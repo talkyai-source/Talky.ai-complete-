@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock3, RefreshCw, ShieldAlert } from "lucide-react";
 
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { api, type RejectedInboundCallItem } from "@/lib/api";
 import { REASON_LABELS } from "@/lib/inbound-reason-labels";
 
@@ -34,6 +34,7 @@ function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPane
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const requestGeneration = useRef(0);
 
     const load = useCallback(async (background = false) => {
@@ -55,6 +56,7 @@ function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPane
         } catch (err) {
             if (generation !== requestGeneration.current) return;
             setError(failedReadMessage(err, "Failed to load rejected inbound calls"));
+            setErrorRequestId(failedReadRequestId(err));
         } finally {
             if (generation === requestGeneration.current) {
                 setLoading(false);
@@ -108,7 +110,7 @@ function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPane
             </header>
 
             {error ? (
-                <div className="p-4"><ErrorState message={error} onRetry={() => void load()} /></div>
+                <div className="p-4"><ErrorState message={error} requestId={errorRequestId} onRetry={() => void load()} /></div>
             ) : loading ? (
                 <div className="p-4"><LoadingState title="Loading rejected calls…" /></div>
             ) : items.length === 0 ? (

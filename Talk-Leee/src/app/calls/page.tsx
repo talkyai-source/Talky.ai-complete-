@@ -8,7 +8,7 @@ import { DialAgainButton } from "@/components/calls/dial-again-button";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { EmptyState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
@@ -291,7 +291,7 @@ function CallRow({
                                 </button>
                             </TooltipTrigger>
                             <TooltipContent side="top" align="start" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-4 shadow-xl">
-                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} data={summaryQuery.data} />
+                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} requestId={failedReadRequestId(summaryQuery.error)} data={summaryQuery.data} />
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
@@ -390,7 +390,7 @@ function CallRow({
                                 </button>
                             </TooltipTrigger>
                             <TooltipContent side="top" align="end" sideOffset={8} className="w-80 max-w-[calc(100vw-2rem)] p-4 shadow-xl">
-                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} data={summaryQuery.data} />
+                                <SummaryPreview fallback={call.summary} isLoading={summaryQuery.isLoading} isError={summaryQuery.isError} requestId={failedReadRequestId(summaryQuery.error)} data={summaryQuery.data} />
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
@@ -556,6 +556,7 @@ function CallRow({
                             ) : transcriptQuery.isError ? (
                                 <CallsLoadError
                                     message={failedReadMessage(transcriptQuery.error, "Failed to load transcript.")}
+                                    requestId={failedReadRequestId(transcriptQuery.error)}
                                     onRetry={() => void transcriptQuery.refetch()}
                                 />
                             ) : transcriptQuery.data?.turns && transcriptQuery.data.turns.length > 0 ? (
@@ -970,7 +971,7 @@ export default function CallsPage() {
             {q.isLoading ? (
                 <LoadingState title="Loading call history" />
             ) : error ? (
-                <CallsLoadError message={error} onRetry={() => void q.refetch()} />
+                <CallsLoadError message={error} requestId={failedReadRequestId(q.error)} onRetry={() => void q.refetch()} />
             ) : allCalls.length === 0 && !hasActiveFilters ? (
                 <EmptyState title="No calls yet" message="Calls will appear here after an outbound campaign starts or an active inbound line receives a call." />
             ) : (

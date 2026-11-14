@@ -16,6 +16,33 @@ export type DualSeriesPoint = {
   b: number;
 };
 
+/**
+ * One Tab stop per chart. The chart's points carry data-chart-point and only
+ * the first is in the Tab order; this moves focus between them with the arrow
+ * keys (Home and End jump to the ends). Each point's own onFocus shows its
+ * tooltip. "columns" makes Up and Down move by a row in a grid of points.
+ */
+export function moveChartPointFocus(e: React.KeyboardEvent<Element>, columns = 0) {
+  const points = Array.from(e.currentTarget.querySelectorAll<HTMLElement | SVGElement>("[data-chart-point]"));
+  const at = points.findIndex((point) => point === document.activeElement);
+  if (at < 0) return;
+  const step =
+    e.key === "ArrowRight" ? 1
+      : e.key === "ArrowLeft" ? -1
+        : e.key === "ArrowDown" ? (columns > 0 ? columns : 1)
+          : e.key === "ArrowUp" ? (columns > 0 ? -columns : -1)
+            : 0;
+  let next = at;
+  if (e.key === "Home") next = 0;
+  else if (e.key === "End") next = points.length - 1;
+  else if (step !== 0) next = at + step;
+  else return;
+  e.preventDefault();
+  // A row step past the first or last row stays where it is.
+  if (next < 0 || next > points.length - 1) next = Math.abs(step) > 1 ? at : Math.max(0, Math.min(points.length - 1, next));
+  points[next]?.focus();
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -91,7 +118,7 @@ export function TimeSeriesLineChart({
   return (
     <div className="relative text-foreground">
       <HoverTooltip tooltip={tooltip} />
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-40">
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-40" onKeyDown={moveChartPointFocus}>
         <path d={areaD} fill={fill} />
         <path d={d} fill="none" stroke={stroke} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
         {chartPoints.map((pt, i) => {
@@ -113,7 +140,8 @@ export function TimeSeriesLineChart({
               fill={stroke}
               stroke="rgba(255,255,255,0.85)"
               strokeWidth={1.5}
-              tabIndex={0}
+              tabIndex={i === 0 ? 0 : -1}
+              data-chart-point
               role="img"
               aria-label={`${label}: ${value}`}
               className="cursor-default"
@@ -269,7 +297,7 @@ export function RealTimeBarChart({
   return (
     <div className="relative">
       <HoverTooltip tooltip={tooltip} />
-      <svg viewBox={`0 0 ${chart.w} ${chart.h}`} className="w-full" style={{ height }}>
+      <svg viewBox={`0 0 ${chart.w} ${chart.h}`} className="w-full" style={{ height }} onKeyDown={moveChartPointFocus}>
         <text
           x={chart.w / 2}
           y={chart.unit * 2}
@@ -338,6 +366,7 @@ export function RealTimeBarChart({
           }}
           transition={barTransition}
           tabIndex={0}
+          data-chart-point
           role="img"
           aria-label={`Answered Calls: ${answeredValue}`}
           onMouseEnter={(e) => {
@@ -379,7 +408,8 @@ export function RealTimeBarChart({
             filter: active === "failed" ? "drop-shadow(0px 10px 18px rgba(0,0,0,0.16))" : "none",
           }}
           transition={barTransition}
-          tabIndex={0}
+          tabIndex={-1}
+          data-chart-point
           role="img"
           aria-label={`Failed Calls: ${failedValue}`}
           onMouseEnter={(e) => {
@@ -932,6 +962,9 @@ export function DonutChart({
   const answeredLabelVisible = answeredLayout.render && !(answeredLayout.lines.length === 1 && answeredLayout.lines[0] === "…");
   const failedLabelVisible = failedLayout.render && !(failedLayout.lines.length === 1 && failedLayout.lines[0] === "…");
 
+  // Which of the chart's tooltips the arrow keys are on (0 summary, 1 Answered, 2 Failed).
+  const keyboardSegment = useRef(0);
+
   const summaryContent = (
     <div className="space-y-2">
       <div className="text-sm font-black text-gray-900">Calls breakdown</div>
@@ -980,8 +1013,19 @@ export function DonutChart({
   return (
     <motion.div
       ref={containerRef}
-      className="relative flex items-center justify-center outline-none"
+      className="relative flex items-center justify-center rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
       tabIndex={0}
+      onKeyDown={(e) => {
+        // The arrow keys step through the chart's own tooltips: the summary,
+        // then Answered, then Failed.
+        const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+        if (step === 0) return;
+        e.preventDefault();
+        const next = clamp(keyboardSegment.current + step, 0, 2);
+        keyboardSegment.current = next;
+        const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
+        tooltip.show(rect.left + rect.width / 2, rect.top + rect.height / 2, next === 0 ? summaryContent : next === 1 ? answeredContent : failedContent);
+      }}
       role="img"
       aria-label={`Answered ${answered} (${Math.round(answeredPct * 100)}%), Failed ${failed} (${Math.round(failedPct * 100)}%), Total ${total}`}
       whileHover={{ scale: 1.01, filter: "drop-shadow(0px 10px 18px rgba(0,0,0,0.14))" }}
@@ -993,6 +1037,7 @@ export function DonutChart({
         if (e.pointerType === "touch") tooltip.show(e.clientX, e.clientY, summaryContent, { pinned: true, autoHideMs: 3000 });
       }}
       onFocus={(e) => {
+        keyboardSegment.current = 0;
         const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect();
         tooltip.show(rect.left + rect.width / 2, rect.top + rect.height / 2, summaryContent);
       }}
@@ -1117,7 +1162,7 @@ export function Heatmap({
     <div className="relative overflow-x-auto">
       <HoverTooltip tooltip={tooltip} />
       <div className="min-w-[520px]">
-        <div className="grid" style={{ gridTemplateColumns: `120px repeat(${cols.length}, minmax(0, 1fr))` }}>
+        <div className="grid" style={{ gridTemplateColumns: `120px repeat(${cols.length}, minmax(0, 1fr))` }} onKeyDown={(e) => moveChartPointFocus(e, cols.length)}>
           <div />
           {cols.map((c) => (
             <div key={c} className="text-[11px] font-semibold text-gray-600 text-center pb-2">
@@ -1137,7 +1182,8 @@ export function Heatmap({
                     <div
                       className="h-6 rounded-md border border-black/5 transition-all duration-300 ease-in-out hover:border-gray-900/10 hover:shadow-sm dark:hover:border-gray-900/20 dark:hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gray-900/20"
                       style={{ background: bg }}
-                      tabIndex={0}
+                      tabIndex={ri === 0 && ci === 0 ? 0 : -1}
+                      data-chart-point
                       role="img"
                       aria-label={`${r} ${c}: ${v}`}
                       onMouseEnter={(e) =>
@@ -1278,6 +1324,14 @@ export function StackedAreaChart({
     );
   };
 
+  // Keyboard: the tooltip is shown at the point itself.
+  const showAtPoint = (i: number, svg: SVGSVGElement) => {
+    const pt = data.topLine[i];
+    if (!pt) return;
+    const rect = svg.getBoundingClientRect();
+    showForIndex(i, rect.left + (pt.x / width) * rect.width, rect.top + (pt.y / height) * rect.height);
+  };
+
   const activeX = activeIndex !== null ? data.midLine[activeIndex]?.x ?? null : null;
   const activeMid = activeIndex !== null ? data.midLine[activeIndex] ?? null : null;
   const activeTop = activeIndex !== null ? data.topLine[activeIndex] ?? null : null;
@@ -1307,6 +1361,33 @@ export function StackedAreaChart({
         }}
         role="img"
         aria-label="Stacked area chart of answered and failed calls"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (points.length === 0) return;
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
+          e.preventDefault();
+          const current = activeIndex ?? points.length - 1;
+          const next =
+            e.key === "ArrowLeft"
+              ? Math.max(0, current - 1)
+              : e.key === "ArrowRight"
+                ? Math.min(points.length - 1, current + 1)
+                : e.key === "Home"
+                  ? 0
+                  : points.length - 1;
+          setActiveIndex(next);
+          showAtPoint(next, e.currentTarget);
+        }}
+        onFocus={(e) => {
+          if (points.length === 0) return;
+          const idx = activeIndex ?? Math.max(0, points.length - 1);
+          setActiveIndex(idx);
+          showAtPoint(idx, e.currentTarget);
+        }}
+        onBlur={() => {
+          setActiveIndex(null);
+          tooltip.hide();
+        }}
       >
         <path d={data.topArea} fill={bColor} />
         <path d={data.midArea} fill={aColor} />
@@ -1871,6 +1952,16 @@ export function LiveCallsTimeSeriesChart({
     showTooltipForIndex(idx, clientX, clientY);
   };
 
+  // Keyboard: the same tooltip as the pointer's, shown at the bucket's point.
+  const showAtBucket = (idx: number, svg: SVGSVGElement) => {
+    const p = linePoints[idx];
+    if (!p) return;
+    const rect = svg.getBoundingClientRect();
+    setActiveIdx(idx);
+    onActiveBucketChange?.(visible.items[idx] ?? null);
+    showTooltipForIndex(idx, rect.left + p.x, rect.top + p.y);
+  };
+
   const resetView = () => {
     setZoom(1);
     setPan(1);
@@ -1889,6 +1980,25 @@ export function LiveCallsTimeSeriesChart({
         style={{ height, touchAction: "none" }}
         role="img"
         aria-label="Live calls time-series chart"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (visible.items.length === 0) return;
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
+          e.preventDefault();
+          const last = visible.items.length - 1;
+          const current = activeIdx ?? last;
+          const next = e.key === "ArrowLeft" ? Math.max(0, current - 1) : e.key === "ArrowRight" ? Math.min(last, current + 1) : e.key === "Home" ? 0 : last;
+          showAtBucket(next, e.currentTarget);
+        }}
+        onFocus={(e) => {
+          if (visible.items.length === 0) return;
+          showAtBucket(activeIdx ?? visible.items.length - 1, e.currentTarget);
+        }}
+        onBlur={() => {
+          setActiveIdx(null);
+          onActiveBucketChange?.(null);
+          tooltip.hide();
+        }}
         onMouseMove={(e) => handlePointerMove(e.clientX, e.clientY)}
         onMouseLeave={() => {
           setActiveIdx(null);

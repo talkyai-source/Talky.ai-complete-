@@ -14,7 +14,7 @@ import { InboundReadinessChecklist, InboundStatusBadge, ReadinessBadge } from "@
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { failedReadMessage } from "@/components/states/page-states";
+import { failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { isMinutesExhausted } from "@/lib/dashboard-api";
 import { inboundErrorCode, inboundErrorStatus } from "@/lib/inbound-api";
@@ -91,9 +91,9 @@ export default function InboundCampaignDetailPage() {
     return (
         <DashboardLayout title="Inbound Campaign" description="Live routing state, server readiness, and versioned configuration">
             {permissions.isLoading ? <InboundLoadingState label="Checking inbound permissions…" /> : permissions.isError ? (
-                <InboundErrorState title="Permissions could not be verified" message="Campaign data and live routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
+                <InboundErrorState requestId={failedReadRequestId(permissions.error)} title="Permissions could not be verified" message="Campaign data and live routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canView ? <InboundPermissionState onRetry={() => void permissions.refetch()} /> : campaignQuery.isLoading ? <InboundLoadingState /> : campaignQuery.isError || !campaign ? (
-                <InboundErrorState title={(campaignQuery.error as { status?: number } | undefined)?.status === 404 ? "Inbound campaign not found" : "Campaign is unavailable"} message={failedReadMessage(campaignQuery.error, "This campaign may have been removed or you may not have access.")} onRetry={() => void campaignQuery.refetch()} />
+                <InboundErrorState requestId={failedReadRequestId(campaignQuery.error)} title={(campaignQuery.error as { status?: number } | undefined)?.status === 404 ? "Inbound campaign not found" : "Campaign is unavailable"} message={failedReadMessage(campaignQuery.error, "This campaign may have been removed or you may not have access.")} onRetry={() => void campaignQuery.refetch()} />
             ) : (
                 <div className="space-y-5">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -153,7 +153,7 @@ export default function InboundCampaignDetailPage() {
                     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.75fr)]">
                         <section className="content-card server-readiness-card" aria-labelledby="readiness-heading">
                             <div className="mb-4 flex items-start justify-between gap-3"><div><h2 id="readiness-heading" className="text-lg font-semibold text-foreground">Server readiness</h2><p className="mt-1 text-sm text-muted-foreground">The server re-evaluates ownership, trunk health, policies, and configuration version at activation.</p></div><Button type="button" variant="ghost" size="icon" onClick={() => void readinessQuery.refetch()} disabled={readinessQuery.isFetching} aria-label="Refresh readiness"><RefreshCw className={readinessQuery.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden /></Button></div>
-                            {readinessQuery.isError ? <InboundErrorState title="Readiness could not be refreshed" message={failedReadMessage(readinessQuery.error, "Try again.")} onRetry={() => void readinessQuery.refetch()} /> : readiness ? <InboundReadinessChecklist readiness={readiness} inboundSwitchOff={inboundSwitchOff} /> : <InboundLoadingState label="Checking activation readiness…" />}
+                            {readinessQuery.isError ? <InboundErrorState requestId={failedReadRequestId(readinessQuery.error)} title="Readiness could not be refreshed" message={failedReadMessage(readinessQuery.error, "Try again.")} onRetry={() => void readinessQuery.refetch()} /> : readiness ? <InboundReadinessChecklist readiness={readiness} inboundSwitchOff={inboundSwitchOff} /> : <InboundLoadingState label="Checking activation readiness…" />}
                         </section>
                         <aside className="space-y-5">
                             <section className="content-card" aria-labelledby="safety-summary-heading"><h2 id="safety-summary-heading" className="text-lg font-semibold text-foreground">Safety policy</h2><dl className="mt-4 space-y-3"><Info label="After hours" value={afterHoursLabel(campaign.after_hours_action)} />{campaign.after_hours_action === "transfer" ? <Info label="Transfer destination" value={campaign.transfer_number ?? "Not configured"} /> : null}<Info label="Recording" value={campaign.recording_enabled ? "Enabled with disclosure" : "Disabled"} /></dl></section>

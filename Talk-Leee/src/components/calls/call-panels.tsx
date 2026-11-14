@@ -36,8 +36,8 @@ function formatDuration(seconds?: number) {
  * the only recovery a user has is a full page reload — which also discards
  * every other panel that loaded fine.
  */
-export function CallLoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
-    return <ErrorState message={message} onRetry={onRetry} />;
+export function CallLoadError({ message, requestId, onRetry }: { message: string; requestId?: string; onRetry?: () => void }) {
+    return <ErrorState message={message} requestId={requestId} onRetry={onRetry} />;
 }
 
 /**
@@ -46,26 +46,28 @@ export function CallLoadError({ message, onRetry }: { message: string; onRetry?:
  * These queries do not auto-retry, so without an explicit control the only
  * recovery is a full page reload.
  */
-export function CallsLoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
-    return <ErrorState message={message} onRetry={onRetry} />;
+export function CallsLoadError({ message, requestId, onRetry }: { message: string; requestId?: string; onRetry?: () => void }) {
+    return <ErrorState message={message} requestId={requestId} onRetry={onRetry} />;
 }
 
 export function SummaryPreview({
     fallback,
     isLoading,
     isError,
+    requestId,
     data,
 }: {
     fallback?: string;
     isLoading: boolean;
     isError: boolean;
+    requestId?: string;
     data?: CallSummaryEnvelope;
 }) {
     if (isLoading) return <LoadingState title="Loading key points…" />;
 
     // No Retry here: a hover preview closes when focus leaves its button, so a
     // control inside it cannot be reached by keyboard.
-    if (isError) return <ErrorState message="Could not load the AI summary." />;
+    if (isError) return <ErrorState message="Could not load the AI summary." requestId={requestId} />;
 
     const sourceMessage = summarySourceMessage(data);
     if (data && (!data.available || !data.summary || data.source_evidence?.summary_current === false)) {

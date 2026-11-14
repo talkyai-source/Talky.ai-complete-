@@ -50,23 +50,26 @@ const COLUMNS: ColumnDef[] = [
     { key: "failed", label: "Failed", numeric: true },
 ];
 
-// One grid at every size: the full 8-column layout. The name track is floored
-// at 10rem so it can never be crushed to zero; everything else is fixed-width.
-// Phones get the same columns as tablets and scroll sideways inside the card.
+// One grid at every size: the full 8-column layout; everything but the name
+// track is fixed-width. Below 1280px the table scrolls sideways inside the
+// card anyway, so the name track is floored at 15rem to keep a long name
+// readable. From 1280px up the table must fit the card: the name track takes
+// the room left after the other columns (floor 9.5rem).
 const TABLE_GRID_COLS =
-    "grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px]";
+    "grid-cols-[36px_minmax(15rem,1.6fr)_110px_170px_120px_90px_90px_90px] xl:grid-cols-[36px_minmax(9.5rem,1.6fr)_110px_170px_120px_90px_90px_90px]";
 // Floor for the grid so narrow viewports scroll it inside the card instead
 // of clipping columns (same pattern as DESKTOP_CALL_MIN_WIDTH on the calls
-// page). Column tracks (36px = 2.25rem) + name floor (10rem) + 110px
+// page). Column tracks (36px = 2.25rem) + name floor (15rem) + 110px
 // (6.875rem) + 170px (10.625rem) + 120px (7.5rem) + 3 × 90px (16.875rem)
-// = 54.125rem, + 7 gap-2 gutters (3.5rem) + the row's px-3 inset (1.5rem)
-// = 59.125rem (946px) exactly. At 1280px with the sidebar expanded the card's
-// inner scroll area is ~951px, so the tightest supported desktop still
-// renders the full grid with zero internal scroll; anything narrower — down
-// to the smallest phones — scrolls horizontally inside the card. Applied to
+// = 59.125rem, + 7 gap-2 gutters (3.5rem) + the row's px-3 inset (1.5rem)
+// = 64.125rem (1026px) exactly below 1280px, where the grid scrolls
+// horizontally inside the card. From 1280px up the name floor is 9.5rem, so
+// the floor is 58.625rem (938px): at 1280px with the sidebar expanded the
+// card's inner scroll area is 945px, so the full grid renders with zero
+// internal scroll from there up. Applied to
 // the sticky header row and to each row's bordered wrapper so the border and
 // grid span the full scroll width.
-const TABLE_MIN_WIDTH = "min-w-[59.125rem]";
+const TABLE_MIN_WIDTH = "min-w-[64.125rem] xl:min-w-[58.625rem]";
 
 type ExportPreset = "All Time" | "Last 7 Days" | "Last 30 Days" | "This Month" | "Custom";
 type ExportColumnKey =
@@ -393,6 +396,8 @@ export function CampaignPerformanceTable({
     const [rowsPerPage, setRowsPerPage] = useState<RowsPerPage>(25);
     const [page, setPage] = useState(1);
     const [statusOpen, setStatusOpen] = useState(false);
+    // The status option that holds the Tab stop while the filter is open.
+    const [statusActive, setStatusActive] = useState(0);
     const [statusPanelStyle, setStatusPanelStyle] = useState<CSSProperties | null>(null);
     const [suggestOpen, setSuggestOpen] = useState(false);
     const [suggestPlacement, setSuggestPlacement] = useState<{ openUp: boolean; maxHeight: number } | null>(null);
@@ -523,6 +528,52 @@ export function CampaignPerformanceTable({
             cols: Array.from(exportCols),
         });
     }, [exportCols, exportFrom, exportPreset, exportTo]);
+
+    // Opening the status filter moves focus to its first option (its onFocus
+    // makes that option the Tab stop).
+    useEffect(() => {
+        if (!statusOpen) return;
+        statusPanelRef.current?.querySelector<HTMLElement>('[role="option"]')?.focus({ preventScroll: true });
+    }, [statusOpen]);
+
+    const closeStatusFilter = () => {
+        setStatusOpen(false);
+        statusButtonRef.current?.focus();
+    };
+
+    const onStatusPanelKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+        if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            closeStatusFilter();
+            return;
+        }
+        if (e.key === "Tab") {
+            // Tab past either end leaves the filter: it closes and the browser
+            // moves on from the button, in the page's own order.
+            const stops = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"][tabindex="0"], button'));
+            const edge = e.shiftKey ? stops[0] : stops[stops.length - 1];
+            if (document.activeElement === edge) closeStatusFilter();
+            return;
+        }
+        const options = Array.from(e.currentTarget.querySelectorAll<HTMLElement>('[role="option"]'));
+        const at = options.indexOf(document.activeElement as HTMLElement);
+        if (at < 0) return;
+        let next = -1;
+        if (e.key === "ArrowDown") next = Math.min(options.length - 1, at + 1);
+        else if (e.key === "ArrowUp") next = Math.max(0, at - 1);
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = options.length - 1;
+        else if (e.key === " ") {
+            e.preventDefault();
+            options[at]?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.click();
+            return;
+        }
+        if (next < 0) return;
+        e.preventDefault();
+        setStatusActive(next);
+        options[next]?.focus();
+    };
 
     useEffect(() => {
         const onClick = (e: MouseEvent) => {
@@ -805,8 +856,9 @@ export function CampaignPerformanceTable({
                         <div className="text-sm font-semibold text-foreground">Filters</div>
                         <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-3 md:items-start">
                             <div className="relative flex min-w-0 flex-col" ref={suggestRef}>
-                                <label className="text-xs font-semibold text-muted-foreground">Campaign name</label>
+                                <label htmlFor="campaign-name-filter" className="text-xs font-semibold text-muted-foreground">Campaign name</label>
                                 <Input
+                                    id="campaign-name-filter"
                                     value={filters.query}
                                     placeholder="Search campaigns…"
                                     onChange={(e) => {
@@ -848,7 +900,7 @@ export function CampaignPerformanceTable({
                             </div>
 
                             <div className="relative flex min-w-0 flex-col">
-                                <label className="text-xs font-semibold text-muted-foreground">Status</label>
+                                <label id="campaign-status-filter-label" className="text-xs font-semibold text-muted-foreground">Status</label>
                                 <button
                                     ref={statusButtonRef}
                                     type="button"
@@ -886,17 +938,21 @@ export function CampaignPerformanceTable({
                                               />
                                               <div
                                                   ref={statusPanelRef}
-                                                  role="listbox"
+                                                  onKeyDown={onStatusPanelKeyDown}
                                                   className="absolute overflow-y-auto rounded-xl border border-border bg-popover p-2 shadow-xl animate-in fade-in-0 zoom-in-95"
                                                   style={statusPanelStyle ?? undefined}
                                               >
-                                                  <div className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">
-                                                      {statusOptions.map((s) => {
+                                                  <div role="listbox" aria-multiselectable="true" aria-labelledby="campaign-status-filter-label" className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">
+                                                      {statusOptions.map((s, statusIndex) => {
                                                           const checked = filters.statuses.includes(s);
                                                           return (
                                                               <label
                                                                   key={s}
-                                                                  className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground"
+                                                                  role="option"
+                                                                  aria-selected={checked}
+                                                                  tabIndex={statusIndex === statusActive ? 0 : -1}
+                                                                  onFocus={() => setStatusActive(statusIndex)}
+                                                                  className="flex cursor-pointer items-center justify-between rounded-lg px-2 py-2 text-sm text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                                                               >
                                                                   <span className="flex items-center gap-2">
                                                                       <span
@@ -910,6 +966,7 @@ export function CampaignPerformanceTable({
                                                                   </span>
                                                                   <input
                                                                       type="checkbox"
+                                                                      tabIndex={-1}
                                                                       checked={checked}
                                                                       onChange={(e) => {
                                                                           const next = e.target.checked;
@@ -935,7 +992,7 @@ export function CampaignPerformanceTable({
                                                       >
                                                           Clear
                                                       </Button>
-                                                      <Button type="button" variant="outline" size="sm" onClick={() => setStatusOpen(false)}>
+                                                      <Button type="button" variant="outline" size="sm" onClick={closeStatusFilter}>
                                                           Done
                                                       </Button>
                                                   </div>
@@ -1167,6 +1224,7 @@ export function CampaignPerformanceTable({
                                                     <button
                                                         type="button"
                                                         className="min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                                        title={campaign.name}
                                                         onClick={() => setDetailsId(campaign.id)}
                                                     >
                                                         <div className="min-w-0 truncate font-semibold hover:underline">{campaign.name}</div>

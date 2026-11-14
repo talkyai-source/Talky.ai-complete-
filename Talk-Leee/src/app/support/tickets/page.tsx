@@ -6,7 +6,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ErrorState } from "@/components/states/page-states";
+import { ErrorState, failedReadRequestId } from "@/components/states/page-states";
 import { SupportPageGate } from "@/components/support/support-unavailable";
 import { TicketList } from "@/components/support/ticket-list";
 import { supportChatStore } from "@/lib/support-chat-store";
@@ -15,7 +15,7 @@ import { TICKET_TABS, useTicketTab, type TicketTab } from "@/lib/support-ticket-
 function TabBody({ tab, scope }: { tab: TicketTab; scope: "mine" | "team" }) {
     const list = useTicketTab(tab, scope, true);
     if (list.loading && !list.items.length) return <p className="text-sm text-muted-foreground">Loading tickets…</p>;
-    if (list.error && !list.items.length) return <ErrorState title="Tickets could not be loaded" message="Retry in a moment." onRetry={list.refetch} />;
+    if (list.error && !list.items.length) return <ErrorState requestId={failedReadRequestId(list.error)} title="Tickets could not be loaded" message="Retry in a moment." onRetry={list.refetch} />;
     return (
         <div className="flex flex-col gap-3">
             <TicketList items={list.items} emptyText={scope === "team" ? "No team tickets here." : "No tickets here."} />

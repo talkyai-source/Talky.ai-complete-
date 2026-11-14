@@ -186,10 +186,12 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
                 {/* Main Content */}
                 <main id="main-content" className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300 print:overflow-visible">
-                    {/* pb-16: keeps every page's last content clear of the fixed
-                        bottom-right chat launcher (its top edge sits 72px above
-                        the viewport bottom; main's own padding is only 16-32px). */}
-                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
+                    {/* pb-32: lets every page's last content scroll clear of both
+                        fixed bottom-right launchers. The Help button is the
+                        higher one: its top edge sits 128px above the viewport
+                        bottom (132px from sm up); main's own padding adds
+                        16-32px, so the content ends 144-160px above it. */}
+                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-32">
                         <SuspensionBanner />
                         <OfflineBanner />
                         <div className="relative">

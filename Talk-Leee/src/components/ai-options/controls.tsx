@@ -131,7 +131,7 @@ export function Segmented<T extends string>({
                 const active = opt.value === value;
                 return (
                     <button
-                        key={opt.value} type="button" onClick={() => onChange(opt.value)}
+                        key={opt.value} type="button" aria-pressed={active} onClick={() => onChange(opt.value)}
                         className={`relative rounded-lg font-medium transition-colors ${pad} ${active ? "text-white" : "text-muted-foreground hover:text-foreground"}`}
                     >
                         {active && (

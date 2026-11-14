@@ -244,3 +244,21 @@ test("outside pointerdown closes the panel", async () => {
 
     await waitFor(() => assert.equal(panel(), null));
 });
+
+// ── FX4b Task 4: the full selected label on hover, on request ───────────────
+
+test("valueTitle puts the selected label in the trigger's title and follows the selection", async () => {
+    const user = userEvent.setup();
+    const long = "A very long model name that the closed trigger cannot show in full";
+    render(<Harness selectProps={{ valueTitle: true }} options={[<option key="a" value="a">{long}</option>, <option key="b" value="b">Banana</option>]} />);
+    assert.equal(trigger().getAttribute("title"), long);
+    assert.equal(trigger().textContent, long, "the trigger's own text is the full label too");
+    await user.click(trigger());
+    await user.click(screen.getByRole("option", { name: "Banana" }));
+    assert.equal(trigger().getAttribute("title"), "Banana");
+});
+
+test("without valueTitle the trigger has no title", () => {
+    render(<Harness />);
+    assert.equal(trigger().hasAttribute("title"), false);
+});

@@ -1651,6 +1651,12 @@ body {
   background-color: var(--bg-main);
 }
 
+/* The menu clips its overflow, so the focus ring is drawn inside the item. */
+.action-menu-item:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
+}
+
 .action-menu-item.danger {
   color: var(--accent-red);
 }

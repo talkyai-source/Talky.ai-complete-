@@ -72,12 +72,13 @@ export default function TeamPage() {
     const rolesQuery = useTeamRoles({ enabled: canManage });
 
     const [busyId, setBusyId] = useState<string | null>(null);
-    const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+    // `role` marks an error that came from changing the row's Role field.
+    const [rowErrors, setRowErrors] = useState<Record<string, { message: string; role: boolean }>>({});
     const [pending, setPending] = useState<PendingChange | null>(null);
 
     const roleOptions = useMemo(() => selectableTeamRoles(rolesQuery.data, user?.role), [rolesQuery.data, user?.role]);
 
-    const run = async (member: TenantMember, action: () => Promise<unknown>): Promise<RowResult> => {
+    const run = async (member: TenantMember, action: () => Promise<unknown>, role = false): Promise<RowResult> => {
         setBusyId(member.id);
         setRowErrors((prev) => {
             if (!(member.id in prev)) return prev;
@@ -91,7 +92,7 @@ export default function TeamPage() {
             return { ok: true };
         } catch (err) {
             const message = formatError(err);
-            setRowErrors((prev) => ({ ...prev, [member.id]: message }));
+            setRowErrors((prev) => ({ ...prev, [member.id]: { message, role } }));
             return { ok: false, message };
         } finally {
             setBusyId(null);
@@ -163,6 +164,8 @@ export default function TeamPage() {
                                                                 setPending({ kind: "role", member, role: next });
                                                             }}
                                                             ariaLabel={`Role: ${member.email}`}
+                                                            ariaInvalid={rowError?.role ? true : undefined}
+                                                            ariaDescribedBy={rowError?.role ? `team-member-error-${member.id}` : undefined}
                                                             disabled={busy}
                                                             className="w-full sm:w-48"
                                                         >
@@ -198,8 +201,8 @@ export default function TeamPage() {
                                                 </div>
                                             </div>
                                             {rowError ? (
-                                                <div role="alert" className="mt-3 break-words rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300" data-testid="team-member-error">
-                                                    {rowError}
+                                                <div id={`team-member-error-${member.id}`} role="alert" className="mt-3 break-words rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300" data-testid="team-member-error">
+                                                    {rowError.message}
                                                 </div>
                                             ) : null}
                                         </li>
@@ -227,7 +230,7 @@ export default function TeamPage() {
                             pending.kind === "role"
                                 ? backendApi.team.updateMember({ id: member.id, role_name: pending.role })
                                 : backendApi.team.removeMember({ id: member.id })
-                        ));
+                        ), pending.kind === "role");
                         if (!result.ok) throw new Error(result.message);
                     }}
                 />

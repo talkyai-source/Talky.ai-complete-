@@ -5,7 +5,7 @@ import { Key, Loader2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 
 type Passkey = {
@@ -39,6 +39,7 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
     const [passkeys, setPasskeys] = useState<Passkey[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const [deletingId, setDeletingId] = useState<string | null>(null);
     // A failed delete is not a failed read: it shows above the list, which stays.
     const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -53,6 +54,7 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
             setPasskeys(items);
         } catch (err) {
             setError(failedReadMessage(err, "Failed to load passkeys"));
+            setErrorRequestId(failedReadRequestId(err));
         } finally {
             setLoading(false);
         }
@@ -88,7 +90,7 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
     }
 
     if (error) {
-        return <ErrorState message={error} onRetry={load} />;
+        return <ErrorState message={error} requestId={errorRequestId} onRetry={load} />;
     }
 
     if (passkeys.length === 0) {

@@ -113,3 +113,25 @@ test("a malformed answer shows the error state's default message, never the vali
     assert.doesNotMatch(document.body.textContent ?? "", /invalid_|"path"|"code"|Invalid input/i);
     assert.doesNotMatch(document.body.textContent ?? "", PERMISSION);
 });
+
+// FX4b Task 3 and FX4b2 Task 3 — the Actor value stays on one line, cut with
+// an ellipsis, with the full value on hover (title). It is not a Tab stop; the
+// cell's own text, which is what a screen reader reads, is still the full value.
+test("FX4b: the Actor value is one cut line with the full value in its title and no Tab stop", async () => {
+    draw();
+    await screen.findByText(auditRow().action, undefined, { timeout: SLOW });
+    const full = "user: " + ACTOR_ID;
+    const actor = screen.getByText(full);
+    assert.equal(actor.getAttribute("title"), full);
+    assert.equal(actor.hasAttribute("tabindex"), false, "not a Tab stop");
+    assert.equal(actor.tabIndex, -1);
+    const cell = actor.closest("td");
+    assert.equal(cell !== null, true);
+    assert.equal(cell!.textContent, full, "the cell's accessible text is the full value");
+    assert.equal(actor.hasAttribute("aria-label") || actor.hasAttribute("aria-hidden") || cell!.hasAttribute("aria-label"), false, "nothing replaces or hides that text");
+    const table = cell!.closest("table");
+    assert.equal(table!.querySelectorAll("[tabindex], a[href], button, input, select, textarea").length, 0, "no Tab stop anywhere in the table");
+    assert.equal(actor.classList.contains("truncate"), true, "one line, ellipsis");
+    assert.equal(actor.classList.contains("break-all"), false, "never broken into short lines");
+    assert.equal(Array.from(actor.classList).some((name) => name.startsWith("max-w-")), true, "a width limit, so the cell cannot grow the row");
+});

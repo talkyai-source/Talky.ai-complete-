@@ -8,7 +8,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { ErrorState } from "@/components/states/page-states";
+import { ErrorState, failedReadRequestId } from "@/components/states/page-states";
 import { SupportPageGate } from "@/components/support/support-unavailable";
 import { TicketList } from "@/components/support/ticket-list";
 import { docsPages } from "@/app/docs/_content/registry";
@@ -132,7 +132,7 @@ function SupportHome() {
                     {latest.isPending ? (
                         <p className="text-sm text-muted-foreground">Loading tickets…</p>
                     ) : latest.error ? (
-                        <ErrorState title="Tickets could not be loaded" message="Retry in a moment." onRetry={() => void latest.refetch()} />
+                        <ErrorState requestId={failedReadRequestId(latest.error)} title="Tickets could not be loaded" message="Retry in a moment." onRetry={() => void latest.refetch()} />
                     ) : (
                         <TicketList items={latest.items} emptyText="You have no tickets yet." />
                     )}

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
-import { EmptyState, ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 import { calendarBucketBounds, calendarHourBounds, reportingDateRange } from "@/lib/reporting-time";
@@ -690,6 +690,7 @@ export default function DashboardPage() {
     // One entry per first request that failed. Each card reads only its own
     // sources, so one failure never replaces the whole page.
     const [sourceErrors, setSourceErrors] = useState<Partial<Record<DashboardSource, string>>>({});
+    const [sourceRequestIds, setSourceRequestIds] = useState<Partial<Record<DashboardSource, string>>>({});
     // Sources that failed only because the summary, which reports the zone
     // they are cut in, failed. They are read again once a summary arrives.
     const [zoneBlockedSources, setZoneBlockedSources] = useState<readonly DashboardSource[]>([]);
@@ -729,7 +730,6 @@ export default function DashboardPage() {
         const snap = (ms: number) => Math.round(ms / stepMs) * stepMs;
         const end = snap(sim.lastUpdatedMs);
         const start = snap(end - liveRangeHours * 60 * 60 * 1000);
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds custom range bounds once, from the live clock, the first time custom mode is entered
         setCustomEndMs(end);
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
@@ -1055,6 +1055,7 @@ export default function DashboardPage() {
                 const message = failedReadMessage(err, "Failed to load dashboard");
                 markZoneBlocked(source, waitedForZone.has(source));
                 setSourceErrors((previous) => ({ ...previous, [source]: message }));
+                setSourceRequestIds((previous) => ({ ...previous, [source]: failedReadRequestId(err) }));
             }
         }));
     }
@@ -1066,7 +1067,7 @@ export default function DashboardPage() {
         // stream) is data: it replaces the error card without a click.
         const failed = sources.filter((source) => sourceErrors[source] && !(source === "summary" && liveSummary));
         if (failed.length === 0) return null;
-        return <ErrorState className={className} message={sourceErrors[failed[0]]} onRetry={() => loadSources(failed)} />;
+        return <ErrorState className={className} message={sourceErrors[failed[0]]} requestId={sourceRequestIds[failed[0]]} onRetry={() => loadSources(failed)} />;
     };
 
     useEffect(() => {
@@ -1485,7 +1486,6 @@ export default function DashboardPage() {
     const [campaignEnabled, setCampaignEnabled] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- preserves existing per-campaign toggle state while adding/removing keys as the campaign list changes
         setCampaignEnabled((prev) => {
             const next: Record<string, boolean> = { ...prev };
             for (const c of campaignLineSeries.campaigns) {

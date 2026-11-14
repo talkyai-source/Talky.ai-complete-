@@ -179,6 +179,19 @@ export function Sidebar({ className }: { className?: string }) {
         [isAdmin, supportVisible, permissions]
     );
 
+    // The one entry that is the current page: the longest listed address the
+    // path is at or under, so /admin/audit-logs is "Audit Logs" and not also
+    // every entry whose address is /admin.
+    const currentHref = useMemo(() => {
+        const hrefs = [
+            ...visibleNavigation.flatMap((item) => (item.children ? item.children.map((child) => child.href) : [item.href])),
+            ...bottomNavigation.map((item) => item.href),
+        ];
+        return hrefs
+            .filter((href) => pathname === href || pathname.startsWith(href + "/"))
+            .sort((a, b) => b.length - a.length)[0] ?? null;
+    }, [pathname, visibleNavigation]);
+
     // Automatically expand dropdowns if a child is active
     useEffect(() => {
         // Reacts to route changes (pathname) to auto-open the dropdown that
@@ -393,19 +406,20 @@ export function Sidebar({ className }: { className?: string }) {
 
             <nav className="grow shrink-0 px-2 py-[var(--sb-navpad)] [&>*+*]:mt-[var(--sb-gap)]">
                 {visibleNavigation.map((item) => {
-                    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                    const isActive = item.children ? item.children.some((child) => child.href === currentHref) : item.href === currentHref;
 
                     // Dropdown item
                     if (item.children && !collapsed) {
                         const isOpen = openDropdowns.has(item.name);
-                        const hasActiveChild = item.children.some(
-                            (child) => pathname === child.href || pathname.startsWith(child.href + "/")
-                        );
+                        // The group is marked only while it is closed; open, the
+                        // child itself is the one marked entry.
+                        const hasActiveChild = !isOpen && item.children.some((child) => child.href === currentHref);
                         return (
                             <div key={item.name}>
                                 <button
                                     type="button"
                                     onClick={() => toggleDropdown(item.name)}
+                                    aria-current={hasActiveChild ? "page" : undefined}
                                     onMouseEnter={(e) => maybeShowTooltip(e, item.name)}
                                     onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                                     onMouseLeave={() => tooltip.hide()}
@@ -428,7 +442,10 @@ export function Sidebar({ className }: { className?: string }) {
                                         )}
                                     />
                                 </button>
+                                {/* Closed, the links are out of the Tab order and
+                                    out of the accessibility tree. */}
                                 <div
+                                    inert={!isOpen}
                                     className={cn(
                                         "grid transition-[grid-template-rows] duration-200 ease-in-out",
                                         isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
@@ -437,12 +454,14 @@ export function Sidebar({ className }: { className?: string }) {
                                     <div className="overflow-hidden">
                                         <div className="pl-4 mt-1 space-y-0.5">
                                             {item.children.map((child) => {
-                                                const isChildActive = pathname === child.href || pathname.startsWith(child.href + "/");
+                                                const isChildActive = isOpen && child.href === currentHref;
                                                 return (
                                                     <Link
                                                         key={child.name}
                                                         href={child.href}
                                                         onClick={onClose}
+                                                        tabIndex={isOpen ? undefined : -1}
+                                                        aria-current={isChildActive ? "page" : undefined}
                                                         className={cn(
                                                             "group flex min-w-0 items-center gap-2 rounded-lg text-[13px] font-medium transition-colors border px-2",
                                                             "py-1.5",
@@ -470,6 +489,7 @@ export function Sidebar({ className }: { className?: string }) {
                             key={item.name}
                             href={item.href}
                             onClick={onClose}
+                            aria-current={isActive ? "page" : undefined}
                             onMouseEnter={(e) => maybeShowTooltip(e, item.name)}
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
@@ -506,12 +526,13 @@ export function Sidebar({ className }: { className?: string }) {
                 className="shrink-0 px-2 mt-[var(--sb-mt)] pt-[var(--sb-bpad)] pb-[var(--sb-bpad)] border-t border-sidebar-border/60 [&>*+*]:mt-[var(--sb-gap)]"
             >
                 {bottomNavigation.map((item) => {
-                    const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
+                    const isActive = item.href === currentHref;
                     return (
                         <Link
                             key={item.name}
                             href={item.href}
                             onClick={onClose}
+                            aria-current={isActive ? "page" : undefined}
                             onMouseEnter={(e) => maybeShowTooltip(e, item.name)}
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}

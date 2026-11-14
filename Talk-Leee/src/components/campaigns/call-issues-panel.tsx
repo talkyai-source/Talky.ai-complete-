@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { ErrorState } from "@/components/states/page-states";
+import { ErrorState, failedReadRequestId } from "@/components/states/page-states";
 import {
     AlertTriangle, AlertCircle, Info, Clock, ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react";
@@ -141,6 +141,7 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
     const [items, setItems] = useState<CallIssue[]>([]);
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const [open, setOpen] = useState(false);
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
     // Bumped by Retry: restarts the poll at once after a failed read.
@@ -160,6 +161,7 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
             } catch (err) {
                 if (cancelled) return;
                 setError(err instanceof Error ? err.message : "Failed to load call issues");
+                setErrorRequestId(failedReadRequestId(err));
             } finally {
                 if (!cancelled) {
                     setLoaded(true);
@@ -187,7 +189,7 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
     if (!loaded && items.length === 0) return null;
     // Nothing was read at all: a failed read with Retry, not an empty issues bar.
     if (error && items.length === 0) {
-        return <ErrorState message="Failed to load call issues" onRetry={() => setRetryToken((t) => t + 1)} />;
+        return <ErrorState message="Failed to load call issues" requestId={errorRequestId} onRetry={() => setRetryToken((t) => t + 1)} />;
     }
 
     const headLook = severityLook(worst);

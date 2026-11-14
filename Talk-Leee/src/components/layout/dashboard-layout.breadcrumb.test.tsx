@@ -70,3 +70,19 @@ test("FX3a2: without a name from the page the crumb is unchanged", () => {
     render(<DashboardLayout title="Loading">page</DashboardLayout>);
     assert.deepEqual(crumbs(), ["Campaigns", "C Draft"]);
 });
+
+// FX4b Task 1 — the page content ends with enough space to scroll its last
+// control clear of both floating buttons. The Help button's top edge is 128px
+// above the window's bottom (132px from 640px up); the space is 128px here
+// plus the 16px (32px from 768px up) padding of <main>.
+test("FX4b: the content area ends with the space that clears the floating buttons", () => {
+    pathname = "/campaigns";
+    const { container } = render(<DashboardLayout title="Campaigns"><button type="button">Last control</button></DashboardLayout>);
+    const main = container.querySelector("main#main-content");
+    assert.equal(main !== null, true);
+    const column = main!.firstElementChild as HTMLElement;
+    assert.equal(column.contains(screen.getByRole("button", { name: "Last control" })), true, "the page content is inside the padded column");
+    assert.equal(column.classList.contains("pb-32"), true, "128px of end space");
+    assert.equal(column.classList.contains("pb-16"), false);
+    assert.equal(main!.classList.contains("p-4") && main!.classList.contains("md:p-8"), true, "plus main's own padding");
+});

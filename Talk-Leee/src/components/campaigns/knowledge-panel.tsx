@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import {
     api, CampaignKnowledge, KnowledgeTestResponse, KnowledgeNode, KnowledgeSource,
 } from "@/lib/api";
@@ -232,6 +232,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
     const [loading, setLoading] = useState(true);
     const [disabled, setDisabled] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loadErrorRequestId, setLoadErrorRequestId] = useState<string | undefined>();
     const [uploading, setUploading] = useState(false);
     const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
     const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -275,6 +276,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
             ) return;
             if (err instanceof ApiClientError && err.status === 404) { setDisabled(true); return; }
             setError(err instanceof Error ? err.message : "Failed to load knowledge");
+            setLoadErrorRequestId(failedReadRequestId(err));
         } finally {
             if (
                 generation === requestGeneration.current
@@ -388,7 +390,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                 <div className="p-4"><LoadingState title="Loading knowledge…" /></div>
             ) : !data && error ? (
                 // Nothing was read: a failed read, never "No knowledge yet".
-                <div className="p-4"><ErrorState message="Failed to load knowledge" onRetry={refresh} /></div>
+                <div className="p-4"><ErrorState message="Failed to load knowledge" requestId={loadErrorRequestId} onRetry={refresh} /></div>
             ) : !data || (data.sources.length === 0 && nodeCount === 0) ? (
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />

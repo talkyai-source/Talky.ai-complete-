@@ -19,6 +19,7 @@ export function Select({
     fitLongestOption,
     disabled,
     lightThemeGreen,
+    valueTitle,
 }: {
     value: string;
     onChange: (next: string) => void;
@@ -32,6 +33,8 @@ export function Select({
     ariaInvalid?: boolean;
     /** Forwarded as aria-describedby so warning/hint text stays announced. */
     ariaDescribedBy?: string;
+    /** Puts the selected label in the trigger's title, for a label the trigger cuts short. */
+    valueTitle?: boolean;
     /**
      * Auto-width parity with native <select>: size the closed trigger to the
      * LONGEST option (native behaviour) instead of the selected one, so the
@@ -379,6 +382,7 @@ export function Select({
                 aria-invalid={ariaInvalid === undefined ? undefined : ariaInvalid}
                 aria-describedby={ariaDescribedBy}
                 disabled={disabled}
+                title={valueTitle ? selectedLabel : undefined}
                 style={fitMinWidth !== undefined ? { minWidth: fitMinWidth } : undefined}
                 onClick={() => setOpen((v) => !v)}
                 className={cn(

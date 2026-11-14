@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdminUiCapabilities } from "@/lib/admin-access";
 import { queryKeys, useAdminEventReadScope, useAdminPartners, useAdminTenants, useAuditLogs, useReactivateTenant, useSecurityEvents, useSuspendTenant } from "@/lib/api-hooks";
@@ -529,7 +529,7 @@ export function AdminOperationsConsole() {
                         <p className="text-xs text-muted-foreground">User search uses current profile names/emails or the saved actor ID. Partner matches current tenant assignment and direct partner records, not historical ownership. Dates are UTC. History may change while you browse.</p>
                         <Button type="button" variant="outline" disabled={!eventOwner.ready || auditLogsQ.isFetching} onClick={() => refreshEventHistory("audit")}>Refresh audit history</Button>
                         {auditLogsQ.isPending ? <LoadingState title="Loading audit logs" description="Fetching backend activity history." /> : null}
-                        {auditLogsQ.isError ? <ErrorState title="Audit logs unavailable" message={auditLogsQ.error instanceof Error ? auditLogsQ.error.message : "Could not load audit activity from the backend."} onRetry={() => auditLogsQ.refetch().then(() => {})} /> : null}
+                        {auditLogsQ.isError ? <ErrorState requestId={failedReadRequestId(auditLogsQ.error)} title="Audit logs unavailable" message={auditLogsQ.error instanceof Error ? auditLogsQ.error.message : "Could not load audit activity from the backend."} onRetry={() => auditLogsQ.refetch().then(() => {})} /> : null}
                         {!auditLogsQ.isPending && !auditLogsQ.isError ? (
                             auditLogsQ.data?.items.length ? (
                                 <div className="space-y-4">
@@ -638,7 +638,7 @@ export function AdminOperationsConsole() {
                         <p className="text-xs text-muted-foreground">User search uses current affected-user names/emails or the saved user ID. It does not identify the actor who caused the event. Dates are UTC. History may change while you browse.</p>
                         <Button type="button" variant="outline" disabled={!eventOwner.ready || securityEventsQ.isFetching} onClick={() => refreshEventHistory("security")}>Refresh security history</Button>
                         {securityEventsQ.isPending ? <LoadingState title="Loading security events" description="Fetching authentication and abuse detection signals." /> : null}
-                        {securityEventsQ.isError ? <ErrorState title="Security events unavailable" message={securityEventsQ.error instanceof Error ? securityEventsQ.error.message : "Could not load security events from the backend."} onRetry={() => securityEventsQ.refetch().then(() => {})} /> : null}
+                        {securityEventsQ.isError ? <ErrorState requestId={failedReadRequestId(securityEventsQ.error)} title="Security events unavailable" message={securityEventsQ.error instanceof Error ? securityEventsQ.error.message : "Could not load security events from the backend."} onRetry={() => securityEventsQ.refetch().then(() => {})} /> : null}
                         {!securityEventsQ.isPending && !securityEventsQ.isError ? (
                             securityEventsQ.data?.items.length ? (
                                 <div className="space-y-4">
@@ -718,7 +718,7 @@ export function AdminOperationsConsole() {
                                     </div>
                                 </div>
                                 {partnersQ.isPending ? <LoadingState title="Loading partners" description="Fetching partner account scopes." /> : null}
-                                {partnersQ.isError ? <ErrorState title="Partner controls unavailable" message="Could not load partner suspension data." onRetry={() => eventOwner.ready ? partnersQ.refetch().then(() => {}) : Promise.resolve()} /> : null}
+                                {partnersQ.isError ? <ErrorState requestId={failedReadRequestId(partnersQ.error)} title="Partner controls unavailable" message="Could not load partner suspension data." onRetry={() => eventOwner.ready ? partnersQ.refetch().then(() => {}) : Promise.resolve()} /> : null}
                                 {!partnersQ.isPending && !partnersQ.isError ? (
                                     partnersQ.data?.items.length ? (
                                         <div className="space-y-3">
@@ -787,7 +787,7 @@ export function AdminOperationsConsole() {
                                     </div>
                                 </div>
                                 {tenantsQ.isPending ? <LoadingState title="Loading tenants" description="Fetching tenant subscription status." /> : null}
-                                {tenantsQ.isError ? <ErrorState title="Tenant controls unavailable" message="Could not load tenant subscription data." onRetry={retryTenants} /> : null}
+                                {tenantsQ.isError ? <ErrorState requestId={failedReadRequestId(tenantsQ.error)} title="Tenant controls unavailable" message="Could not load tenant subscription data." onRetry={retryTenants} /> : null}
                                 {!tenantsQ.isPending && !tenantsQ.isError ? (
                                     tenantsQ.data?.items.length ? (
                                         <div className="space-y-3">
