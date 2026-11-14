@@ -48,7 +48,8 @@ export function isUsableRate(rate: unknown): rate is number {
  */
 export function formatEstimate(usd: number, rate: number, currency: string): string {
   const amount = usd * rate;
-  const digits = amount < 10 ? 2 : 0;
+  // By size, not sign: a refund of -5,000 is a large amount too. Zero needs no decimals.
+  const digits = amount !== 0 && Math.abs(amount) < 10 ? 2 : 0;
   try {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
@@ -59,6 +60,22 @@ export function formatEstimate(usd: number, rate: number, currency: string): str
   } catch {
     return `${currency} ${amount.toFixed(digits)}`;
   }
+}
+
+/**
+ * The dollar value of a stored amount in minor units (cents), or null when the
+ * amount is missing or is not a US-dollar amount. Only a dollar amount can be
+ * estimated, because the rates are quoted against the dollar.
+ */
+export function usdFromMinor(
+  minor: number | null | undefined,
+  currency: string | null | undefined,
+  exponent: number | null | undefined,
+): number | null {
+  if (typeof minor !== "number" || !Number.isFinite(minor)) return null;
+  if (typeof currency !== "string" || currency.toUpperCase() !== BILLING_CURRENCY) return null;
+  if (typeof exponent !== "number" || !Number.isInteger(exponent) || exponent < 0 || exponent > 4) return null;
+  return minor / 10 ** exponent;
 }
 
 /** "British Pound" for "GBP"; the code itself when the browser has no name for it. */

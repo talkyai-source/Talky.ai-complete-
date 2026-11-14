@@ -1,8 +1,13 @@
+import type { ReactNode } from "react";
+import { LocalAmount } from "@/components/pricing/local-price";
+
 export type PartnerDashboardStats = {
     totalSubTenants: number;
     activeCalls: number;
     minutesUsed: number;
     billingSummary: string;
+    /** The same summary as a number of dollars, for a display in the visitor's currency. */
+    billingUsd: number;
 };
 
 function stableNumberFromString(input: string) {
@@ -17,20 +22,21 @@ export function getPartnerDashboardStats(partnerId: string): PartnerDashboardSta
     const key = partnerId.trim().toLowerCase();
 
     if (key === "acme") {
-        return { totalSubTenants: 12, activeCalls: 8, minutesUsed: 1420, billingSummary: "$320" };
+        return { totalSubTenants: 12, activeCalls: 8, minutesUsed: 1420, billingSummary: "$320", billingUsd: 320 };
     }
 
     if (key === "zen") {
-        return { totalSubTenants: 7, activeCalls: 3, minutesUsed: 860, billingSummary: "$190" };
+        return { totalSubTenants: 7, activeCalls: 3, minutesUsed: 860, billingSummary: "$190", billingUsd: 190 };
     }
 
     const seed = stableNumberFromString(key);
     const totalSubTenants = 3 + (seed % 20);
     const activeCalls = seed % 11;
     const minutesUsed = 300 + (seed % 5000);
-    const billingSummary = `$${(80 + (seed % 1200)).toLocaleString()}`;
+    const billingUsd = 80 + (seed % 1200);
+    const billingSummary = `$${billingUsd.toLocaleString()}`;
 
-    return { totalSubTenants, activeCalls, minutesUsed, billingSummary };
+    return { totalSubTenants, activeCalls, minutesUsed, billingSummary, billingUsd };
 }
 
 function MetricCard({
@@ -40,7 +46,7 @@ function MetricCard({
     helper,
 }: {
     label: string;
-    value: string;
+    value: ReactNode;
     valueSuffix?: string;
     helper?: string;
 }) {
@@ -65,7 +71,7 @@ export function PartnerDashboard({ stats }: { stats: PartnerDashboardStats }) {
                 <MetricCard label="Total Sub-Tenants" value={fmtInt(stats.totalSubTenants)} />
                 <MetricCard label="Active Calls" value={fmtInt(stats.activeCalls)} helper="Aggregated across all sub-tenants." />
                 <MetricCard label="Minutes Used" value={fmtInt(stats.minutesUsed)} helper="Aggregated usage total." />
-                <MetricCard label="Billing Summary" value={stats.billingSummary} valueSuffix="This Month" helper="High-level monthly summary." />
+                <MetricCard label="Billing Summary" value={<LocalAmount usd={stats.billingUsd} usdText={stats.billingSummary} />} valueSuffix="This Month" helper="High-level monthly summary." />
             </div>
         </div>
 

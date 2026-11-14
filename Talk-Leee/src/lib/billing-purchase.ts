@@ -50,6 +50,16 @@ export function formatPurchasedPrice(price: PurchasedPrice | BillingPrice): stri
 /** A yearly offer's monthly equivalent and saving against the same plan's
  * monthly offer, from server amounts only (never a UI-side discount). */
 export function yearlySaving(year: BillingPrice, options: readonly BillingPrice[]): string | null {
+  const parts = yearlySavingParts(year, options);
+  if (!parts) return null;
+  return parts.percent > 0
+    ? `Equals ${parts.perMonth} / month · save ${parts.percent}% vs monthly`
+    : `Equals ${parts.perMonth} / month`;
+}
+/** The pieces of the yearly-saving line, for a display that also shows them in another currency. */
+export function yearlySavingParts(year: BillingPrice, options: readonly BillingPrice[]): {
+  perMonth: string; perMonthMinor: number; currency: string; exponent: number; percent: number;
+} | null {
   if (year.kind !== "stripe" || year.interval !== "year") return null;
   const month = options.find(option => option.kind === "stripe" && option.active && option.interval === "month"
     && option.currency === year.currency && option.currency_exponent === year.currency_exponent && option.amount_minor > 0);
@@ -59,7 +69,7 @@ export function yearlySaving(year: BillingPrice, options: readonly BillingPrice[
     minimumFractionDigits: year.currency_exponent, maximumFractionDigits: year.currency_exponent,
   }).format(year.amount_minor / 12 / (10 ** year.currency_exponent));
   const percent = Math.round((1 - year.amount_minor / (12 * month.amount_minor)) * 100);
-  return percent > 0 ? `Equals ${perMonth} / month · save ${percent}% vs monthly` : `Equals ${perMonth} / month`;
+  return { perMonth, perMonthMinor: year.amount_minor / 12, currency: year.currency, exponent: year.currency_exponent, percent };
 }
 export function hasManagedSubscription(subscription: BillingSubscription | null): boolean {
   if (!subscription || ["inactive", "canceled", "cancelled", "incomplete_expired"].includes(subscription.status)) return false;
