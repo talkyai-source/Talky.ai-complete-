@@ -186,10 +186,13 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
                 {/* Main Content */}
                 <main id="main-content" className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300 print:overflow-visible">
-                    {/* pb-16: keeps every page's last content clear of the fixed
-                        bottom-right chat launcher (its top edge sits 72px above
-                        the viewport bottom; main's own padding is only 16-32px). */}
-                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
+                    {/* pb-32: keeps every page's last content clear of the two
+                        fixed bottom-right launchers. The chat launcher's top
+                        edge sits 72px above the viewport bottom and the Help
+                        launcher above it reaches 132px; main's own padding is
+                        only 16-32px. pb-16 cleared the chat launcher alone, so
+                        Help covered the last action of a page (14 Nov). */}
+                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-32">
                         <SuspensionBanner />
                         <OfflineBanner />
                         <div className="relative">
