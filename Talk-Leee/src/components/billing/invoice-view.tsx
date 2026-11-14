@@ -1,12 +1,14 @@
 "use client";
 
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { ArrowLeft, Download, ExternalLink, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useBillingInvoice, useBillingInvoices } from "@/lib/billing-api";
-import { formatMinorMoney, type BillingInvoice } from "@/lib/billing-read";
+import { type BillingInvoice } from "@/lib/billing-read";
+import { LocalMinorAmount } from "@/components/billing/local-money";
 import { formatBillingError } from "@/components/billing/billing-overview";
 
 export function BillingSupport({ reference }: { reference?: string }) {
@@ -32,7 +34,7 @@ export function ProviderRefundFacts({ refunds, detailStatus, capturedAt }: {
     <h3 className="font-semibold">Provider refund status</h3>
     <p className="text-xs text-muted-foreground">{capturedAt ? `Captured ${new Date(capturedAt).toLocaleString()}.` : "Capture time unavailable."} Provider status does not confirm when funds reach a bank.</p>
     {detailStatus !== "complete" && <p>Refund information is {detailStatus}.</p>}
-    {refunds === null || (refunds.length === 0 && detailStatus !== "complete") ? <p>Refund entries unavailable or incomplete.</p> : refunds.length === 0 ? <p>No refund entries in the captured records.</p> : <ul className="space-y-1">{refunds.map((refund) => <li key={refund.id} className="break-all">{refund.id} · {formatMinorMoney(refund.amount, refund.currency, refund.currency_exponent)} · Provider status: {refund.status ?? "Unavailable"}</li>)}</ul>}
+    {refunds === null || (refunds.length === 0 && detailStatus !== "complete") ? <p>Refund entries unavailable or incomplete.</p> : refunds.length === 0 ? <p>No refund entries in the captured records.</p> : <ul className="space-y-1">{refunds.map((refund) => <li key={refund.id} className="break-all">{refund.id} · <LocalMinorAmount minor={refund.amount} currency={refund.currency} exponent={refund.currency_exponent} /> · Provider status: {refund.status ?? "Unavailable"}</li>)}</ul>}
   </section>;
 }
 
@@ -55,9 +57,9 @@ export function BillingInvoiceList() {
             <tbody>{query.data?.map((invoice) => <tr key={invoice.id} className="border-b">
               <td className="p-3"><Link className="inline-block py-1 -my-1 font-semibold underline" href={`/billing/invoices/${invoice.id}`}>{invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id}</Link></td>
               <td className="p-3">{invoiceDate(invoice.period_start)} – {invoiceDate(invoice.period_end)}</td>
-              <td className="p-3">{formatMinorMoney(invoice.total, invoice.currency, invoice.currency_exponent)}</td>
-              <td className="p-3">{formatMinorMoney(invoice.amount_paid, invoice.currency, invoice.currency_exponent)}</td>
-              <td className="p-3">{formatMinorMoney(invoice.amount_remaining, invoice.currency, invoice.currency_exponent)}</td>
+              <td className="p-3"><LocalMinorAmount minor={invoice.total} currency={invoice.currency} exponent={invoice.currency_exponent} /></td>
+              <td className="p-3"><LocalMinorAmount minor={invoice.amount_paid} currency={invoice.currency} exponent={invoice.currency_exponent} /></td>
+              <td className="p-3"><LocalMinorAmount minor={invoice.amount_remaining} currency={invoice.currency} exponent={invoice.currency_exponent} /></td>
               <td className="p-3"><InvoiceStatus status={invoice.status} /></td>
             </tr>)}</tbody></table></div>}
       </CardContent></Card>
@@ -74,8 +76,8 @@ export function BillingInvoiceDetail({ id }: { id: string }) {
 }
 
 export function InvoiceFacts({ invoice }: { invoice: BillingInvoice }) {
-  const money = (value: number | null, currency = invoice.currency) => formatMinorMoney(value, currency,
-    currency?.toLowerCase() === invoice.currency?.toLowerCase() ? invoice.currency_exponent : null);
+  const money = (value: number | null, currency = invoice.currency) => <LocalMinorAmount minor={value} currency={currency}
+    exponent={currency?.toLowerCase() === invoice.currency?.toLowerCase() ? invoice.currency_exponent : null} />;
   const reference = invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id;
   return <div className="space-y-6">
     <div className="flex flex-wrap gap-3 print:hidden"><Button asChild variant="outline" size="sm"><Link href="/billing/invoices"><ArrowLeft className="mr-1 h-4 w-4" aria-hidden /> Recent invoices</Link></Button>
@@ -85,8 +87,8 @@ export function InvoiceFacts({ invoice }: { invoice: BillingInvoice }) {
     </CardHeader><CardContent className="space-y-4">
       {invoice.detail_status !== "complete" && <p role="status" className="rounded-lg border p-3 text-sm">{invoice.detail_status === "partial" ? "Some invoice details are unavailable." : "Detailed invoice facts were not captured."} Missing values are not zero. Use the provider invoice or PDF where available.</p>}
       <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {[["Invoice period", `${invoiceDate(invoice.period_start)} – ${invoiceDate(invoice.period_end)}`], ["Due date", invoiceDate(invoice.due_date)], ["Paid date", invoiceDate(invoice.paid_at)], ["Recorded locally", invoiceDate(invoice.created_at)],
-          ["Subtotal", money(invoice.subtotal)], ["Invoice total", money(invoice.total)], ["Provider amount due", money(invoice.amount_due)], ["Amount paid", money(invoice.amount_paid)], ["Amount remaining", money(invoice.amount_remaining)]].map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 font-semibold tabular-nums">{value}</dd></div>)}
+        {([["Invoice period", `${invoiceDate(invoice.period_start)} – ${invoiceDate(invoice.period_end)}`], ["Due date", invoiceDate(invoice.due_date)], ["Paid date", invoiceDate(invoice.paid_at)], ["Recorded locally", invoiceDate(invoice.created_at)],
+          ["Subtotal", money(invoice.subtotal)], ["Invoice total", money(invoice.total)], ["Provider amount due", money(invoice.amount_due)], ["Amount paid", money(invoice.amount_paid)], ["Amount remaining", money(invoice.amount_remaining)]] as [string, ReactNode][]).map(([label, value]) => <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 font-semibold tabular-nums">{value}</dd></div>)}
       </dl>
     </CardContent></Card>
     <Card><CardHeader><CardTitle>Invoice line items</CardTitle><CardDescription>Recorded invoice amounts. Call usage and allowance are shown separately on Billing.</CardDescription></CardHeader><CardContent>

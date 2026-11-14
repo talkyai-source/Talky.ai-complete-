@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { z } from "zod";
 import { BILLING_CURRENCY, currencyName, formatEstimate, isUsableRate } from "@/lib/display-currency";
 
@@ -30,30 +30,104 @@ export async function loadDisplayCurrency(fetchImpl: typeof fetch = fetch): Prom
   }
 }
 
-const DisplayCurrencyContext = createContext<DisplayCurrency | null>(null);
+type DisplayCurrencyStore = { value: DisplayCurrency | null; request: () => void };
 
-/** Loads the visitor's display currency once for everything inside it. */
+const DisplayCurrencyContext = createContext<DisplayCurrencyStore | null>(null);
+
+/**
+ * Holds the visitor's display currency for everything inside it. The lookup is
+ * made once, and only when something on the page shows a money amount, so a
+ * page without prices asks for nothing.
+ */
 export function DisplayCurrencyProvider({ children }: { children: ReactNode }) {
   const [value, setValue] = useState<DisplayCurrency | null>(null);
+  const [wanted, setWanted] = useState(false);
   useEffect(() => {
+    if (!wanted) return;
     let live = true;
     void loadDisplayCurrency().then((loaded) => { if (live) setValue(loaded); });
     return () => { live = false; };
-  }, []);
-  return <DisplayCurrencyContext.Provider value={value}>{children}</DisplayCurrencyContext.Provider>;
+  }, [wanted]);
+  const request = useCallback(() => setWanted(true), []);
+  const store = useMemo(() => ({ value, request }), [value, request]);
+  return <DisplayCurrencyContext.Provider value={store}>{children}</DisplayCurrencyContext.Provider>;
+}
+
+/** The visitor's display currency, or null when they are shown dollars only. */
+export function useDisplayCurrency(): DisplayCurrency | null {
+  const store = useContext(DisplayCurrencyContext);
+  const request = store?.request;
+  useEffect(() => { request?.(); }, [request]);
+  return store?.value ?? null;
 }
 
 /**
- * The estimate for one dollar price, for example "≈ £75/month". Renders nothing
- * for a visitor who is shown dollars only, so the page is unchanged for them.
+ * One dollar amount as text, the visitor's currency first:
+ * "≈ PKR 27,383/month ($99/month)". Unchanged for a visitor who is shown
+ * dollars only, and for an amount that is not in dollars (usd is null).
  */
-export function LocalEstimate({ usd, suffix = "", className }: { usd: number; suffix?: string; className?: string }) {
-  const display = useContext(DisplayCurrencyContext);
-  if (!display) return null;
+export function localAmountText(
+  display: DisplayCurrency | null,
+  usd: number | null,
+  usdText: string,
+  suffix = "",
+): string {
+  if (!display || usd === null || !Number.isFinite(usd)) return usdText;
+  // Zero is zero in every currency: no estimate mark, no dollar amount beside it.
+  if (usd === 0) return `${formatEstimate(0, display.rate, display.currency)}${suffix}`;
+  return `≈ ${formatEstimate(usd, display.rate, display.currency)}${suffix} (${usdText})`;
+}
+
+/**
+ * A dollar amount inside a sentence or a table cell, the visitor's currency
+ * first and the dollar amount in brackets after it.
+ */
+export function LocalAmount({ usd, usdText, suffix = "", usdOnlyText }: {
+  usd: number | null;
+  usdText: string;
+  suffix?: string;
+  /** What a dollars-only visitor reads, when that is longer than usdText. */
+  usdOnlyText?: string;
+}) {
+  const display = useDisplayCurrency();
+  if (!display || usd === null || !Number.isFinite(usd)) return <>{usdOnlyText ?? usdText}</>;
+  // Zero is zero in every currency: no estimate mark, no dollar amount beside it.
+  if (usd === 0) {
+    return <span data-testid="local-estimate">{formatEstimate(0, display.rate, display.currency)}{suffix}</span>;
+  }
   return (
-    <span className={className} data-testid="local-estimate">
-      ≈ {formatEstimate(usd, display.rate, display.currency)}{suffix}
-    </span>
+    <>
+      <span data-testid="local-estimate">
+        ≈ {formatEstimate(usd, display.rate, display.currency)}{suffix}
+      </span>{" "}
+      ({usdText})
+    </>
+  );
+}
+
+/**
+ * One price, in the visitor's own currency first. A visitor who is shown
+ * dollars only gets the dollar price alone, so the page is unchanged for them
+ * (and in the server HTML). Anyone else gets the local estimate in the
+ * headline's place, for example "≈ £75/month", and the dollar amount that is
+ * actually charged directly under it.
+ */
+export function LocalFirstPrice({ usd, usdText, suffix = "", className, chargedClassName }: {
+  usd: number;
+  usdText: string;
+  suffix?: string;
+  className?: string;
+  chargedClassName?: string;
+}) {
+  const display = useDisplayCurrency();
+  if (!display) return <p className={className}>{usdText}</p>;
+  return (
+    <>
+      <p className={className} data-testid="local-estimate">
+        ≈ {formatEstimate(usd, display.rate, display.currency)}{suffix}
+      </p>
+      <p className={chargedClassName} data-testid="charged-in-usd">{usdText} charged in US dollars</p>
+    </>
   );
 }
 
@@ -67,7 +141,7 @@ function readableDate(isoDate: string | null): string | null {
 
 /** Says, once per page, that the local amounts are estimates and what is charged. */
 export function LocalEstimateNote({ className }: { className?: string }) {
-  const display = useContext(DisplayCurrencyContext);
+  const display = useDisplayCurrency();
   if (!display) return null;
   const rateDate = readableDate(display.asOf);
   return (

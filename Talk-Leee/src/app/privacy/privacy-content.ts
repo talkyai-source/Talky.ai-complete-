@@ -118,7 +118,7 @@ export const privacyBlocks: LegalBlock[] = [
     items: [
       `We do not collect Social Security numbers or national identity documents`,
       `We do not collect biometric data — passkey public keys are cryptographic, not biometric`,
-      `We do not collect precise geolocation data. To show price estimates in your local currency, the pricing page uses only the country your connection appears to come from, and does not store it`,
+      `We do not collect precise geolocation data. To show prices and amounts in your local currency, the website uses only the country your connection appears to come from, and does not store it`,
       `We do not read email body content (only metadata: sender, subject, date)`,
       `We do not access Google Drive files other than those created by Talk-Lee`,
       `We do not collect data from children under 13 (US/COPPA) or 16 (EU/UK GDPR)`,
