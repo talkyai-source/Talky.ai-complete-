@@ -173,6 +173,27 @@ async def read_worker_heartbeats(redis_client: Any, *, now: float | None = None)
     return list(await asyncio.gather(*(read(name, key) for name, key in _WORKER_HEARTBEAT_KEYS.items())))
 
 
+@router.get("/healthz/watch")
+async def healthwatch_probe(response: Response) -> Dict[str, Any]:
+    """
+    Public, coarse view of the server's own health watch, for the outside
+    uptime watch: ``{"clear", "failing", "ran_recently"}``. ``clear`` is true
+    only when the watch completed a run in the last ten minutes and holds no
+    check as failing. Check names and values are never returned. The answer is
+    always HTTP 200: the caller judges ``clear``, and a dead API is already
+    covered by its own checks.
+    """
+    from app.core.container import get_container
+    from app.core.operational_alerts import healthwatch_public_state
+
+    response.headers["Cache-Control"] = "no-store"
+    container = get_container()
+    redis_client = (
+        getattr(container, "redis", None) if container.is_initialized else None
+    )
+    return await healthwatch_public_state(redis_client)
+
+
 @router.get("/healthz/workers")
 async def workers_health_probe(response: Response, request: Request) -> Dict[str, Any]:
     """

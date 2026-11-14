@@ -126,11 +126,11 @@ def test_retry_stops_on_success():
 
 
 def test_run_checks_covers_site_api_and_tls():
-    opener = lambda u, t: (200, b'{"ready": true, "healthy": true}')  # noqa: E731
+    opener = lambda u, t: (200, b'{"ready": true, "healthy": true, "clear": true}')  # noqa: E731
     out = uw.run_checks(opener, lambda h, t: NOW + timedelta(days=60), sleep=lambda s: None,
                         clock=lambda: NOW)
     names = {r["name"] for r in out}
-    assert {"api-health", "website", "tls-website", "tls-api"} <= names
+    assert {"api-health", "website", "server-health-watch", "tls-website", "tls-api"} <= names
     assert all(r["ok"] for r in out)
 
 
@@ -249,7 +249,7 @@ def test_main_opens_issue_and_returns_1():
 def test_main_closes_on_recovery_and_returns_0():
     gh, calls = fake_gh_factory([{"number": 7, "title": uw.ISSUE_TITLE, "createdAt": "2026-11-13T08:00:00Z",
                                   "body": "Failing: website", "comments": []}])
-    code = uw.main(gh=gh, opener=lambda u, t: (200, b'{"ready": true, "healthy": true}'),
+    code = uw.main(gh=gh, opener=lambda u, t: (200, b'{"ready": true, "healthy": true, "clear": true}'),
                    cert_fetcher=lambda h, t: NOW + timedelta(days=60), sleep=lambda s: None, clock=lambda: NOW)
     assert code == 0 and any(c[:3] == ["issue", "close", "7"] for c in calls)
 
@@ -266,3 +266,21 @@ def test_workflow_guards():
     assert "timeout-minutes: 5" in text
     uses = re.findall(r"uses:\s*(\S+)", text)
     assert set(uses) <= {"actions/checkout@v4", "actions/setup-python@v5"}
+
+
+def test_server_health_watch_is_judged_by_its_clear_flag():
+    url = "https://api.talkleeai.com/api/v1/healthz/watch"
+    assert ("server-health-watch", url, 10, "clear") in uw.HTTP_CHECKS
+    clear = uw.check_http("server-health-watch", url, 10, "clear",
+                          lambda u, t: (200, b'{"clear": true, "failing": 0, "ran_recently": true}'))
+    assert clear["ok"] is True
+    # Failing checks on the server, or a watch that stopped: both read as not clear,
+    # and the alert says so in words instead of "not ready".
+    for body in (b'{"clear": false, "failing": 2, "ran_recently": true}',
+                 b'{"clear": false, "failing": 0, "ran_recently": false}'):
+        assert uw.check_http("server-health-watch", url, 10, "clear", lambda u, t, body=body: (200, body)) == {
+            "name": "server-health-watch", "ok": False,
+            "detail": "the server's own health watch holds a failing check, or has not run for 10 minutes"}
+    # Other checks keep their wording.
+    assert uw.check_http("api-readiness", url, 10, "ready",
+                         lambda u, t: (200, b'{"ready": false}'))["detail"] == "HTTP 200 not ready"

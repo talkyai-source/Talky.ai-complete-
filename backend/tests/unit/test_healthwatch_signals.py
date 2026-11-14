@@ -315,3 +315,48 @@ def test_real_shell_runs_additional_checks_even_if_worker_probe_fails(tmp_path, 
     assert result.returncode == expected, result.stdout + result.stderr
     lines = operations.read_text().splitlines()
     assert len(lines) == 1 and lines[0].endswith("scripts/healthwatch.py")
+
+
+def _systemctl(stdout, returncode=0):
+    def run(args, **kwargs):
+        assert args[:2] == ["systemctl", "list-units"] and "talky-*" in args and "--state=failed" in args
+        assert 0 < kwargs["timeout"] <= 5 and kwargs.get("shell", False) is False
+        return NS(returncode=returncode, stdout=stdout, stderr="")
+    return run
+
+
+def test_failed_units_are_named_and_the_watch_never_counts_itself(watch, monkeypatch):
+    listing = ("talky-db-backup.service loaded failed failed Talky.ai nightly Postgres backup\n"
+               "talky-healthwatch.service loaded failed failed Talky.ai Worker Health Watch\n"
+               "talky-inbound-synthetic.service loaded failed failed Talky carrier-hairpin inbound synthetic call\n"
+               "talky-notify@talky-db-backup.service.service loaded failed failed Notify operator\n")
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(listing))
+    assert watch.check_failed_units() == {"status": "alert", "failed": [
+        "talky-db-backup.service", "talky-inbound-synthetic.service",
+        "talky-notify@talky-db-backup.service.service"]}
+
+
+def test_no_failed_unit_is_ok_and_the_watch_alone_is_ok(watch, monkeypatch):
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(""))
+    assert watch.check_failed_units() == {"status": "ok", "failed": []}
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl("talky-healthwatch.service loaded failed failed x\n"))
+    assert watch.check_failed_units() == {"status": "ok", "failed": []}
+
+
+@pytest.mark.parametrize("stdout,returncode", [("", 1), ("talky-x.service;rm loaded failed failed x\n", 0)])
+def test_unreadable_unit_state_is_never_reported_as_healthy(watch, monkeypatch, stdout, returncode):
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(stdout, returncode))
+    assert watch.check_failed_units()["status"] == "unavailable"
+
+
+def test_a_host_without_systemctl_is_unavailable_not_healthy(watch, monkeypatch):
+    def run(args, **kwargs):
+        raise FileNotFoundError("systemctl")
+    monkeypatch.setattr(watch.subprocess, "run", run)
+    assert watch.check_failed_units()["status"] == "unavailable"
+
+
+async def test_each_completed_run_leaves_a_ten_minute_mark_for_the_outside_watch(watch, redis):
+    await watch._record_run(redis, NOW)
+    assert float(await redis.get(watch.LAST_RUN_KEY)) == NOW.timestamp()
+    assert 0 < await redis.ttl(watch.LAST_RUN_KEY) <= 600
