@@ -315,6 +315,7 @@ async def load_active_provider_leg_ids(
             conn,
             call_reference=normalized_reference,
             expected_provider=expected_provider,
+            tenant_id=tenant_id,
         )
 
 
@@ -323,8 +324,15 @@ async def fetch_active_provider_leg_ids(
     *,
     call_reference: str,
     expected_provider: str | None,
+    tenant_id: str | None = None,
 ) -> tuple[str, ...]:
-    """Connection-level form used when a caller already holds an RLS scope."""
+    """Connection-level form used when a caller already holds an RLS scope.
+
+    ``tenant_id`` is part of the predicate whenever the caller knows the
+    call's tenant (the production role bypasses RLS, so the reference alone
+    must not reach another tenant's call). ``None`` is a platform caller on a
+    bypass connection.
+    """
 
     normalized_reference = str(call_reference or "").strip()
     if not normalized_reference:
@@ -341,6 +349,7 @@ async def fetch_active_provider_leg_ids(
                 OR c.provider_call_id=$1
                 OR c.external_call_uuid=$1
             )
+              AND ($2::uuid IS NULL OR c.tenant_id=$2::uuid)
               AND l.status IN (
                   'initiated','ringing','answered',
                   'in_progress','in_call','active'
@@ -351,6 +360,7 @@ async def fetch_active_provider_leg_ids(
             ORDER BY l.created_at, l.id
             """,
             normalized_reference,
+            str(tenant_id) if tenant_id is not None else None,
         )
     )
     expected = expected_provider.strip().lower() if isinstance(expected_provider, str) else ""
@@ -387,15 +397,21 @@ async def mark_termination_pending_and_load_context(
     The pending marker is deliberately non-terminal: it releases no billing,
     quota, or concurrency resources. If the immediate provider proof fails,
     the recovery loop owns the retry within its normal <=30-second cadence.
+
+    ``tenant_id`` is part of the lock's predicate whenever the caller is
+    tenant-scoped (the production role bypasses RLS, so a reference alone must
+    not lock another tenant's call); ``None`` is the platform/internal caller.
+    The fence and the leg reads then use the locked row's own id and tenant.
     """
 
     normalized_reference = str(call_reference or "").strip()
     if not normalized_reference:
         raise ValueError("call_reference is required")
     bounded_timeout = max(0.1, min(5.0, float(timeout_s)))
+    caller_tenant = str(tenant_id) if tenant_id is not None else None
     async with acquire_with_tenant(
         pool,
-        str(tenant_id) if tenant_id is not None else None,
+        caller_tenant,
         timeout=bounded_timeout,
     ) as conn:
         row = await conn.fetchrow(
@@ -413,11 +429,13 @@ async def mark_termination_pending_and_load_context(
                 OR provider_call_id=$1
                 OR external_call_uuid=$1
             )
+              AND ($2::uuid IS NULL OR tenant_id=$2::uuid)
             ORDER BY created_at DESC
             LIMIT 1
             FOR UPDATE
             """,
             normalized_reference,
+            caller_tenant,
         )
         if not row:
             raise LookupError("call not found")
@@ -431,10 +449,12 @@ async def mark_termination_pending_and_load_context(
                 UPDATE calls
                    SET status='termination_pending', updated_at=NOW()
                  WHERE id=$1::uuid
+                   AND tenant_id=$3::uuid
                    AND status <> ALL($2::text[])
                 """,
                 str(row["call_id"]),
                 list(TERMINAL_CALL_STATUSES),
+                str(row["tenant_id"]),
             )
 
         leg_rows = list(
@@ -513,11 +533,14 @@ async def _load_persisted_inbound_terminal_duration(
     normalized_provider_id = str(provider_call_id or "").strip()
     if not normalized_call_id or not normalized_provider_id:
         raise ValueError("durable and provider call identities are required")
+    caller_tenant = str(tenant_id) if tenant_id is not None else None
     async with acquire_with_tenant(
         pool,
-        str(tenant_id) if tenant_id is not None else None,
+        caller_tenant,
         timeout=5.0,
     ) as conn:
+        # The tenant is part of the predicate whenever the caller has one
+        # (every caller passes the call's own); ``None`` is a platform caller.
         row = await conn.fetchrow(
             """
             SELECT answered_at, provider_terminated_at,
@@ -526,9 +549,11 @@ async def _load_persisted_inbound_terminal_duration(
             WHERE id=$1::uuid
               AND direction='inbound'
               AND (provider_call_id=$2 OR external_call_uuid=$2)
+              AND ($3::uuid IS NULL OR tenant_id=$3::uuid)
             """,
             normalized_call_id,
             normalized_provider_id,
+            caller_tenant,
         )
     if row is None:
         raise RuntimeError("durable inbound call identity was not found")

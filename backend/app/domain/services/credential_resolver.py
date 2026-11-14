@@ -321,8 +321,10 @@ class CredentialResolver:
         try:
             async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
                 await conn.execute(
-                    "UPDATE tenant_ai_credentials SET last_used_at = NOW() WHERE id = $1",
+                    "UPDATE tenant_ai_credentials SET last_used_at = NOW() "
+                    "WHERE id = $1 AND tenant_id = $2",
                     row["id"],
+                    tenant_id,
                 )
         except Exception:
             # Usage tracking is best-effort; never fail origination on it.

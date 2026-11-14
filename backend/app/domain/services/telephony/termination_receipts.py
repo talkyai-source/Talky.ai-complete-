@@ -108,9 +108,13 @@ async def persist_termination_receipt(pool: Any, context: TerminationContext, *,
         async with asyncio.timeout(_RECEIPT_WRITE_TIMEOUT_SECONDS), acquire_with_tenant(
             pool, None, timeout=_RECEIPT_WRITE_TIMEOUT_SECONDS,
         ) as conn:
+            # This connection bypasses RLS, so the tenant is named here: the call
+            # is locked only if it belongs to the tenant the context was read
+            # from (receipt_matches would reject any other tenant's row anyway).
             call = await conn.fetchrow(
-                "SELECT id, tenant_id, provider, provider_call_id, external_call_uuid, status, route_snapshot FROM calls WHERE id=$1::uuid FOR UPDATE",
+                "SELECT id, tenant_id, provider, provider_call_id, external_call_uuid, status, route_snapshot FROM calls WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE",
                 context.call_id,
+                context.tenant_id,
             )
             legs = [dict(row) for row in await conn.fetch(
                 "SELECT id, provider, provider_leg_id, status, created_at FROM call_legs WHERE call_id=$1::uuid ORDER BY created_at, id",

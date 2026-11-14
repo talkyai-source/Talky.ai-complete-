@@ -1567,6 +1567,7 @@ async def _hydrate_orphan_recovery_context(
                 conn,
                 call_reference=str(row["id"]),
                 expected_provider=row.get("provider"),
+                tenant_id=str(row["tenant_id"]),
             )
         )
 

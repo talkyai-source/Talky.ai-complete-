@@ -505,16 +505,17 @@ class AbuseDetectionService:
         """Check for rapid successive calls to same number (harassment)."""
         async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             recent_count = await conn.fetchval(
-                f"""
+                """
                 SELECT COUNT(*)
                 FROM calls
                 WHERE tenant_id = $1
                   AND phone_number = $2
-                  AND created_at > NOW() - INTERVAL '{window_minutes} minutes'
+                  AND created_at > NOW() - make_interval(mins => $3::int)
                   AND NOT is_test
                 """,
                 tenant_id,
                 phone_number,
+                window_minutes,
             )
 
             if recent_count and recent_count >= threshold:

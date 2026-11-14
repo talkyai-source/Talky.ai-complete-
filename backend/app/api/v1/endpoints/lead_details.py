@@ -332,8 +332,9 @@ async def set_lead_fields(
             )
 
         await conn.execute(
-            "DELETE FROM campaign_lead_fields WHERE campaign_id = $1::uuid",
+            "DELETE FROM campaign_lead_fields WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid",
             campaign_id,
+            tenant_id,
         )
         for f, normalized in normalized_fields:
             await conn.execute(

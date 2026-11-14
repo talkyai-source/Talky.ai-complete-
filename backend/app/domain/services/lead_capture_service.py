@@ -708,6 +708,7 @@ class LeadCaptureService:
                 """
                 SELECT f.field_key, f.field_type
                   FROM calls c JOIN campaign_lead_fields f ON f.campaign_id=c.campaign_id
+                                                          AND f.tenant_id=c.tenant_id
                  WHERE c.id = $2::uuid AND c.tenant_id=$1::uuid
                    AND f.is_required
                  ORDER BY f.sort_order, f.field_key

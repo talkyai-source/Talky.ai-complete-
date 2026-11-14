@@ -83,8 +83,11 @@ class Connection:
             )
             self.failed_rows.append(args)
             return "INSERT 0 1"
-        if query == "UPDATE calls SET recording_url = $1, updated_at = NOW() WHERE id = $2":
-            assert args == (f"/api/v1/recordings/{RECORDING}/stream", UUID(CALL))
+        if query == (
+            "UPDATE calls SET recording_url = $1, updated_at = NOW() "
+            "WHERE id = $2 AND tenant_id = $3"
+        ):
+            assert args == (f"/api/v1/recordings/{RECORDING}/stream", UUID(CALL), UUID(TENANT))
             self.links.append(args)
             return "UPDATE 1"
         self.unexpected.append(query)

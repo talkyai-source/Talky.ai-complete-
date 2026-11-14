@@ -319,11 +319,11 @@ async def test_dialer8_cap_counts_a_rolling_24_hours_in_any_timezone():
     w = DialerWorker()
     conn = _Conn(fetchval_result=2)
     _use_conn(w, conn)
-    assert await w._get_lead_attempts_today("lead-1") == 2
+    assert await w._get_lead_attempts_today("lead-1", "tenant-1") == 2
     sql, args = conn.calls[0]
     assert "interval '24 hours'" in sql
     assert "AT TIME ZONE" not in sql
-    assert args == ("lead-1",)
+    assert args == ("lead-1", "tenant-1")
 
 
 @pytest.mark.asyncio
@@ -335,7 +335,7 @@ async def test_dialer8_cap_deferral_rechecks_hourly():
     w = _worker(rules=rules)
     w.rules_engine.can_make_call = AsyncMock(return_value=(False, "daily_lead_cap_reached_1/1"))
     await w.process_job(_job())
-    w._get_lead_attempts_today.assert_awaited_once_with("lead-abc")
+    w._get_lead_attempts_today.assert_awaited_once_with("lead-abc", "tenant-abc")
     assert w.queue_service._redefer_inflight.await_args.kwargs["delay_seconds"] == 3600
 
 

@@ -84,10 +84,10 @@ async def seed_for_tenant(
                 SET sip_domain = $1, port = $2, transport = $3, direction = 'both',
                     auth_username = $4, auth_password_encrypted = $5,
                     is_active = TRUE, updated_at = NOW()
-                WHERE id = $6
+                WHERE id = $6 AND tenant_id = $7
                 """,
                 cfg["domain"], cfg["port"], cfg["transport"],
-                cfg["username"], enc, existing["id"],
+                cfg["username"], enc, existing["id"], tenant_id,
             )
         else:
             await conn.execute(

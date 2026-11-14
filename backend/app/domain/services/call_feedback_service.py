@@ -430,11 +430,12 @@ class CallFeedbackRepository:
                 removed = await conn.fetchrow(
                     """
                     DELETE FROM call_feedback
-                    WHERE call_id = $1 AND id = $2
+                    WHERE call_id = $1 AND id = $2 AND tenant_id = $3
                     RETURNING audio_storage_provider, audio_bucket, audio_key
                     """,
                     self._uuid(call_id),
                     self._uuid(previous_id),
+                    self._uuid(tenant_id),
                 )
                 if removed is None:
                     return None
@@ -481,11 +482,12 @@ class CallFeedbackRepository:
                        transcription_started_at = NOW(),
                        transcript_error = NULL,
                        updated_at = NOW()
-                 WHERE id = $1 AND transcript_status = 'pending'
+                 WHERE id = $1 AND tenant_id = $2 AND transcript_status = 'pending'
                    AND transcription_attempts = 0
                 RETURNING {_FEEDBACK_COLUMNS}
                 """,
                 self._uuid(feedback_id),
+                self._uuid(tenant_id),
             )
         return dict(row) if row else None
 

@@ -418,9 +418,11 @@ class ReminderWorker:
         async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
             # Mark as processing
             claimed = await conn.execute(
-                "UPDATE reminders SET status = 'processing', idempotency_key = $1 WHERE id = $2 AND status = 'pending'",
+                "UPDATE reminders SET status = 'processing', idempotency_key = $1 "
+                "WHERE id = $2 AND tenant_id = $3 AND status = 'pending'",
                 idempotency_key,
                 reminder_id,
+                tenant_id,
             )
             if claimed != "UPDATE 1":
                 return  # Cancelled or already claimed by another worker.
@@ -490,11 +492,12 @@ class ReminderWorker:
                     """
                     UPDATE reminders SET 
                         status = 'sent', sent_at = NOW(), channel = $1, external_message_id = $2
-                    WHERE id = $3
+                    WHERE id = $3 AND tenant_id = $4
                     """,
                     channel,
                     external_message_id,
                     reminder_id,
+                    tenant_id,
                 )
 
                 self._reminders_sent += 1
@@ -524,12 +527,13 @@ class ReminderWorker:
                         UPDATE reminders SET 
                             status = 'pending', retry_count = $1, next_retry_at = NOW() + $2 * interval '1 second',
                             last_error = $3, scheduled_at = NOW() + $2 * interval '1 second'
-                        WHERE id = $4
+                        WHERE id = $4 AND tenant_id = $5
                         """,
                         retry_count,
                         delay_Seconds,
                         error,
                         reminder_id,
+                        tenant_id,
                     )
 
                     logger.info(
@@ -539,10 +543,12 @@ class ReminderWorker:
                 else:
                     # Max retries exceeded, mark as failed
                     await conn.execute(
-                        "UPDATE reminders SET status = 'failed', retry_count = $1, last_error = $2 WHERE id = $3",
+                        "UPDATE reminders SET status = 'failed', retry_count = $1, last_error = $2 "
+                        "WHERE id = $3 AND tenant_id = $4",
                         retry_count,
                         error,
                         reminder_id,
+                        tenant_id,
                     )
 
                     self._reminders_failed += 1

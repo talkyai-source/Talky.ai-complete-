@@ -290,9 +290,10 @@ async def apply_topup_event(conn, billing, event_type, data, event_id):
     credit = await conn.fetchrow(
         """SELECT COUNT(*) AS count,COUNT(*) FILTER (WHERE lower(currency)<>$2) AS currency_mismatches,
         COALESCE(SUM(minutes_delta),0) AS minutes,
-        COALESCE(SUM(amount_cents),0) AS amount FROM billing_ledger WHERE order_id=$1 AND kind='topup'""",
+        COALESCE(SUM(amount_cents),0) AS amount FROM billing_ledger WHERE order_id=$1 AND kind='topup' AND tenant_id=$3""",
         order["id"],
         currency,
+        tenant_id,
     )
     has_credit = (
         credit["count"] == 1
@@ -304,8 +305,9 @@ async def apply_topup_event(conn, billing, event_type, data, event_id):
         _review("recorded_credit_conflict", tenant_id)
     debits = await conn.fetch(
         """SELECT kind,minutes_delta,amount_cents,currency FROM billing_ledger
-        WHERE order_id=$1 AND kind IN ('refund','dispute')""",
+        WHERE order_id=$1 AND kind IN ('refund','dispute') AND tenant_id=$2""",
         order["id"],
+        tenant_id,
     )
     if debits:
         if (

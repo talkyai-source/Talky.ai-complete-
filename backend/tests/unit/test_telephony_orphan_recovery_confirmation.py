@@ -491,8 +491,10 @@ async def test_hydration_uses_durable_inbound_truth_and_all_active_transfer_ids(
                 "recovery_match_count": 1,
             }
 
-        async def fetch(self, query, actual_durable_id):
+        async def fetch(self, query, actual_durable_id, leg_tenant_id):
             assert actual_durable_id == durable_id
+            # F2-03: the leg lookup names the tenant of the call it located.
+            assert leg_tenant_id == tenant_id
             self.transfer_query = query
             return [
                 {"provider_leg_id": "talky-xfer-00000000000000000001", "provider": "asterisk"},

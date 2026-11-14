@@ -346,11 +346,17 @@ async def record_call_state(
                 # if the same state event arrives twice (race-tolerant).
                 sql = (
                     f"UPDATE calls SET status = $1, {ts_col} = COALESCE({ts_col}, NOW()), "
-                    f"updated_at = NOW() WHERE id = $2{_guard_sql}"
+                    f"updated_at = NOW() WHERE id = $2 AND tenant_id = $3::uuid{_guard_sql}"
                 )
             else:
-                sql = f"UPDATE calls SET status = $1, updated_at = NOW() WHERE id = $2{_guard_sql}"
-            result = await conn.execute(sql, state.value, call_id)
+                sql = (
+                    "UPDATE calls SET status = $1, updated_at = NOW() "
+                    f"WHERE id = $2 AND tenant_id = $3::uuid{_guard_sql}"
+                )
+            # The tenant is named in the statement itself, not left to the RLS
+            # context set above: a role that bypasses RLS would otherwise let a
+            # wrong call id move another tenant's call.
+            result = await conn.execute(sql, state.value, call_id, str(tenant_id))
             if result == "UPDATE 0":
                 # Zero rows is ambiguous under FORCE ROW LEVEL SECURITY: either
                 # the row IS visible and the monotonic CAS guard rejected a
@@ -360,7 +366,8 @@ async def record_call_state(
                 # connection so the probe runs inside the same transaction and
                 # therefore under the same SET LOCAL tenant context.
                 still_visible = await conn.fetchval(
-                    "SELECT 1 FROM calls WHERE id = $1", call_id
+                    "SELECT 1 FROM calls WHERE id = $1 AND tenant_id = $2::uuid",
+                    call_id, str(tenant_id),
                 )
                 if still_visible is None:
                     logger.warning(

@@ -234,12 +234,20 @@ async def get_security_event(
     user_tenant_id = resolve_tenant_scope(
         current_user, None, denied_detail="Cannot access other tenant events"
     )
-    # A platform operator may resolve an event before its tenant is known.
     async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
-        row = await conn.fetchrow(
-            "SELECT * FROM security_events WHERE event_id = $1",
-            event_id,
-        )
+        if user_tenant_id:
+            # A tenant caller's statement can only ever match its own tenant's row.
+            row = await conn.fetchrow(
+                "SELECT * FROM security_events WHERE event_id = $1 AND tenant_id = $2",
+                event_id,
+                user_tenant_id,
+            )
+        else:
+            # A platform operator may resolve an event before its tenant is known.
+            row = await conn.fetchrow(
+                "SELECT * FROM security_events WHERE event_id = $1",
+                event_id,
+            )
     if not row:
         raise HTTPException(status_code=404, detail="Event not found")
     # Compare as strings — asyncpg returns uuid columns as `uuid.UUID` while

@@ -403,14 +403,15 @@ class SecretsManager:
                 )
                 return None
 
-            # Update access tracking
+            # Update access tracking. The write repeats the tenant of the row
+            # just read (NULL for a platform-owned secret), not the id alone.
             await conn.execute(
                 """
                 UPDATE tenant_secrets
                 SET last_accessed_at = NOW(), last_accessed_by = $1, access_count = access_count + 1
-                WHERE secret_id = $2
+                WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3
                 """,
-                accessor_uuid, secret_uuid
+                accessor_uuid, secret_uuid, row["tenant_id"]
             )
 
             # Log access
@@ -604,10 +605,12 @@ class SecretsManager:
                 new_lookup_hash,
             )
 
-            # Link old to new
+            # Link old to new. Both writes to the old version repeat the tenant of
+            # the row read above (NULL for a platform-owned secret), not the id alone.
             await conn.execute(
-                "UPDATE tenant_secrets SET rotated_to = $1 WHERE secret_id = $2",
-                new_secret_id, secret_uuid
+                "UPDATE tenant_secrets SET rotated_to = $1 "
+                "WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+                new_secret_id, secret_uuid, row["tenant_id"]
             )
 
             # Schedule old secret revocation after grace period
@@ -616,9 +619,9 @@ class SecretsManager:
                 """
                 UPDATE tenant_secrets
                 SET expires_at = LEAST(expires_at, $1)
-                WHERE secret_id = $2
+                WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3
                 """,
-                revoke_at, secret_uuid
+                revoke_at, secret_uuid, row["tenant_id"]
             )
 
             # Log rotation
@@ -673,13 +676,15 @@ class SecretsManager:
             if not row:
                 return False
 
+            # The write repeats the tenant of the row just read (NULL for a
+            # platform-owned secret), not the id alone.
             await conn.execute(
                 """
                 UPDATE tenant_secrets
                 SET is_active = FALSE, revoked_at = NOW(), revoked_reason = $1
-                WHERE secret_id = $2
+                WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3
                 """,
-                reason, secret_uuid
+                reason, secret_uuid, row["tenant_id"]
             )
 
             # Log revocation
@@ -737,13 +742,15 @@ class SecretsManager:
             if not row:
                 return False
 
+            # The write repeats the tenant of the row just read (NULL for a
+            # platform-owned secret), not the id alone.
             await conn.execute(
                 """
                 UPDATE tenant_secrets
                 SET is_active = FALSE, is_compromised = TRUE, revoked_at = NOW(), revoked_reason = $1
-                WHERE secret_id = $2
+                WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3
                 """,
-                f"COMPROMISED: {reason}", secret_uuid
+                f"COMPROMISED: {reason}", secret_uuid, row["tenant_id"]
             )
 
             # Log compromise

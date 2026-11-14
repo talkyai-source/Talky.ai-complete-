@@ -62,20 +62,23 @@ def _empty_conn():
 
 # ── loaders ──────────────────────────────────────────────────────────
 
+# Each loader of a lead / campaign also names the job's tenant (F2-03): the
+# worker's connection bypasses RLS, so the id alone must not reach another
+# tenant's row.
 _LOADERS = [
-    ("_get_tenant_rules", "tenant-10"),
-    ("_get_campaign_calling_config", "campaign-10"),
-    ("_get_lead_last_called", "lead-10"),
-    ("_get_lead_attempts_today", "lead-10"),
+    ("_get_tenant_rules", ("tenant-10",)),
+    ("_get_campaign_calling_config", ("campaign-10", "tenant-10")),
+    ("_get_lead_last_called", ("lead-10", "tenant-10")),
+    ("_get_lead_attempts_today", ("lead-10", "tenant-10")),
 ]
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name,arg", _LOADERS)
-async def test_loader_raises_typed_error_when_the_query_fails(name, arg):
+@pytest.mark.parametrize("name,args", _LOADERS)
+async def test_loader_raises_typed_error_when_the_query_fails(name, args):
     w = _worker_with_conn(_failing_conn(asyncio_timeout()))
     with pytest.raises(RuntimeError) as info:
-        await getattr(w, name)(arg)
+        await getattr(w, name)(*args)
     assert type(info.value).__name__ == "ComplianceLookupUnavailable"
 
 
@@ -90,23 +93,23 @@ async def test_absent_rows_still_mean_defaults_not_unavailable():
     w = _worker_with_conn(_empty_conn())
     rules = await w._get_tenant_rules("tenant-10")
     assert rules.time_window_start == CallingRules.default().time_window_start
-    assert await w._get_campaign_calling_config("campaign-10") is None
-    assert await w._get_lead_last_called("lead-10") is None
-    assert await w._get_lead_attempts_today("lead-10") == 0
+    assert await w._get_campaign_calling_config("campaign-10", "tenant-10") is None
+    assert await w._get_lead_last_called("lead-10", "tenant-10") is None
+    assert await w._get_lead_attempts_today("lead-10", "tenant-10") == 0
 
 
 @pytest.mark.asyncio
 async def test_lead_timezone_db_error_raises_but_missing_column_stays_best_effort():
     w = _worker_with_conn(_failing_conn(asyncpg.PostgresConnectionError("blip")))
     with pytest.raises(RuntimeError) as info:
-        await w._get_lead_timezone("lead-10")
+        await w._get_lead_timezone("lead-10", "tenant-10")
     assert type(info.value).__name__ == "ComplianceLookupUnavailable"
 
     # Pre-0020 database: the column does not exist -> documented best-effort None.
     w = _worker_with_conn(
         _failing_conn(asyncpg.UndefinedColumnError('column "timezone" does not exist'))
     )
-    assert await w._get_lead_timezone("lead-10") is None
+    assert await w._get_lead_timezone("lead-10", "tenant-10") is None
 
 
 # ── process_job wiring ───────────────────────────────────────────────

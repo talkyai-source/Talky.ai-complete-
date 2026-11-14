@@ -767,7 +767,7 @@ async def test_out_of_minutes_payload_survives_in_the_scheduled_set():
 async def test_daily_lead_cap_does_not_count_intents_released_while_the_line_was_refused():
     w = DialerWorker()
     conn = _conn_pool(w, fetchval=2)
-    assert await w._get_lead_attempts_today("lead-1") == 2
+    assert await w._get_lead_attempts_today("lead-1", "tenant-1") == 2
     sql = conn.fetchval.call_args.args[0]
     assert "line_not_ready" in sql and "provider_call_id IS NULL" in sql
 

@@ -380,7 +380,9 @@ async def test_security_get_platform_admin_reads_another_tenants_event(pool):
     assert row.event_id == b
 
 
-async def test_security_get_tenant_admin_cross_tenant_still_403(pool):
+async def test_security_get_tenant_admin_cross_tenant_is_not_found(pool):
+    # F2-03: the lookup itself now carries the caller's tenant, so another
+    # tenant's event never leaves the database (it was a 403 after the read).
     b = await _seed_security_event(pool, TENANT_B)
 
     with pytest.raises(HTTPException) as exc:
@@ -388,7 +390,7 @@ async def test_security_get_tenant_admin_cross_tenant_still_403(pool):
             event_id=b, current_user=_user("tenant_admin", TENANT_A), db_pool=pool,
         )
 
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 404
 
 
 async def test_security_update_resolve_escalate_reach_another_tenant_for_platform_admin(pool):

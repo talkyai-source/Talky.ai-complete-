@@ -27,6 +27,57 @@ _BILLABLE_SUBSCRIPTIONS = ("active", "past_due")
 _OK_SUBSCRIPTIONS = ("active", "trialing", "past_due")
 _SNIPPET_MAX = 200
 
+# Read-only SQL for the tools below, kept next to the one place that runs it so each statement is read with
+# its tenant predicate and the F2-03 scanner (scripts/tenant_sql_inventory.py, which cannot follow a constant
+# imported from another module) can prove it. Every statement carries an explicit ``tenant_id`` predicate
+# (``tenants`` itself is keyed by ``id``) and the tenant is always the executor's, never a model argument.
+# Never select transcripts, recording URLs, summaries, connector ``config`` or full phone numbers.
+TENANT_SQL = "SELECT plan_id, subscription_status, status FROM tenants WHERE id = $1"
+PLAN_SQL = "SELECT name, price FROM plans WHERE id = $1"
+
+CAMPAIGN_BY_ID_SQL = (
+    "SELECT id, name, status, direction, updated_at FROM campaigns "
+    "WHERE id = $1 AND tenant_id = $2"
+)
+CAMPAIGN_BY_NAME_SQL = (
+    "SELECT id, name, status, direction, updated_at FROM campaigns "
+    "WHERE lower(name) = lower($1) AND tenant_id = $2 ORDER BY updated_at DESC LIMIT 1"
+)
+CAMPAIGN_FAILURES_SQL = (
+    "SELECT failure_reason, max(failure_category) AS failure_category, count(*) AS n "
+    "FROM dialer_jobs WHERE campaign_id = $1 AND tenant_id = $2 AND status = 'failed' "
+    "AND updated_at > now() - interval '24 hours' "
+    "GROUP BY failure_reason ORDER BY n DESC LIMIT 5"
+)
+RECENT_FAILURES_SQL = (
+    "SELECT failure_reason, max(failure_category) AS failure_category, count(*) AS n "
+    "FROM dialer_jobs WHERE tenant_id = $1 "
+    "AND (status = 'failed' OR failure_reason IS NOT NULL) "
+    "AND updated_at > now() - interval '24 hours' "
+    "GROUP BY failure_reason ORDER BY n DESC LIMIT 5"
+)
+CALL_SQL = (
+    "SELECT id, campaign_id, status, outcome, direction, started_at, ended_at, "
+    "duration_seconds, dialer_job_id FROM calls WHERE id = $1 AND tenant_id = $2"
+)
+JOB_REASON_SQL = (
+    "SELECT failure_reason, failure_category FROM dialer_jobs WHERE id = $1 AND tenant_id = $2"
+)
+PHONES_SQL = (
+    "SELECT e164, status, verified_at, provider FROM tenant_phone_numbers "
+    "WHERE tenant_id = $1 ORDER BY e164 LIMIT 20"
+)
+CONNECTORS_SQL = (
+    "SELECT type, provider, name, status, provider_revocation_status FROM connectors "
+    "WHERE tenant_id = $1 ORDER BY name LIMIT 20"
+)
+TICKETS_SQL = (
+    "SELECT id, number, subject, status, category FROM support_tickets "
+    "WHERE tenant_id = $1 AND requester_user_id = $2 "
+    "AND status IN ('open','in_progress','waiting_on_customer') "
+    "ORDER BY updated_at DESC LIMIT 5"
+)
+
 
 @dataclass(frozen=True)
 class ToolOutcome:
@@ -100,10 +151,10 @@ class ToolExecutor:
 
     async def _get_account_overview(self, args: Any) -> _Part | None:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            tenant = await conn.fetchrow(q.TENANT_SQL, self._tenant)
+            tenant = await conn.fetchrow(TENANT_SQL, self._tenant)
             if tenant is None:
                 return None
-            plan = await conn.fetchrow(q.PLAN_SQL, tenant["plan_id"]) if tenant["plan_id"] else None
+            plan = await conn.fetchrow(PLAN_SQL, tenant["plan_id"]) if tenant["plan_id"] else None
             minutes = await compute_minutes_status(conn, self._tenant)
         sub, status = tenant["subscription_status"], tenant["status"]
         price = plan["price"] if plan else 0
@@ -130,13 +181,13 @@ class ToolExecutor:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
             row = None
             try:
-                row = await conn.fetchrow(q.CAMPAIGN_BY_ID_SQL, str(UUID(ref)), self._tenant)
+                row = await conn.fetchrow(CAMPAIGN_BY_ID_SQL, str(UUID(ref)), self._tenant)
             except ValueError:
-                row = await conn.fetchrow(q.CAMPAIGN_BY_NAME_SQL, ref, self._tenant)
+                row = await conn.fetchrow(CAMPAIGN_BY_NAME_SQL, ref, self._tenant)
             if row is None:
                 return None
             cid = str(row["id"])
-            failures = await conn.fetch(q.CAMPAIGN_FAILURES_SQL, cid, self._tenant)
+            failures = await conn.fetch(CAMPAIGN_FAILURES_SQL, cid, self._tenant)
         result: dict[str, Any] = {"name": row["name"], "status": row["status"],
                                   "direction": row["direction"], "updated_at": q.iso(row["updated_at"])}
         findings: list[Finding] = []
@@ -153,19 +204,19 @@ class ToolExecutor:
 
     async def _get_recent_call_issues(self, args: Any) -> _Part:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            rows = await conn.fetch(q.RECENT_FAILURES_SQL, self._tenant)
+            rows = await conn.fetch(RECENT_FAILURES_SQL, self._tenant)
         groups, findings = _group(list(rows))
         return _Part({"issues_24h": groups}, f"checked failed calls in the last 24h, {len(groups)} kinds",
                      findings=findings)
 
     async def _get_call_details(self, args: Any) -> _Part | None:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            row = await conn.fetchrow(q.CALL_SQL, str(args.call_id), self._tenant)
+            row = await conn.fetchrow(CALL_SQL, str(args.call_id), self._tenant)
             if row is None:
                 return None
             job = None
             if row["dialer_job_id"]:
-                job = await conn.fetchrow(q.JOB_REASON_SQL, str(row["dialer_job_id"]), self._tenant)
+                job = await conn.fetchrow(JOB_REASON_SQL, str(row["dialer_job_id"]), self._tenant)
         result: dict[str, Any] = {
             "status": row["status"], "outcome": row["outcome"], "direction": row["direction"],
             "started_at": q.iso(row["started_at"]), "ended_at": q.iso(row["ended_at"]),
@@ -182,7 +233,7 @@ class ToolExecutor:
 
     async def _get_phone_numbers_status(self, args: Any) -> _Part:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            rows = await conn.fetch(q.PHONES_SQL, self._tenant)
+            rows = await conn.fetch(PHONES_SQL, self._tenant)
         numbers = [{"number": q.mask_phone(r["e164"]), "status": r["status"], "provider": r["provider"],
                     "verified_at": q.iso(r["verified_at"])} for r in rows]
         findings: list[Finding] = []
@@ -193,14 +244,14 @@ class ToolExecutor:
 
     async def _get_connectors_status(self, args: Any) -> _Part:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            rows = await conn.fetch(q.CONNECTORS_SQL, self._tenant)
+            rows = await conn.fetch(CONNECTORS_SQL, self._tenant)
         items = [{"type": r["type"], "provider": r["provider"], "name": r["name"], "status": r["status"],
                   "revocation": r["provider_revocation_status"]} for r in rows]
         return _Part({"connectors": items}, f"checked {len(items)} connectors")
 
     async def _find_open_tickets(self, args: Any) -> _Part:
         async with acquire_with_tenant(self._pool, self._tenant) as conn:
-            rows = await conn.fetch(q.TICKETS_SQL, self._tenant, self._user)
+            rows = await conn.fetch(TICKETS_SQL, self._tenant, self._user)
         items = [{"number": vocabulary.ticket_display_number(r["number"]), "subject": str(r["subject"])[:120],
                   "status": r["status"], "category": r["category"]} for r in rows]
         return _Part({"tickets": items}, f"found {len(items)} open tickets")
