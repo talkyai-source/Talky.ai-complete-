@@ -32,6 +32,9 @@ import {
 import { useNotificationsActions } from "@/lib/notifications-client";
 import { SipTrunksList } from "@/components/settings/sip-trunks-list";
 
+// Same shape check as the SIP line form (pbx-line-form.ts CALLER_ID) and the trunk API.
+const CALLER_ID = /^\+?[0-9][0-9\s().-]{1,}$/;
+
 const UNVERIFIED_AVAILABILITY: ProviderAvailability = {
     activation_allowed: false, qualification_only: false,
     reason: "Availability could not be verified. Refresh settings before activating.",
@@ -135,11 +138,20 @@ function ProviderCard({
     const lastTest = existing?.last_test_result || null;
 
     async function handleSave() {
+        const callerId = fromNumber.trim();
+        if (callerId && (callerId.length > 64 || !CALLER_ID.test(callerId))) {
+            createNotification({
+                type: "error",
+                title: "Save failed",
+                message: "The caller ID should be a phone number: digits, with spaces, dashes or brackets if you like.",
+            });
+            return;
+        }
         try {
             await saveMutation.mutateAsync({
                 provider,
                 credentials: creds as never,
-                from_number: fromNumber || undefined,
+                from_number: callerId || undefined,
             });
             createNotification({
                 type: "success",

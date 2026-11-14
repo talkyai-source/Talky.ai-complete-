@@ -22,11 +22,8 @@ import { ProviderKeysSection } from "@/components/settings/provider-keys-section
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
+import { clampIntText } from "@/lib/number-text";
 import { Loader2 } from "lucide-react";
-
-function clampNumber(n: number, min: number, max: number) {
-    return Math.min(max, Math.max(min, n));
-}
 
 const notificationTypes: NotificationType[] = ["success", "warning", "error", "info"];
 const priorities: NotificationPriority[] = ["low", "normal", "high"];
@@ -35,6 +32,8 @@ const routings: NotificationRouting[] = ["inApp", "none"];
 export default function SettingsPage() {
     const { settings, hydrated, persistence } = useNotificationsState();
     const { setSettings, setCategory, create: createNotification } = useNotificationsActions();
+    // What the user typed in the duration box, kept as text until blur.
+    const [toastTyped, setToastTyped] = useState<string | null>(null);
     // Phase 5 universal-auth-state: token now comes from AuthContext via
     // the reactive useAccessToken() hook. The previous implementation
     // dynamically imported `getBrowserAuthToken` inside a mount-time
@@ -62,6 +61,9 @@ export default function SettingsPage() {
         setProfileName(user?.name ?? "");
         setProfileBusiness(user?.business_name ?? "");
     }, [user?.name, user?.business_name]);
+
+    // Only a tenant admin or above may rename the business (the server refuses others).
+    const canEditBusinessName = ["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"].includes(String(user?.role ?? ""));
 
     const profileDirty =
         (user?.name ?? "") !== profileName.trim() ||
@@ -166,11 +168,14 @@ export default function SettingsPage() {
                                     type="number"
                                     min={1200}
                                     max={30000}
-                                    value={settings.toastDurationMs}
+                                    value={toastTyped ?? settings.toastDurationMs}
                                     disabled={!hydrated}
-                                    onChange={(e) =>
-                                        setSettings({ toastDurationMs: clampNumber(Number(e.target.value) || 0, 1200, 30000) })
-                                    }
+                                    onChange={(e) => setToastTyped(e.target.value)}
+                                    onBlur={() => {
+                                        if (toastTyped === null) return;
+                                        setSettings({ toastDurationMs: clampIntText(toastTyped, 1200, 30000, settings.toastDurationMs) });
+                                        setToastTyped(null);
+                                    }}
                                 />
                             </div>
                             <div className="space-y-2">
@@ -282,6 +287,7 @@ export default function SettingsPage() {
                                                     id="profileName"
                                                     value={profileName}
                                                     onChange={(e) => setProfileName(e.target.value)}
+                                                    maxLength={100}
                                                     placeholder="Your full name"
                                                 />
                                             </div>
@@ -291,6 +297,9 @@ export default function SettingsPage() {
                                                     id="profileBusiness"
                                                     value={profileBusiness}
                                                     onChange={(e) => setProfileBusiness(e.target.value)}
+                                                    maxLength={100}
+                                                    readOnly={!canEditBusinessName}
+                                                    disabled={!canEditBusinessName}
                                                     placeholder="Acme Inc."
                                                 />
                                             </div>

@@ -129,3 +129,19 @@ test("Import sends the chosen object, campaign and clamped limit and shows count
     await waitFor(() => assert.ok(screen.getByTestId("salesforce-import-result")));
     assert.match(screen.getByTestId("salesforce-import-result").textContent ?? "", /imported 2/);
 });
+
+test("callback priority box can be cleared and retyped; clamps on blur and save (forms audit B-F17)", async () => {
+    const calls = renderView();
+    const box = screen.getByLabelText("Callback priority (1–10)") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "" } });
+    assert.equal(box.value, "");
+    fireEvent.change(box, { target: { value: "3" } });
+    assert.equal(box.value, "3");
+    fireEvent.change(box, { target: { value: "30" } });
+    assert.equal(box.value, "30");
+    fireEvent.blur(box);
+    assert.equal(box.value, "10");
+    fireEvent.click(screen.getByTestId("salesforce-save"));
+    await waitFor(() => assert.equal(calls.save.length, 1));
+    assert.deepEqual(calls.save[0], { callback_priority: 10 });
+});

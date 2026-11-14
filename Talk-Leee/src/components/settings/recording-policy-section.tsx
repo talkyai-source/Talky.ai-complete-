@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { ErrorState, failedReadMessage } from "@/components/states/page-states";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
+import { clampIntText } from "@/lib/number-text";
 import { cn } from "@/lib/utils";
 
 export type RecordingConsentMode = "disabled" | "one_party" | "two_party";
@@ -33,6 +34,13 @@ export type RecordingPolicyInput = {
     two_party_country_codes: string[];
     retention_days: number;
 };
+
+function parseCodes(text: string): string[] {
+    return text
+        .split(/[,\s]+/)
+        .map((c) => c.trim().toUpperCase())
+        .filter(Boolean);
+}
 
 function formatError(err: unknown) {
     if (isApiClientError(err)) return err.message;
@@ -76,6 +84,9 @@ export function RecordingPolicyView({
 }) {
     const [draft, setDraft] = useState<Partial<RecordingPolicyInput>>({});
     const [saveError, setSaveError] = useState<string | null>(null);
+    // What the user typed, kept as text until blur or save (null = untouched).
+    const [codesTyped, setCodesTyped] = useState<string | null>(null);
+    const [retentionTyped, setRetentionTyped] = useState<string | null>(null);
 
     const effective: RecordingPolicyInput = {
         default_consent_mode: policy?.default_consent_mode ?? "disabled",
@@ -85,8 +96,21 @@ export function RecordingPolicyView({
         retention_days: policy?.retention_days ?? 90,
         ...draft,
     };
-    const codesText = useMemo(() => effective.two_party_country_codes.join(", "), [effective.two_party_country_codes]);
-    const dirty = Object.keys(draft).length > 0;
+    const codesText = codesTyped ?? effective.two_party_country_codes.join(", ");
+    const retentionText = retentionTyped ?? String(effective.retention_days);
+    const dirty = Object.keys(draft).length > 0 || codesTyped !== null || retentionTyped !== null;
+    const commitCodes = () => {
+        if (codesTyped === null) return;
+        const codes = parseCodes(codesTyped);
+        setDraft((d) => ({ ...d, two_party_country_codes: codes }));
+        setCodesTyped(null);
+    };
+    const commitRetention = () => {
+        if (retentionTyped === null) return;
+        const days = clampIntText(retentionTyped, 1, 3650, 90);
+        setDraft((d) => ({ ...d, retention_days: days }));
+        setRetentionTyped(null);
+    };
 
     const save = async () => {
         setSaveError(null);
@@ -95,10 +119,12 @@ export function RecordingPolicyView({
                 default_consent_mode: effective.default_consent_mode,
                 announcement_text: (effective.announcement_text ?? "").trim() || null,
                 opt_out_dtmf_digit: (effective.opt_out_dtmf_digit ?? "").trim() || null,
-                two_party_country_codes: effective.two_party_country_codes,
-                retention_days: effective.retention_days,
+                two_party_country_codes: codesTyped !== null ? parseCodes(codesTyped) : effective.two_party_country_codes,
+                retention_days: retentionTyped !== null ? clampIntText(retentionTyped, 1, 3650, 90) : effective.retention_days,
             });
             setDraft({});
+            setCodesTyped(null);
+            setRetentionTyped(null);
         } catch (err) {
             setSaveError(formatError(err));
         }
@@ -171,15 +197,8 @@ export function RecordingPolicyView({
                             id="rp-countries"
                             placeholder="GB, DE, US-CA"
                             value={codesText}
-                            onChange={(e) =>
-                                setDraft((d) => ({
-                                    ...d,
-                                    two_party_country_codes: e.target.value
-                                        .split(/[,\s]+/)
-                                        .map((c) => c.trim().toUpperCase())
-                                        .filter(Boolean),
-                                }))
-                            }
+                            onChange={(e) => setCodesTyped(e.target.value)}
+                            onBlur={commitCodes}
                             disabled={!canEdit || effective.default_consent_mode !== "two_party"}
                         />
                     </div>
@@ -190,9 +209,10 @@ export function RecordingPolicyView({
                             <Input
                                 id="rp-dtmf"
                                 maxLength={1}
+                                pattern="[0-9*#]"
                                 placeholder="9"
                                 value={effective.opt_out_dtmf_digit ?? ""}
-                                onChange={(e) => setDraft((d) => ({ ...d, opt_out_dtmf_digit: e.target.value }))}
+                                onChange={(e) => setDraft((d) => ({ ...d, opt_out_dtmf_digit: e.target.value.replace(/[^0-9*#]/g, "") }))}
                                 disabled={!canEdit || effective.default_consent_mode !== "two_party"}
                             />
                         </div>
@@ -203,8 +223,9 @@ export function RecordingPolicyView({
                                 type="number"
                                 min={1}
                                 max={3650}
-                                value={effective.retention_days}
-                                onChange={(e) => setDraft((d) => ({ ...d, retention_days: Math.max(1, Math.min(3650, Number.parseInt(e.target.value, 10) || 90)) }))}
+                                value={retentionText}
+                                onChange={(e) => setRetentionTyped(e.target.value)}
+                                onBlur={commitRetention}
                                 disabled={!canEdit}
                             />
                         </div>

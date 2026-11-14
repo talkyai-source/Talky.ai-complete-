@@ -39,8 +39,11 @@ function sourceLabel(source: string) {
     return SOURCE_LABELS[source] ?? source;
 }
 
-function failureText(error: unknown, fallback: string) {
-    if (isApiClientError(error) && error.status === 422) return "Not a valid phone number for the selected country.";
+// backend dnc.py BulkImportRequest.numbers max_length.
+const DNC_IMPORT_LIMIT = 10_000;
+
+function failureText(error: unknown, fallback: string, invalidText = "Not a valid phone number for the selected country.") {
+    if (isApiClientError(error) && error.status === 422) return invalidText;
     if (isApiClientError(error) && error.status === 403) return "Your role cannot change the Do-Not-Call list.";
     return error instanceof Error ? error.message : fallback;
 }
@@ -105,13 +108,17 @@ export default function DoNotCallPage() {
             setBulkError("Paste at least one number.");
             return;
         }
+        if (numbers.length > DNC_IMPORT_LIMIT) {
+            setBulkError(`Import at most ${DNC_IMPORT_LIMIT.toLocaleString("en-US")} numbers at a time.`);
+            return;
+        }
         setImporting(true);
         try {
             setBulkResult(await dncApi.bulkImport({ numbers, defaultCountry: bulkCountry }));
             setBulkText("");
             await refresh();
         } catch (error) {
-            setBulkError(failureText(error, "The numbers were not imported."));
+            setBulkError(failureText(error, "The numbers were not imported.", "The import was refused. Check the list and the country, and import at most 10,000 numbers at a time."));
         } finally {
             setImporting(false);
         }
