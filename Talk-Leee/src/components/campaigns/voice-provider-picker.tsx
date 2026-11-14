@@ -18,6 +18,7 @@ import { Play, Sparkles, Square } from "lucide-react";
 
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { failedReadMessage } from "@/components/states/page-states";
 import { aiOptionsApi, VoiceInfo } from "@/lib/ai-options-api";
 import { PersonaType } from "@/lib/dashboard-api";
 import {
@@ -96,7 +97,7 @@ export function VoiceProviderPicker({
             setLoaded(true);
         }).catch((err: unknown) => {
             if (cancelled) return;
-            setLoadError(err instanceof Error ? err.message : "The voice catalog is unavailable.");
+            setLoadError(failedReadMessage(err, "The voice catalog is unavailable."));
             setLoaded(true);
         });
         return () => {

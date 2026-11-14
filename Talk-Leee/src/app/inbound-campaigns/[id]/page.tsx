@@ -14,6 +14,7 @@ import { InboundReadinessChecklist, InboundStatusBadge, ReadinessBadge } from "@
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { failedReadMessage } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { isMinutesExhausted } from "@/lib/dashboard-api";
 import { inboundErrorCode, inboundErrorStatus } from "@/lib/inbound-api";
@@ -27,6 +28,7 @@ import {
     useInboundReadiness,
     useMinutesStatus,
     usePauseInboundCampaign,
+    useTenantInboundControls,
 } from "@/lib/queries/inbound-queries";
 
 type LifecycleAction = "activate" | "deactivate" | "archive";
@@ -42,6 +44,9 @@ export default function InboundCampaignDetailPage() {
     const readinessQuery = useInboundReadiness(id, canLoadCampaign);
     const minutesQuery = useMinutesStatus(canLoadCampaign);
     const quotaExhausted = isMinutesExhausted(minutesQuery.data);
+    // Only roles with inbound:controls can read the account's inbound switch.
+    const tenantControls = useTenantInboundControls(canLoadCampaign && capabilities.canChangeControls);
+    const inboundSwitchOff = capabilities.canChangeControls && tenantControls.data?.inbound_enabled !== true;
     const activate = useActivateInboundCampaign(id);
     const pause = usePauseInboundCampaign(id);
     const archive = useArchiveInboundCampaign(id);
@@ -51,6 +56,11 @@ export default function InboundCampaignDetailPage() {
     const readiness = readinessQuery.data ?? campaign?.readiness;
     const canActivate = readinessQuery.isSuccess && readinessQuery.data.ready;
     const canManageKnowledge = permissions.isSuccess && capabilities.canEdit;
+    const archived = campaign?.status === "archived";
+    // "Ready" is never shown for an archived campaign or while the account's
+    // inbound switch is off; a blocker count is still shown.
+    const shownReadiness = readiness ?? campaign?.readiness;
+    const showReadiness = Boolean(shownReadiness) && !archived && !(shownReadiness?.ready && inboundSwitchOff);
 
     async function confirmAction() {
         if (!action || !campaign) return;
@@ -82,19 +92,21 @@ export default function InboundCampaignDetailPage() {
         <DashboardLayout title="Inbound Campaign" description="Live routing state, server readiness, and versioned configuration">
             {permissions.isLoading ? <InboundLoadingState label="Checking inbound permissions…" /> : permissions.isError ? (
                 <InboundErrorState title="Permissions could not be verified" message="Campaign data and live routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
-            ) : !capabilities.canView ? <InboundPermissionState /> : campaignQuery.isLoading ? <InboundLoadingState /> : campaignQuery.isError || !campaign ? (
-                <InboundErrorState title={(campaignQuery.error as { status?: number } | undefined)?.status === 404 ? "Inbound campaign not found" : "Campaign is unavailable"} message={campaignQuery.error instanceof Error ? campaignQuery.error.message : "This campaign may have been removed or you may not have access."} onRetry={() => void campaignQuery.refetch()} />
+            ) : !capabilities.canView ? <InboundPermissionState onRetry={() => void permissions.refetch()} /> : campaignQuery.isLoading ? <InboundLoadingState /> : campaignQuery.isError || !campaign ? (
+                <InboundErrorState title={(campaignQuery.error as { status?: number } | undefined)?.status === 404 ? "Inbound campaign not found" : "Campaign is unavailable"} message={failedReadMessage(campaignQuery.error, "This campaign may have been removed or you may not have access.")} onRetry={() => void campaignQuery.refetch()} />
             ) : (
                 <div className="space-y-5">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <Button asChild variant="ghost" size="sm" className="self-start px-2"><Link href="/inbound-campaigns"><ArrowLeft className="h-4 w-4" aria-hidden />Back to inbound campaigns</Link></Button>
                         <div className="flex flex-wrap gap-2">
                             {capabilities.canEdit ? <Button asChild variant="outline" size="sm" data-testid="inbound-edit-campaign"><Link href={`/campaigns/${encodeURIComponent(campaign.campaign_id)}/edit`}><Edit3 className="h-4 w-4" aria-hidden />Edit campaign &amp; agent</Link></Button> : null}
-                            <span className="inline-flex items-center rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground" title="The browser Test agent runs outbound campaigns. Test this inbound line by calling its number once it is active.">
-                                Test: call the number once active
-                            </span>
+                            {archived ? null : (
+                                <span className="inline-flex items-center rounded-md border border-dashed border-border px-2.5 py-1.5 text-xs text-muted-foreground" title="The browser Test agent runs outbound campaigns. Test this inbound line by calling its number once it is active.">
+                                    Test: call the number once active
+                                </span>
+                            )}
                             {serverCampaignId && capabilities.canEdit && campaign.status !== "active" && campaign.status !== "archived" ? <Button asChild variant="outline" size="sm"><Link href={`/inbound-campaigns/${encodeURIComponent(serverCampaignId)}/edit`}><Edit3 className="h-4 w-4" aria-hidden />Edit number &amp; routing</Link></Button> : null}
-                            {serverCampaignId ? <Button asChild variant="outline" size="sm"><Link href={`/calls?direction=inbound&inbound_campaign_id=${encodeURIComponent(serverCampaignId)}`}><History className="h-4 w-4" aria-hidden />Call history</Link></Button> : null}
+                            {serverCampaignId ? <Button asChild variant="outline" size="sm"><Link href={`/calls?direction=inbound&inbound_campaign_id=${encodeURIComponent(serverCampaignId)}`}><History className="h-4 w-4" aria-hidden />Call History</Link></Button> : null}
                             {capabilities.canChangeLifecycle && (campaign.status === "draft" || campaign.status === "paused") ? <Button size="sm" disabled={!canActivate} onClick={() => setAction("activate")}><Play className="h-4 w-4" aria-hidden />Activate</Button> : null}
                             {capabilities.canChangeLifecycle && campaign.status === "active" ? <Button size="sm" variant="outline" onClick={() => setAction("deactivate")}><Pause className="h-4 w-4" aria-hidden />Deactivate</Button> : null}
                             {capabilities.canChangeLifecycle && (campaign.status === "draft" || campaign.status === "paused") ? <Button size="sm" variant="destructive" onClick={() => setAction("archive")}><Archive className="h-4 w-4" aria-hidden />Archive</Button> : null}
@@ -122,8 +134,9 @@ export default function InboundCampaignDetailPage() {
                     <section className="content-card" aria-labelledby="inbound-overview-heading">
                         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                             <div className="min-w-0 flex-1"><p className="font-mono text-sm text-muted-foreground">{campaign.phone_number?.masked_number ?? "No verified number"}</p><h2 id="inbound-overview-heading" className="mt-1 break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>{campaign.purpose ? <p className="mt-1 text-sm text-muted-foreground [overflow-wrap:anywhere]">{campaign.purpose}</p> : null}</div>
-                            <div className="flex shrink-0 flex-wrap gap-2"><InboundStatusBadge status={campaign.status} /><ReadinessBadge readiness={readiness ?? campaign.readiness} /></div>
+                            <div className="flex shrink-0 flex-wrap gap-2"><InboundStatusBadge status={campaign.status} />{showReadiness && shownReadiness ? <ReadinessBadge readiness={shownReadiness} /> : null}</div>
                         </div>
+                        {campaign.last_error ? <p className="mt-4 rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-destructive [overflow-wrap:anywhere]" role="status">{campaign.last_error}</p> : null}
                         <dl className="mt-6 grid gap-4 border-t border-border pt-5 sm:grid-cols-2 lg:grid-cols-4"><Info label="AI campaign" value={campaign.campaign_name || campaign.campaign_id || "Not selected"} /><Info label="SIP trunk" value={campaign.sip_trunk_name || campaign.sip_trunk_id || "Not selected"} /><Info label="Opening" value={campaign.opening_mode === "agent_first" ? "Agent first" : "Caller first"} /><Info label="Timezone" value={campaign.timezone} /></dl>
                     </section>
 
@@ -133,14 +146,14 @@ export default function InboundCampaignDetailPage() {
                         <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-foreground">
                             <li>Once this campaign is active, call its assigned public number from a separate mobile or landline. A SIP account or extension is not the public number.</li>
                             <li>Check the configured greeting and have a short two-way conversation. Note the time and what you hear if the call fails.</li>
-                            <li>Confirm the call appears below and ends in Call history. Check its transcript, summary, duration and recording where enabled.</li>
+                            <li>Confirm the call appears below and ends in Call History. Check its transcript, summary, duration and recording where enabled.</li>
                         </ol>
                     </section>
 
                     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(18rem,0.75fr)]">
                         <section className="content-card server-readiness-card" aria-labelledby="readiness-heading">
                             <div className="mb-4 flex items-start justify-between gap-3"><div><h2 id="readiness-heading" className="text-lg font-semibold text-foreground">Server readiness</h2><p className="mt-1 text-sm text-muted-foreground">The server re-evaluates ownership, trunk health, policies, and configuration version at activation.</p></div><Button type="button" variant="ghost" size="icon" onClick={() => void readinessQuery.refetch()} disabled={readinessQuery.isFetching} aria-label="Refresh readiness"><RefreshCw className={readinessQuery.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden /></Button></div>
-                            {readinessQuery.isError ? <InboundErrorState title="Readiness could not be refreshed" message={readinessQuery.error instanceof Error ? readinessQuery.error.message : "Try again."} onRetry={() => void readinessQuery.refetch()} /> : readiness ? <InboundReadinessChecklist readiness={readiness} /> : <InboundLoadingState label="Checking activation readiness…" />}
+                            {readinessQuery.isError ? <InboundErrorState title="Readiness could not be refreshed" message={failedReadMessage(readinessQuery.error, "Try again.")} onRetry={() => void readinessQuery.refetch()} /> : readiness ? <InboundReadinessChecklist readiness={readiness} inboundSwitchOff={inboundSwitchOff} /> : <InboundLoadingState label="Checking activation readiness…" />}
                         </section>
                         <aside className="space-y-5">
                             <section className="content-card" aria-labelledby="safety-summary-heading"><h2 id="safety-summary-heading" className="text-lg font-semibold text-foreground">Safety policy</h2><dl className="mt-4 space-y-3"><Info label="After hours" value={afterHoursLabel(campaign.after_hours_action)} />{campaign.after_hours_action === "transfer" ? <Info label="Transfer destination" value={campaign.transfer_number ?? "Not configured"} /> : null}<Info label="Recording" value={campaign.recording_enabled ? "Enabled with disclosure" : "Disabled"} /></dl></section>

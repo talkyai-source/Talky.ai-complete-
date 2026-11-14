@@ -36,18 +36,23 @@ import {
     type CampaignBriefDraft,
 } from "@/lib/campaign-brief";
 import {
+    AGENT_NAMES_OVERFLOW_TEXT,
+    MAX_BRIEF_NAME_LENGTH,
     PERSONAS,
     PersonaSpec,
     SlotDef,
+    agentNamesOverflow,
     isRecommendedVoiceForPersona,
     parseAgentNames,
     parseKvList,
     parseList,
+    representativeNameTooLong,
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
+import { callingHoursInverted, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
     CampaignLeadFieldsPicker,
@@ -231,6 +236,8 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     const [loadingVoices, setLoadingVoices] = useState(true);
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
     const [globalAiConfig, setGlobalAiConfig] = useState<AIProviderConfig | null>(null);
+    // TTS model id -> the name AI Options shows for it. Empty until (or unless) the providers list is read.
+    const [ttsModelNames, setTtsModelNames] = useState<Record<string, string>>({});
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
     // Track the Web Audio context too, so the Stop button can interrupt
     // a base64-PCM preview mid-playback (HTMLAudio path uses .pause(),
@@ -483,6 +490,12 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             }
         }
         void fetchVoices();
+        // The model's display name comes from the same list AI Options shows; a failed read keeps the id.
+        void aiOptionsApi.getProviders()
+            .then((list) => {
+                setTtsModelNames(Object.fromEntries((list?.tts?.models ?? []).map((model) => [model.id, model.name])));
+            })
+            .catch(() => {});
     }, []);
 
     function handleChange(
@@ -609,6 +622,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setError("Select a voice from the active global TTS provider before saving the campaign.");
             return;
         }
+        if (!formData.name.trim()) {
+            setError("Add a campaign name.");
+            return;
+        }
         const agentNames = parseAgentNames(agentNamesRaw);
         if (agentNames.length === 0) {
             setError("Add at least one agent name (up to three — we rotate per call).");
@@ -616,6 +633,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!companyName.trim()) {
             setError("Add the company or business name your agent represents.");
+            return;
+        }
+        if (representativeNameTooLong(agentNames)) {
+            setError("The first representative name must be 120 characters or fewer.");
             return;
         }
         if (!isRealtime && !guidance.valid) {
@@ -627,6 +648,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!isRealtime && briefError) {
             setError(briefError);
+            return;
+        }
+        if (direction === "outbound" && callingHoursInverted(schedule)) {
+            setError(HOURS_ORDER_ERROR);
             return;
         }
         const missing = missingRequiredSlots();
@@ -641,7 +666,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
         const payload = {
             ...voiceSelection,
-            name: formData.name,
+            name: formData.name.trim(),
             description: formData.description || undefined,
             system_prompt: formData.system_prompt,
             voice_id: formData.voice_id,
@@ -705,7 +730,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
     }
 
-    const submitLabel = isEdit ? "Save Campaign" : "Create Campaign";
+    const submitLabel = isEdit ? "Save campaign" : "Create campaign";
     const submittingLabel = isEdit ? "Saving..." : "Creating...";
 
     return (
@@ -721,7 +746,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     <CampaignVoiceSettings value={voiceSelection} onChange={setVoiceSelection} />
                     {/* Name */}
                     <div className="space-y-2">
-                        <Label htmlFor="name">Campaign Name</Label>
+                        <Label htmlFor="name">Campaign name</Label>
                         <Input
                             id="name"
                             name="name"
@@ -772,9 +797,9 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         {globalAiConfig && (
                             <p className="text-xs text-muted-foreground">
                                 Campaign voices follow your global AI Options TTS provider:{" "}
-                                <span className="font-medium text-foreground">{globalAiConfig.tts_provider}</span>{" "}
+                                <span className="font-medium capitalize text-foreground">{globalAiConfig.tts_provider}</span>{" "}
                                 on model{" "}
-                                <span className="font-medium text-foreground">{globalAiConfig.tts_model}</span>.
+                                <span className="font-medium text-foreground">{ttsModelNames[globalAiConfig.tts_model] ?? globalAiConfig.tts_model}</span>.
                             </p>
                         )}
                         {/*
@@ -1112,7 +1137,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
                     {/* Persona picker */}
                     <div className="space-y-2">
-                        <Label>Agent role</Label>
+                        <Label>Persona</Label>
                         <p className="text-xs text-muted-foreground">
                             Each role shares our generic voice guardrails (pacing, phrasing, interruption handling). You only fill in the business-specific details.
                         </p>
@@ -1250,6 +1275,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 name="company_name"
                                 placeholder="The name your agent says on the call"
                                 value={companyName}
+                                maxLength={MAX_BRIEF_NAME_LENGTH}
                                 onChange={(e) => setCompanyName(e.target.value)}
                                 required
                                 disabled={submitting}
@@ -1268,6 +1294,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             />
                             <p className="text-xs text-muted-foreground">
                                 Comma-separated. One is picked per call — supply 2–3 to rotate.
+                                {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                             </p>
                             {/*
                              * Voice-gender attention notice — surfaces ONLY when the
@@ -1408,7 +1435,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
                     {conflict && <CampaignVersionConflictNotice />}
                     {error && (
-                        <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                             {error}
                         </div>
                     )}

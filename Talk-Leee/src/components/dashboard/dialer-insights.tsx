@@ -8,12 +8,14 @@
  *   • Retry effectiveness — answer rate by attempt ordinal, so you can see
  *     whether 2nd/3rd attempts actually convert or just burn minutes.
  *
- * Pure read-only; fails quietly to a muted state if analytics aren't ready.
+ * Pure read-only. A failed request shows the shared ErrorState with Retry;
+ * it is never reported as "not enough data".
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, RefreshCw } from "lucide-react";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { extendedApi } from "@/lib/extended-api";
 
 type AttemptStat = { attempt: number; total: number; answered: number; answer_rate: number };
@@ -30,34 +32,49 @@ export function DialerInsights() {
     const [tz, setTz] = useState("UTC");
     const [attempts, setAttempts] = useState<AttemptStat[]>([]);
     const [loading, setLoading] = useState(true);
-    const [failed, setFailed] = useState(false);
+    // undefined = no failure; a string is the request's own message ("" when
+    // it gave none, which leaves the shared ErrorState on its default).
+    const [failure, setFailure] = useState<string | undefined>(undefined);
+    const alive = useRef(true);
 
-    useEffect(() => {
-        let alive = true;
-        (async () => {
-            try {
-                const [bt, re] = await Promise.all([
-                    extendedApi.getBestTimeToCall(),
-                    extendedApi.getRetryEffectiveness(),
-                ]);
-                if (!alive) return;
-                setTz(bt.timezone);
-                setBestHour(bt.best_hour);
-                if (bt.best_hour != null) {
-                    const h = bt.hours.find((x) => x.hour === bt.best_hour);
-                    setBestRate(h ? h.answer_rate : null);
-                }
-                setAttempts(re.attempts.slice(0, 5));
-            } catch {
-                if (alive) setFailed(true);
-            } finally {
-                if (alive) setLoading(false);
+    const load = useCallback(async () => {
+        try {
+            const [bt, re] = await Promise.all([
+                extendedApi.getBestTimeToCall(),
+                extendedApi.getRetryEffectiveness(),
+            ]);
+            if (!alive.current) return;
+            setTz(bt.timezone);
+            setBestHour(bt.best_hour);
+            if (bt.best_hour != null) {
+                const h = bt.hours.find((x) => x.hour === bt.best_hour);
+                setBestRate(h ? h.answer_rate : null);
             }
-        })();
-        return () => { alive = false; };
+            setAttempts(re.attempts.slice(0, 5));
+            setFailure(undefined);
+        } catch (err) {
+            if (alive.current) setFailure(failedReadMessage(err, ""));
+        } finally {
+            if (alive.current) setLoading(false);
+        }
     }, []);
 
+    useEffect(() => {
+        alive.current = true;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; load sets its state as the requests resolve
+        void load();
+        return () => { alive.current = false; };
+    }, [load]);
+
     const maxAttemptTotal = Math.max(1, ...attempts.map((a) => a.total));
+
+    if (failure !== undefined) {
+        return <ErrorState message={failure || undefined} onRetry={load} />;
+    }
+
+    if (loading) {
+        return <LoadingState title="Loading…" />;
+    }
 
     return (
         <Card>
@@ -66,11 +83,6 @@ export function DialerInsights() {
                 <CardDescription>When to call, and whether retries pay off.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
-                {loading ? (
-                    <p className="text-sm text-muted-foreground">Loading…</p>
-                ) : failed ? (
-                    <p className="text-sm text-muted-foreground">Not enough call data yet.</p>
-                ) : (
                     <>
                         {/* Best time to call */}
                         <div className="flex items-center gap-3">
@@ -90,7 +102,7 @@ export function DialerInsights() {
                                         <span className="ml-1 text-xs text-muted-foreground">({tz})</span>
                                     </div>
                                 ) : (
-                                    <div className="text-sm">Not enough data yet</div>
+                                    <EmptyState title="Not enough data yet" />
                                 )}
                             </div>
                         </div>
@@ -101,7 +113,7 @@ export function DialerInsights() {
                                 <RefreshCw className="h-4 w-4" /> Retry effectiveness
                             </div>
                             {attempts.length === 0 ? (
-                                <p className="text-sm text-muted-foreground">No attempts in range.</p>
+                                <EmptyState title="No attempts in range." />
                             ) : (
                                 <div className="space-y-1.5">
                                     {attempts.map((a) => (
@@ -124,7 +136,6 @@ export function DialerInsights() {
                             )}
                         </div>
                     </>
-                )}
             </CardContent>
         </Card>
     );

@@ -115,7 +115,7 @@ export function SupplierEvidenceCard({ fromDate, toDate, generation, refreshVers
 
     return <section className="card" aria-label="Supplier source evidence">
         <div className="card-header"><h2 className="card-title" ref={heading} tabIndex={-1}>Supplier source evidence</h2>
-            <button className="btn btn-secondary" disabled={loading || busy} onClick={() => void load()}>Refresh evidence</button></div>
+            <button className="btn btn-secondary" disabled={loading || busy} onClick={() => void load()}>{error ? 'Retry' : 'Refresh evidence'}</button></div>
         <div className="card-body">
             <p>Retain a Deepgram billing-breakdown export for an explicit project and period. Amounts are reported USD usage charges, not paid invoices or net spend. Credits, tax and quantities are unknown. Groq and Cartesia statement coverage is missing.</p>
             <p>Imports are operator-supplied evidence. A recorded review is an operator attestation, not automatic supplier verification or finance approval. Overlapping captures are never added together.</p>

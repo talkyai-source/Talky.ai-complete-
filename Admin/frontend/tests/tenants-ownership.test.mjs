@@ -135,7 +135,7 @@ for (const operation of ['subscription', 'quota']) test(`confirmed ${operation} 
     assert.match(text(), /Directory unavailable after commit/);
     const savedNotice = find('[aria-label="Saved tenant change"]');
     assert.ok(savedNotice, 'a confirmed saved receipt must survive a failing follow-up read');
-    assert.match(savedNotice.textContent, /Acme.*one/);
+    assert.match(savedNotice.textContent, /Saved change confirmed for Acme. /);
     assert.match(savedNotice.textContent, /audit-fixture/);
     assert.match(savedNotice.textContent, operation === 'subscription' ? /suspended/ : /600/);
     assert.match(savedNotice.textContent, /not a current-state check/);

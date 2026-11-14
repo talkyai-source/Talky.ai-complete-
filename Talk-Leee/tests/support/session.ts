@@ -213,6 +213,9 @@ function callAnalytics(url: URL, nowMs: number) {
  * /analytics/calls). Keys are paths without the query string.
  */
 const PAGE_MOCKS: ApiMock[] = [
+    // /auth/register and /auth/accept-invite (src/components/auth/legal-acceptance.tsx): useLegalAcceptance asks
+    // whether the Terms/Privacy acceptance is required. "Not required" is production's state today.
+    { path: "/auth/legal-versions", body: { required: false, terms_version: null, privacy_version: null } },
     // /calls/call-001 (src/app/calls/[id]/page.tsx): dashboardApi.getCall maps this body (dashboard-api.ts:820-886).
     // A fixed timestamp keeps the page deterministic. Status "completed": active statuses make the list poll.
     {

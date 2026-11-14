@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
+import { failedReadMessage } from "@/components/states/page-states";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
@@ -16,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
+import { LegalAcceptanceField, useLegalAcceptance } from "@/components/auth/legal-acceptance";
 
 type Step = "form" | "otp" | "password";
 
@@ -37,12 +39,15 @@ export default function RegisterClientPage() {
     // Both the first send and "Resend" start a signup, and Cloudflare accepts
     // a Turnstile token once, so each gets its own (QA F4-12).
     const turnstile = useTurnstile("signup");
+    const legal = useLegalAcceptance();
     const nameInputRef = useRef<HTMLInputElement | null>(null);
     const otpInputRef = useRef<HTMLInputElement | null>(null);
     const passwordInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
     const messageId = useId();
     const otpHelpId = useId();
+    const passwordHelpId = useId();
+    const mismatchId = useId();
 
     useEffect(() => {
         const t = window.setTimeout(() => {
@@ -61,7 +66,7 @@ export default function RegisterClientPage() {
     }
 
     function extractError(err: unknown, fallback: string): string {
-        if (err instanceof Error) return err.message;
+        if (err instanceof Error) return failedReadMessage(err, fallback);
         if (typeof err === "object" && err !== null) {
             const detail = (err as { detail?: unknown }).detail;
             if (typeof detail === "string") return detail;
@@ -72,9 +77,17 @@ export default function RegisterClientPage() {
 
     async function handleFormSubmit(e: React.FormEvent) {
         e.preventDefault();
-        setLoading(true);
         setError("");
         setMessage("");
+        if (!formData.name.trim()) {
+            setError("Enter your name.");
+            return;
+        }
+        if (!formData.businessName.trim()) {
+            setError("Enter your business name.");
+            return;
+        }
+        setLoading(true);
 
         try {
             const response = await turnstile.run((token) => api.signupStart(
@@ -128,14 +141,19 @@ export default function RegisterClientPage() {
             return;
         }
 
+        if (legal.blocked) {
+            setError("Accept the Terms of Service and Privacy Policy to continue.");
+            return;
+        }
+
         setLoading(true);
         try {
-            const response = await api.signupComplete(
-                formData.email.trim(),
-                otpCode,
-                password,
-                confirmPassword,
-            );
+            // With acceptance off, the call is exactly what it was before (no
+            // fifth argument, no extra body fields).
+            const accepted = legal.fields();
+            const response = accepted.termsVersion && accepted.privacyVersion
+                ? await api.signupComplete(formData.email.trim(), otpCode, password, confirmPassword, accepted)
+                : await api.signupComplete(formData.email.trim(), otpCode, password, confirmPassword);
             api.setToken(response.access_token);
 
             // Account creation returns everything needed to seed the shared
@@ -174,7 +192,13 @@ export default function RegisterClientPage() {
                 router.push(destination);
             }
         } catch (err) {
-            setError(extractError(err, "Could not create account. Please try again."));
+            if (legal.handleRefusal(err)) return;
+            const text = extractError(err, "Could not create account. Please try again.");
+            if (/expired or not found/i.test(text)) {
+                // The code is gone; the code step has the Resend button.
+                handleBackToOtp();
+            }
+            setError(text);
         } finally {
             setLoading(false);
         }
@@ -272,10 +296,12 @@ export default function RegisterClientPage() {
                                             name="name"
                                             type="text"
                                             placeholder="John Doe"
+                                            autoComplete="name"
                                             value={formData.name}
                                             onChange={handleChange}
                                             className="pl-10"
                                             required
+                                            maxLength={100}
                                             disabled={loading}
                                             ref={nameInputRef}
                                             aria-invalid={error ? true : undefined}
@@ -293,10 +319,12 @@ export default function RegisterClientPage() {
                                             name="businessName"
                                             type="text"
                                             placeholder="Acme Inc."
+                                            autoComplete="organization"
                                             value={formData.businessName}
                                             onChange={handleChange}
                                             className="pl-10"
                                             required
+                                            maxLength={100}
                                             disabled={loading}
                                         />
                                     </div>
@@ -311,6 +339,7 @@ export default function RegisterClientPage() {
                                             name="email"
                                             type="email"
                                             placeholder="you@company.com"
+                                            autoComplete="email"
                                             value={formData.email}
                                             onChange={handleChange}
                                             className="pl-10"
@@ -322,6 +351,8 @@ export default function RegisterClientPage() {
 
                                 {turnstile.widget}
 
+                                {legal.unavailable ? <LegalAcceptanceField legal={legal} /> : null}
+
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
                                         {error}
@@ -330,7 +361,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending}>
+                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending || legal.unavailable}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -338,7 +369,7 @@ export default function RegisterClientPage() {
                                         </>
                                     ) : (
                                         <>
-                                            Get Started
+                                            Get started
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}
@@ -362,7 +393,7 @@ export default function RegisterClientPage() {
                         >
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="otp">Verification Code</Label>
+                                    <Label htmlFor="otp">Verification code</Label>
                                     <div className="relative">
                                         <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
                                         <Input
@@ -465,9 +496,12 @@ export default function RegisterClientPage() {
                                             autoComplete="new-password"
                                             ref={passwordInputRef}
                                             aria-invalid={error ? true : undefined}
-                                            aria-describedby={error ? errorId : undefined}
+                                            aria-describedby={[passwordHelpId, error ? errorId : null].filter(Boolean).join(" ")}
                                         />
                                     </div>
+                                    <p id={passwordHelpId} className="text-xs text-muted-foreground">
+                                        At least {MIN_PASSWORD_LENGTH} characters, and not a common password.
+                                    </p>
                                 </div>
 
                                 <div className="space-y-2">
@@ -485,9 +519,17 @@ export default function RegisterClientPage() {
                                             minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
+                                            aria-describedby={confirmPassword && confirmPassword !== password ? mismatchId : undefined}
                                         />
                                     </div>
+                                    {confirmPassword && confirmPassword !== password ? (
+                                        <p id={mismatchId} role="status" className="text-xs text-red-600 dark:text-red-400">
+                                            Passwords do not match.
+                                        </p>
+                                    ) : null}
                                 </div>
+
+                                <LegalAcceptanceField legal={legal} disabled={loading} />
 
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
@@ -500,7 +542,7 @@ export default function RegisterClientPage() {
                                 <Button
                                     type="submit"
                                     className="w-full"
-                                    disabled={loading || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
+                                    disabled={loading || legal.blocked || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
                                 >
                                     {loading ? (
                                         <>
@@ -509,7 +551,7 @@ export default function RegisterClientPage() {
                                         </>
                                     ) : (
                                         <>
-                                            Create Account
+                                            Create account
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}

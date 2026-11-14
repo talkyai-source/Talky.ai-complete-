@@ -5,12 +5,14 @@
  */
 
 import { useMemo, useState } from "react";
-import { AlertTriangle, Filter, Loader2, Shield } from "lucide-react";
+import { Filter, Shield } from "lucide-react";
 
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useAuditLogs } from "@/lib/api-hooks";
+import { isApiClientError } from "@/lib/http-client";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import type { AuditLogEvent } from "@/lib/models";
 
 /**
@@ -100,7 +102,7 @@ export default function AuditLogsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Shield className="h-5 w-5" aria-hidden /> Audit Trail
+              <Shield className="h-5 w-5" aria-hidden /> Audit Logs
             </CardTitle>
             <CardDescription>
               {logsQuery.isPending
@@ -111,29 +113,23 @@ export default function AuditLogsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {logsQuery.isPending && (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading audit events…
-              </div>
-            )}
+            {logsQuery.isPending && <LoadingState title="Loading audit events…" />}
 
             {/* An error is reported as an error. It is never allowed to fall
                 through to the empty state, which would claim the tenant has a
                 clean audit history when in fact nothing was read. */}
             {logsQuery.isError && (
-              <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden />
-                <div className="space-y-2">
-                  <p className="text-foreground">The audit log could not be loaded, so none of it is shown.</p>
-                  <p className="text-xs text-muted-foreground">
-                    {logsQuery.error instanceof Error ? logsQuery.error.message : "Request failed"}
-                    {" — reading the audit trail needs the audit:read permission."}
-                  </p>
-                  <Button variant="outline" size="sm" onClick={() => void logsQuery.refetch()}>
-                    Try again
-                  </Button>
-                </div>
-              </div>
+              <ErrorState
+                title="The audit log could not be loaded, so none of it is shown."
+                message={
+                  failedReadMessage(logsQuery.error, "Request failed") +
+                  // Only a refused permission is about the permission.
+                  (isApiClientError(logsQuery.error) && logsQuery.error.status === 403
+                    ? " — reading the audit trail needs the audit:read permission."
+                    : "")
+                }
+                onRetry={() => { void logsQuery.refetch(); }}
+              />
             )}
 
             {logsQuery.isSuccess && filteredLogs.length > 0 && (
@@ -160,7 +156,7 @@ export default function AuditLogsPage() {
                         <td className="px-4 py-3">
                           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{log.actionType}</code>
                         </td>
-                        <td className="px-4 py-3">{badge(log.eventCategory, UNKNOWN_CLASS)}</td>
+                        <td className="px-4 py-3">{badge(log.eventCategory.replace(/_/g, " ").toLowerCase(), UNKNOWN_CLASS)}</td>
                         <td className="max-w-[300px] px-4 py-3 text-xs text-muted-foreground">{log.description ?? log.eventType}</td>
                         <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{log.ipAddress ?? "—"}</td>
                         <td className="px-4 py-3">{badge(log.severity, SEVERITY_CLASS[log.severity] ?? UNKNOWN_CLASS)}</td>
@@ -172,11 +168,12 @@ export default function AuditLogsPage() {
             )}
 
             {logsQuery.isSuccess && filteredLogs.length === 0 && (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                {logs.length === 0
+              <EmptyState
+                kind={logs.length === 0 ? "generic" : "search"}
+                title={logs.length === 0
                   ? "No audit events were returned for the current scope."
                   : "No audit events in the loaded page match the selected category."}
-              </div>
+              />
             )}
           </CardContent>
         </Card>

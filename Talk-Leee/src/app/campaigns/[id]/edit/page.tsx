@@ -22,9 +22,10 @@ import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-edi
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
+import { ArrowLeft } from "lucide-react";
+import { ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 import { RoleNotice } from "@/components/states/role-notice";
-import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
 /**
@@ -76,6 +77,8 @@ export default function EditCampaignPage() {
     const [callingSchedule, setCallingSchedule] = useState<CampaignCallingSchedule | null>(null);
     const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
     const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
+    // Bumped by Retry: reads the campaign again after a failed read.
+    const [reloadToken, setReloadToken] = useState(0);
     // QA F1-21: a role without campaigns:update is told so, not given an editor.
     const mayChange = campaignActions(useKnownPermissions()).update;
 
@@ -84,6 +87,7 @@ export default function EditCampaignPage() {
         async function load() {
             try {
                 setLoading(true);
+                setError("");
                 const { campaign } = await dashboardApi.getCampaign(campaignId);
                 if (cancelled) return;
                 if (!isOutboundCampaign(campaign)) {
@@ -131,7 +135,7 @@ export default function EditCampaignPage() {
                 );
             } catch (err) {
                 if (cancelled) return;
-                setError(err instanceof Error ? err.message : "Failed to load campaign");
+                setError(failedReadMessage(err, "Failed to load campaign"));
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -140,11 +144,12 @@ export default function EditCampaignPage() {
         return () => {
             cancelled = true;
         };
-    }, [campaignId, router]);
+    }, [campaignId, router, reloadToken]);
 
     return (
         <DashboardLayout
-            title="Edit Campaign"
+            title="Edit campaign"
+            breadcrumbLabels={initial?.name ? { [campaignId]: initial.name } : undefined}
             description="Update campaign details — same form as creation, prefilled with the saved values."
         >
             <motion.div
@@ -163,14 +168,12 @@ export default function EditCampaignPage() {
             </motion.div>
 
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <RefreshCw className="w-6 h-6 animate-spin text-muted-foreground" />
+                <div className="max-w-2xl">
+                    <LoadingState />
                 </div>
             ) : error ? (
                 <div className="max-w-2xl">
-                    <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                        {error}
-                    </div>
+                    <ErrorState message={error} onRetry={() => setReloadToken((t) => t + 1)} />
                 </div>
             ) : !mayChange ? (
                 <RoleNotice

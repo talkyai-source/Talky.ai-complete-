@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
+import { ErrorState, failedReadMessage } from "@/components/states/page-states";
 import { extendedApi } from "@/lib/extended-api";
 
 type Issue = {
@@ -33,24 +34,38 @@ export function issueAge(createdAt: string | null | undefined, now: number = Dat
 export function CallIssuesBanner() {
     const [issues, setIssues] = useState<Issue[]>([]);
     const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+    // undefined = the last read answered; a string is the failed read's message.
+    const [failure, setFailure] = useState<string | undefined>(undefined);
+    const stopped = useRef(false);
+
+    const load = useCallback(async () => {
+        try {
+            const res = await extendedApi.getRecentCallIssues();
+            // An answer without the issue list is a failed read, not "no issues".
+            if (!Array.isArray(res?.items)) throw new Error();
+            if (stopped.current) return;
+            setIssues(res.items);
+            setFailure(undefined);
+        } catch (err) {
+            // A failed read is shown with Retry; it never breaks the page.
+            if (!stopped.current) setFailure(failedReadMessage(err));
+        }
+    }, []);
 
     useEffect(() => {
-        let stopped = false;
-        const load = async () => {
-            try {
-                const res = await extendedApi.getRecentCallIssues();
-                if (!stopped) setIssues(res.items ?? []);
-            } catch {
-                // best-effort — a failing banner must never break the page
-            }
-        };
-        load();
+        stopped.current = false;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; load sets its state as the request resolves
+        void load();
         const id = window.setInterval(load, 60_000);
         return () => {
-            stopped = true;
+            stopped.current = true;
             window.clearInterval(id);
         };
-    }, []);
+    }, [load]);
+
+    if (failure !== undefined) {
+        return <ErrorState className="mb-4" message={failure} onRetry={load} />;
+    }
 
     const visible = issues.filter((i) => !dismissed.has(i.id));
     if (visible.length === 0) return null;

@@ -21,7 +21,7 @@ const draw = async (path = '/login', returnTo) => {
         el(Probe), el(Routes, null, el(Route, { path: '/login', element: el(C.LoginPage) }), el(Route, { path: '*', element: el('p', null, 'Available section') })))));
 };
 const signIn = async () => {
-    await setInput(find('#email'), ME.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign In');
+    await setInput(find('#email'), ME.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign in');
 };
 const publicRoute = (request) => {
     if (request.path.endsWith('/auth/login')) return response(challenge);

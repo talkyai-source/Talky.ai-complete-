@@ -237,7 +237,7 @@ test("a card still waiting for the status answer shows only 'Checking status…'
     assert.ok(screen.getByText(CHECKING));
     absent(screen.queryByLabelText(/^Status:/), "no status pill before the backend answers");
     assert.equal(screen.queryAllByRole("button").length, 0, "no Connect, Reconnect or Disconnect before the backend answers");
-    absent(screen.queryByText("Not connected."));
+    absent(screen.queryByText("Disconnected."));
 });
 
 test("a card with no status answer shows no status, no buttons and no message of its own", () => {
@@ -246,7 +246,7 @@ test("a card with no status answer shows no status, no buttons and no message of
     absent(screen.queryByLabelText(/^Status:/));
     assert.equal(screen.queryAllByRole("button").length, 0);
     absent(screen.queryByText(CHECKING), "a failed status call is not still checking");
-    absent(screen.queryByText("Not connected."));
+    absent(screen.queryByText("Disconnected."));
 });
 
 test("backend status error is labelled 'Needs attention', never 'Error' or 'Failed'", () => {
@@ -321,7 +321,7 @@ test("a handle that reads closed without being seen on the provider shows nothin
         await wait(1200);
         absent(screen.queryByText(CLOSED_EARLY));
         assert.equal(refetch.mock.callCount(), 0);
-        assert.ok(screen.getByText("Not connected."));
+        assert.ok(screen.getByText("Disconnected."));
     });
 });
 
@@ -422,4 +422,51 @@ test("a Connect that cannot start ends with the error and a usable button", asyn
         assert.ok(screen.getByText("Request timed out"));
         assert.equal(screen.getByRole("button", { name: "Connect" }).hasAttribute("disabled"), false);
     });
+});
+
+// ── FX3a Task 4.3: one ellipsis style ────────────────────────────────────────
+test("FX3a: Connect reads Starting… with the ellipsis character while the request runs", async () => {
+    const never = () => new Promise<never>(() => {});
+    renderWithQueryClient(createElement(ConnectorCard, { ...baseProps, status: "disconnected", authorizeConnector: never } as CardProps));
+    await act(async () => { fireEvent.click(screen.getByTestId("connector-email-connect")); });
+    const label = screen.getByTestId("connector-email-connect").textContent ?? "";
+    assert.equal(label.includes("Starting…"), true, label);
+    assert.equal(label.includes("..."), false, label);
+});
+
+// ── FX3a2 Tasks 3.1 and 5 ────────────────────────────────────────────────────
+test("FX3a2: the provider line shows the connector's name, not the provider id", () => {
+    renderWithQueryClient(createElement(ConnectorCard, { ...baseProps, name: "Gmail", status: "connected", provider: "gmail" } as CardProps));
+    assert.equal(screen.queryByText("Provider: Gmail") !== null, true);
+    assert.equal(screen.queryByText("Provider: gmail") !== null, false);
+});
+
+test("FX3a2: the app's own time limit reads Please retry., a server message is shown as is", async () => {
+    const { ApiClientError } = await import("@/lib/http-client");
+    const failures: unknown[] = [
+        new ApiClientError({ code: "timeout", message: "Request timed out", url: "/connectors/email/authorize", method: "GET" }),
+        new ApiClientError({ status: 503, code: "server_error", message: "Connector service is unavailable", url: "/connectors/email/authorize", method: "GET" }),
+    ];
+    await withOpen(null, async () => {
+        renderWithQueryClient(createElement(ConnectorCard, { ...baseProps, status: "disconnected", authorizeConnector: async () => { throw failures.shift(); } } as CardProps));
+        await act(async () => { fireEvent.click(screen.getByTestId("connector-email-connect")); });
+        await wait(50);
+        assert.equal(screen.queryByText("Please retry.") !== null, true);
+        assert.equal(screen.queryByText("Request timed out") !== null, false);
+        await act(async () => { fireEvent.click(screen.getByTestId("connector-email-connect")); });
+        await wait(50);
+        assert.equal(screen.queryByText("Connector service is unavailable") !== null, true);
+    });
+});
+
+// MERGE2 Task 7.1: one state name. A view-only role reads the same
+// "Disconnected" as everyone else, followed by why it cannot connect.
+test("a role that may not connect reads 'Disconnected.' with the reason, never 'Not connected'", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "disconnected", mayConnect: false,
+        })
+    );
+    assert.ok(screen.getByText("Disconnected. Your role can view connectors but not connect them."));
+    assert.equal(screen.queryByText(/Not connected/), null);
 });

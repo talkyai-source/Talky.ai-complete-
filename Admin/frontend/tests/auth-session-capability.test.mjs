@@ -19,7 +19,7 @@ const draw = async (key = 'initial') => {
     await render(el(C.AuthProvider, { key }, el(C.MemoryRouter, null, el(Screen)))); await settle();
 };
 const signIn = async () => {
-    await setInput(find('#email'), ME.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign In');
+    await setInput(find('#email'), ME.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign in');
 };
 const setupMfa = async () => {
     api.setToken(null);

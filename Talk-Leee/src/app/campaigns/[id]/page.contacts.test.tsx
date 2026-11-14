@@ -68,7 +68,7 @@ function mockPage() {
 
 async function openForm() {
     render(<Page />);
-    fireEvent.click(await screen.findByRole("button", { name: /Add Contact/ }, { timeout: SLOW }));
+    fireEvent.click(await screen.findByRole("button", { name: /Add contact/ }, { timeout: SLOW }));
     return await screen.findByLabelText("Phone Number", undefined, { timeout: SLOW }) as HTMLInputElement;
 }
 

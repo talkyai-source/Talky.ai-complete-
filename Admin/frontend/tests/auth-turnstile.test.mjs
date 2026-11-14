@@ -58,7 +58,7 @@ const fillCredentials = async () => {
     await setInput(find('#email'), 'admin@example.invalid');
     await setInput(find('#password'), 'synthetic-password');
 };
-const signIn = async () => { await click('Sign In'); await settle(); };
+const signIn = async () => { await click('Sign in'); await settle(); };
 const submitButton = () => find('button[type="submit"]');
 const cloudflareScripts = () => [...document.querySelectorAll('script')]
     .filter((tag) => (tag.getAttribute('src') ?? '').includes('challenges.cloudflare.com'));

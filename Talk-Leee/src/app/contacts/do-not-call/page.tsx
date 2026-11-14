@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ReadError } from "@/components/ui/read-error";
+import { ErrorState } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { dncApi, DNC_LIST_LIMIT, type DncBulkResult, type DncEntry } from "@/lib/dnc-api";
 import { isApiClientError } from "@/lib/http-client";
@@ -39,8 +39,11 @@ function sourceLabel(source: string) {
     return SOURCE_LABELS[source] ?? source;
 }
 
-function failureText(error: unknown, fallback: string) {
-    if (isApiClientError(error) && error.status === 422) return "Not a valid phone number for the selected country.";
+// backend dnc.py BulkImportRequest.numbers max_length.
+const DNC_IMPORT_LIMIT = 10_000;
+
+function failureText(error: unknown, fallback: string, invalidText = "Not a valid phone number for the selected country.") {
+    if (isApiClientError(error) && error.status === 422) return invalidText;
     if (isApiClientError(error) && error.status === 403) return "Your role cannot change the Do-Not-Call list.";
     return error instanceof Error ? error.message : fallback;
 }
@@ -105,13 +108,17 @@ export default function DoNotCallPage() {
             setBulkError("Paste at least one number.");
             return;
         }
+        if (numbers.length > DNC_IMPORT_LIMIT) {
+            setBulkError(`Import at most ${DNC_IMPORT_LIMIT.toLocaleString("en-US")} numbers at a time.`);
+            return;
+        }
         setImporting(true);
         try {
             setBulkResult(await dncApi.bulkImport({ numbers, defaultCountry: bulkCountry }));
             setBulkText("");
             await refresh();
         } catch (error) {
-            setBulkError(failureText(error, "The numbers were not imported."));
+            setBulkError(failureText(error, "The numbers were not imported.", "The import was refused. Check the list and the country, and import at most 10,000 numbers at a time."));
         } finally {
             setImporting(false);
         }
@@ -203,8 +210,8 @@ export default function DoNotCallPage() {
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading the Do-Not-Call list…
                         </p>
                     ) : entries.isError ? (
-                        <ReadError
-                            resource="the Do-Not-Call list"
+                        <ErrorState
+                            message="Could not load the Do-Not-Call list."
                             requestId={isApiClientError(entries.error) ? entries.error.requestId : undefined}
                             onRetry={() => { void entries.refetch(); }}
                             busy={entries.isFetching}

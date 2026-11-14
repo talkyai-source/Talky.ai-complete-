@@ -15,7 +15,7 @@ export function LoginPage() {
     const [recovery, setRecovery] = useState(false);
     const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
     const [turnstileResets, setTurnstileResets] = useState(0);
-    const { login, verifyMfa, cancelMfa, mfaChallenge, error, isAuthenticated, isLoading, user, checkAuth, logout, logoutRecoveryRequired } = useAuth();
+    const { login, verifyMfa, cancelMfa, mfaChallenge, error, isAuthenticated, isLoading, user, checkAuth, logout, logoutRecoveryRequired, signInRefused } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const target = safeAdminReturn((location.state as { from?: { pathname?: string } })?.from?.pathname, user?.role);
@@ -41,12 +41,12 @@ export function LoginPage() {
     };
     return <div className="login-page"><div className="login-container">
         <div className="login-header">
-            <div className="login-logo"><div className="login-logo-icon"><Zap size={24} /></div><span className="login-logo-text">Talk-lee</span></div>
+            <div className="login-logo"><div className="login-logo-icon"><Zap size={24} /></div><span className="login-logo-text">Talk-Lee</span></div>
             <h1>{mfaChallenge ? 'Verify your sign-in' : 'Admin Login'}</h1>
             <p>{mfaChallenge ? 'Complete the second factor for this account.' : 'Sign in to access the admin dashboard'}</p>
         </div>
         {error && <div className="login-error" role="alert"><AlertCircle size={16} /><span>{error}</span>
-            {!mfaChallenge && error !== MFA_REQUIRED_MESSAGE && <button type="button" onClick={() => void (logoutRecoveryRequired ? logout() : checkAuth())} disabled={isLoading}>
+            {!mfaChallenge && !signInRefused && error !== MFA_REQUIRED_MESSAGE && <button type="button" onClick={() => void (logoutRecoveryRequired ? logout() : checkAuth())} disabled={isLoading}>
                 {logoutRecoveryRequired ? 'Retry browser sign-out' : 'Retry session check'}
             </button>}
         </div>}
@@ -75,7 +75,7 @@ export function LoginPage() {
                 {TURNSTILE_SITE_KEY !== '' && <TurnstileWidget siteKey={TURNSTILE_SITE_KEY} action="login"
                     onToken={setTurnstileToken} resetCount={turnstileResets} />}
             </>}
-            <button type="submit" className="login-button" disabled={isLoading || waitingForToken}>{isLoading ? 'Verifying...' : mfaChallenge ? 'Verify' : 'Sign In'}</button>
+            <button type="submit" className="login-button" disabled={isLoading || waitingForToken}>{isLoading ? 'Verifying...' : mfaChallenge ? 'Verify' : 'Sign in'}</button>
         </form>
         <div className="login-footer"><p>Admin access only. Contact your administrator for access.</p></div>
     </div></div>;

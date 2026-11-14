@@ -217,7 +217,7 @@ const principal = () => find('[data-principal]').textContent;
 const challenge = { access_token: '', mfa_required: true, mfa_challenge_token: 'one-use-challenge-B' };
 test.beforeEach(() => { localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: A.id })); });
 const submitB = async () => {
-    await setInput(find('#email'), B.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign In');
+    await setInput(find('#email'), B.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign in');
 };
 const completeB = async () => { await setInput(find('#factor'), '123456'); await click('Verify'); };
 const signInB = async () => { await submitB(); await completeB(); };

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import React from "react";
+import { z } from "zod";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { backendApi } from "@/lib/backend-api";
 import { ApiClientError } from "@/lib/http-client";
@@ -169,6 +170,27 @@ test("a tenant admin reads active, pending and suspended members and sees every 
     assert.equal(row("tu-5").getByRole("button", { name: "Remove" }).hasAttribute("disabled"), false);
 });
 
+test("FX2b4: a member read that fails with a JavaScript error shows 'Please retry.', never the raw text", async () => {
+    currentUser = TENANT_ADMIN;
+    mock.method(backendApi.team, "members", async () => (undefined as unknown as TenantMember[]).map((item) => item));
+    mockRoles();
+    renderWithQueryClient(<Page />);
+
+    await waitFor(() => assert.ok(screen.getByRole("alert")), { timeout: SLOW });
+    assert.equal(screen.getByText("Please retry.") === screen.getByRole("alert"), true, "the message is the alert's own text");
+    present(screen.queryByRole("button", { name: "Retry" }));
+});
+
+test("FX2b4: a roles answer the app could not read shows 'Please retry.', never the validation dump", async () => {
+    currentUser = TENANT_ADMIN;
+    mockMembers();
+    mock.method(backendApi.team, "roles", async () => { throw new z.ZodError([{ code: "custom", path: [], message: "Invalid input: expected array" }]); });
+    renderWithQueryClient(<Page />);
+
+    const box = await screen.findByTestId("team-roles-error", undefined, { timeout: SLOW });
+    assert.equal(box.textContent, "Please retry.");
+});
+
 test("a failed read shows the server's message in the error state and never a list", async () => {
     currentUser = TENANT_ADMIN;
     mock.method(backendApi.team, "members", async () => { throw new Error("Access denied to this tenant"); });
@@ -176,7 +198,7 @@ test("a failed read shows the server's message in the error state and never a li
     renderWithQueryClient(<Page />);
 
     await waitFor(() => assert.ok(screen.getByRole("alert")), { timeout: SLOW });
-    assert.equal(screen.getByRole("alert").textContent, "Access denied to this tenant");
+    assert.equal(screen.getByText("Access denied to this tenant") === screen.getByRole("alert"), true, "the message is the alert's own text");
     absent(screen.queryByTestId("team-member-list"));
     assert.equal(screen.queryAllByTestId("team-member-row").length, 0);
     present(screen.queryByRole("button", { name: "Retry" }), "the existing error state offers Retry");
@@ -639,6 +661,6 @@ test("a failed read of the waiting list says so with a request reference and a w
     assert.equal(screen.queryAllByText("No open invites.").length, 0, "a failed read is not an empty list");
 
     const readsBefore = invitesReads;
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => assert.equal(invitesReads > readsBefore, true, "Try again reads the invites again"), { timeout: SLOW });
 });

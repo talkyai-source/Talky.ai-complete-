@@ -16,6 +16,45 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { ZodError } from "zod";
+
+/** ErrorState's own default message, for callers that have to fall back to it. */
+export const ERROR_STATE_DEFAULT_MESSAGE = "Please retry.";
+
+const JS_ERROR_NAMES = new Set(["TypeError", "ReferenceError", "RangeError", "SyntaxError", "EvalError", "URIError"]);
+
+/**
+ * The message for a failed read. An answer the app could not read fails schema
+ * validation; that dump is never shown, the default message is.
+ */
+export function failedReadMessage(err: unknown, fallback: string = ERROR_STATE_DEFAULT_MESSAGE): string {
+    if (err instanceof ZodError) return ERROR_STATE_DEFAULT_MESSAGE;
+    // A JavaScript error (the answer did not have the expected shape) is not a
+    // server message either.
+    if (err instanceof Error && JS_ERROR_NAMES.has(err.name)) return ERROR_STATE_DEFAULT_MESSAGE;
+    // No server answered: the text is the browser's own, not a server message.
+    if (err instanceof Error && (err as { code?: unknown }).code === "network_error") return ERROR_STATE_DEFAULT_MESSAGE;
+    // The app's own "this answer is not valid" sentence is not a server message.
+    if (err instanceof Error && (err as { code?: unknown }).code === "invalid_response") return ERROR_STATE_DEFAULT_MESSAGE;
+    // The app's own time limit ran out ("Request timed out"): not a server message either.
+    if (err instanceof Error && (err as { code?: unknown }).code === "timeout") return ERROR_STATE_DEFAULT_MESSAGE;
+    return err instanceof Error && err.message ? err.message : fallback;
+}
+
+function subscribeToConnectivity(callback: () => void) {
+    window.addEventListener("online", callback);
+    window.addEventListener("offline", callback);
+    return () => {
+        window.removeEventListener("online", callback);
+        window.removeEventListener("offline", callback);
+    };
+}
+
+/** The server's reference for a failed request, when the error carries one. */
+export function failedReadRequestId(err: unknown): string | undefined {
+    const requestId = err instanceof Error ? (err as { requestId?: unknown }).requestId : undefined;
+    return typeof requestId === "string" && requestId ? requestId : undefined;
+}
 
 function SkeletonBlock({
     className,
@@ -131,7 +170,7 @@ export function LoadingState({
     lines?: number;
 }) {
     return (
-        <Card>
+        <Card role="status">
             <CardHeader>
                 <CardTitle>{title}</CardTitle>
                 {description ? <CardDescription>{description}</CardDescription> : null}
@@ -145,7 +184,10 @@ export function LoadingState({
 
 export function ErrorState({
     title = "Something went wrong",
-    message = "Please retry.",
+    message = ERROR_STATE_DEFAULT_MESSAGE,
+    requestId,
+    staleData = false,
+    busy = false,
     onRetry,
     retryLabel = "Retry",
     supportHref,
@@ -159,6 +201,12 @@ export function ErrorState({
 }: {
     title?: string;
     message?: string;
+    /** The server's reference for the failed request; shown under the message when there is one. */
+    requestId?: string;
+    /** The last loaded data is still on screen under this error. */
+    staleData?: boolean;
+    /** The caller's own read is running again (a refetch it knows about). */
+    busy?: boolean;
     onRetry?: () => void | Promise<void>;
     retryLabel?: string;
     supportHref?: string;
@@ -170,6 +218,17 @@ export function ErrorState({
     actionLabel?: string;
     className?: string;
 }) {
+    // Reconnecting changes the sentence only; nothing is read again until Retry.
+    const offline = React.useSyncExternalStore(subscribeToConnectivity, () => navigator.onLine === false, () => false);
+    // A retry that returns a promise is running until it settles.
+    const [retrying, setRetrying] = React.useState(false);
+    const retry = () => {
+        const running = onRetry?.();
+        if (running && typeof (running as Promise<void>).then === "function") {
+            setRetrying(true);
+            void Promise.resolve(running).catch(() => undefined).finally(() => setRetrying(false));
+        }
+    };
     const resolvedTroubleshooting =
         troubleshooting && troubleshooting.length > 0
             ? troubleshooting
@@ -177,20 +236,20 @@ export function ErrorState({
 
     return (
         <Card className={className}>
-            <CardHeader>
-                <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive shrink-0">
-                        <CircleAlert className="h-5 w-5" aria-hidden />
-                    </div>
-                    <div className="min-w-0">
-                        <CardTitle>{title}</CardTitle>
-                        <CardDescription role="alert" aria-live="assertive">
-                            {message}
-                        </CardDescription>
-                    </div>
+            {/* One alert holds the whole failure: the message is its own text, and
+                the reference, the notices and Retry are inside it. The icon is
+                placed in the left padding and the checks and buttons are pulled
+                back under it, so the card reads as before. */}
+            <div role="alert" aria-live="assertive" className="relative p-6 pl-[4.5rem] text-sm text-muted-foreground">
+                <div className="absolute left-6 top-6 mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border border-destructive/20 bg-destructive/10 text-destructive">
+                    <CircleAlert className="h-5 w-5" aria-hidden />
                 </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+                <CardTitle className="text-gray-900 dark:text-white">{title}</CardTitle>
+                {message}
+                {offline ? <p className="mt-1">You appear to be offline. Reconnect and try again.</p> : null}
+                {staleData ? <p className="mt-1">Showing the last loaded data. It may not reflect the selected filters.</p> : null}
+                {requestId ? <p className="mt-1 break-all text-xs text-muted-foreground">Request reference: {requestId}</p> : null}
+            <div className="-ml-12 mt-6 space-y-4 text-gray-900 dark:text-white">
                 <div className="rounded-xl border border-border bg-muted/30 p-3">
                     <div className="text-xs font-semibold text-foreground">{troubleshootingTitle}</div>
                     <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
@@ -228,13 +287,14 @@ export function ErrorState({
                     ) : null}
 
                     {onRetry ? (
-                        <Button type="button" onClick={() => void onRetry()}>
+                        <Button type="button" onClick={retry} disabled={offline || busy || retrying}>
                             <RotateCcw className="h-4 w-4" aria-hidden />
                             {retryLabel}
                         </Button>
                     ) : null}
                 </div>
-            </CardContent>
+            </div>
+            </div>
         </Card>
     );
 }
@@ -258,7 +318,7 @@ export function EmptyState({
     className,
 }: {
     title: string;
-    message: string;
+    message?: string;
     kind?: "generic" | "search" | "inbox" | "email" | "uploads" | "connectors";
     hint?: string;
     primaryActionLabel?: string;
@@ -301,7 +361,7 @@ export function EmptyState({
                     </div>
                     <div className="min-w-0">
                         <CardTitle>{title}</CardTitle>
-                        <CardDescription>{message}</CardDescription>
+                        {message ? <CardDescription>{message}</CardDescription> : null}
                         {hint ? <div className="mt-2 text-sm text-muted-foreground">{hint}</div> : null}
                     </div>
                 </div>

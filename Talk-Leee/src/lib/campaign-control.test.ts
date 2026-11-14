@@ -166,3 +166,10 @@ test("pausing a set adds up the calls still ending and reports an unchecked clea
         lines: ["5 live calls are still ending.", "Live calls could not be checked. Some may still be ending."],
     });
 });
+
+// ── FX3a Task 2.6 ────────────────────────────────────────────────────────────
+test("FX3a: one live call still ending is singular", () => {
+    assert.equal(terminationNoticeText({ status: "partial", deferred: 1 }), "1 live call is still ending.");
+    assert.equal(terminationNoticeText({ status: "partial", deferred: 1 }).includes("1 live calls"), false);
+    assert.equal(terminationNoticeText({ status: "partial", deferred: 2 }), "2 live calls are still ending.");
+});

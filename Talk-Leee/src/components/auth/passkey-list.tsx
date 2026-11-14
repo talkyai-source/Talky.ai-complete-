@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Key, Loader2, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 
 type Passkey = {
@@ -38,15 +40,19 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    // A failed delete is not a failed read: it shows above the list, which stays.
+    const [deleteError, setDeleteError] = useState<string | null>(null);
 
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
             const items = await api.listPasskeys();
+            // An answer that is not a list is a failed read, not "no passkeys".
+            if (!Array.isArray(items)) throw new Error();
             setPasskeys(items);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load passkeys");
+            setError(failedReadMessage(err, "Failed to load passkeys"));
         } finally {
             setLoading(false);
         }
@@ -60,48 +66,38 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
         void load();
     }, [load, refreshKey]);
 
+    // The passkey the remove dialog is asking about.
+    const [removeTarget, setRemoveTarget] = useState<Passkey | null>(null);
+
+    // Runs from the dialog's confirm button; a failure is shown by this list.
     async function handleDelete(passkey: Passkey) {
-        const confirmed = window.confirm(
-            `Remove passkey "${passkey.display_name || passkey.device_type}"?`,
-        );
-        if (!confirmed) return;
         setDeletingId(passkey.id);
+        setDeleteError(null);
         try {
             await api.deletePasskey(passkey.id);
             setPasskeys((prev) => prev.filter((p) => p.id !== passkey.id));
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to delete passkey");
+            setDeleteError(err instanceof Error ? err.message : "Failed to delete passkey");
         } finally {
             setDeletingId(null);
         }
     }
 
     if (loading) {
-        return (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                Loading passkeys…
-            </div>
-        );
+        return <LoadingState title="Loading passkeys…" />;
     }
 
     if (error) {
-        return (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-300">
-                {error}
-            </div>
-        );
+        return <ErrorState message={error} onRetry={load} />;
     }
 
     if (passkeys.length === 0) {
-        return (
-            <p className="text-sm text-muted-foreground py-1">
-                No passkeys registered yet.
-            </p>
-        );
+        return <EmptyState title="No passkeys registered yet." />;
     }
 
     return (
+        <>
+        {deleteError ? <p role="alert" className="mb-2 text-sm text-destructive">{deleteError}</p> : null}
         <ul className="divide-y divide-gray-200 dark:divide-white/10 rounded-md border border-gray-200 dark:border-white/10 overflow-hidden">
             {passkeys.map((pk) => (
                 <li
@@ -124,7 +120,7 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
                     <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => handleDelete(pk)}
+                        onClick={() => setRemoveTarget(pk)}
                         disabled={deletingId === pk.id}
                         aria-label={`Remove passkey ${pk.display_name || pk.device_type}`}
                     >
@@ -136,6 +132,17 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
                     </Button>
                 </li>
             ))}
+            <ConfirmDialog
+                open={removeTarget !== null}
+                onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}
+                intent="delete"
+                title={removeTarget ? `Remove passkey ${removeTarget.display_name || removeTarget.device_type}` : undefined}
+                description=""
+                warningText={removeTarget ? `Remove passkey "${removeTarget.display_name || removeTarget.device_type}"?` : ""}
+                confirmLabel={removeTarget ? `Remove passkey ${removeTarget.display_name || removeTarget.device_type}` : undefined}
+                onConfirm={() => (removeTarget ? handleDelete(removeTarget) : undefined)}
+            />
         </ul>
+        </>
     );
 }

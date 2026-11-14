@@ -19,6 +19,23 @@ function getFocusableElements(container: HTMLElement) {
     });
 }
 
+// Open dialogs, oldest first. Escape belongs to the last one only, so one
+// press closes the top dialog and leaves the one under it open.
+const openModals: object[] = [];
+
+// The last element that held focus. A control that disables itself while it
+// opens a dialog (a Start button showing its spinner) has already lost focus
+// to <body> by the time the dialog mounts, so the opener is read from here.
+let lastFocused: HTMLElement | null = null;
+let trackingFocus = false;
+function trackFocus() {
+    if (trackingFocus) return;
+    trackingFocus = true;
+    document.addEventListener("focusin", (e) => {
+        if (e.target instanceof HTMLElement) lastFocused = e.target;
+    }, true);
+}
+
 export function Modal({
     open,
     onOpenChange,
@@ -45,6 +62,7 @@ export function Modal({
     const titleId = useId();
     const descId = useId();
     const panelRef = useRef<HTMLDivElement | null>(null);
+    const stackEntry = useRef<object | null>(null);
     const disableMotion = useMemo(() => {
         const actEnv = Boolean((globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: unknown }).IS_REACT_ACT_ENVIRONMENT);
         if (actEnv) return true;
@@ -54,12 +72,37 @@ export function Modal({
 
     useEffect(() => {
         if (!open) return;
+        const self = {};
+        stackEntry.current = self;
+        openModals.push(self);
+        return () => {
+            const at = openModals.indexOf(self);
+            if (at !== -1) openModals.splice(at, 1);
+        };
+    }, [open]);
+
+    useEffect(() => {
+        if (!open) return;
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === "Escape") onOpenChange(false);
+            if (e.key !== "Escape") return;
+            if (openModals[openModals.length - 1] !== stackEntry.current) return;
+            onOpenChange(false);
         };
         window.addEventListener("keydown", onKeyDown);
         return () => window.removeEventListener("keydown", onKeyDown);
     }, [open, onOpenChange]);
+
+    useEffect(() => { trackFocus(); }, []);
+
+    // Closing returns focus to the control that opened the dialog.
+    useEffect(() => {
+        if (!open) return;
+        const active = document.activeElement;
+        const opener = active instanceof HTMLElement && active !== document.body ? active : lastFocused;
+        return () => {
+            if (opener && opener.isConnected) opener.focus();
+        };
+    }, [open]);
 
     useEffect(() => {
         if (!open) return;

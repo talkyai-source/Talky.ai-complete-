@@ -222,7 +222,7 @@ function OwnedFormalHoldPanel({ target, onClose, onChanged, generation, returnFo
                 <p>{target.type} ID: <code>{target.id}</code></p>
                 <p>Formal holds have a reason, audit record and exact-event restoration. Ordinary user blocks and tenant subscription controls are separate. Restoring one hold may leave another restriction in place.</p>
                 {!allowed ? <p role="alert">A current platform administrator is required to inspect or change formal holds.</p> : <>
-                    <button ref={refreshControl} className="btn btn-secondary formal-hold-refresh" type="button" disabled={loading || busy} onClick={() => { void load(); setProofRevision((v) => v + 1); }}>Refresh hold status</button>
+                    <button ref={refreshControl} className="btn btn-secondary formal-hold-refresh" type="button" disabled={loading || busy} onClick={() => { void load(); setProofRevision((v) => v + 1); }}>{readError && outcome?.kind !== 'unknown' ? 'Retry' : 'Refresh hold status'}</button>
                     {loading && <p role="status">Loading formal hold status…</p>}
                     {readError && <p role="alert">Status unavailable: {readError}{status ? ' Previously loaded status is stale; actions are disabled.' : ''}</p>}
                     {mutationError && <p role="alert">{mutationError}</p>}

@@ -34,18 +34,19 @@ function labelForSegment(seg: string) {
     return LABELS[decoded] ?? decoded.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export function Breadcrumbs({ className }: { className?: string }) {
+/** `labels` names a path segment the page knows better than its URL does (a campaign id, by the campaign's name). */
+export function Breadcrumbs({ className, labels }: { className?: string; labels?: Record<string, string> }) {
     const pathname = usePathname() || "/";
     const segments = pathname.split("/").filter(Boolean);
     if (segments.length <= 1) return null;
 
     const crumbs = segments.map((seg, idx) => {
         const href = "/" + segments.slice(0, idx + 1).join("/");
-        return { seg, href, label: labelForSegment(seg), isLast: idx === segments.length - 1 };
+        return { seg, href, label: labels?.[decodeURIComponent(seg)] ?? labelForSegment(seg), isLast: idx === segments.length - 1 };
     });
 
     return (
-        <nav aria-label="Breadcrumb" className={cn("flex flex-wrap items-center gap-1 text-xs text-muted-foreground", className)}>
+        <nav aria-label="Breadcrumb" className={cn("flex flex-wrap items-center gap-x-1 gap-y-2 text-xs text-muted-foreground", className)}>
             {crumbs.map((c) => (
                 <span key={c.href} className="flex items-center gap-1">
                     {c.isLast ? (

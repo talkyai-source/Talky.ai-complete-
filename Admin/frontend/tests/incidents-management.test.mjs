@@ -25,7 +25,7 @@ test('source recovery is shown separately from an open operator incident', async
     await draw(); await open();
     const detail = find('[role="dialog"]').textContent;
     assert.match(detail, /Recovery reported/);
-    assert.match(detail, /Operator statusopen/);
+    assert.match(detail, /Operator statusOpen/);
     assert.match(detail, /recorded separately/);
     assert.equal(button('Acknowledge').disabled, false);
 });
@@ -144,7 +144,7 @@ test('acknowledgement dispatch is single and only a matching saved receipt repor
     assert.equal(state.requests.filter((r) => r.method === 'POST').length, 1);
     saved = true; await act(async () => pending.resolve(response({ success: true, incident_id: 'one', status: 'acknowledged', message: 'Incident acknowledged', acknowledged_at: stamp, acknowledged_by: receiptActor, resolved_at: null, resolved_by: null })));
     assert.match(find('[role="status"]').textContent, /server confirmed/);
-    assert.match(find('[role="dialog"]').textContent, /acknowledged/);
+    assert.match(find('[role="dialog"]').textContent, /Operator statusAcknowledged/);
 });
 
 test('unconfirmed action requires reading the record and does not erase the error on list refresh', async () => {
@@ -155,7 +155,7 @@ test('unconfirmed action requires reading the record and does not erase the erro
     assert.equal(button('Acknowledge').disabled, true); assert.match(text(), /could not be confirmed/);
     await click('Refresh list'); assert.match(text(), /could not be confirmed/);
     saved = true; await click('Refresh record'); await settle();
-    assert.match(find('[role="dialog"]').textContent, /resolved/);
+    assert.match(find('[role="dialog"]').textContent, /Operator statusResolved/);
     assert.equal([...state.host.querySelectorAll('button')].some((b) => b.textContent === 'Resolve'), false);
     assert.equal(state.requests.filter((r) => r.method === 'POST').length, 1);
 });
@@ -186,7 +186,7 @@ test('confirmed resolution stays resolved if its follow-up read fails', async ()
     };
     await draw(); await open(); await click('Resolve'); await click('Confirm resolution'); await settle();
     const dialog = find('[role="dialog"]');
-    assert.match(dialog.textContent, /resolved/); assert.match(dialog.textContent, /last confirmed record/);
+    assert.match(dialog.textContent, /Operator statusResolved/); assert.match(dialog.textContent, /last confirmed record/);
     assert.ok(dialog.textContent.includes(`by ${receiptActor}`));
     assert.equal([...dialog.querySelectorAll('button')].some((b) => ['Acknowledge', 'Resolve', 'Confirm resolution'].includes(b.textContent)), false);
 });

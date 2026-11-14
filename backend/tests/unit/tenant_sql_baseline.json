@@ -3709,10 +3709,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c5b2c9492190e4cf6dce1f6c1dc7bc3362530430187d025702f1e3f34cd8377c",
+      "id": "a296d298f760a17d1e74e25a50306126bd7b8ad7fb7919c187a1d202c1d2a926",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 3850,
+      "line": 3858,
       "method": "execute",
       "tables": [
         "leads"
@@ -6670,10 +6670,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "1d0f3295f6f846bced87bd4dec331cda7e2bc730b252b20c2b30c770d13df848",
+      "id": "6d5b03a4ded02e79250c2f8781c453975edd1c6166edb960f912b8bf7177ec43",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3536,
+      "line": 3544,
       "method": "execute",
       "tables": [
         "calls"

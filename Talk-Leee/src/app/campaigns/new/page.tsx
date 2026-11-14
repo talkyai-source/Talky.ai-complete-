@@ -46,7 +46,7 @@ export default function NewCampaignPage() {
     };
 
     return (
-        <DashboardLayout title="Create Campaign" description="Set up a new voice campaign">
+        <DashboardLayout title="Create campaign" description="Set up a new voice campaign">
             <motion.div
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}

@@ -1,30 +1,35 @@
-import { AlertCircle, Loader2, LockKeyhole, PhoneIncoming } from "lucide-react";
+import { AlertCircle, LockKeyhole } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 
 export function InboundLoadingState({ label = "Loading inbound campaign…" }: { label?: string }) {
-    return (
-        <div className="content-card flex min-h-64 items-center justify-center" role="status" aria-live="polite" aria-busy="true">
-            <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                {label}
-            </div>
-        </div>
-    );
+    return <LoadingState title={label} />;
 }
 
 export function InboundErrorState({ title = "Inbound data is unavailable", message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+    // A failed read: the shared ErrorState with Retry. Without a retry this is
+    // a notice about the campaign's state, not a failed read.
+    if (onRetry) return <ErrorState title={title} message={message} onRetry={onRetry} />;
     return (
         <div className="content-card flex min-h-64 flex-col items-center justify-center text-center" role="alert">
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10 text-destructive"><AlertCircle className="h-5 w-5" aria-hidden /></span>
             <h2 className="mt-4 text-lg font-semibold text-foreground">{title}</h2>
             <p className="mt-1 max-w-lg text-sm text-muted-foreground">{message}</p>
-            {onRetry ? <Button type="button" variant="outline" className="mt-4" onClick={onRetry}>Try again</Button> : null}
         </div>
     );
 }
 
-export function InboundPermissionState({ action = "view inbound campaigns" }: { action?: string }) {
+export function InboundPermissionState({ action = "view inbound campaigns", onRetry }: { action?: string; onRetry?: () => void }) {
+    // A permission refusal is a failed read: the shared ErrorState with Retry.
+    if (onRetry) {
+        return (
+            <ErrorState
+                title={`You cannot ${action}`}
+                message="Ask a tenant administrator to grant the specific inbound capability. Access is re-checked by the server for every action."
+                onRetry={onRetry}
+            />
+        );
+    }
     return (
         <div className="content-card flex min-h-64 flex-col items-center justify-center text-center" role="alert">
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-muted text-muted-foreground"><LockKeyhole className="h-5 w-5" aria-hidden /></span>
@@ -35,13 +40,13 @@ export function InboundPermissionState({ action = "view inbound campaigns" }: { 
     );
 }
 
-export function InboundEmptyState({ onCreate }: { onCreate?: React.ReactNode }) {
+export function InboundEmptyState({ createHref }: { createHref?: string }) {
     return (
-        <div className="content-card flex min-h-72 flex-col items-center justify-center text-center">
-            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary"><PhoneIncoming className="h-6 w-6" aria-hidden /></span>
-            <h2 className="mt-4 text-lg font-semibold text-foreground">No inbound campaigns yet</h2>
-            <p className="mt-1 max-w-md text-sm text-muted-foreground">Create a durable draft, assign a verified number, and let server readiness confirm the route before activation.</p>
-            {onCreate ? <div className="mt-4">{onCreate}</div> : null}
-        </div>
+        <EmptyState
+            title="No inbound campaigns yet"
+            message="Create a durable draft, assign a verified number, and let server readiness confirm the route before activation."
+            actionLabel={createHref ? "Create the first draft" : undefined}
+            actionHref={createHref}
+        />
     );
 }

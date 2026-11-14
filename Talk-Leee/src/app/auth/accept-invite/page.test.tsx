@@ -91,3 +91,27 @@ test("the server's refusal is shown, and a link spent meanwhile turns the page",
     await fillAndJoin();
     await screen.findByRole("heading", { level: 1, name: "This invite cannot be used" });
 });
+
+test("the invite name field stops at the 100 characters the server accepts", async () => {
+    mock.method(inviteApi, "preview", async () => INVITE);
+    openLink(`#token=${TOKEN}`);
+    const field = await screen.findByLabelText("Your name", undefined, { timeout: SLOW });
+    assert.equal((field as HTMLInputElement).maxLength, 100);
+});
+
+test("a failed invite check offers Try again, keeps the link, and recovers", async () => {
+    let attempt = 0;
+    const preview = mock.method(inviteApi, "preview", async () => {
+        attempt += 1;
+        if (attempt === 1) throw refusal(503, "The service is busy. Please try again.");
+        return INVITE;
+    });
+    openLink(`#token=${TOKEN}`);
+    await screen.findByRole("heading", { level: 1, name: "We could not check your invite" }, { timeout: SLOW });
+    assert.match(screen.getByRole("alert").textContent ?? "", /busy/);
+    assert.ok(window.location.hash.includes(TOKEN), "the link must survive a reload while the check keeps failing");
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Try again" })); });
+    await screen.findByRole("heading", { level: 1, name: "Join Acme Ltd" }, { timeout: SLOW });
+    assert.deepEqual(preview.mock.calls.map((call) => call.arguments), [[TOKEN], [TOKEN]]);
+    assert.equal(window.location.hash, "");
+});

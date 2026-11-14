@@ -97,14 +97,14 @@ test("the month figures say UTC, the live chart says the account's reporting zon
     fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
     assert.equal(labelText("dashboard-campaign-lines-timezone"), "Timezone: UTC");
     // The UTC day bucket "2026-03-01" prints as Mar 1 (local date here would be Feb 28).
-    assert.deepEqual(Array.from(screen.getByTestId("stacked-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
-    assert.deepEqual(Array.from(screen.getByTestId("timeline-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
+    assert.deepEqual(Array.from(screen.getByTestId("stacked-labels").querySelectorAll("li")).map((li) => li.textContent), ["3/1/2026"]);
+    assert.deepEqual(Array.from(screen.getByTestId("timeline-labels").querySelectorAll("li")).map((li) => li.textContent), ["3/1/2026"]);
 });
 
 test("the UTC figures print the UTC date with the browser ahead of UTC", async () => {
     process.env.TZ = "Asia/Tokyo";
     await mountPage();
     assert.equal(labelText("dashboard-live-timezone"), `Timezone: ${REPORTING_ZONE}`);
-    assert.deepEqual(Array.from(screen.getByTestId("stacked-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
-    assert.deepEqual(Array.from(screen.getByTestId("timeline-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
+    assert.deepEqual(Array.from(screen.getByTestId("stacked-labels").querySelectorAll("li")).map((li) => li.textContent), ["3/1/2026"]);
+    assert.deepEqual(Array.from(screen.getByTestId("timeline-labels").querySelectorAll("li")).map((li) => li.textContent), ["3/1/2026"]);
 });

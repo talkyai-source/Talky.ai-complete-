@@ -56,7 +56,7 @@ function openQuickView() {
 
 test("a read-only role is offered reading and export, not campaign changes", () => {
     mountTable(READ_ONLY);
-    assert.equal(screen.queryByRole("link", { name: "New Campaign" }) === null, true, "New Campaign offered");
+    assert.equal(screen.queryByRole("link", { name: "Create campaign" }) === null, true, "New Campaign offered");
     assert.ok(screen.getByRole("button", { name: "Export" }));
 
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Spring push" }));
@@ -67,22 +67,22 @@ test("a read-only role is offered reading and export, not campaign changes", () 
     }
 
     const quickView = openQuickView();
-    assert.ok(quickView.getByRole("link", { name: "Open Page" }));
+    assert.ok(quickView.getByRole("link", { name: "Open page" }));
     assert.ok(quickView.getByRole("button", { name: "View Analytics" }));
-    for (const name of ["Resume", "Pause", "Duplicate", "Edit Campaign", "Delete"]) {
+    for (const name of ["Resume", "Pause", "Duplicate", "Edit", "Delete"]) {
         assert.equal(quickView.queryByRole("button", { name }) === null, true, `${name} offered`);
     }
 });
 
 test("a role that manages campaigns keeps every action", () => {
     mountTable(MANAGER);
-    assert.ok(screen.getByRole("link", { name: "New Campaign" }));
+    assert.ok(screen.getByRole("link", { name: "Create campaign" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Select Spring push" }));
     for (const name of [/Pause Selected/, /Resume Selected/, /Delete Selected/, /Export Selected/]) {
         assert.ok(screen.getByRole("button", { name }), `${name} missing`);
     }
     const quickView = openQuickView();
-    for (const name of ["Resume", "Duplicate", "Edit Campaign", "Delete"]) {
+    for (const name of ["Resume", "Duplicate", "Edit", "Delete"]) {
         assert.ok(quickView.getByRole("button", { name }), `${name} missing`);
     }
 });

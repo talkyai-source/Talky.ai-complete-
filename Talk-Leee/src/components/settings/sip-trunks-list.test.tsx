@@ -70,7 +70,8 @@ function mount(options: {
             return await (options.write ?? (async () => ({})))(req, state) as T;
         }
         state.gets.push(req.path);
-        if (req.path.endsWith("/outbound-route")) return (options.route ?? {}) as T;
+        // A valid answer with nothing to show; `{}` is now a failed read (FX2b3).
+        if (req.path.endsWith("/outbound-route")) return (options.route ?? { ready: true, reason_code: "sip_not_required" }) as T;
         if (req.path.endsWith("/pool")) return (options.pool ?? []) as T;
         if (req.path.endsWith("/pool-assignment")) return {} as T;
         if (options.listError) throw options.listError;
@@ -195,7 +196,7 @@ test("the page shows the number outbound calls really go out from, not only a st
     const status = await screen.findByText(/Outbound calls go out from/);
     assert.match(status.textContent || "", /\+17789249977 on Test trunk/);
     assert.ok(screen.getByText("Outbound calls use this line"));
-    assert.ok(screen.getByText("Number shown on calls: +442079460000"));
+    assert.ok(screen.getByText("Caller ID: +442079460000"));
 });
 
 test("a line the dialer cannot use says so instead of showing a number as if it worked", async () => {
@@ -664,4 +665,11 @@ test("any other delete failure also stays in the dialog", async () => {
     await screen.findByText("A campaign still uses this trunk. Remove its assignment first.");
     assert.ok(screen.getByRole("dialog"));
     assert.deepEqual(calls(state), ["DELETE /telephony/sip/trunks/trunk-1"]);
+});
+
+test("FX3b2 Task 2: the line card names the number 'Caller ID'", async () => {
+    mount({ route: { ready: true, reason_code: "ready", caller_id: "+17789249977", trunk_id: "trunk-1", trunk_name: "Test trunk" } });
+    await screen.findByText(/Outbound calls go out from/);
+    assert.equal(screen.queryAllByText("Caller ID: +442079460000").length, 1);
+    assert.equal((document.body.textContent ?? "").includes("Number shown on calls"), false);
 });

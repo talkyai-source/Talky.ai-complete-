@@ -57,6 +57,15 @@ export function connectorOAuthErrorSentence(code: string | null | undefined): st
     return `${CONNECTOR_RETURN_FAILED_TEXT} (${cleaned})`;
 }
 
+/** The connector names the Connectors page shows on its cards. */
+export const CONNECTOR_NAMES: Record<string, string> = {
+    calendar: "Google Calendar",
+    email: "Gmail",
+    crm: "HubSpot",
+    drive: "Google Drive",
+    salesforce: "Salesforce",
+};
+
 export function parseConnectorsCallback(
     params: URLSearchParams,
     defaultProviderType?: string
@@ -76,7 +85,7 @@ export function parseConnectorsCallback(
         return {
             ok: true,
             providerType,
-            message: providerType ? `${providerType} connected successfully.` : "Connector connected successfully.",
+            message: providerType ? `${CONNECTOR_NAMES[providerType] ?? providerType} connected successfully.` : "Connector connected successfully.",
         };
     }
 

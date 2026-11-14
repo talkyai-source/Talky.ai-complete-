@@ -1,12 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Clock, Volume2 } from "lucide-react";
+import { Clock } from "lucide-react";
 import { motion } from "framer-motion";
 
 import { RecordingFeedbackBar } from "@/components/calls/recording-feedback-bar";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { RecordingMediaControls } from "@/components/recordings/recording-media-controls";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { extendedApi, type Recording } from "@/lib/extended-api";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -28,7 +29,10 @@ export default function RecordingsPage() {
     const canRead = permissions.isSuccess && capabilities.canRead;
 
     const [recordings, setRecordings] = useState<Recording[]>([]);
-    const [loading, setLoading] = useState(false);
+    // False until the first page has answered: only that first load replaces
+    // the list. On a page change the current list stays while the next loads.
+    const [loaded, setLoaded] = useState(false);
+    const [reload, setReload] = useState(0);
     const [error, setError] = useState("");
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
@@ -39,7 +43,6 @@ export default function RecordingsPage() {
         const controller = new AbortController();
         void (async () => {
             try {
-                setLoading(true);
                 setError("");
                 const response = await extendedApi.listRecordings(
                     undefined,
@@ -48,18 +51,19 @@ export default function RecordingsPage() {
                     controller.signal,
                 );
                 if (controller.signal.aborted) return;
+                // An answer without its list is a failed read, not "no recordings".
+                if (!Array.isArray(response?.items)) throw new Error();
                 setRecordings(response.items);
                 setTotal(response.total);
+                setLoaded(true);
             } catch (err) {
                 if (controller.signal.aborted) return;
-                setError(err instanceof Error ? err.message : "Failed to load recordings");
-            } finally {
-                if (!controller.signal.aborted) setLoading(false);
+                setError(failedReadMessage(err, "Failed to load recordings"));
             }
         })();
 
         return () => controller.abort();
-    }, [canRead, page]);
+    }, [canRead, page, reload]);
 
     const handleDeleted = useCallback((recordingId: string) => {
         const wasOnlyRow = recordings.length === 1;
@@ -73,36 +77,16 @@ export default function RecordingsPage() {
 
     return (
         <DashboardLayout title="Recordings" description="Listen to and manage call recordings">
-            {checkingPermissions || (canRead && loading) ? (
-                <div className="flex h-64 items-center justify-center">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
-                </div>
+            {checkingPermissions || (canRead && !loaded && !error) ? (
+                <LoadingState />
             ) : permissions.isError ? (
-                <div className="content-card border-amber-500/30 text-amber-700 dark:text-amber-300" role="alert">
-                    Recording permissions could not be verified. Please refresh and try again.
-                </div>
+                <ErrorState message="Recording permissions could not be verified. Please refresh and try again." onRetry={() => void permissions.refetch()} />
             ) : !canRead ? (
-                <div className="content-card text-muted-foreground">
-                    You do not have permission to view or play call recordings.
-                </div>
+                <ErrorState message="You do not have permission to view or play call recordings." onRetry={() => void permissions.refetch()} />
             ) : error ? (
-                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400" role="alert">
-                    {error}
-                </div>
+                <ErrorState message={error} onRetry={() => setReload((current) => current + 1)} />
             ) : recordings.length === 0 ? (
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="content-card py-16 text-center"
-                >
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-foreground/5">
-                        <Volume2 className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <h2 className="mb-2 text-lg font-medium text-foreground">No recordings yet</h2>
-                    <p className="text-muted-foreground">
-                        Recordings will appear here after calls are completed.
-                    </p>
-                </motion.div>
+                <EmptyState title="No recordings yet" message="Recordings will appear here after calls are completed." />
             ) : (
                 <>
                     <div className="space-y-4">

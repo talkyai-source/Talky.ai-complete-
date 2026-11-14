@@ -140,7 +140,7 @@ for (const [route, page] of PAGES) {
         render(React.createElement(page()));
 
         assert.ok(screen.getByText("Connection complete"));
-        assert.ok(screen.getByText("calendar connected successfully."));
+        assert.ok(screen.getByText("Google Calendar connected successfully."));
         assert.equal(closes, 0);
         await pastAutoClose();
         assert.equal(closes, 1, "success keeps today's auto-close");

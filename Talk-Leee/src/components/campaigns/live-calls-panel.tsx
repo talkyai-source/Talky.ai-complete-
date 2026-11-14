@@ -497,6 +497,8 @@ function LiveCallsPanelScope({ campaignId, direction, title = "Live calls" }: Li
                     recentWindowSeconds: RECENT_WINDOW_SECONDS,
                 });
                 if (cancelled) return;
+                // An answer without an items list is a failed read, not an empty one.
+                if (!Array.isArray(res?.items)) throw new Error("Failed to load live calls");
                 setItems(res.items);
                 setTerminations((current) => {
                     const polledById = new Map(res.items.map((item) => [item.id, item]));

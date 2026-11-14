@@ -74,7 +74,7 @@ function menuFor(nextRole: string, permissions: string[] | null) {
 
 test("a read-only user sees what it may read, and no Billing", () => {
     const menu = menuFor("readonly", READONLY);
-    for (const name of ["Dashboard", "Campaigns", "Inbound", "Call History", "Contacts", "Analytics", "Recordings", "Connectors", "AI Options", "Security", "Settings"]) {
+    for (const name of ["Dashboard", "Campaigns", "Inbound Campaigns", "Call History", "Contacts", "Analytics", "Recordings", "Connectors", "AI Options", "Security", "Settings"]) {
         assert.ok(menu.includes(name), `${name} missing from ${menu.join(", ")}`);
     }
     assert.equal(menu.some((name) => name.startsWith("Billing")), false, `Billing shown: ${menu.join(", ")}`);
@@ -92,7 +92,7 @@ test("an agent sees no Connectors and no Billing", () => {
 test("a billing user sees Billing and none of the call, campaign or recording pages", () => {
     const menu = menuFor("billing_user", BILLING_USER);
     assert.ok(menu.some((name) => name.startsWith("Billing")), `no Billing in ${menu.join(", ")}`);
-    for (const name of ["Campaigns", "Inbound", "Call History", "Contacts", "Recordings", "Connectors"]) {
+    for (const name of ["Campaigns", "Inbound Campaigns", "Call History", "Contacts", "Recordings", "Connectors"]) {
         assert.equal(menu.includes(name), false, `${name} shown to a billing user`);
     }
     assert.ok(menu.includes("Analytics"));
@@ -100,7 +100,7 @@ test("a billing user sees Billing and none of the call, campaign or recording pa
 
 test("a tenant admin keeps every tenant page", () => {
     const menu = menuFor("tenant_admin", TENANT_ADMIN);
-    for (const name of ["Dashboard", "Campaigns", "Inbound", "Call History", "Contacts", "Analytics", "Recordings", "Connectors", "AI Options", "Security", "Settings"]) {
+    for (const name of ["Dashboard", "Campaigns", "Inbound Campaigns", "Call History", "Contacts", "Analytics", "Recordings", "Connectors", "AI Options", "Security", "Settings"]) {
         assert.ok(menu.includes(name), `${name} missing`);
     }
     assert.ok(menu.some((name) => name.startsWith("Billing")));

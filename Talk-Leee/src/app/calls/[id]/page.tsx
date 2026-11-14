@@ -9,10 +9,12 @@ import { Button } from "@/components/ui/button";
 import { PrintButton } from "@/components/ui/print-support";
 import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
+import { LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
+import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, TransferLegsPanel } from "@/components/calls/call-panels";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
@@ -81,7 +83,7 @@ export default function CallDetailPage() {
         permissions.isSuccess ? permissions.data.permissions : undefined,
     ).canView;
     const transcript = useMemo(() => (transcriptQuery.data?.turns ?? []) as TranscriptTurn[], [transcriptQuery.data?.turns]);
-    const error = callQuery.isError ? (callQuery.error instanceof Error ? callQuery.error.message : "Failed to load call details") : "";
+    const error = callQuery.isError ? failedReadMessage(callQuery.error, "Failed to load call details") : "";
 
     const [recordingLoading, setRecordingLoading] = useState(false);
     const [recordingDownloading, setRecordingDownloading] = useState(false);
@@ -263,16 +265,14 @@ export default function CallDetailPage() {
             >
                 <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-2 px-2">
                     <ArrowLeft className="h-4 w-4" />
-                    Back to calls
+                    Back to Call History
                 </Button>
                 {/* QA F1-24: print this call's details. */}
                 {call ? <PrintButton /> : null}
             </motion.div>
 
             {callQuery.isLoading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
-                </div>
+                <LoadingState />
             ) : error ? (
                 <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
@@ -308,7 +308,7 @@ export default function CallDetailPage() {
                                     <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Outcome</div>
                                     <div className="mt-1">
                                         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${getStatusStyle(call.outcome)}`}>
-                                            {call.outcome.replace(/_/g, " ")}
+                                            {humanizeOutcome(call.outcome)}
                                         </span>
                                     </div>
                                 </div>
@@ -339,9 +339,11 @@ export default function CallDetailPage() {
                                 // returned tells the operator something untrue
                                 // about the call.
                                 <CallLoadError
-                                    message={transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
+                                    message={failedReadMessage(transcriptQuery.error, "Failed to load transcript.")}
                                     onRetry={() => void transcriptQuery.refetch()}
                                 />
+                            ) : transcriptQuery.isLoading ? (
+                                <LoadingState title="Loading transcript…" />
                             ) : transcript.length === 0 ? (
                                 <div className="py-8 text-center text-sm text-muted-foreground">
                                     No transcript available
@@ -362,9 +364,9 @@ export default function CallDetailPage() {
                                             className={`flex gap-3 ${turn.role === "assistant" ? "flex-row" : "flex-row-reverse"}`}
                                         >
                                             <div
-                                                className={`flex h-9 w-9 items-center justify-center rounded-full border border-border text-xs font-bold ${turn.role === "assistant" ? "bg-muted/60 text-foreground" : "bg-muted/80 text-foreground"}`}
+                                                className={`flex h-9 min-w-9 shrink-0 items-center justify-center rounded-full border px-2 border-border text-xs font-bold ${turn.role === "assistant" ? "bg-muted/60 text-foreground" : "bg-muted/80 text-foreground"}`}
                                             >
-                                                {turn.role === "assistant" ? "AI" : "U"}
+                                                {turn.role === "assistant" ? "Agent" : "Caller"}
                                             </div>
                                             <div
                                                 className={`flex-1 max-w-[82%] rounded-2xl border p-4 shadow-sm ${turn.role === "assistant" ? "border-border bg-background" : "border-border bg-muted/60"}`}
@@ -406,7 +408,7 @@ export default function CallDetailPage() {
                             <h2 className="text-sm font-semibold text-foreground mb-4">Recording</h2>
                             <div className="rounded-2xl border border-border bg-muted/60 p-4 shadow-sm space-y-2">
                                 {recordingError && (
-                                    <p className="text-xs text-destructive mb-2">{recordingError}</p>
+                                    <p role="alert" className="text-xs text-destructive mb-2">{recordingError}</p>
                                 )}
                                 <div className="flex gap-2">
                                     <Button

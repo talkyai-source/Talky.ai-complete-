@@ -163,8 +163,8 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
             onOpenChange={(next) => {
                 if (!next) dialog.close();
             }}
-            title="Who speaks first?"
-            description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the caller."
+            title="Start campaign"
+            description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the callee."
             size="sm"
             footer={
                 <div className="flex justify-end gap-2">
@@ -244,7 +244,7 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
                         className="mt-1"
                     />
                     <div>
-                        <div className="text-sm font-medium text-foreground">Caller speaks first</div>
+                        <div className="text-sm font-medium text-foreground">Callee speaks first</div>
                         <div className="text-xs text-muted-foreground">
                             Agent waits for the callee to say &ldquo;hello&rdquo; before responding. Feels more natural on warm lists.
                         </div>
@@ -269,7 +269,10 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
                                     type="number"
                                     min={1}
                                     max={100}
-                                    value={batchSize}
+                                    aria-label="Calls at a time"
+                                    // A saved 0 means "no limit" on the server: say so instead of showing 0.
+                                    placeholder="Unlimited"
+                                    value={batchSize === 0 ? "" : batchSize}
                                     onChange={(e) => {
                                         const n = parseInt(e.target.value, 10);
                                         setBatchSize(Number.isNaN(n) ? 1 : Math.min(100, Math.max(1, n)));

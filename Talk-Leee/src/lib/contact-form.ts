@@ -48,16 +48,56 @@ export function optionalE164(raw: string, country: CountrySelection): string {
     return requiredE164(raw, country);
 }
 
+/** Every IANA zone this browser knows; empty when the browser cannot list them
+ *  (the API still checks, so an empty list only skips the early message). */
+// The API's shape rule for a zone name (contact_fields._IANA_RE): Area/Place,
+// letters only. A browser also lists names such as "UTC" that the API refuses,
+// so they are left out here rather than offered and then rejected on save.
+const API_ZONE_SHAPE = /^[A-Za-z_]+\/[A-Za-z_+\-/]+$/;
+
+export function supportedTimeZones(): string[] {
+    try {
+        return Intl.supportedValuesOf("timeZone").filter((zone) => API_ZONE_SHAPE.test(zone));
+    } catch {
+        return [];
+    }
+}
+
+/** Empty is fine; anything typed must be a real IANA zone (same rule as the API). */
+export function contactTimezoneError(raw: string, zones: string[] = supportedTimeZones()): string | null {
+    const value = raw.trim();
+    if (!value || zones.length === 0 || zones.includes(value)) return null;
+    return `"${value}" is not a time zone. Pick one from the list, for example Europe/London or America/New_York.`;
+}
+
+/** The first reason an OPTIONAL field blocks Add/Save, in plain words, or null.
+ *  The form shows it beside the button because these fields live inside the
+ *  collapsible "More details" section. */
+export function contactOptionalFieldProblem(
+    form: ContactFormState,
+    country: CountrySelection,
+    zones: string[] = supportedTimeZones(),
+): string | null {
+    for (const [label, raw] of [["Mobile number", form.mobile_number], ["Business number", form.business_number]] as const) {
+        if (!raw.trim()) continue;
+        const parsed = parsePhoneNumber(raw, country);
+        if (!parsed.ok) return `${label} is not valid: ${parsed.error}`;
+    }
+    const tz = contactTimezoneError(form.timezone, zones);
+    return tz ? `Timezone: ${tz}` : null;
+}
+
 export function contactPayload(form: ContactFormState, country: CountrySelection = ""): ContactMutation {
     const firstName = form.first_name.trim();
     const lastName = form.last_name.trim();
-    const fullName = [firstName, lastName].filter(Boolean).join(" ");
     return {
         phone_number: requiredE164(form.phone_number, country),
         mobile_number: optionalE164(form.mobile_number, country),
-        full_name: fullName,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
+        // No full_name: the API re-splits it on the first space and would
+        // overwrite a multi-word first name. Empty names are sent as "" so an
+        // edit can clear one (the API treats "" as remove).
+        first_name: firstName,
+        last_name: lastName,
         email: form.email.trim(),
         company_name: form.company_name.trim(),
         job_title: form.job_title.trim(),

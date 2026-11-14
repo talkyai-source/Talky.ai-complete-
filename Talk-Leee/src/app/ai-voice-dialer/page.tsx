@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { LocalAmount } from "@/components/pricing/local-price";
 
 export const metadata: Metadata = {
   title: "AI Voice Dialer That Actually Books Meetings",
@@ -50,7 +51,7 @@ export default function AIVoiceDialerPage() {
   const costStats = [
     { value: "40%", label: "Rep time lost to dialing, not selling." },
     { value: "300", label: "Daily call ceiling, dialing manually." },
-    { value: "$0", label: "Return on missed dials and follow-ups." },
+    { value: <LocalAmount usd={0} usdText="$0" />, label: "Return on missed dials and follow-ups." },
   ];
 
   // QA F1-04: no unmeasured numbers or absolutes.
@@ -265,8 +266,9 @@ export default function AIVoiceDialerPage() {
             outcomes by hand.
           </p>
           <p className={bodyClassName}>
-            <span className="font-semibold text-primary dark:text-foreground">Do the math:</span> if a rep costs $60,000 a year
-            and spends 40% of their day dialing instead of closing, that&rsquo;s roughly $24,000 annually just to press phone
+            <span className="font-semibold text-primary dark:text-foreground">Do the math:</span> if a rep costs{" "}
+            <LocalAmount usd={60000} usdText="$60,000" /> a year and spends 40% of their day dialing instead of closing,
+            that&rsquo;s roughly <LocalAmount usd={24000} usdText="$24,000" /> annually just to press phone
             numbers. Across a five-person team, manual dialing alone costs you six figures before a single deal closes.
           </p>
           <p className={bodyClassName}>
@@ -275,7 +277,7 @@ export default function AIVoiceDialerPage() {
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {costStats.map((stat) => (
-              <div key={stat.value} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
+              <div key={stat.label} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
                 <p className="text-3xl md:text-4xl font-bold tracking-tight text-primary dark:text-foreground">{stat.value}</p>
                 <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">{stat.label}</p>
               </div>

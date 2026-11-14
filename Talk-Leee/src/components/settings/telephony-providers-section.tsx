@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-    AlertCircle,
     CheckCircle2,
     Loader2,
     Phone,
@@ -30,6 +31,9 @@ import {
 } from "@/lib/telephony-api";
 import { useNotificationsActions } from "@/lib/notifications-client";
 import { SipTrunksList } from "@/components/settings/sip-trunks-list";
+
+// Same shape check as the SIP line form (pbx-line-form.ts CALLER_ID) and the trunk API.
+const CALLER_ID = /^\+?[0-9][0-9\s().-]{1,}$/;
 
 const UNVERIFIED_AVAILABILITY: ProviderAvailability = {
     activation_allowed: false, qualification_only: false,
@@ -113,6 +117,8 @@ function ProviderCard({
     const [creds, setCreds] = useState<Record<string, string>>({ ...def.initial });
     const [fromNumber, setFromNumber] = useState<string>(existing?.from_number ?? "");
     const [showSaved, setShowSaved] = useState<boolean>(Boolean(existing?.has_credentials));
+    // The "forget credentials" confirm dialog is open.
+    const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
     useEffect(() => {
         // Re-sync local editable state whenever the server-backed `existing`
@@ -132,11 +138,20 @@ function ProviderCard({
     const lastTest = existing?.last_test_result || null;
 
     async function handleSave() {
+        const callerId = fromNumber.trim();
+        if (callerId && (callerId.length > 64 || !CALLER_ID.test(callerId))) {
+            createNotification({
+                type: "error",
+                title: "Save failed",
+                message: "The caller ID should be a phone number: digits, with spaces, dashes or brackets if you like.",
+            });
+            return;
+        }
         try {
             await saveMutation.mutateAsync({
                 provider,
                 credentials: creds as never,
-                from_number: fromNumber || undefined,
+                from_number: callerId || undefined,
             });
             createNotification({
                 type: "success",
@@ -179,8 +194,8 @@ function ProviderCard({
         }
     }
 
+    // Runs from the confirm dialog; it reports its own result as a toast.
     async function handleDelete() {
-        if (!confirm(`Forget ${iconLabel} credentials for this tenant?`)) return;
         try {
             await deleteMutation.mutateAsync(provider);
             createNotification({
@@ -337,12 +352,20 @@ function ProviderCard({
                         </Button>
                     )}
                     {showSaved && (
-                        <Button onClick={handleDelete} disabled={deleteMutation.isPending} variant="ghost" size="sm">
+                        <Button onClick={() => setConfirmDeleteOpen(true)} disabled={deleteMutation.isPending} variant="ghost" size="sm">
                             <Trash2 className="h-3 w-3" aria-hidden />
                         </Button>
                     )}
                 </div>
             </CardContent>
+            <ConfirmDialog
+                open={confirmDeleteOpen}
+                onOpenChange={setConfirmDeleteOpen}
+                intent="delete"
+                description=""
+                warningText={`Forget ${iconLabel} credentials for this tenant?`}
+                onConfirm={handleDelete}
+            />
         </Card>
     );
 }
@@ -353,25 +376,11 @@ export function TelephonyProvidersSection() {
     const activateMutation = useActivateTelephonyProvider();
 
     if (query.isLoading) {
-        return (
-            <div className="flex items-center justify-center py-12 text-muted-foreground">
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading telephony settings…
-            </div>
-        );
+        return <LoadingState title="Loading telephony settings…" />;
     }
 
     if (query.error) {
-        return (
-            <Card>
-                <CardContent className="py-10 text-center">
-                    <AlertCircle className="mx-auto h-6 w-6 text-red-500" aria-hidden />
-                    <div className="mt-2 text-sm font-semibold text-foreground">Failed to load telephony settings</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                        {query.error instanceof Error ? query.error.message : String(query.error)}
-                    </div>
-                </CardContent>
-            </Card>
-        );
+        return <ErrorState message="Failed to load telephony settings" onRetry={() => void query.refetch()} />;
     }
 
     const data = query.data ?? { active: "none" as ActiveProvider, providers: [], availability: {} };

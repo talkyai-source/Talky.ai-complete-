@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, CircleDashed, ShieldCheck, XCircle } from "lucide-react";
 
 import type { InboundReadiness } from "@/lib/inbound-api";
+import { REASON_LABELS } from "@/lib/inbound-reason-labels";
 import { cn } from "@/lib/utils";
 
 const STATUS_STYLES: Record<string, string> = {
@@ -52,7 +53,12 @@ export function ReadinessBadge({ readiness }: { readiness: InboundReadiness }) {
     );
 }
 
-export function InboundReadinessChecklist({ readiness }: { readiness: InboundReadiness }) {
+export function InboundReadinessChecklist({ readiness, inboundSwitchOff = false }: {
+    readiness: InboundReadiness;
+    /** The account inbound switch is not confirmed on: no new call is answered,
+     *  so the "Safe to request activation" summary is not shown. */
+    inboundSwitchOff?: boolean;
+}) {
     // Six checks are shown at a time; the rest scroll inside the card. The
     // cap is derived from the first rendered row's real height rather than a
     // hardcoded pixel guess, matching the Event Stream / Alert Timeline cards
@@ -88,6 +94,7 @@ export function InboundReadinessChecklist({ readiness }: { readiness: InboundRea
 
     return (
         <div className="space-y-3" aria-label="Server readiness checks">
+            {readiness.ready && inboundSwitchOff ? null : (
             <div
                 className={cn(
                     "flex items-start gap-3 rounded-xl border p-4",
@@ -107,11 +114,12 @@ export function InboundReadinessChecklist({ readiness }: { readiness: InboundRea
                     </p>
                     <p className="mt-0.5 text-sm text-muted-foreground">
                         {readiness.ready
-                            ? "The server has verified the current DID, agent and telephony configuration."
+                            ? "The server has verified the current phone number, agent and telephony configuration."
                             : "Resolve every failed check below. The server re-checks everything when activation is requested."}
                     </p>
                 </div>
             </div>
+            )}
 
             {readiness.checks.length === 0 && readiness.blockers.length === 0 ? (
                 <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/30 p-4">
@@ -159,7 +167,7 @@ export function InboundReadinessChecklist({ readiness }: { readiness: InboundRea
                                     <div className="min-w-0">
                                         <p className="text-sm font-semibold text-foreground">{blocker.message}</p>
                                         <p className="mt-1 text-sm text-muted-foreground">{blocker.remediation}</p>
-                                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">{blocker.code}</p>
+                                        <p className="mt-1 font-mono text-[11px] text-muted-foreground">{Object.hasOwn(REASON_LABELS, blocker.code) ? REASON_LABELS[blocker.code] : blocker.code}</p>
                                     </div>
                                 </div>
                             </li>

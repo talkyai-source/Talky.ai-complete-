@@ -52,7 +52,7 @@ test('formal controls fail closed for a non-platform role without requesting pro
 test('failed and mismatched reads never look like an empty successful history', async () => {
     state.route = (r) => r.path.endsWith('/status') ? response({ detail: 'database offline' }, 503) : route(r);
     await draw(); assert.match(text(), /Status unavailable: database offline/); assert.doesNotMatch(text(), /No formal hold history/);
-    state.route = route; current = status([], target(B)); await click('Refresh hold status');
+    state.route = route; current = status([], target(B)); await click('Retry'); // FX2a2: the read had failed, so the button is the retry
     assert.match(text(), /does not match this account/); assert.equal(find('form'), null);
 });
 test('empty and truncated history are explicit and ordinary controls remain separate', async () => {
@@ -101,7 +101,8 @@ test('a committed receipt wins over stale active status and a retained confirm c
     current = status([event()]); post = () => response(saved(E, target(), { restored: true })); await draw();
     await draft('Restore selected hold'); const retained = callback(button('Confirm formal action')); await click('Confirm formal action');
     assert.equal(button('Restore selected hold').disabled, true); await act(async () => retained());
-    await click('Refresh hold status'); assert.equal(button('Restore selected hold').disabled, true);
+    await click('Retry'); // FX2a2: the last status read was refused as stale, so the button is the retry
+    assert.equal(button('Restore selected hold').disabled, true);
     assert.equal(posts().length, 1); assert.match(text(), /Action saved: Restore selected hold/);
 });
 test('a definite server conflict clears the draft but requires current state before a fresh action', async () => {

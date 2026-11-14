@@ -93,13 +93,13 @@ function mountPage(user: TestUser) {
 async function reload(user: TestUser) {
     cleanup();
     mountPage(user);
-    await screen.findByLabelText(/^Campaign name$/i, {}, { timeout: SLOW });
+    await screen.findByLabelText(/^Campaign name( \*)?$/i, {}, { timeout: SLOW });
 }
 async function typeName(value: string) {
-    const input = await screen.findByLabelText(/^Campaign name$/i, {}, { timeout: SLOW });
+    const input = await screen.findByLabelText(/^Campaign name( \*)?$/i, {}, { timeout: SLOW });
     fireEvent.change(input, { target: { value } });
 }
-const nameValue = () => (screen.getByLabelText(/^Campaign name$/i) as HTMLInputElement).value;
+const nameValue = () => (screen.getByLabelText(/^Campaign name( \*)?$/i) as HTMLInputElement).value;
 const keptNotice = () => screen.queryByText(/We kept the campaign you were setting up in this tab/);
 
 test("a reload keeps the outbound wizard's draft and says so", async () => {
@@ -156,11 +156,11 @@ test("creating the campaign removes its draft", async () => {
 test("the classic form keeps its own draft through a reload", async () => {
     mountPage(ACCOUNT_A);
     fireEvent.click(await screen.findByRole("button", { name: /Prefer the detailed form/ }, { timeout: SLOW }));
-    const input = await screen.findByLabelText("Campaign Name", {}, { timeout: SLOW });
+    const input = await screen.findByLabelText("Campaign name", {}, { timeout: SLOW });
     fireEvent.change(input, { target: { value: "Classic draft" } });
     await reload(ACCOUNT_A);
     fireEvent.click(screen.getByRole("button", { name: /Prefer the detailed form/ }));
-    assert.equal((await screen.findByLabelText("Campaign Name", {}, { timeout: SLOW }) as HTMLInputElement).value, "Classic draft");
+    assert.equal((await screen.findByLabelText("Campaign name", {}, { timeout: SLOW }) as HTMLInputElement).value, "Classic draft");
     assert.ok(keptNotice());
 });
 
@@ -181,7 +181,7 @@ test("a role that may not create campaigns is told so instead of shown the form"
     permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "calls:read"] } };
     mountPage(ACCOUNT_A);
     await screen.findByText("Your role can't create campaigns", undefined, { timeout: SLOW });
-    assert.equal(screen.queryByLabelText(/^Campaign name$/i) === null, true, "form shown");
+    assert.equal(screen.queryByLabelText(/^Campaign name( \*)?$/i) === null, true, "form shown");
     assert.equal(screen.queryByRole("button", { name: /Prefer the detailed form/ }) === null, true, "form toggle shown");
     assert.equal(screen.getByRole("link", { name: "View campaigns" }).getAttribute("href"), "/campaigns");
 });
@@ -189,6 +189,6 @@ test("a role that may not create campaigns is told so instead of shown the form"
 test("a role that may create campaigns gets the wizard", async () => {
     permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "campaigns:create"] } };
     mountPage(ACCOUNT_A);
-    await screen.findByLabelText(/^Campaign name$/i, {}, { timeout: SLOW });
+    await screen.findByLabelText(/^Campaign name( \*)?$/i, {}, { timeout: SLOW });
     assert.equal(screen.queryByText("Your role can't create campaigns"), null);
 });

@@ -285,12 +285,12 @@ function OwnedLiveCalls({ generation }: { generation: number }) {
                             ) : isPaused ? (
                                 <>
                                     <Play size={14} />
-                                    Resume Calls
+                                    Resume calls
                                 </>
                             ) : (
                                 <>
                                     <Pause size={14} />
-                                    Pause All Calls
+                                    Pause all calls
                                 </>
                             )}
                         </button>

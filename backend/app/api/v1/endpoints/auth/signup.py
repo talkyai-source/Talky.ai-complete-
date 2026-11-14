@@ -47,6 +47,7 @@ from ._shared import (
 )
 from .schemas import (
     AuthTokenResponse,
+    LegalVersionsResponse,
     SignupCompleteRequest,
     SignupStartRequest,
     SignupStartResponse,
@@ -160,6 +161,24 @@ def _get_redis_or_503():
             detail="Signup service temporarily unavailable.",
         )
     return container.redis
+
+
+@router.get("/legal-versions", response_model=LegalVersionsResponse)
+@limiter.limit("60/minute")
+async def legal_versions(request: Request, response: Response) -> LegalVersionsResponse:
+    """QA F12-10: public, read-only. Tells the sign-up and invite pages
+    whether the Terms/Privacy acceptance is required and which versions to
+    send back. Exposes nothing else."""
+    from app.core import config
+    from app.domain.services.legal_acceptance import current_versions
+
+    response.headers["Cache-Control"] = "no-store"
+    terms, privacy = current_versions()
+    return LegalVersionsResponse(
+        required=bool(getattr(config.get_settings(), "legal_acceptance_required", False)),
+        terms_version=terms,
+        privacy_version=privacy,
+    )
 
 
 @router.post("/signup/start", response_model=SignupStartResponse)

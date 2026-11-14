@@ -71,7 +71,7 @@ for (const status of ["paused", "running"]) {
         render(<Page />);
         await screen.findByText("+442071234567", undefined, { timeout: SLOW });
         // A paused campaign's start control reads Resume (plan 3.2); Duplicate needs campaigns:create (plan 3.1).
-        for (const name of [/^Edit$/, /^Start$/, /^Resume$/, /^Pause$/, /^Stop$/, /^Duplicate$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
+        for (const name of [/^Edit$/, /^Start$/, /^Resume$/, /^Pause$/, /^Stop$/, /^Duplicate$/, /Import CSV/, /Add contact/, /^Edit \+44/, /^Remove \+44/]) {
             assert.equal(absent(name), true, `${name} offered`);
         }
         assert.equal(contactListsReadOnly, true);
@@ -84,7 +84,7 @@ test("a role that may change campaigns keeps every control", async () => {
     render(<Page />);
     await screen.findByText("+442071234567", undefined, { timeout: SLOW });
     // A paused campaign's start control reads Resume (plan 3.2), not Start.
-    for (const name of [/^Edit$/, /^Resume$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
+    for (const name of [/^Edit$/, /^Resume$/, /Import CSV/, /Add contact/, /^Edit \+44/, /^Remove \+44/]) {
         assert.ok(screen.getByRole("button", { name }), `${name} missing`);
     }
     await waitFor(() => assert.equal(contactListsReadOnly, false));

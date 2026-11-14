@@ -1,11 +1,15 @@
 import type { Metadata } from "next";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
+import { DemoBooking } from "./demo-booking";
 
 export const metadata: Metadata = {
   title: "Book a Demo",
-  description: "Choose a time for your 30-minute Talk-Lee demo.",
+  description: "Tell us about your business and choose a time for your 30-minute Talk-Lee demo.",
 };
+
+const CALENDAR_URL =
+  "https://calendar.google.com/calendar/appointments/schedules/AcZssZ3VEktu7gPGKJcZVfxi45o6GcDdU8RYpSelY9EDJqje_tQn9L6ts1TX0FtnfDH1HyNVeDkBLXM8?gv=true";
 
 export default function BookADemoPage() {
   return (
@@ -17,22 +21,9 @@ export default function BookADemoPage() {
             Book a Demo
           </h1>
           <p className="text-gray-700 dark:text-muted-foreground mb-8">
-            Choose a time for your 30-minute demo.
+            Tell us a little about your business, then choose a time for your 30-minute demo.
           </p>
-          <div className="w-fit max-w-full mx-auto space-y-2 mb-8 text-sm text-gray-900 dark:text-foreground font-semibold">
-            <p>1- Business Name</p>
-            <p>2- What services does your business offer?</p>
-            <p>3- What can be made better in your business using Talklee AI?</p>
-          </div>
-          <iframe
-            src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ3VEktu7gPGKJcZVfxi45o6GcDdU8RYpSelY9EDJqje_tQn9L6ts1TX0FtnfDH1HyNVeDkBLXM8?gv=true"
-            className="bg-white rounded-2xl dark:[filter:invert(1)_hue-rotate(180deg)]"
-            style={{ border: 0 }}
-            width="100%"
-            height={700}
-            frameBorder="0"
-            title="Book a Demo"
-          />
+          <DemoBooking calendarUrl={CALENDAR_URL} />
         </div>
       </section>
       <Footer />

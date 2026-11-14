@@ -20,9 +20,9 @@ test("a UTC day bucket prints its UTC date with the browser behind UTC", () => {
         // The local date of UTC midnight is the previous day here.
         assert.equal(new Date("2026-03-01").getDate(), 28);
         assert.equal(new Date("2026-03-01").toLocaleDateString("en-US", { month: "short", day: "numeric" }), "Feb 28");
-        assert.equal(formatUtcDateLabel("2026-03-01"), "Mar 1");
-        assert.equal(formatUtcDateLabel(Date.parse("2026-03-01")), "Mar 1");
-        assert.equal(formatUtcDateLabel(new Date("2026-03-01T00:00:00Z")), "Mar 1");
+        assert.equal(formatUtcDateLabel("2026-03-01"), "3/1/2026");
+        assert.equal(formatUtcDateLabel(Date.parse("2026-03-01")), "3/1/2026");
+        assert.equal(formatUtcDateLabel(new Date("2026-03-01T00:00:00Z")), "3/1/2026");
         assert.equal(browserTimeZoneName(), "America/Los_Angeles");
     });
 });
@@ -31,9 +31,9 @@ test("a UTC day bucket prints its UTC date with the browser ahead of UTC", () =>
     withTimeZone("Asia/Tokyo", () => {
         // The local date of this UTC instant is the next day here.
         assert.equal(new Date("2026-03-01T23:30:00Z").getDate(), 2);
-        assert.equal(formatUtcDateLabel("2026-03-01T23:30:00Z"), "Mar 1");
-        assert.equal(formatUtcDateLabel("2026-03-01"), "Mar 1");
-        assert.equal(formatUtcDateLabel("2026-03-01T10:00"), "Mar 1");
+        assert.equal(formatUtcDateLabel("2026-03-01T23:30:00Z"), "3/1/2026");
+        assert.equal(formatUtcDateLabel("2026-03-01"), "3/1/2026");
+        assert.equal(formatUtcDateLabel("2026-03-01T10:00"), "3/1/2026");
         assert.equal(browserTimeZoneName(), "Asia/Tokyo");
     });
 });

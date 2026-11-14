@@ -22,11 +22,14 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
-import { EmptyState, ErrorState } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useTopupBalance } from "@/lib/topup-api";
-import { formatPurchasedPrice, type BillingSubscription } from "@/lib/billing-purchase";
+import { type BillingSubscription } from "@/lib/billing-purchase";
+import { LocalMinorAmount, LocalPurchasedPrice } from "@/components/billing/local-money";
+import { localAmountText, useDisplayCurrency } from "@/components/pricing/local-price";
+import { usdFromMinor } from "@/lib/display-currency";
 import { useCheckoutConfirmationPending } from "@/components/billing/use-billing-purchase";
 import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
@@ -86,7 +89,7 @@ type OverageAlertRow = {
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString();
 }
 
 function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
@@ -114,9 +117,9 @@ export function formatBillingError(err: unknown): string {
   if (isApiClientError(err)) {
     if (err.status === 403) return "You do not have permission to view billing for this account.";
     if (err.status === 401) return "Your session has expired.";
-    return err.message;
+    return failedReadMessage(err, "The request did not complete.");
   }
-  return err instanceof Error ? err.message : "The request did not complete.";
+  return failedReadMessage(err, "The request did not complete.");
 }
 
 function statusBadge(state: string) {
@@ -206,11 +209,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
   if (initialLoading) {
     return (
       <div className="space-y-6">
-        <Card>
-          <CardContent className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading billing data…
-          </CardContent>
-        </Card>
+        <LoadingState title="Loading billing data…" />
       </div>
     );
   }
@@ -365,7 +364,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
         </div>
       </CardHeader>
       <CardContent className="relative">
-        {subscription.purchased_price_option ? <p className="mb-4 font-medium">Purchased offer: {formatPurchasedPrice(subscription.purchased_price_option)}</p> : <p className="mb-4 text-sm text-muted-foreground">Purchased price and interval are not available in the billing record. The current catalogue is not used to infer them.</p>}
+        {subscription.purchased_price_option ? <p className="mb-4 font-medium">Purchased offer: <LocalPurchasedPrice price={subscription.purchased_price_option} /></p> : <p className="mb-4 text-sm text-muted-foreground">Purchased price and interval are not available in the billing record. The current catalogue is not used to infer them.</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {details.map((detail) => (
             <div
@@ -479,9 +478,7 @@ function CallStats({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex items-center justify-center py-6 text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading call stats…
-          </div>
+          <LoadingState title="Loading call stats…" />
         ) : failed ? (
           // Zeros here would read as "you made no calls". We do not know that.
           <SectionLoadError what="Call stats" error={error} onRetry={onRetry} />
@@ -530,13 +527,11 @@ function UsageSummarySection({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading daily usage…
-          </div>
+          <LoadingState title="Loading daily usage…" />
         ) : failed ? (
           <SectionLoadError what="Daily usage" error={error} onRetry={onRetry} />
         ) : daily.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No call activity in the last 30 days.</div>
+          <EmptyState title="No call activity in the last 30 days." />
         ) : (
           <>
             <div className="relative h-32 overflow-hidden rounded-2xl border border-border/70 bg-muted/20 px-3 pb-3 pt-5">
@@ -598,12 +593,13 @@ function OverageAlertsCard({
   error: unknown;
   onRetry: () => void;
 }) {
+  const display = useDisplayCurrency();
   const warnings: { message: string; severity: "warning" | "critical" }[] = [];
 
   alerts.forEach((a) => {
     warnings.push({
       message: a.type === "minutes"
-         ? `You have exceeded your monthly minutes allowance by ${a.exceededBy.toLocaleString()} minutes. ${a.estimatedCharge === null ? "Additional usage pricing is unavailable; this is not a charge." : `Estimated additional usage: ${formatMinorMoney(a.estimatedCharge, a.currency, a.currency_exponent)}. This is not a charge.`}`
+         ? `You have exceeded your monthly minutes allowance by ${a.exceededBy.toLocaleString()} minutes. ${a.estimatedCharge === null ? "Additional usage pricing is unavailable; this is not a charge." : `Estimated additional usage: ${localAmountText(display, usdFromMinor(a.estimatedCharge, a.currency, a.currency_exponent), formatMinorMoney(a.estimatedCharge, a.currency, a.currency_exponent))}. This is not a charge.`}`
         : `You have exceeded your concurrency limit by ${a.exceededBy}. Additional usage pricing is unavailable; this is not a charge.`,
       severity: a.severity,
     });
@@ -665,7 +661,7 @@ function AdjustmentsList({ adjustments, loading, failed, error, onRetry }: {
         <thead><tr className="border-b text-left"><th scope="col" className="p-3">Movement</th><th scope="col" className="p-3">Minutes</th><th scope="col" className="p-3">Amount</th><th scope="col" className="p-3">Order and provider reference</th><th scope="col" className="p-3">Recorded</th></tr></thead>
         <tbody>{adjustments.map((entry) => <tr key={entry.id} className="border-b"><td className="p-3">{entry.kind === "topup" ? "Top-up credit" : entry.kind === "refund" ? "Refund accounting reversal" : entry.kind === "dispute" ? "Dispute accounting reversal" : "Adjustment"}{entry.note && <p className="text-xs text-muted-foreground">{entry.note}</p>}</td>
           <td className="p-3 tabular-nums">{entry.minutes_delta > 0 ? "+" : ""}{entry.minutes_delta.toLocaleString()}</td>
-          <td className="p-3 tabular-nums">{formatMinorMoney(entry.amount_cents, entry.currency, entry.currency_exponent)}</td>
+          <td className="p-3 tabular-nums"><LocalMinorAmount minor={entry.amount_cents} currency={entry.currency} exponent={entry.currency_exponent} /></td>
           <td className="p-3 break-all"><p>{entry.order_id ?? "Order unavailable"}</p><p className="text-xs text-muted-foreground">{entry.provider_payment_id ?? entry.provider_event_id ?? "Provider reference unavailable"}</p></td>
           <td className="p-3">{formatDate(entry.created_at)}</td></tr>)}</tbody>
       </table></div>}</CardContent></Card>;
@@ -707,7 +703,7 @@ function RecentInvoices({
           // never been billed. Say what happened instead.
           <SectionLoadError what="Your invoices" error={error} onRetry={onRetry} />
         ) : invoices.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No invoices yet.</div>
+          <EmptyState title="No invoices yet." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border bg-card/50">
             <table className="min-w-full text-sm">
@@ -724,11 +720,11 @@ function RecentInvoices({
                   <tr key={inv.id} className="border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
                       <Link href={`/billing/invoices/${inv.id}`} className="inline-block py-1 -my-1 font-semibold text-foreground hover:underline">
-                        {inv.stripe_invoice_id || inv.id.slice(0, 8)}
+                        {inv.invoice_number || inv.stripe_invoice_id || inv.id.slice(0, 8)}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(inv.period_start)} – {formatDate(inv.period_end)}</td>
-                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground">{formatMinorMoney(inv.total, inv.currency, inv.currency_exponent)}</td>
+                    <td className="px-4 py-3 text-right font-semibold tabular-nums text-foreground"><LocalMinorAmount minor={inv.total} currency={inv.currency} exponent={inv.currency_exponent} /></td>
                     <td className="px-4 py-3">{invoiceStatusBadge(inv.status)}</td>
                   </tr>
                 ))}

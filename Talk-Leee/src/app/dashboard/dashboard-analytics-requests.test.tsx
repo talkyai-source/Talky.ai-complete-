@@ -95,7 +95,7 @@ async function charts(answered: number, failed: number) {
         assert.equal(stacked.points.length, 1);
         assert.equal(stacked.points[0].a, answered);
         assert.equal(stacked.points[0].b, failed);
-        assert.match(stacked.points[0].label, /Nov 6/);
+        assert.match(stacked.points[0].label, /11\/6\/2026/);
     });
 }
 async function tick() {
@@ -186,14 +186,17 @@ test("one periodic daily refresh updates both consumers and unmount releases pol
 test("a failed initial daily request stays visible and Retry loads one new shared slice", async () => {
     daily = async () => { throw new Error("Synthetic daily analytics failure"); };
     render(<DashboardPage />);
-    assert.match((await screen.findByRole("alert")).textContent ?? "", /Synthetic daily analytics failure/);
+    // FX1a: a failed source replaces only the cards that read it, each with
+    // its own message and Retry; Retry reads that source again and no other.
+    const alerts = await screen.findAllByRole("alert");
+    for (const alert of alerts) assert.match(alert.textContent ?? "", /Synthetic daily analytics failure/);
     assert.equal(count("daily"), 1);
     daily = async () => ({ timezone: zone, series: originalSeries });
-    fireEvent.click(screen.getByRole("button", { name: "Retry dashboard" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Retry" })[0]);
     await charts(3, 2);
     assert.equal(count("daily"), 2, "Exactly one failed request and one successful retry");
-    assert.equal(count("hourly"), 2);
-    assert.equal(count("campaign"), 2);
+    assert.equal(count("hourly"), 1);
+    assert.equal(count("campaign"), 1);
     assert.equal(screen.queryByRole("alert"), null);
 });
 

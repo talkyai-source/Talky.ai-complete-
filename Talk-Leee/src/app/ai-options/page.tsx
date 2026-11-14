@@ -4,6 +4,7 @@ import { RealtimeControls } from "@/components/realtime/ai-options-controls";
 import { Select } from "@/components/ui/select";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
 import { AI_OPTIONS_READ_ONLY_NOTICE, canEditAiOptions } from "@/components/ai-options/controls";
@@ -105,6 +106,9 @@ function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
 }
 
 // ── Realtime (gpt-realtime-2) fallback catalog ────────────────
+// A Select option is a plain string, so the provider id gets in text the
+// same first-letter capital the voice provider buttons get from `capitalize`.
+const capitalizeProviderId = (id: string) => id.charAt(0).toUpperCase() + id.slice(1);
 const DEFAULT_TURN_DETECTION = "high";
 const DEFAULT_NOISE_REDUCTION = "far_field";
 
@@ -193,7 +197,6 @@ function AIOptionsEditor({ scope }: { scope: string }) {
 
     // Derived from the cached queries (no local mirror to drift out of sync).
     const elevenLabsError = voicesQuery.data?.elevenlabs_error ?? null;
-    const voicesNote = voicesQuery.isError ? "Voices took too long to load. Reload to fetch them." : "";
     const loadFailed = providersQuery.isError || configQuery.isError;
     const loading = providersQuery.isLoading || configQuery.isLoading;
 
@@ -489,20 +492,15 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
             {loading || (!config && !loadFailed) ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-emerald-500 border-b-transparent" />
-                </div>
+                <LoadingState />
             ) : !providers || !config ? (
-                <div className="space-y-4">
-                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-5">
-                        <div className="flex items-center gap-3 text-red-500"><AlertCircle className="h-5 w-5" /><span>{error || "AI options failed to load from the backend."}</span></div>
-                    </div>
-                    <button onClick={() => { providersQuery.refetch(); voicesQuery.refetch(); configQuery.refetch(); }} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white hover:bg-emerald-600">
-                        <RefreshCw className="h-4 w-4" /> Retry
-                    </button>
-                </div>
+                <ErrorState message={error || "AI options failed to load from the backend."} onRetry={() => { providersQuery.refetch(); voicesQuery.refetch(); configQuery.refetch(); }} />
             ) : (
-                <div className="space-y-4">
+                // A role that cannot change AI settings gets every control on
+                // the page disabled, not only Save: a disabled fieldset turns
+                // off each select, input, button and voice card inside it.
+                // The two dials are not form controls and take `disabled`.
+                <fieldset disabled={!canEdit} className="m-0 min-w-0 space-y-4 border-0 p-0">
                     {/* Slim brand strip — the page title/description already live in the
                         DashboardLayout header, so this stays compact instead of a tall hero. */}
                     <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex items-center gap-3 overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-r from-emerald-600 to-emerald-500 px-4 py-2.5 text-white">
@@ -540,14 +538,14 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                     {/* Banners */}
                     <AnimatePresence>
                         {error && (
-                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
+                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 p-4">
                                 <div className="flex items-center gap-3 text-red-500"><AlertCircle className="h-5 w-5" /><span>{error}</span></div>
                             </motion.div>
                         )}
                     </AnimatePresence>
                     <AnimatePresence>
                         {saveSuccess && (
-                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
+                            <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} role="status" className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4">
                                 <div className="flex items-center gap-3 text-emerald-600 dark:text-emerald-400"><Check className="h-5 w-5" /><span>Configuration saved successfully!</span></div>
                             </motion.div>
                         )}
@@ -599,11 +597,11 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                 >
                                     {llmModelUnavailable && (
                                         <option value={config.llm_model} disabled>
-                                            {`[${config.llm_provider}] ${config.llm_model} (currently unavailable)`}
+                                            {`[${capitalizeProviderId(config.llm_provider)}] ${config.llm_model} (currently unavailable)`}
                                         </option>
                                     )}
                                     {providers?.llm.models.map((model) => (
-                                        <option key={model.id} value={model.id}>{model.provider ? `[${model.provider}] ${model.name}` : model.name}</option>
+                                        <option key={model.id} value={model.id}>{model.provider ? `[${capitalizeProviderId(model.provider)}] ${model.name}` : model.name}</option>
                                     ))}
                                 </Select>
                                 {llmModelUnavailable && (
@@ -636,6 +634,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             >
                                 <div className={llmDialsHidden ? "contents invisible" : "contents"} onClick={(e) => e.stopPropagation()}>
                                     <RadialKnob
+                                        disabled={!canEdit}
                                         label="Temp" value={config.llm_temperature}
                                         min={0} max={2} step={0.1}
                                         format={(v) => v.toFixed(1)} hint="creativity"
@@ -657,6 +656,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                         }
                                     />
                                     <RadialKnob
+                                        disabled={!canEdit}
                                         label="Tokens" value={config.llm_max_tokens}
                                         min={50} max={5000} step={50} hint="max length"
                                         onChange={(v) => setConfig({ ...config, llm_max_tokens: v })}
@@ -789,7 +789,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             </div>
                         )}
 
-                        {!voicesQuery.isLoading && !voices.some((voice) => voice.id === config.tts_voice_id && voice.provider === config.tts_provider) && (
+                        {!voicesQuery.isLoading && !voicesQuery.isError && !voices.some((voice) => voice.id === config.tts_voice_id && voice.provider === config.tts_provider) && (
                             <p role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
                                 Saved voice {config.tts_voice_id} is currently unavailable in the catalog. Reload the catalog or select a voice explicitly. Your saved selection has been kept.
                             </p>
@@ -797,11 +797,15 @@ function AIOptionsEditor({ scope }: { scope: string }) {
 
                         {/* Voice grid — compact */}
                         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                            {filteredVoices.length === 0 && (
+                            {voicesQuery.isLoading ? (
+                                <div className="col-span-full"><LoadingState /></div>
+                            ) : voicesQuery.isError ? (
+                                <div className="col-span-full"><ErrorState message={(voicesQuery.error as { code?: unknown } | null)?.code === "timeout" ? "Voices took too long to load. Reload to fetch them." : "Voices could not be loaded."} onRetry={() => void voicesQuery.refetch()} /></div>
+                            ) : filteredVoices.length === 0 && (
                                 <div className="col-span-full rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">
                                     {ttsProvider === "elevenlabs" && elevenLabsError
                                         ? <><span className="font-semibold">ElevenLabs API error:</span>{" "}{elevenLabsError.includes("401") ? "API key invalid/expired. Update ELEVENLABS_API_KEY and restart the server." : elevenLabsError}</>
-                                        : voicesNote || `No voices available for "${ttsProvider}". Check the provider key and reload.`}
+                                        : `No voices available for "${ttsProvider}". Check the provider key and reload.`}
                                 </div>
                             )}
                             {filteredVoices.map((voice) => {
@@ -967,7 +971,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                     )}
                     </AnimatePresence>
 
-                </div>
+                </fieldset>
             )}
             <ApplyToCampaignsModal open={!!applyModal} provider={applyModal?.provider ?? ""} voiceId={applyModal?.voiceId ?? ""} voiceLabel={applyModal?.voiceLabel} onClose={() => setApplyModal(null)} />
             <VoiceCloneModal

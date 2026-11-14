@@ -118,7 +118,7 @@ export const privacyBlocks: LegalBlock[] = [
     items: [
       `We do not collect Social Security numbers or national identity documents`,
       `We do not collect biometric data — passkey public keys are cryptographic, not biometric`,
-      `We do not collect precise geolocation data`,
+      `We do not collect precise geolocation data. To show prices and amounts in your local currency, the website uses only the country your connection appears to come from, and does not store it`,
       `We do not read email body content (only metadata: sender, subject, date)`,
       `We do not access Google Drive files other than those created by Talk-Lee`,
       `We do not collect data from children under 13 (US/COPPA) or 16 (EU/UK GDPR)`,
@@ -225,7 +225,7 @@ export const privacyBlocks: LegalBlock[] = [
   {
     type: "ul",
     items: [
-      `Google Calendar booking page — the Book a Demo page shows Google's appointment booking form inside our page. What you type there, such as your name, email address and any notes, goes to Google and to the Talk-Lee calendar the booking is made in. Google's own privacy policy applies to that form`,
+      `Google Calendar booking page — the Book a Demo page shows Google's appointment booking form inside our page. What you type there, such as your name, email address and any notes, goes to Google and to the Talk-Lee calendar the booking is made in. Google's own privacy policy applies to that form. The short form above it on the same page (your name, email address, business name and your answers to two questions about your business) is sent to Talk-Lee, not to Google, and is kept with the enquiries we receive so that we can prepare for your demo`,
       `Pwned Passwords (Have I Been Pwned) — when you enter a password on the sign-in form, your browser sends the first five characters of a one-way hash of it to api.pwnedpasswords.com to check whether it has appeared in a known data breach. The password itself is never sent, and no account details are attached to the request`,
     ],
   },

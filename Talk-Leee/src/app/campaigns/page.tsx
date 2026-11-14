@@ -125,7 +125,7 @@ export default function CampaignsPage() {
     }
 
     return (
-        <DashboardLayout title="Campaign Performance" description="Sorting, filtering, bulk actions, and live ops signals">
+        <DashboardLayout title="Campaigns" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
                 <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} onExport={() => setExportOpen(true)} allowed={allowed} />
                 {notice && notice.campaignId === null ? <CampaignControlNoticeBox notice={notice.notice} testId="campaign-list-notice" /> : null}

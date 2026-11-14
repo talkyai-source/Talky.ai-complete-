@@ -54,7 +54,7 @@ export function CampaignReadinessNotice({ readiness }: { readiness: ReturnType<t
         : "rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-300";
     return <div className={`mt-1 max-w-sm ${tone}`} role="status">
         {readiness.reason}{" "}
-        {!readiness.checking && <button type="button" className="font-semibold underline" onClick={() => void readiness.retry()}>Check again</button>}
+        {!readiness.checking && <button type="button" className="font-semibold underline" onClick={() => void readiness.retry()}>{readiness.error ? "Retry" : "Check again"}</button>}
     </div>;
 }
 

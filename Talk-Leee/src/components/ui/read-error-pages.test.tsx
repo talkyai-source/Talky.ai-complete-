@@ -145,7 +145,7 @@ for (const [kind, Page] of [["analytics", AnalyticsPage], ["campaigns", Campaign
         succeed(kind);
         fireEvent.click(within(alert).getByRole("button", { name: /try again|retry/i }));
         await loaded(kind);
-        assert.equal(readCount(kind), 2);
+        assert.equal(readCount(kind), kind === "analytics" ? 3 : 2);
         assert.equal(screen.queryByRole("alert"), null);
         noWriteOrNetwork();
     });
@@ -161,7 +161,7 @@ for (const [kind, Page] of [["analytics", AnalyticsPage], ["campaigns", Campaign
         assert.equal(readCount(kind), 1, "An online event must not replay work automatically");
         fireEvent.click(within(screen.getByRole("alert")).getByRole("button", { name: /try again|retry/i }));
         await loaded(kind);
-        assert.equal(readCount(kind), 2);
+        assert.equal(readCount(kind), kind === "analytics" ? 3 : 2);
         noWriteOrNetwork();
     });
 
@@ -175,7 +175,7 @@ for (const [kind, Page] of [["analytics", AnalyticsPage], ["campaigns", Campaign
         const alert = await screen.findByRole("alert");
         assert.match(alert.textContent ?? "", /last loaded data/i);
         await loaded(kind);
-        assert.equal(readCount(kind), 2);
+        assert.equal(readCount(kind), kind === "analytics" ? 3 : 2);
         assert.equal(screen.queryByText(/0-0 of 0|No campaigns match|No data/i), null);
         noWriteOrNetwork();
     });

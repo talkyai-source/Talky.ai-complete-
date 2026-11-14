@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { api, sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
+import { UnexpectedAnswerError } from "@/lib/unexpected-answer";
 
 /*
  * Customer support API: the 17 /support routes, modelled on what the backend
@@ -172,7 +173,7 @@ export function describeSupportError(error: unknown): string {
 function parse<T>(schema: z.ZodType<T>, data: unknown, what: string): T {
     const result = schema.safeParse(data);
     if (result.success) return result.data;
-    throw new Error(`Unexpected ${what} response from the server.`);
+    throw new UnexpectedAnswerError(`Unexpected ${what} response from the server.`);
 }
 
 async function write<T>(schema: z.ZodType<T>, what: string, opts: { path: string; body: unknown; signal?: AbortSignal }): Promise<WriteResult<T>> {

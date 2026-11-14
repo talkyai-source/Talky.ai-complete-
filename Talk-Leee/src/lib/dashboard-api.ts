@@ -873,6 +873,8 @@ class DashboardApi {
             method: "GET",
         });
         
+        // An answer without the call is a failed read.
+        if (!response?.id) throw new Error();
         // Map backend response to frontend format
         return {
             id: response.id,

@@ -1,11 +1,12 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi, type AdminPartnerListInput, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
 import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
 import { isActiveCallStatus } from "@/lib/call-history-workflow";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
+import { CONTACTS_MAX_PAGES, CONTACTS_PAGE_SIZE } from "@/lib/contact-fields";
 import { extendedApi } from "@/lib/extended-api";
 import type { AssistantRun, AssistantRunStatus, CalendarEvent, Connector, Reminder } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
@@ -13,7 +14,7 @@ import { notificationsStore } from "@/lib/notifications";
 import { useNotificationMutation } from "@/lib/notification-mutations";
 import { captureException } from "@/lib/monitoring";
 import { useAuth } from "@/lib/auth-context";
-import { getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
+import { ApiClientError, getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 
 function randomId() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -40,6 +41,8 @@ export const queryKeys = {
     campaign: (id: string) => ["campaign", id] as const,
     campaignStats: (id: string) => ["campaignStats", id] as const,
     campaignContacts: (campaignId: string, page: number, pageSize: number) => ["campaignContacts", campaignId, page, pageSize] as const,
+    allCalls: (scope: string | null, pageSize: number, filters?: CallListFilters) => ["calls", "all-pages", scope, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
+    newestCalls: (scope: string | null, pageSize: number, filters?: CallListFilters) => ["calls-newest-page", scope, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
     calls: (cursor: string | null, pageSize: number, filters?: CallListFilters) => ["calls", cursor, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
     call: (id: string) => ["call", id] as const,
     callTranscript: (id: string, format: "json" | "text") => ["callTranscript", id, format] as const,
@@ -64,10 +67,59 @@ export function useConnectors() {
     });
 }
 
+// The connector status check and Connect/Reconnect end as a failure when they
+// have not finished within 20 seconds, retries included. Each attempt has its
+// own shorter limits (lib/backend-api); the retries used to run one after
+// another on top of them, so the wait reached 28 s and 39 s.
+export const CONNECTOR_TOTAL_LIMIT_MS = 20_000;
+
+export async function withinConnectorTotalLimit<T>(
+    run: (signal: AbortSignal) => Promise<T>,
+    options: { retries: number; shouldRetry?: (err: unknown) => boolean; signal?: AbortSignal; path?: string }
+): Promise<T> {
+    const controller = new AbortController();
+    const outer = options.signal;
+    const onAbort = () => controller.abort(outer?.reason);
+    if (outer) {
+        if (outer.aborted) onAbort();
+        else outer.addEventListener("abort", onAbort, { once: true });
+    }
+    let expired = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let waitTimer: ReturnType<typeof setTimeout> | undefined;
+    const limit = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+            expired = true;
+            reject(new ApiClientError({ code: "timeout", message: "Request timed out", url: options.path ?? "", method: "GET" }));
+            controller.abort(new Error("Timeout"));
+        }, CONNECTOR_TOTAL_LIMIT_MS);
+    });
+    const attempts = async () => {
+        for (let failures = 0; ; ) {
+            try {
+                return await run(controller.signal);
+            } catch (err) {
+                failures += 1;
+                if (expired || controller.signal.aborted || failures > options.retries || options.shouldRetry?.(err) === false) throw err;
+                // The same back-off the query client used between attempts.
+                await new Promise<void>((resolve) => { waitTimer = setTimeout(resolve, Math.min(1000 * 2 ** (failures - 1), 30_000)); });
+                if (expired || controller.signal.aborted) throw err;
+            }
+        }
+    };
+    try {
+        return await Promise.race([attempts(), limit]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        if (waitTimer !== undefined) clearTimeout(waitTimer);
+        outer?.removeEventListener("abort", onAbort);
+    }
+}
+
 export function useConnectorStatuses(options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: queryKeys.connectorStatuses(),
-        queryFn: ({ signal }) => backendApi.connectors.status(signal),
+        queryFn: ({ signal }) => withinConnectorTotalLimit((bounded) => backendApi.connectors.status(bounded), { retries: 2, signal, path: "/connectors/status" }),
         refetchInterval: () => {
             if (typeof document === "undefined") return 10_000;
             if (document.visibilityState === "hidden") return false;
@@ -77,7 +129,8 @@ export function useConnectorStatuses(options?: { enabled?: boolean }) {
         refetchOnWindowFocus: true,
         refetchOnMount: "always",
         staleTime: 0,
-        retry: 2,
+        // The retries run inside the one 20-second limit above.
+        retry: false,
         enabled: options?.enabled ?? true,
     });
 }
@@ -163,15 +216,19 @@ export function useImportSalesforcePeople() {
 
 export function useAuthorizeConnector() {
     return useNotificationMutation({
-        mutationFn: backendApi.connectors.authorize,
-        retry: (failureCount, err) => {
-            if (failureCount >= 2) return false;
-            if (typeof err === "object" && err !== null && "status" in (err as object)) {
-                const status = (err as { status?: number }).status;
-                if (typeof status === "number" && status >= 400 && status < 500) return false;
-            }
-            return true;
-        },
+        // One retry, never after a 4xx, inside the one 20-second limit.
+        mutationFn: (input: { type: string; redirect_uri: string }) =>
+            withinConnectorTotalLimit(() => backendApi.connectors.authorize(input), {
+                retries: 1,
+                shouldRetry: (err) => {
+                    if (typeof err === "object" && err !== null && "status" in (err as object)) {
+                        const status = (err as { status?: number }).status;
+                        if (typeof status === "number" && status >= 400 && status < 500) return false;
+                    }
+                    return true;
+                },
+            }),
+        retry: false,
         onError: () => {
             notificationsStore.create({ type: "error", title: "Authorization failed", message: "Could not start the connection flow." });
         },
@@ -584,6 +641,8 @@ export function useOutboundCampaigns() {
         queryKey: queryKeys.campaigns(),
         queryFn: async () => {
             const data = await dashboardApi.listCampaigns();
+            // An answer without a campaigns list is a failed read, not an empty list.
+            if (!Array.isArray(data?.campaigns)) throw new Error("Failed to load campaigns");
             return data.campaigns;
         },
         select: outboundCampaignsOnly,
@@ -624,26 +683,103 @@ export function useCampaignContacts(campaignId: string | undefined, page: number
     });
 }
 
+/** Keep the first copy of any call that appears twice, in order. */
+function uniqueCalls(calls: Call[]): Call[] {
+    const seen = new Set<string>();
+    return calls.filter((call) => (seen.has(call.id) ? false : (seen.add(call.id), true)));
+}
+
 /**
- * One page of call history in the server's cursor mode (QA F6-03). `cursor` is
- * null for the newest page, else the `nextCursor` of the page before it; a
- * cursor is only valid for the filters it was issued under, so the caller must
- * start over (null) whenever a filter changes.
+ * Merge a fresh read of the newest page into the calls already loaded: a call
+ * already known takes its fresh values in place, a call not yet known goes on
+ * top (newest first), and the server's total replaces the old one.
  */
-export function useCalls(cursor: string | null, pageSize: number, filters: CallListFilters = {}) {
-    return useQuery<{ calls: Call[]; nextCursor: string | null }>({
-        queryKey: queryKeys.calls(cursor, pageSize, filters),
-        queryFn: () => dashboardApi.listCallsCursor(cursor, pageSize, filters),
-        placeholderData: keepPreviousData,
-        // Keep the history live only while a call is actually changing state.
-        // This lets the page raise its one-time review prompt immediately after
-        // an active call ends without polling settled history forever.
-        refetchInterval: (query) => {
-            const data = query.state.data as { calls: Call[]; nextCursor: string | null } | undefined;
-            const hasActiveCall = data?.calls.some((call) => isActiveCallStatus(call.status));
-            return hasActiveCall ? 3_000 : false;
+export function mergeNewestCalls(
+    loaded: { calls: Call[]; total: number },
+    newest: { calls: Call[]; total: number },
+): { calls: Call[]; total: number } {
+    const fresh = new Map(newest.calls.map((call) => [call.id, call]));
+    const known = new Set(loaded.calls.map((call) => call.id));
+    const arrived = newest.calls.filter((call) => !known.has(call.id));
+    const updated = loaded.calls.map((call) => fresh.get(call.id) ?? call);
+    return { calls: uniqueCalls([...arrived, ...updated]), total: newest.total };
+}
+
+/** The most calls Call History reads: the same 5,000 as the other all-pages lists. */
+export const CALL_HISTORY_MAX_CALLS = CONTACTS_PAGE_SIZE * CONTACTS_MAX_PAGES;
+
+/** `complete` is false when the 5,000-call limit stopped the reading (or it is still running). */
+export type AllCalls = { calls: Call[]; complete: boolean };
+
+/**
+ * Every call under the given server filters, read with the server's cursor
+ * (QA F6-03) one page after another, so Call History search and filters cover
+ * all calls and not only the rows of one page. GET /calls has no
+ * search/outcome/number filters of its own. Reading stops at 5,000 calls.
+ *
+ * The rows already read are shown while the rest loads. Every page is read on
+ * page load, when a server filter or the signed-in tenant changes (a cursor is
+ * only valid for the tenant and filters it was issued under), and when the
+ * caller refetches (a filter change, Retry). While a call is active the
+ * 3-second refresh reads the newest page only (one request) and merges it
+ * into the calls already loaded.
+ */
+export function useCalls(scope: string | null, pageSize: number, filters: CallListFilters = {}) {
+    const queryClient = useQueryClient();
+    const queryKey = queryKeys.allCalls(scope, pageSize, filters);
+    const keyText = JSON.stringify(queryKey);
+    const [partial, setPartial] = useState<{ key: string; calls: Call[] } | null>(null);
+    const all = useQuery<AllCalls>({
+        queryKey,
+        queryFn: async ({ signal }) => {
+            const calls: Call[] = [];
+            const maxPages = Math.ceil(CALL_HISTORY_MAX_CALLS / pageSize);
+            let cursor: string | null = null;
+            let complete = false;
+            for (let page = 0; page < maxPages; page++) {
+                const read = await dashboardApi.listCallsCursor(cursor, pageSize, filters, signal);
+                calls.push(...read.calls);
+                if (read.nextCursor === null) {
+                    complete = true;
+                    break;
+                }
+                cursor = read.nextCursor;
+                if (!signal.aborted) setPartial({ key: keyText, calls: uniqueCalls(calls) });
+            }
+            // A call that arrives between two page reads shifts the pages by
+            // one row; keep the first copy of any call read twice.
+            return { calls: uniqueCalls(calls), complete };
         },
+        placeholderData: keepPreviousData,
     });
+    // This scope's own answer once there is one; until then the rows read so far.
+    const own = all.data && !all.isPlaceholderData ? all.data : null;
+    const reading = !own && partial?.key === keyText ? partial.calls : null;
+    const hasActiveCall = Boolean(own?.calls.some((call) => isActiveCallStatus(call.status)));
+    // Live only while a call is changing state: this lets the page raise its
+    // one-time review prompt right after an active call ends without polling
+    // settled history forever.
+    useQuery({
+        queryKey: queryKeys.newestCalls(scope, pageSize, filters),
+        queryFn: async ({ signal }) => {
+            const newest = await dashboardApi.listCallsCursor(null, pageSize, filters, signal);
+            queryClient.setQueryData<AllCalls>(queryKey, (loaded) => loaded
+                ? { calls: mergeNewestCalls({ calls: loaded.calls, total: loaded.calls.length }, { calls: newest.calls, total: newest.calls.length }).calls, complete: loaded.complete }
+                : loaded);
+            return newest.calls.length;
+        },
+        enabled: Boolean(own) && hasActiveCall,
+        refetchInterval: 3_000,
+        gcTime: 0,
+    });
+    // The rows to show: this scope's, the ones read so far, or the scope just
+    // left while the first page loads. `complete` (every page read, so the
+    // count of the rows is exact) is true for this scope's finished answer only.
+    const data = useMemo<AllCalls | undefined>(
+        () => own ?? (reading ? { calls: reading, complete: false } : all.data ? { calls: all.data.calls, complete: false } : undefined),
+        [own, reading, all.data],
+    );
+    return { data, isLoading: all.isLoading && !reading, isError: all.isError, error: all.error, refetch: all.refetch };
 }
 
 export function useCall(id: string | undefined) {

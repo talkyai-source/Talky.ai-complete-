@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ReadError } from "@/components/ui/read-error";
+import { ErrorState } from "@/components/states/page-states";
 import { Select } from "@/components/ui/select";
 import { isApiClientError } from "@/lib/http-client";
 import { ASSIGNABLE_ROLES, roleName, teamApi, type AssignableRole, type TeamInvite } from "@/lib/team-api";
@@ -125,8 +125,8 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading invites…
                         </p>
                     ) : invites.isError ? (
-                        <ReadError
-                            resource="the invites"
+                        <ErrorState
+                            message="Could not load the invites."
                             requestId={isApiClientError(invites.error) ? invites.error.requestId : undefined}
                             onRetry={() => { void invites.refetch(); }}
                             busy={invites.isFetching}

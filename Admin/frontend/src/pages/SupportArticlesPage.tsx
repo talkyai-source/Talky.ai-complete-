@@ -97,7 +97,7 @@ function SupportArticlesContent({ generation }: { generation: number }) {
                         </div>
                         <div className="page-header-actions">
                             <button type="button" className="btn btn-primary" disabled={busy || editing.mode !== 'closed'} onClick={() => { setActionError(null); setEditing({ mode: 'create' }); }}>New article</button>
-                            <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={16} /> Refresh</button>
+                            <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void refresh()}><RefreshCw size={16} /> {error ? 'Retry' : 'Refresh'}</button>
                         </div>
                     </div>
 

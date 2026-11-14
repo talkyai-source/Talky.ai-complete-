@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import { BillingPeriod } from "./billing-period";
 import { PayAsYouGoSection } from "./pay-as-you-go";
+import { DisplayCurrencyProvider, LocalAmount, LocalFirstPrice, LocalEstimateNote } from "@/components/pricing/local-price";
 
 export const metadata: Metadata = {
   title: "Pricing | Talk-Lee AI",
@@ -27,6 +29,10 @@ export default function PricingPage() {
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
   const listClassName = "space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
+  // A price headline. Outside the US it shows the visitor's own currency, and
+  // the dollar amount that is charged sits under it in the smaller style.
+  const priceClassName = "text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground";
+  const chargedClassName = "mt-1 block text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -35,8 +41,11 @@ export default function PricingPage() {
     {
       name: "Basic",
       price: "$99/month",
+      usdMonthly: 99,
       annualPrice: "$82/month",
-      annual: "Billed annually: $986/year (save 17%)",
+      usdAnnualMonthly: 82,
+      annual: "$986/year",
+      usdAnnual: 986,
       highlights: [
         "Included AI minutes: 300/month",
         "Concurrent calls: 3",
@@ -48,8 +57,11 @@ export default function PricingPage() {
     {
       name: "Business",
       price: "$299/month",
+      usdMonthly: 299,
       annualPrice: "$248/month",
-      annual: "Billed annually: $2,978/year (save 17%)",
+      usdAnnualMonthly: 248,
+      annual: "$2,978/year",
+      usdAnnual: 2978,
       highlights: [
         "Included AI minutes: 1,000/month",
         "Concurrent calls: 10",
@@ -60,9 +72,17 @@ export default function PricingPage() {
     },
   ];
 
-  const comparisonRows: [string, string, string][] = [
-    ["Monthly price", "$99/month", "$299/month"],
-    ["Annual billing (17% off)", "$986/year ($82/month)", "$2,978/year ($248/month)"],
+  const comparisonRows: [string, ReactNode, ReactNode][] = [
+    [
+      "Monthly price",
+      <LocalAmount key="basic" usd={99} usdText="$99/month" suffix="/month" />,
+      <LocalAmount key="business" usd={299} usdText="$299/month" suffix="/month" />,
+    ],
+    [
+      "Annual billing (17% off)",
+      <LocalAmount key="basic" usd={986} usdText="$986/year" usdOnlyText="$986/year ($82/month)" suffix="/year" />,
+      <LocalAmount key="business" usd={2978} usdText="$2,978/year" usdOnlyText="$2,978/year ($248/month)" suffix="/year" />,
+    ],
     ["Included AI minutes", "300/month", "1,000/month"],
     ["Concurrent calls", "3", "10"],
     ["Campaigns", "2", "10"],
@@ -83,9 +103,9 @@ export default function PricingPage() {
   ];
 
   const bundles = [
-    { price: "$50", minutes: "125 minutes", rate: "$0.40/min" },
-    { price: "$70", minutes: "175 minutes", rate: "$0.40/min" },
-    { price: "$100", minutes: "250 minutes", rate: "$0.40/min" },
+    { price: "$50", usd: 50, minutes: "125 minutes", rate: "$0.40/min", usdRate: 0.4 },
+    { price: "$70", usd: 70, minutes: "175 minutes", rate: "$0.40/min", usdRate: 0.4 },
+    { price: "$100", usd: 100, minutes: "250 minutes", rate: "$0.40/min", usdRate: 0.4 },
   ];
 
   const bundleNotes = [
@@ -96,12 +116,20 @@ export default function PricingPage() {
     "Larger custom minute bundles can be quoted for higher-volume customers.",
   ];
 
-  const voiceProviders = [
-    "Google voices are included in the subscription.",
-    "Cartesia voices are included in the subscription.",
-    "Deepgram voices and Deepgram speech-to-text are included in the subscription.",
-    "ElevenLabs is a premium voice option and is charged separately.",
-    "Current indicative ElevenLabs add-on: $50/month; the exact included ElevenLabs allowance should be confirmed in the client agreement.",
+  const voiceProviders: { key: string; text: ReactNode }[] = [
+    { key: "google", text: "Google voices are included in the subscription." },
+    { key: "cartesia", text: "Cartesia voices are included in the subscription." },
+    { key: "deepgram", text: "Deepgram voices and Deepgram speech-to-text are included in the subscription." },
+    { key: "elevenlabs", text: "ElevenLabs is a premium voice option and is charged separately." },
+    {
+      key: "elevenlabs-price",
+      text: (
+        <>
+          Current indicative ElevenLabs add-on: <LocalAmount usd={50} usdText="$50/month" suffix="/month" />; the exact
+          included ElevenLabs allowance should be confirmed in the client agreement.
+        </>
+      ),
+    },
   ];
 
   const telephoneUsage = [
@@ -125,6 +153,7 @@ export default function PricingPage() {
   return (
     <main className="home-navbar-offset bg-cyan-50 dark:bg-black">
       <Navbar />
+      <DisplayCurrencyProvider>
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
@@ -134,6 +163,7 @@ export default function PricingPage() {
             Simple plans for AI voice calling. AI platform minutes and telephone/PSTN/SIP carrier minutes are billed
             separately.
           </p>
+          <LocalEstimateNote className="mt-3 mx-auto max-w-3xl text-sm text-gray-700 dark:text-muted-foreground" />
         </header>
 
         <BillingPeriod>
@@ -145,16 +175,28 @@ export default function PricingPage() {
                 {/* Both price blocks are always in the server HTML; the switch's
                     data-billing attribute hides the unselected one with CSS. */}
                 <div className="group-data-[billing=monthly]/billing:hidden">
-                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                    {plan.annualPrice}
+                  <LocalFirstPrice
+                    usd={plan.usdAnnualMonthly}
+                    usdText={plan.annualPrice}
+                    suffix="/month"
+                    className={`mt-3 ${priceClassName}`}
+                    chargedClassName={chargedClassName}
+                  />
+                  <p className={cardBodyClassName}>
+                    Monthly price: <LocalAmount usd={plan.usdMonthly} usdText={plan.price} suffix="/month" />
                   </p>
-                  <p className={cardBodyClassName}>Monthly price: {plan.price}</p>
                 </div>
                 <div className="group-data-[billing=annual]/billing:hidden">
-                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                    {plan.price}
+                  <LocalFirstPrice
+                    usd={plan.usdMonthly}
+                    usdText={plan.price}
+                    suffix="/month"
+                    className={`mt-3 ${priceClassName}`}
+                    chargedClassName={chargedClassName}
+                  />
+                  <p className={cardBodyClassName}>
+                    Billed annually: <LocalAmount usd={plan.usdAnnual} usdText={plan.annual} suffix="/year" /> (save 17%)
                   </p>
-                  <p className={cardBodyClassName}>{plan.annual}</p>
                 </div>
                 <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                   {plan.highlights.map((item) => (
@@ -231,16 +273,21 @@ export default function PricingPage() {
           <h2 className={headingClassName}>AI minute top-up bundles</h2>
           <p className={bodyClassName}>
             If the included AI minutes are used before the next monthly renewal, additional AI minutes can be purchased
-            at the standard rate of $0.40 per minute.
+            at the standard rate of <LocalAmount usd={0.4} usdText="$0.40" /> per minute.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {bundles.map((bundle) => (
               <div key={bundle.price} className={accentCardClassName} style={accentCardStyle}>
-                <p className="text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {bundle.price}
-                </p>
+                <LocalFirstPrice
+                  usd={bundle.usd}
+                  usdText={bundle.price}
+                  className={priceClassName}
+                  chargedClassName={chargedClassName}
+                />
                 <p className={cardBodyClassName}>{bundle.minutes}</p>
-                <p className="mt-1 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">{bundle.rate}</p>
+                <p className="mt-1 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+                  <LocalAmount usd={bundle.usdRate} usdText={bundle.rate} suffix="/min" />
+                </p>
               </div>
             ))}
           </div>
@@ -258,7 +305,7 @@ export default function PricingPage() {
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className={listClassName}>
               {voiceProviders.map((item) => (
-                <li key={item}>&bull; {item}</li>
+                <li key={item.key}>&bull; {item.text}</li>
               ))}
             </ul>
           </div>
@@ -307,6 +354,7 @@ export default function PricingPage() {
           </div>
         </section>
       </div>
+      </DisplayCurrencyProvider>
       <Footer />
     </main>
   );

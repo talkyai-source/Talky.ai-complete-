@@ -13,6 +13,9 @@ import { HtmlPreview } from "@/components/email/html-preview";
 import { RichTextEditor } from "@/components/email/rich-text-editor";
 import { isValidEmail, normalizeEmailList, splitEmailInput } from "@/lib/email-utils";
 
+// The API accepts at most 50 recipients per send (SendEmailRequest.to max_length).
+const MAX_RECIPIENTS = 50;
+
 type Step = "recipients" | "template" | "edit" | "confirm";
 
 function contactLabel(input: { first_name?: string; last_name?: string; email?: string }) {
@@ -91,9 +94,11 @@ export function SendEmailModal({
 
     const recipients = useMemo(() => normalizeEmailList(splitEmailInput(recipientsText)), [recipientsText]);
     const invalidRecipients = useMemo(() => recipients.filter((e) => !isValidEmail(e)), [recipients]);
-    const recipientsOk = recipients.length > 0 && invalidRecipients.length === 0;
+    const tooManyRecipients = recipients.length > MAX_RECIPIENTS;
+    const recipientsOk = recipients.length > 0 && invalidRecipients.length === 0 && !tooManyRecipients;
 
-    const templateOk = Boolean(templateId);
+    // The API refuses an empty subject, so the dialog asks for one up front.
+    const templateOk = Boolean(templateId) && subject.trim().length > 0;
 
     const editBlockedByLock = Boolean(template?.locked) && !allowEditLocked;
 
@@ -109,7 +114,7 @@ export function SendEmailModal({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="text-xs text-gray-300">
                 {connectorBlocked ? connectorBlockReason : null}
-                {send.isError ? (connectorBlocked ? " • " : "") + "Send failed. Review details and try again." : null}
+                {send.isError ? (connectorBlocked ? " • " : "") + (send.error instanceof Error && send.error.message ? send.error.message : "Send failed. Review details and try again.") : null}
             </div>
             <div className="flex justify-end gap-2">
                 <Button type="button" variant="ghost" onClick={() => setStep("edit")} disabled={send.isPending}>
@@ -119,13 +124,17 @@ export function SendEmailModal({
                     type="button"
                     onClick={async () => {
                         if (!templateId) return;
-                        await send.mutateAsync({
-                            to: recipients,
-                            templateId,
-                            subject: subject.trim() ? subject.trim() : undefined,
-                            html: editEnabled ? editingHtml : undefined,
-                        });
-                        onOpenChange(false);
+                        try {
+                            await send.mutateAsync({
+                                to: recipients,
+                                templateId,
+                                subject: subject.trim(),
+                                html: effectiveHtml,
+                            });
+                            onOpenChange(false);
+                        } catch {
+                            // The failure text is shown in the footer from send.error.
+                        }
                     }}
                     disabled={!canSubmit}
                 >
@@ -224,6 +233,11 @@ export function SendEmailModal({
                                         Add from contacts
                                     </Button>
                                 </div>
+                                {tooManyRecipients ? (
+                                    <div role="alert" className="text-xs text-red-200">
+                                        {recipients.length} recipients is too many: send to at most {MAX_RECIPIENTS} at a time ({recipients.length - MAX_RECIPIENTS} over).
+                                    </div>
+                                ) : null}
                                 {invalidRecipients.length > 0 ? (
                                     <div className="text-xs text-red-200">
                                         Invalid: {invalidRecipients.slice(0, 5).join(", ")}
@@ -243,7 +257,8 @@ export function SendEmailModal({
                                         id="subject"
                                         value={subject}
                                         onChange={(e) => setSubject(e.target.value)}
-                                        placeholder="Optional subject"
+                                        placeholder="Subject (required)"
+                                        aria-required="true"
                                         className="border-white/10 bg-white/5 text-white placeholder:text-gray-400 focus-visible:ring-white/20"
                                     />
                                 </div>

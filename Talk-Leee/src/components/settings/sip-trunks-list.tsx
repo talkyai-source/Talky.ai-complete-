@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { Plus, Loader2, ServerCog } from "lucide-react";
 import {
     useSipTrunks,
@@ -35,8 +36,14 @@ function PoolAccountSelector() {
     const assignmentQuery = usePoolAssignment();
     const setAssignment = useSetPoolAssignment();
 
+    const poolFailed = useReadFailed(poolQuery);
     const pool = poolQuery.data ?? [];
     const current = assignmentQuery.data?.pool_trunk_id ?? "";
+
+    // A failed read is shown with Retry, never as "no pool accounts".
+    if (poolFailed && !poolQuery.data) {
+        return <ErrorState className="mb-4" requestId={failedReadRequestId(poolQuery.error)} message={failedReadMessage(poolQuery.error)} onRetry={() => void poolQuery.refetch()} />;
+    }
 
     // Nothing to show until the platform actually has pool accounts.
     if (!poolQuery.isLoading && pool.length === 0) return null;
@@ -98,6 +105,18 @@ function PoolAccountSelector() {
     );
 }
 
+/**
+ * True from a failed read until a read succeeds. A poll that follows a failed
+ * read puts the query back into "loading"; this keeps the error on screen
+ * meanwhile, so the loading state shows only on the first load.
+ */
+function useReadFailed(query: { isError: boolean; isSuccess: boolean }): boolean {
+    const [failed, setFailed] = useState(false);
+    if (query.isError && !failed) setFailed(true);
+    if (query.isSuccess && failed) setFailed(false);
+    return failed || query.isError;
+}
+
 /** The number outbound calls really go out from, decided by the dialer's own rules. */
 function OutboundRouteSummary({ route }: { route?: OutboundRoute }) {
     // A cloud-provider account does not dial through these SIP lines.
@@ -128,7 +147,10 @@ function errorText(e: unknown, fallback: string): string {
 export function SipTrunksList() {
     const { create: createNotification } = useNotificationsActions();
     const trunksQuery = useSipTrunks();
-    const outboundRoute = useOutboundRoute().data;
+    const trunksFailed = useReadFailed(trunksQuery);
+    const routeQuery = useOutboundRoute();
+    const routeFailed = useReadFailed(routeQuery);
+    const outboundRoute = routeQuery.data;
     const testMutation = useTestSipTrunk();
     const activateMutation = useActivateSipTrunk();
     const deactivateMutation = useDeactivateSipTrunk();
@@ -255,19 +277,18 @@ export function SipTrunksList() {
                 </div>
             </CardHeader>
             <CardContent>
-                <OutboundRouteSummary route={outboundRoute} />
+                {routeFailed && !outboundRoute ? (
+                    <ErrorState className="mb-4" requestId={failedReadRequestId(routeQuery.error)} message={failedReadMessage(routeQuery.error)} onRetry={() => void routeQuery.refetch()} />
+                ) : (
+                    <OutboundRouteSummary route={outboundRoute} />
+                )}
                 <PoolAccountSelector />
-                {trunksQuery.isLoading ? (
-                    <div className="flex items-center justify-center py-8 text-muted-foreground">
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading your PBX connections…
-                    </div>
-                ) : trunksQuery.isError && !trunksQuery.data ? (
-                    <div role="alert" className="py-4 text-sm text-destructive">Could not load your PBX connections. <Button variant="outline" size="sm" onClick={() => void trunksQuery.refetch()}>Retry</Button></div>
+                {trunksQuery.isLoading && !trunksFailed ? (
+                    <LoadingState title="Loading your PBX connections…" />
+                ) : trunksFailed && !trunksQuery.data ? (
+                    <ErrorState message="Could not load your PBX connections." onRetry={() => void trunksQuery.refetch()} />
                 ) : trunks.length === 0 ? (
-                    <div className="py-8 text-center text-sm text-muted-foreground">
-                        No PBX connected yet. Select <strong>Connect PBX</strong> and enter the address,
-                        username and password your provider gave you.
-                    </div>
+                    <EmptyState title="No PBX connected yet." message="Select Connect PBX and enter the address, username and password your provider gave you." />
                 ) : (
                     <div className="space-y-3">
                         {trunksQuery.isError ? (

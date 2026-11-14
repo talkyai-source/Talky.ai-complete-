@@ -58,7 +58,8 @@ test("a failed refresh disables previously ready start and offers a successful r
     await screen.findByText(/Calling readiness could not be checked/);
     assert.equal((button as HTMLButtonElement).disabled, true);
     failing = false;
-    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    // FX2a: the button that retries a failed readiness read is labelled "Retry".
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => assert.equal((button as HTMLButtonElement).disabled, false));
 });
 

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import {
     api, CampaignKnowledge, KnowledgeTestResponse, KnowledgeNode, KnowledgeSource,
 } from "@/lib/api";
@@ -262,6 +263,8 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                 generation !== requestGeneration.current
                 || requestedCampaignId !== activeCampaignId.current
             ) return;
+            // An answer without its tree and sources is a failed read.
+            if (!Array.isArray(res?.tree) || !Array.isArray(res?.sources)) throw new Error("Failed to load knowledge");
             setData(res);
             setDisabled(false);
             setError(null);
@@ -368,7 +371,7 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
                     {nodeCount > 0 && <span className="text-xs text-muted-foreground">{nodeCount} sections</span>}
                 </div>
                 <div className="flex items-center gap-2">
-                    {error && <span className="text-xs text-red-600 dark:text-red-400 truncate max-w-[30%]" title={error}>{error}</span>}
+                    {error && data && <span className="text-xs text-red-600 dark:text-red-400 truncate max-w-[30%]" title={error}>{error}</span>}
                     {!readOnly && (
                         <>
                             <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
@@ -382,7 +385,10 @@ function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelPro
             </div>
 
             {loading ? (
-                <div className="flex items-center gap-2 px-4 py-6 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading knowledge…</div>
+                <div className="p-4"><LoadingState title="Loading knowledge…" /></div>
+            ) : !data && error ? (
+                // Nothing was read: a failed read, never "No knowledge yet".
+                <div className="p-4"><ErrorState message="Failed to load knowledge" onRetry={refresh} /></div>
             ) : !data || (data.sources.length === 0 && nodeCount === 0) ? (
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />

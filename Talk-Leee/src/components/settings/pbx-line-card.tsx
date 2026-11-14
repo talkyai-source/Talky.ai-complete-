@@ -114,7 +114,7 @@ export function PbxLineCard({
                     <p className="font-mono text-xs text-muted-foreground wrap-anywhere">{server}</p>
                     <p className="text-xs text-muted-foreground wrap-anywhere">{signInText(trunk)}</p>
                     <p className="text-xs text-muted-foreground">{directionText(trunk.direction)}</p>
-                    {callerId ? <p className="text-xs text-muted-foreground wrap-anywhere">Number shown on calls: {callerId}</p> : null}
+                    {callerId ? <p className="text-xs text-muted-foreground wrap-anywhere">Caller ID: {callerId}</p> : null}
                     {usedForOutbound ? (
                         <p className="inline-flex w-fit items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
                             <PhoneOutgoing className="h-3 w-3" aria-hidden />
