@@ -3,6 +3,8 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { z } from "zod";
 import { apiBaseUrl } from "@/lib/env";
+import { BILLING_CURRENCY } from "@/lib/display-currency";
+import { LocalEstimate } from "@/components/pricing/local-price";
 
 // Pay-as-you-go prices live in the backend and change without a release, so the
 // page reads them instead of hard-coding them.
@@ -69,6 +71,10 @@ export function PayAsYouGoCard({ bundles, className, style, titleClassName, body
           {bundles.map((bundle) => (
             <li key={bundle.code}>
               &bull; {bundle.minutes.toLocaleString("en-US")} minutes: {formatBundlePrice(bundle)}
+              {/* The estimate converts from dollars, so it is shown only for a dollar price. */}
+              {bundle.currency.toUpperCase() === BILLING_CURRENCY ? (
+                <LocalEstimate usd={bundle.price_cents / 10 ** (bundle.currency_exponent ?? 2)} className="ml-2" />
+              ) : null}
             </li>
           ))}
         </ul>
