@@ -1359,6 +1359,31 @@ class CallGuard:
 
         return None
 
+    async def _plan_concurrent_calls(self, tenant_id: str) -> Optional[int]:
+        """Simultaneous calls sold with the tenant's plan.
+
+        None when the tenant has no plan, the plan carries no usable number,
+        or the lookup fails: a failed lookup must never block a call, so the
+        caller keeps the default in every one of those cases.
+        """
+        try:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+                value = await conn.fetchval(
+                    """
+                    SELECT p.concurrent_calls
+                    FROM tenants t
+                    JOIN plans p ON p.id = t.plan_id
+                    WHERE t.id = $1
+                    """,
+                    tenant_id,
+                )
+        except Exception as exc:  # noqa: BLE001 - never block a call on this lookup
+            logger.warning("plan concurrency lookup failed, using the default: %s", type(exc).__name__)
+            return None
+        if type(value) is int and 1 <= value <= 1000:
+            return value
+        return None
+
     async def _get_tenant_limits(self, tenant_id: str) -> Optional[TenantCallLimits]:
         """Fetch tenant limits from cache or database."""
         cache_key = f"callguard:limits:tenant:{tenant_id}"
@@ -1405,8 +1430,15 @@ class CallGuard:
             return TenantCallLimits()
 
         if not row:
-            # Return default limits
-            return TenantCallLimits()
+            # No explicit limits for this tenant. Every default applies, except
+            # that the number of simultaneous calls is the one sold with the
+            # tenant's plan (3 on Basic, 10 on Business). Without this, every
+            # self-serve tenant was allowed the default of 10.
+            limits = TenantCallLimits()
+            plan_concurrency = await self._plan_concurrent_calls(tenant_id)
+            if plan_concurrency is not None:
+                limits.max_concurrent_calls = plan_concurrency
+            return limits
 
         limits = TenantCallLimits(
             calls_per_minute=row["calls_per_minute"],
