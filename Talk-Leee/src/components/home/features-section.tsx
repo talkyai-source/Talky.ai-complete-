@@ -19,7 +19,7 @@ const services = [
   {
     icon: Mic,
     title: "White‑Label Program",
-    description: "Resell Talk-Lee AI under your own brand with dedicated access (limited spots).",
+    description: "Reselling Talk-Lee AI under your own brand is planned and not available yet. Contact us to register your interest.",
   },
   {
     icon: Settings,

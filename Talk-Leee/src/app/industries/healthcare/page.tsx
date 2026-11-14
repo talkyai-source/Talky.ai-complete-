@@ -273,7 +273,7 @@ export default function HealthcareIndustryPage() {
     {
       question: "Does it integrate with my existing EHR or scheduling system?",
       answer:
-        "Yes. Our AI agents connect with most major scheduling and EHR platforms so appointments booked over the phone sync straight to your calendar — no double entry for your front desk.",
+        "Appointments booked over the phone are added to Google Calendar or Outlook Calendar. A direct connection to EHR systems is not available in this release.",
     },
     {
       question: "Will it work alongside my current staff?",

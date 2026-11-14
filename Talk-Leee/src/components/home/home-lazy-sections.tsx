@@ -55,7 +55,7 @@ function FAQSection() {
     },
     {
       question: "Can Talk-Lee AI integrate with my existing phone system or CRM?",
-      answer: "Yes. Talk-Lee AI connects seamlessly with phone systems, CRMs like HubSpot, and lead forms.",
+      answer: "Yes. Talk-Lee AI connects to your phone system through a SIP trunk, to HubSpot and Salesforce, and to Google Calendar and Outlook Calendar.",
     },
     {
       question: "How does Talk-Lee AI learn my company information?",
@@ -71,11 +71,11 @@ function FAQSection() {
     },
     {
       question: "Can I resell Talk-Lee AI under my own brand?",
-      answer: "Yes. Our white‑label program lets you offer AI voice solutions as your own. Limited spots available.",
+      answer: "Not yet. A white‑label program is planned and is not available in this release. Contact us to register your interest.",
     },
     {
       question: "Do you provide phone numbers for campaigns?",
-      answer: "Talk-Lee AI issues dedicated numbers for your inbound and outbound campaigns.",
+      answer: "Not yet. Calls go out through Talk-Lee AI's shared line, or through your own SIP trunk and numbers if you connect one. Numbers issued by Talk-Lee AI are not available in this release.",
     },
   ];
 
