@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { currencyForCountry, currencyName, formatEstimate, isUsableRate } from "./display-currency";
+import { currencyForCountry, currencyName, formatEstimate, isUsableRate, usdFromMinor } from "./display-currency";
 
 describe("display currency", () => {
   it("maps a country to its currency, whatever the letter case", () => {
@@ -48,5 +48,29 @@ describe("display currency", () => {
   it("names a currency in words", () => {
     assert.equal(currencyName("GBP"), "British Pound");
     assert.equal(currencyName("PKR"), "Pakistani Rupee");
+  });
+
+  it("gives the dollar value of a stored amount only when it is a usable dollar amount", () => {
+    assert.equal(usdFromMinor(9900, "usd", 2), 99);
+    assert.equal(usdFromMinor(9900, "USD", 2), 99);
+    assert.equal(usdFromMinor(-5000, "usd", 2), -50);
+    assert.equal(usdFromMinor(0, "usd", 2), 0);
+    assert.equal(usdFromMinor(1250, "jpy", 0), null, "a yen amount is not converted from dollars");
+    assert.equal(usdFromMinor(9900, "gbp", 2), null);
+    const unusable: [number | null, string | null, number | null][] = [
+      [null, "usd", 2], [9900, null, 2], [9900, "usd", null], [Number.NaN, "usd", 2], [9900, "usd", 1.5], [9900, "usd", -1],
+    ];
+    for (const [minor, currency, exponent] of unusable) {
+      assert.equal(usdFromMinor(minor, currency, exponent), null, JSON.stringify([minor, currency, exponent]));
+    }
+  });
+
+  it("rounds a large refund like a large charge, and writes zero without decimals", () => {
+    const plain = (text: string) => text.replace(/ /g, " ");
+    assert.equal(plain(formatEstimate(50, 276.6, "PKR")), "PKR 13,830");
+    assert.equal(plain(formatEstimate(-50, 276.6, "PKR")), "-PKR 13,830");
+    assert.equal(plain(formatEstimate(0, 276.6, "PKR")), "PKR 0");
+    assert.equal(plain(formatEstimate(0.02, 276.6, "PKR")), "PKR 5.53");
+    assert.equal(formatEstimate(-50, 0.755149, "GBP"), "-£38");
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
-import { DisplayCurrencyProvider, LocalFirstPrice, LocalEstimateNote, loadDisplayCurrency } from "./local-price";
+import { DisplayCurrencyProvider, LocalAmount, LocalFirstPrice, LocalEstimateNote, loadDisplayCurrency, localAmountText } from "./local-price";
 import { PayAsYouGoCard, type PaygBundle } from "@/app/pricing/pay-as-you-go";
 
 const page = () =>
@@ -82,6 +82,55 @@ describe("local price estimates", () => {
     window.history.replaceState({}, "", "/pricing/?country=pk%26x=1");
     await loadDisplayCurrency();
     assert.deepEqual(asked, ["/api/display-currency"]);
+  });
+
+  it("shows a dollar amount in running text in the visitor's currency first, with the dollars in brackets", async () => {
+    answerWith({ currency: "GBP", rate: 0.755149, as_of: "2026-11-13" });
+    render(
+      <DisplayCurrencyProvider>
+        <p data-testid="line">Monthly price: <LocalAmount usd={99} usdText="$99/month" suffix="/month" /></p>
+        <p data-testid="zero"><LocalAmount usd={0} usdText="$0" /></p>
+        <p data-testid="other"><LocalAmount usd={null} usdText="€50.00" /></p>
+        <p data-testid="long"><LocalAmount usd={986} usdText="$986/year" usdOnlyText="$986/year ($82/month)" suffix="/year" /></p>
+      </DisplayCurrencyProvider>,
+    );
+    await waitFor(() => assert.equal(screen.getByTestId("line").textContent, "Monthly price: ≈ £75/month ($99/month)"));
+    assert.equal(screen.getByTestId("zero").textContent, "£0", "zero is zero in every currency");
+    assert.equal(screen.getByTestId("other").textContent, "€50.00", "an amount that is not in dollars is left alone");
+    assert.equal(screen.getByTestId("long").textContent, "≈ £745/year ($986/year)");
+    assert.deepEqual(asked, ["/api/display-currency"], "one lookup for the whole page");
+  });
+
+  it("leaves a dollar amount exactly as written for a visitor who is shown dollars only", async () => {
+    answerWith({ currency: null });
+    render(
+      <DisplayCurrencyProvider>
+        <p data-testid="line"><LocalAmount usd={99} usdText="$99/month" suffix="/month" /></p>
+        <p data-testid="long"><LocalAmount usd={986} usdText="$986/year" usdOnlyText="$986/year ($82/month)" suffix="/year" /></p>
+      </DisplayCurrencyProvider>,
+    );
+    await waitFor(() => assert.equal(asked.length, 1));
+    assert.equal(screen.getByTestId("line").textContent, "$99/month");
+    assert.equal(screen.getByTestId("long").textContent, "$986/year ($82/month)");
+    assert.equal(screen.queryByTestId("local-estimate"), null);
+  });
+
+  it("asks for nothing on a page that shows no money amount, or outside a provider", async () => {
+    answerWith({ currency: "GBP", rate: 0.755149 });
+    render(<DisplayCurrencyProvider><p>No prices on this page</p></DisplayCurrencyProvider>);
+    render(<p data-testid="bare"><LocalAmount usd={99} usdText="$99" /></p>);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    assert.deepEqual(asked, []);
+    assert.equal(screen.getByTestId("bare").textContent, "$99");
+  });
+
+  it("writes the same thing as plain text, for labels a screen reader announces", () => {
+    const pounds = { currency: "GBP", rate: 0.755149, asOf: null };
+    assert.equal(localAmountText(pounds, 50, "$50.00"), "≈ £38 ($50.00)");
+    assert.equal(localAmountText(pounds, 50, "$50.00 / month", " / month"), "≈ £38 / month ($50.00 / month)");
+    assert.equal(localAmountText(pounds, 0, "$0.00"), "£0");
+    assert.equal(localAmountText(pounds, null, "Unavailable"), "Unavailable");
+    assert.equal(localAmountText(null, 50, "$50.00"), "$50.00");
   });
 
   it("leads the live pay-as-you-go bundles with the local amount, but only when they are priced in dollars", async () => {
