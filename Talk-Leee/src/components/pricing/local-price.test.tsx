@@ -2,14 +2,13 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert";
 import { render, screen, cleanup, waitFor } from "@testing-library/react";
 import React from "react";
-import { DisplayCurrencyProvider, LocalEstimate, LocalEstimateNote, loadDisplayCurrency } from "./local-price";
+import { DisplayCurrencyProvider, LocalFirstPrice, LocalEstimateNote, loadDisplayCurrency } from "./local-price";
 import { PayAsYouGoCard, type PaygBundle } from "@/app/pricing/pay-as-you-go";
 
 const page = () =>
   render(
     <DisplayCurrencyProvider>
-      <p>$99/month</p>
-      <LocalEstimate usd={99} suffix="/month" />
+      <LocalFirstPrice usd={99} usdText="$99/month" suffix="/month" className="headline" chargedClassName="charged" />
       <LocalEstimateNote />
     </DisplayCurrencyProvider>,
   );
@@ -27,11 +26,19 @@ describe("local price estimates", () => {
     window.history.replaceState({}, "", "/");
   });
 
-  it("shows an estimate beside the dollar price, and says what is charged", async () => {
+  it("shows the visitor's own currency as the main price, with the dollar charge under it", async () => {
     answerWith({ currency: "GBP", rate: 0.755149, as_of: "2026-11-13" });
     page();
     await waitFor(() => assert.equal(screen.getByTestId("local-estimate").textContent, "≈ £75/month"));
-    assert.ok(screen.getByText("$99/month"));
+    // The local amount takes the headline's place and style; the dollar amount
+    // that is charged moves directly under it, in the smaller style.
+    const local = screen.getByTestId("local-estimate");
+    assert.equal(local.className, "headline");
+    const charged = screen.getByTestId("charged-in-usd");
+    assert.equal(charged.textContent, "$99/month charged in US dollars");
+    assert.equal(charged.className, "charged");
+    assert.equal(charged.previousElementSibling, local);
+    assert.equal(screen.queryByText("$99/month"), null, "the dollar price is no longer a headline of its own");
     const note = screen.getByTestId("local-estimate-note").textContent ?? "";
     assert.match(note, /charged in US dollars/);
     assert.match(note, /GBP \(British Pound\) are estimates at the exchange rate of 13 Nov 2026; the amount your bank charges may differ/);
@@ -39,13 +46,16 @@ describe("local price estimates", () => {
     assert.deepEqual(asked, ["/api/display-currency"]);
   });
 
-  it("adds nothing for a visitor who is shown dollars only", async () => {
+  it("shows the dollar price alone for a visitor who is shown dollars only", async () => {
     answerWith({ currency: null });
     page();
+    // Before the lookup answers (and in the server HTML) the dollar price is the headline.
+    assert.equal(screen.getByText("$99/month").className, "headline");
     await waitFor(() => assert.equal(asked.length, 1));
     assert.equal(screen.queryByTestId("local-estimate"), null);
+    assert.equal(screen.queryByTestId("charged-in-usd"), null);
     assert.equal(screen.queryByTestId("local-estimate-note"), null);
-    assert.ok(screen.getByText("$99/month"));
+    assert.equal(screen.getByText("$99/month").className, "headline");
   });
 
   it("adds nothing when the lookup fails, answers oddly, or names dollars", async () => {
@@ -74,7 +84,7 @@ describe("local price estimates", () => {
     assert.deepEqual(asked, ["/api/display-currency"]);
   });
 
-  it("estimates the live pay-as-you-go bundles, but only when they are priced in dollars", async () => {
+  it("leads the live pay-as-you-go bundles with the local amount, but only when they are priced in dollars", async () => {
     const bundle: PaygBundle = { code: "payg_125", minutes: 125, price_cents: 5000, currency: "usd", currency_exponent: 2 };
     answerWith({ currency: "GBP", rate: 0.755149, as_of: "2026-11-13" });
     render(
@@ -84,6 +94,10 @@ describe("local price estimates", () => {
     );
     await waitFor(() => assert.equal(screen.getAllByTestId("local-estimate").length, 1));
     assert.equal(screen.getByTestId("local-estimate").textContent, "≈ £38");
-    assert.ok(screen.getByText(/125 minutes: \$50\.00/));
+    const lines = screen.getAllByRole("listitem").map((item) => (item.textContent ?? "").replace(/\s+/g, " ").trim());
+    assert.deepEqual(lines, [
+      "• 125 minutes: ≈ £38 ($50.00 charged in US dollars)",
+      "• 125 minutes: €50.00",
+    ]);
   });
 });

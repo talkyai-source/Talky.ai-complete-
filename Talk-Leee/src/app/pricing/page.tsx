@@ -5,7 +5,7 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import { BillingPeriod } from "./billing-period";
 import { PayAsYouGoSection } from "./pay-as-you-go";
-import { DisplayCurrencyProvider, LocalEstimate, LocalEstimateNote } from "@/components/pricing/local-price";
+import { DisplayCurrencyProvider, LocalFirstPrice, LocalEstimateNote } from "@/components/pricing/local-price";
 
 export const metadata: Metadata = {
   title: "Pricing | Talk-Lee AI",
@@ -28,8 +28,10 @@ export default function PricingPage() {
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
   const listClassName = "space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
-  // A local-currency estimate under a dollar price (shown outside the US only).
-  const estimateClassName = "mt-1 block text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground";
+  // A price headline. Outside the US it shows the visitor's own currency, and
+  // the dollar amount that is charged sits under it in the smaller style.
+  const priceClassName = "text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground";
+  const chargedClassName = "mt-1 block text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -154,17 +156,23 @@ export default function PricingPage() {
                 {/* Both price blocks are always in the server HTML; the switch's
                     data-billing attribute hides the unselected one with CSS. */}
                 <div className="group-data-[billing=monthly]/billing:hidden">
-                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                    {plan.annualPrice}
-                  </p>
-                  <LocalEstimate usd={plan.usdAnnualMonthly} suffix="/month" className={estimateClassName} />
+                  <LocalFirstPrice
+                    usd={plan.usdAnnualMonthly}
+                    usdText={plan.annualPrice}
+                    suffix="/month"
+                    className={`mt-3 ${priceClassName}`}
+                    chargedClassName={chargedClassName}
+                  />
                   <p className={cardBodyClassName}>Monthly price: {plan.price}</p>
                 </div>
                 <div className="group-data-[billing=annual]/billing:hidden">
-                  <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                    {plan.price}
-                  </p>
-                  <LocalEstimate usd={plan.usdMonthly} suffix="/month" className={estimateClassName} />
+                  <LocalFirstPrice
+                    usd={plan.usdMonthly}
+                    usdText={plan.price}
+                    suffix="/month"
+                    className={`mt-3 ${priceClassName}`}
+                    chargedClassName={chargedClassName}
+                  />
                   <p className={cardBodyClassName}>{plan.annual}</p>
                 </div>
                 <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -247,10 +255,12 @@ export default function PricingPage() {
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {bundles.map((bundle) => (
               <div key={bundle.price} className={accentCardClassName} style={accentCardStyle}>
-                <p className="text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {bundle.price}
-                </p>
-                <LocalEstimate usd={bundle.usd} className={estimateClassName} />
+                <LocalFirstPrice
+                  usd={bundle.usd}
+                  usdText={bundle.price}
+                  className={priceClassName}
+                  chargedClassName={chargedClassName}
+                />
                 <p className={cardBodyClassName}>{bundle.minutes}</p>
                 <p className="mt-1 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">{bundle.rate}</p>
               </div>
