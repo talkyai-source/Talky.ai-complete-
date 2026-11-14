@@ -36,7 +36,9 @@ describe("ContactSection", () => {
     
     // Check for contact info
     assert.ok(screen.getByText("Get in Touch"));
-    assert.ok(screen.getByText("contact@talk-lee.com"));
+    // The address must be on the company's own domain: talk-lee.com was never registered.
+    const address = screen.getByText("support@talkleeai.com");
+    assert.equal(address.closest("a")?.getAttribute("href"), "mailto:support@talkleeai.com");
   });
 
   it("keeps the message box at 16px on phones so iOS does not zoom", () => {
