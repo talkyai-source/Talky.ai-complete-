@@ -243,7 +243,7 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                 <div className="space-y-6">
                    <div>
                       <h4 className="text-lg font-semibold text-primary dark:text-foreground mb-1">Email</h4>
-                      <a href="mailto:contact@talk-lee.com" className="text-gray-700 dark:text-muted-foreground hover:underline underline-offset-4">contact@talk-lee.com</a>
+                      <a href="mailto:support@talkleeai.com" className="text-gray-700 dark:text-muted-foreground hover:underline underline-offset-4">support@talkleeai.com</a>
                    </div>
                 </div>
              </motion.div>

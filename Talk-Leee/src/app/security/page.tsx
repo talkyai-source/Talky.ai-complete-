@@ -256,18 +256,22 @@ export default function SecurityPage() {
     const [regenCodes, setRegenCodes] = useState<string[] | null>(null);
     const [busy, setBusy] = useState(false);
     const [mfaError, setMfaError] = useState<string | null>(null);
+    // The status read failed. That is "unknown", never "off": an account
+    // without two-factor is answered with enabled=false, not with an error.
+    const [mfaStatusFailed, setMfaStatusFailed] = useState(false);
 
     const refreshMfa = useCallback(async (t: string) => {
         // No early return on an empty token: in cookie-only mode the JWT is
         // HttpOnly, so `t` is "" while the shared client still authenticates.
         try {
             setMfaLoading(true);
+            setMfaStatusFailed(false);
             const s = await getMfaStatus(t);
             setMfaEnabled(s.enabled);
             setMfaVerifiedAt(s.verifiedAt);
             setMfaCodesRemaining(s.recoveryCodesRemaining);
         } catch {
-            /* 404 / network — leave the defaults */
+            setMfaStatusFailed(true);
         } finally {
             setMfaLoading(false);
         }
@@ -371,6 +375,15 @@ export default function SecurityPage() {
                         <p className="flex items-center gap-2 text-sm text-muted-foreground">
                             <Loader2 className="h-4 w-4 animate-spin" /> Checking status…
                         </p>
+                    ) : mfaStatusFailed ? (
+                        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+                            <p className="text-sm text-foreground">
+                                We could not check whether two-factor authentication is on. Nothing has changed on your account.
+                            </p>
+                            <Button variant="outline" size="sm" onClick={() => void refreshMfa(token)}>
+                                Try again
+                            </Button>
+                        </div>
                     ) : mfaEnabled ? (
                         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3">
                             <p className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-300">
