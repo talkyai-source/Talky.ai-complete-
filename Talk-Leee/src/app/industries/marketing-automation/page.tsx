@@ -166,7 +166,7 @@ export default function MarketingAutomationIndustryPage() {
     },
   ];
 
-  const integrationLogos = ["HubSpot", "GoHighLevel", "Salesforce", "Google Calendar", "Outlook", "Zapier"];
+  const integrationLogos = ["HubSpot", "Salesforce", "Google Calendar", "Outlook"];
 
   const howItWorks = [
     {
@@ -258,7 +258,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       question: "Does it integrate with the CRMs my clients already use?",
       answer:
-        "Yes. It supports AI CRM integration for marketing with popular platforms like HubSpot, GoHighLevel, Salesforce, and other leading CRM systems, automatically syncing lead and call data.",
+        "It connects to HubSpot and Salesforce and syncs lead and call data to them. Other CRM systems are not connected in this release.",
     },
     {
       question: "How does AI marketing lead qualification work?",

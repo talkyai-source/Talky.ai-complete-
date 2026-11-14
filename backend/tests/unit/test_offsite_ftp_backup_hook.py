@@ -23,8 +23,12 @@ case "$1" in
     head -c "${FAKE_DUMP_BYTES}" /dev/zero
     exit "${FAKE_HELPER_EXIT:-0}" ;;
   *offsite_ftp.py)
-    echo offsite-ftp >> "$FTP_TEST_LOG"
+    [[ "$2" = sync-recordings ]] || echo offsite-ftp >> "$FTP_TEST_LOG"
     shift
+    if [[ "$1" = sync-recordings ]]; then
+      echo recordings >> "$FTP_TEST_LOG"
+      exit "${FAKE_REC_EXIT:-0}"
+    fi
     [[ "$1" = publish ]] || exit 91
     shift
     published=""
@@ -79,3 +83,27 @@ def test_without_an_ftp_destination_nothing_is_sent(tmp_path, boundary, monkeypa
     result = backup._run_backup(tmp_path, 9000)
     assert result.returncode == 0, result.stderr
     assert boundary.read_text().splitlines() == ["snapshot"]
+
+
+def test_recordings_sync_is_off_unless_the_explicit_switch_is_set(tmp_path, boundary, monkeypatch):
+    monkeypatch.delenv("TALKY_OFFSITE_FTP_RECORDINGS", raising=False)
+    result = backup._run_backup(tmp_path, 9000)
+    assert result.returncode == 0, result.stderr
+    assert "recordings" not in boundary.read_text().splitlines()
+
+
+def test_recordings_sync_runs_after_the_database_upload_when_switched_on(tmp_path, boundary, monkeypatch):
+    monkeypatch.setenv("TALKY_OFFSITE_FTP_RECORDINGS", "1")
+    result = backup._run_backup(tmp_path, 9000)
+    assert result.returncode == 0, result.stderr
+    assert boundary.read_text().splitlines() == ["snapshot", "offsite-ftp", "verified-local-publication", "recordings"]
+
+
+def test_a_recordings_failure_fails_the_unit_but_the_database_copy_and_retention_stand(tmp_path, boundary, monkeypatch):
+    stale = backup._seed_previous(tmp_path, 9000, 45, "talky-20250101T000000Z.dump")
+    monkeypatch.setenv("TALKY_OFFSITE_FTP_RECORDINGS", "1")
+    monkeypatch.setenv("FAKE_REC_EXIT", "1")
+    result = backup._run_backup(tmp_path, 9000)
+    assert result.returncode != 0, "a failed recordings sync must fail the unit"
+    assert "verified-local-publication" in boundary.read_text().splitlines()
+    assert not stale.exists(), "the database copy succeeded, so local retention still runs"

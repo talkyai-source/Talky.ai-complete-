@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isApiClientError } from "@/lib/http-client";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { LegalAcceptanceField, useLegalAcceptance } from "@/components/auth/legal-acceptance";
 import { inviteApi, roleName, type InvitePreview } from "@/lib/team-api";
 
 /**
@@ -22,6 +23,7 @@ type Phase =
     | { kind: "checking" }
     | { kind: "missing" }
     | { kind: "invalid" }
+    | { kind: "failed"; message: string }
     | { kind: "form"; invite: InvitePreview }
     | { kind: "done"; email: string };
 
@@ -52,29 +54,45 @@ export default function AcceptInvitePage() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const legal = useLegalAcceptance();
+
+    // The token stays in the address until the check gets an answer, so a
+    // reload after a network error or a busy server can still find it.
+    async function check(isLive: () => boolean) {
+        token.current = token.current || tokenFromAddress();
+        if (!token.current) {
+            await Promise.resolve();
+            if (isLive()) setPhase({ kind: "missing" });
+            return;
+        }
+        const clearAddress = () => {
+            if (window.location.hash) window.history.replaceState(window.history.state, "", window.location.pathname);
+        };
+        try {
+            const invite = await inviteApi.preview(token.current);
+            clearAddress();
+            if (isLive()) setPhase({ kind: "form", invite });
+        } catch (err) {
+            if (isApiClientError(err) && err.status === 410) {
+                clearAddress();
+                if (isLive()) setPhase({ kind: "invalid" });
+            } else if (isLive()) {
+                setPhase({ kind: "failed", message: failureMessage(err) });
+            }
+        }
+    }
 
     useEffect(() => {
         let live = true;
-        async function check() {
-            token.current = token.current || tokenFromAddress();
-            if (window.location.hash) window.history.replaceState(window.history.state, "", window.location.pathname);
-            if (!token.current) {
-                await Promise.resolve();
-                if (live) setPhase({ kind: "missing" });
-                return;
-            }
-            try {
-                const invite = await inviteApi.preview(token.current);
-                if (live) setPhase({ kind: "form", invite });
-            } catch (err) {
-                if (!live) return;
-                if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
-                else setError(failureMessage(err));
-            }
-        }
-        void check();
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the check sets state only after awaiting the server (or a microtask)
+        void check(() => live);
         return () => { live = false; };
     }, []);
+
+    function tryAgain() {
+        setPhase({ kind: "checking" });
+        void check(() => true);
+    }
 
     async function join(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -91,12 +109,17 @@ export default function AcceptInvitePage() {
             setError("Passwords do not match.");
             return;
         }
+        if (legal.blocked) {
+            setError("Accept the Terms of Service and Privacy Policy to continue.");
+            return;
+        }
         setSubmitting(true);
         try {
-            const joined = await inviteApi.accept({ token: token.current, name: name.trim(), password, confirmPassword });
+            const joined = await inviteApi.accept({ token: token.current, name: name.trim(), password, confirmPassword, ...legal.fields() });
             setPhase({ kind: "done", email: joined.email });
         } catch (err) {
-            if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
+            if (legal.handleRefusal(err)) setError("");
+            else if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
             else setError(failureMessage(err));
         } finally {
             setSubmitting(false);
@@ -110,9 +133,19 @@ export default function AcceptInvitePage() {
                     <CardHeader>
                         <Heading>Checking your invite</Heading>
                         <CardDescription role="status" className="flex items-center gap-2">
-                            {error ? error : (<><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> One moment…</>)}
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> One moment…
                         </CardDescription>
                     </CardHeader>
+                ) : phase.kind === "failed" ? (
+                    <>
+                        <CardHeader>
+                            <Heading>We could not check your invite</Heading>
+                            <CardDescription role="alert">{phase.message}</CardDescription>
+                        </CardHeader>
+                        <CardFooter>
+                            <Button type="button" className="w-full" onClick={tryAgain}>Try again</Button>
+                        </CardFooter>
+                    </>
                 ) : phase.kind === "missing" ? (
                     <CardHeader>
                         <Heading>This link is incomplete</Heading>
@@ -146,27 +179,31 @@ export default function AcceptInvitePage() {
                         <CardContent className="space-y-4">
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-name">Your name</Label>
-                                <Input id="invite-name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} />
+                                <Input id="invite-name" autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-password">Password</Label>
-                                <Input id="invite-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                                <Input id="invite-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                                 <p className="text-xs text-muted-foreground">At least {MIN_PASSWORD_LENGTH} characters.</p>
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-confirm">Confirm password</Label>
-                                <Input id="invite-confirm" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                                <Input id="invite-confirm" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                             </div>
-                            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-                            <p className="text-xs text-muted-foreground">
-                                By joining, you agree to our{" "}
-                                <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
-                                {" "}and{" "}
-                                <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
-                            </p>
+                            {error ? <p id="invite-error" role="alert" className="text-sm text-destructive">{error}</p> : null}
+                            {legal.required ? (
+                                <LegalAcceptanceField legal={legal} disabled={submitting} />
+                            ) : (
+                                <p className="text-xs text-muted-foreground">
+                                    By joining, you agree to our{" "}
+                                    <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
+                                    {" "}and{" "}
+                                    <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
+                                </p>
+                            )}
                         </CardContent>
                         <CardFooter>
-                            <Button type="submit" className="w-full" disabled={submitting}>
+                            <Button type="submit" className="w-full" disabled={submitting || legal.blocked}>
                                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />}
                                 Join the workspace
                             </Button>

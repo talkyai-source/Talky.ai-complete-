@@ -1,7 +1,38 @@
 "use client";
+import { useState } from "react";
 import type { AIProviderConfig, ProviderListResponse } from "@/lib/ai-options-api";
 import { Select } from "@/components/ui/select";
 import { RealtimePromptEditor } from "./prompt-editor";
+
+/**
+ * A number box that never sends 0 for an empty box: it keeps what is typed,
+ * passes on only a number inside min..max, and on blur puts the box back to a
+ * valid value (the nearest limit, or the saved value when it is empty).
+ */
+function BoundedNumberInput({ label, className, min, max, step, value, onCommit }: {
+    label: string; className: string; min: number; max: number; step: number;
+    value: number; onCommit: (next: number) => void;
+}) {
+    const [text, setText] = useState(String(value));
+    const [seen, setSeen] = useState(value);
+    if (value !== seen) {
+        // The saved value changed from outside (for example the config finished loading).
+        setSeen(value);
+        setText(String(value));
+    }
+    return <label className="text-sm font-medium">{label}<input className={className} type="number" min={min} max={max} step={step} value={text}
+        onChange={(e) => {
+            setText(e.target.value);
+            const n = Number(e.target.value);
+            if (e.target.value.trim() !== "" && Number.isFinite(n) && n >= min && n <= max) { setSeen(n); onCommit(n); }
+        }}
+        onBlur={() => {
+            const n = Number(text);
+            const next = text.trim() === "" || !Number.isFinite(n) ? value : Math.min(max, Math.max(min, n));
+            setText(String(next));
+            if (next !== value) { setSeen(next); onCommit(next); }
+        }} /></label>;
+}
 
 export function RealtimeControls({ config, catalog, onChange, onPreview, previewing }: {
     config: AIProviderConfig;
@@ -43,8 +74,8 @@ export function RealtimeControls({ config, catalog, onChange, onPreview, preview
                 <label className="text-sm font-medium">Reasoning effort<Select className="mt-1" selectClassName={selCls} ariaLabel="Reasoning effort" value={settings.reasoning_effort || "low"} onChange={(next) => set({ reasoning_effort: next })}>
                     {["minimal", "low", "medium", "high", "xhigh", "none"].map((v) => <option key={v} value={v}>{v === "none" ? "Provider default" : v}</option>)}
                 </Select></label>
-                <label className="text-sm font-medium">Speech speed<input className={cls} type="number" min={0.25} max={1.5} step={0.05} value={settings.speed ?? 1} onChange={(e) => set({ speed: Number(e.target.value) })} /></label>
-                <label className="text-sm font-medium">Maximum response tokens<input className={cls} type="number" min={64} max={4096} step={64} value={settings.max_output_tokens ?? 1024} onChange={(e) => set({ max_output_tokens: Number(e.target.value) })} /></label>
+                <BoundedNumberInput label="Speech speed" className={cls} min={0.25} max={1.5} step={0.05} value={settings.speed ?? 1} onCommit={(speed) => set({ speed })} />
+                <BoundedNumberInput label="Maximum response tokens" className={cls} min={64} max={4096} step={64} value={settings.max_output_tokens ?? 1024} onCommit={(max_output_tokens) => set({ max_output_tokens })} />
             </div>
             <RealtimePromptEditor value={settings.prompt} onChange={(prompt) => set({ prompt })} />
         </fieldset>

@@ -83,11 +83,16 @@ export const inviteApi = {
         const data = await sharedHttpClient().request({ path: "/auth/invites/preview", method: "POST", body: { token } });
         return previewSchema.parse(data);
     },
-    async accept(input: { token: string; name: string; password: string; confirmPassword: string }) {
+    async accept(input: { token: string; name: string; password: string; confirmPassword: string; termsVersion?: string; privacyVersion?: string }) {
         const data = await sharedHttpClient().request({
             path: "/auth/invites/accept",
             method: "POST",
-            body: { token: input.token, name: input.name, password: input.password, confirm_password: input.confirmPassword },
+            body: {
+                token: input.token, name: input.name, password: input.password, confirm_password: input.confirmPassword,
+                ...(input.termsVersion && input.privacyVersion
+                    ? { terms_version: input.termsVersion, privacy_version: input.privacyVersion }
+                    : {}),
+            },
         });
         return acceptedSchema.parse(data);
     },

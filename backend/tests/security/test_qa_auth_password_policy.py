@@ -74,3 +74,44 @@ async def test_existing_admin_hash_input_contract_is_preserved(monkeypatch):
                                   role="platform_admin")
     with pytest.raises(ReachedDatabase):
         await users.create_user(body, SimpleNamespace(id="synthetic-admin"), SimpleNamespace(pool=None), SimpleNamespace())
+
+
+async def test_change_password_uses_both_passwords_exactly_as_typed_like_sign_in(monkeypatch):
+    """Sign-in compares the typed password as is, so change must not strip."""
+    from app.api.v1.endpoints.auth.schemas import ChangePasswordRequest
+    change = importlib.import_module("app.api.v1.endpoints.auth.password")
+    seen = {}
+
+    class FakeConn:
+        async def fetchrow(self, *args):
+            return {"password_hash": "stored-hash"}
+
+    @asynccontextmanager
+    async def fake_acquire(*args):
+        yield FakeConn()
+
+    def fake_validate(password):
+        seen["new"] = password
+
+    def fake_verify(password, stored):
+        seen["old"] = password
+        return False  # stop before any write
+
+    monkeypatch.setattr(change, "acquire_with_tenant", fake_acquire)
+    monkeypatch.setattr(change, "validate_password_strength", fake_validate)
+    monkeypatch.setattr(change, "verify_password", fake_verify)
+    body = ChangePasswordRequest(old_password=" old credential ", new_password=" orchid lantern café 2026 ")
+    with pytest.raises(HTTPException) as exc:
+        await change.change_password(None, body, Response(), SimpleNamespace(tenant_id=None, id="u"),
+                                     SimpleNamespace(pool=None), SimpleNamespace())
+    assert exc.value.status_code == 400
+    assert seen == {"new": " orchid lantern café 2026 ", "old": " old credential "}
+
+
+async def test_change_password_still_refuses_empty_passwords():
+    from app.api.v1.endpoints.auth.schemas import ChangePasswordRequest
+    change = importlib.import_module("app.api.v1.endpoints.auth.password")
+    with pytest.raises(HTTPException) as exc:
+        await change.change_password(None, ChangePasswordRequest(old_password="", new_password="x"), Response(),
+                                     SimpleNamespace(tenant_id=None), SimpleNamespace(pool=None), SimpleNamespace())
+    assert exc.value.status_code == 400

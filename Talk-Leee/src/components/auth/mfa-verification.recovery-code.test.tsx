@@ -126,3 +126,11 @@ test("FX3a: with no challenge the error names two-factor authentication, not MFA
   await waitFor(() => assert.deepEqual(errors, ["Two-factor authentication session expired. Please sign in again."]));
   assert.equal(screen.queryByText(/MFA session expired/) !== null, false);
 });
+
+test("A-F10 the helper line and the error both say 6-8 digits, as the field accepts", () => {
+  mount();
+  assert.match(screen.getByText(/Open your authenticator app/).textContent ?? "", /6-8 digit code/);
+  fireEvent.change(field(), { target: { value: "123" } });
+  fireEvent.submit(field().closest("form")!);
+  assert.match(screen.getByRole("alert").textContent ?? "", /6-8 digit code/);
+});

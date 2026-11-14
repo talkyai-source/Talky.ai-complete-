@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
-import { formatPurchasedPrice, hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/billing-purchase";
+import { hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/billing-purchase";
+import { LocalPurchasedPrice, LocalYearlySaving } from "@/components/billing/local-money";
 import { useBillingRefusal } from "@/lib/billing-refusal";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
 
@@ -26,7 +27,7 @@ function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPu
     {attempt?.state === "activated" && <p role="status" className="rounded-xl border border-emerald-500/30 p-4">The server confirmed this purchase. Your current plan is shown from billing records.</p>}
     {(attempt?.state === "expired" || attempt?.state === "failed") && <p role="status" className="text-sm">The server confirmed the saved checkout {attempt.state === "expired" ? "expired" : "failed"}. You may choose an available offer again.</p>}
     {saved && <div className="space-y-3 rounded-xl border p-4">
-      <p className="font-medium">Saved purchase: {saved.price_option.plan_name} — {formatPurchasedPrice(saved.price_option)}</p>
+      <p className="font-medium">Saved purchase: {saved.price_option.plan_name} — <LocalPurchasedPrice price={saved.price_option} /></p>
       <p className="text-sm">{attempt?.state === "open" ? "Checkout is open. Resume this purchase instead of creating another." : "This purchase is not yet confirmed. Its selection is kept for safe retry."}</p>
       <p className="break-all text-xs text-muted-foreground">Request reference: {saved.request_id}</p>
       <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void purchase.run()}>{busy ? "Checking…" : "Resume saved purchase"}</Button><Button variant="outline" disabled={busy} onClick={() => void purchase.check()}>Check status</Button></div>
@@ -79,7 +80,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
         const available = Boolean(price?.checkout_available && price.active && (price.kind === "free" || ["live", "test"].includes(plan.billing_mode)));
         const currentFree = price?.kind === "free" && subscription?.purchased_price_option?.id === price.id;
         const saving = price ? yearlySaving(price, plan.price_options) : null;
-        return <Card key={plan.id} className="flex flex-col"><CardHeader><CardTitle>{plan.name}</CardTitle><CardDescription>{price ? formatPurchasedPrice(price) : "No approved offer for this interval"}</CardDescription>{saving && <p className="text-sm">{saving}</p>}{plan.billing_mode === "test" && price?.kind === "stripe" && <p className="text-sm">Test billing — not a live purchase</p>}</CardHeader><CardContent className="flex flex-1 flex-col gap-4">
+        return <Card key={plan.id} className="flex flex-col"><CardHeader><CardTitle>{plan.name}</CardTitle><CardDescription>{price ? <LocalPurchasedPrice price={price} /> : "No approved offer for this interval"}</CardDescription>{price && saving && <p className="text-sm"><LocalYearlySaving year={price} options={plan.price_options} /></p>}{plan.billing_mode === "test" && price?.kind === "stripe" && <p className="text-sm">Test billing — not a live purchase</p>}</CardHeader><CardContent className="flex flex-1 flex-col gap-4">
           <ul className="flex-1 space-y-2 text-sm">{plan.features.map(feature => <li key={feature}>{feature}</li>)}</ul>
           <p className="text-sm">Monthly included allowance: {plan.minutes === 0 ? "Unlimited" : `${plan.minutes.toLocaleString()} minutes`}<br />Concurrent calls: {plan.concurrent_calls}</p>
           {!available && <p className="text-sm">{price?.unavailable_reason || "This offer is not available for checkout."}</p>}

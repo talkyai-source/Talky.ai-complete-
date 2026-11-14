@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Dict, List, Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.domain.services.contact_fields import _valid_timezone
 from app.domain.services.voice_action_config import VoiceEmailAction, VoiceFormAction
 
 
@@ -447,6 +448,16 @@ class ApplyTtsConfigRequest(BaseModel):
     campaign_ids: List[str] = Field(..., min_length=1)
 
 
+def _check_contact_timezone(v: Optional[str]) -> Optional[str]:
+    """Empty is allowed; anything else must be a real IANA zone (same rule as CSV import)."""
+    if v is None or not v.strip():
+        return v
+    error = _valid_timezone(v.strip())
+    if error:
+        raise ValueError(error)
+    return v.strip()
+
+
 class ContactCreate(BaseModel):
     """Request body for adding a single contact to a campaign."""
 
@@ -476,6 +487,11 @@ class ContactCreate(BaseModel):
             raise ValueError("Phone number cannot be empty")
         # Library validity is enforced with campaign/account country in the endpoint.
         return v
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        return _check_contact_timezone(v)
 
 
 class ContactUpdate(BaseModel):
@@ -509,6 +525,11 @@ class ContactUpdate(BaseModel):
             raise ValueError("Phone number cannot be empty")
         # Length/format enforced in the endpoint (tenant-scoped).
         return v
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        return _check_contact_timezone(v)
 
 
 class ContactListResponse(BaseModel):

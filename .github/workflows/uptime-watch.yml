@@ -1,0 +1,37 @@
+name: Outside uptime watch
+
+on:
+  schedule:
+    # Every 10 minutes, but never on a round minute: GitHub delays scheduled
+    # runs under load, most at the start of an hour and on round minutes, and
+    # may drop them. On 14 Nov 2026 the "*/10" schedule did not start once in
+    # five hours.
+    - cron: "7,17,27,37,47,57 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Check site and API from outside the server
+    if: github.repository == 'talkyai-source/Talky.ai-complete-'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run outside checks and update the uptime issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python scripts/uptime_watch.py

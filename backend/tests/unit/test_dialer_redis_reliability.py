@@ -21,7 +21,7 @@ import fakeredis.aioredis as fakeredis
 import pytest
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
-from app.domain.services.queue_service import DialerQueueService
+from app.domain.services.queue_service import DialerQueueService, QueueUnavailableError
 from app.domain.services import global_concurrency as gc
 
 
@@ -71,8 +71,9 @@ async def test_crash_between_pop_and_mark_is_recoverable_not_lost():
 
     svc._mark_processing = boom  # type: ignore[assignment]
 
-    result = await svc.dequeue_job(tenant_ids=["t1"])
-    assert result is None  # the dequeue itself failed...
+    # The dequeue itself fails, and says so: a failure is not "queue empty".
+    with pytest.raises(QueueUnavailableError):
+        await svc.dequeue_job(tenant_ids=["t1"])
 
     # ...but the job is NOT lost: it lives in the durable inflight list, and it
     # is UNtracked (no processing-ZSET marker) — exactly the crash-orphan shape.

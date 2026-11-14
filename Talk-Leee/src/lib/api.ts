@@ -469,13 +469,19 @@ class ApiClient {
         code: string,
         password: string,
         confirmPassword: string,
+        legal: { termsVersion?: string; privacyVersion?: string } = {},
     ): Promise<SignupCompleteResponse> {
         const path = "/auth/signup/complete";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
-            body: { email, code, password, confirm_password: confirmPassword },
+            body: {
+                email, code, password, confirm_password: confirmPassword,
+                ...(legal.termsVersion && legal.privacyVersion
+                    ? { terms_version: legal.termsVersion, privacy_version: legal.privacyVersion }
+                    : {}),
+            },
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(SignupCompleteResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });

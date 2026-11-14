@@ -186,6 +186,44 @@ async def test_worker_signal_uses_actual_registered_heartbeat_age(watch, age, ex
         "dialer:heartbeat_ts", "voice:heartbeat_ts", "reminder:heartbeat_ts"}
 
 
+async def test_the_watch_redis_pool_admits_every_concurrent_heartbeat_read(watch, monkeypatch):
+    """check_workers reads all worker heartbeats at once. In production (14 Nov
+    2026) the watch built a pool of two connections for three reads, so the last
+    worker was always reported as heartbeat_read_unavailable while it was alive."""
+    import redis.asyncio as real_redis
+    import redis.exceptions
+    from app.api.v1.endpoints.health import _WORKER_HEARTBEAT_KEYS
+    built = {}
+    def from_url(url, **kwargs):
+        built.update(kwargs)
+        return fakeredis.aioredis.FakeRedis(decode_responses=kwargs["decode_responses"],
+                                            max_connections=kwargs["max_connections"])
+    monkeypatch.delenv("REDIS_MODE", raising=False)
+    monkeypatch.setattr(real_redis, "from_url", from_url)
+    monkeypatch.setattr("app.core.container._build_redis_url", lambda: "redis://synthetic.invalid/0")
+    client = await watch._redis_client()
+    held = []
+    try:
+        # One connection per read that check_workers starts together.
+        try:
+            for _ in _WORKER_HEARTBEAT_KEYS:
+                held.append(await client.connection_pool.get_connection("GET"))
+        except redis.exceptions.ConnectionError as refused:
+            pytest.fail(f"the watch pool refused concurrent read {len(held) + 1} of {len(_WORKER_HEARTBEAT_KEYS)}: {refused}")
+        finally:
+            for connection in held:
+                await client.connection_pool.release(connection)
+        for key in _WORKER_HEARTBEAT_KEYS.values():
+            await client.set(key, str(NOW.timestamp() - 5))
+        result = await watch.check_workers(client, now=NOW)
+    finally:
+        await client.aclose()
+    assert built["max_connections"] > len(_WORKER_HEARTBEAT_KEYS) - 1
+    assert result["status"] == "ok"
+    assert [(row["name"], row["reason"]) for row in result["workers"]] == [
+        (name, "recent_heartbeat") for name in _WORKER_HEARTBEAT_KEYS]
+
+
 @pytest.mark.parametrize("observations,expected", [(None, "unavailable"), ([], "no_recent_evidence"),
     ([NS(component="llm", provider="groq", outcome="failed", error_category="rate_limit")], "alert"),
     ([NS(component="stt", provider="deepgram", outcome="recognized", error_category="none")], "ok")])
@@ -277,3 +315,48 @@ def test_real_shell_runs_additional_checks_even_if_worker_probe_fails(tmp_path, 
     assert result.returncode == expected, result.stdout + result.stderr
     lines = operations.read_text().splitlines()
     assert len(lines) == 1 and lines[0].endswith("scripts/healthwatch.py")
+
+
+def _systemctl(stdout, returncode=0):
+    def run(args, **kwargs):
+        assert args[:2] == ["systemctl", "list-units"] and "talky-*" in args and "--state=failed" in args
+        assert 0 < kwargs["timeout"] <= 5 and kwargs.get("shell", False) is False
+        return NS(returncode=returncode, stdout=stdout, stderr="")
+    return run
+
+
+def test_failed_units_are_named_and_the_watch_never_counts_itself(watch, monkeypatch):
+    listing = ("talky-db-backup.service loaded failed failed Talky.ai nightly Postgres backup\n"
+               "talky-healthwatch.service loaded failed failed Talky.ai Worker Health Watch\n"
+               "talky-inbound-synthetic.service loaded failed failed Talky carrier-hairpin inbound synthetic call\n"
+               "talky-notify@talky-db-backup.service.service loaded failed failed Notify operator\n")
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(listing))
+    assert watch.check_failed_units() == {"status": "alert", "failed": [
+        "talky-db-backup.service", "talky-inbound-synthetic.service",
+        "talky-notify@talky-db-backup.service.service"]}
+
+
+def test_no_failed_unit_is_ok_and_the_watch_alone_is_ok(watch, monkeypatch):
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(""))
+    assert watch.check_failed_units() == {"status": "ok", "failed": []}
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl("talky-healthwatch.service loaded failed failed x\n"))
+    assert watch.check_failed_units() == {"status": "ok", "failed": []}
+
+
+@pytest.mark.parametrize("stdout,returncode", [("", 1), ("talky-x.service;rm loaded failed failed x\n", 0)])
+def test_unreadable_unit_state_is_never_reported_as_healthy(watch, monkeypatch, stdout, returncode):
+    monkeypatch.setattr(watch.subprocess, "run", _systemctl(stdout, returncode))
+    assert watch.check_failed_units()["status"] == "unavailable"
+
+
+def test_a_host_without_systemctl_is_unavailable_not_healthy(watch, monkeypatch):
+    def run(args, **kwargs):
+        raise FileNotFoundError("systemctl")
+    monkeypatch.setattr(watch.subprocess, "run", run)
+    assert watch.check_failed_units()["status"] == "unavailable"
+
+
+async def test_each_completed_run_leaves_a_ten_minute_mark_for_the_outside_watch(watch, redis):
+    await watch._record_run(redis, NOW)
+    assert float(await redis.get(watch.LAST_RUN_KEY)) == NOW.timestamp()
+    assert 0 < await redis.ttl(watch.LAST_RUN_KEY) <= 600

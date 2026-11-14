@@ -27,7 +27,7 @@ export class ContactSubmissionError extends Error {
 // timeout, a lost response, a platform error page — leaves the fate unknown,
 // and retrying the saved message is safe because the request reference is
 // reused. Neither names anything internal.
-const NOT_SENT_MESSAGE = "This form is not accepting messages right now. Please try again later or email contact@talk-lee.com. Your message is kept here for a safe retry.";
+const NOT_SENT_MESSAGE = "This form is not accepting messages right now. Please try again later or email support@talkleeai.com. Your message is kept here for a safe retry.";
 const UNCONFIRMED_MESSAGE = "We could not confirm receipt. Your message may have been received; it is kept here, and retrying the saved message is safe.";
 
 async function readOutcome(response: Response): Promise<string | undefined> {

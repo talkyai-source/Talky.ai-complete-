@@ -17,7 +17,7 @@ import { AlertTriangle, Clock } from "lucide-react";
 
 import { Select } from "@/components/ui/select";
 import type { CampaignCallingSchedule } from "@/lib/dashboard-api";
-import { checkCallingWindow } from "@/lib/calling-window";
+import { callingHoursInverted, checkCallingWindow, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import {
     CALLING_HOURS_RULE_TEXT,
     DAY_LABELS,
@@ -130,6 +130,10 @@ export function CallingScheduleEditor({
                     )}
                 </div>
             </div>
+
+            {callingHoursInverted(value) && (
+                <p role="alert" className="text-xs text-destructive" data-testid="calling-hours-order-error">{HOURS_ORDER_ERROR}</p>
+            )}
 
             {/* Days */}
             <div>

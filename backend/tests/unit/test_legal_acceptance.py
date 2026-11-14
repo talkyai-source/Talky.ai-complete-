@@ -190,3 +190,37 @@ async def test_authenticated_reacceptance_appends_the_current_users_receipt(flow
     assert response.status_code == 200, response.text
     assert len(flow.conn.legal_writes) == 1
     assert tuple(flow.conn.legal_writes[0][1][:2]) == (TENANT_ID, user.id)
+
+
+async def read_legal_versions():
+    response = Response()
+    result = await inspect.unwrap(signup.legal_versions)(request=SimpleNamespace(), response=response)
+    return result.model_dump(), response
+
+
+async def test_public_legal_versions_when_acceptance_is_off(flow):
+    data, response = await read_legal_versions()
+    assert data == {"required": False, "terms_version": "terms-test-v1", "privacy_version": "privacy-test-v1"}
+    assert response.headers["cache-control"] == "no-store"
+
+
+async def test_public_legal_versions_when_required_with_versions(flow):
+    flow.settings.legal_acceptance_required = True
+    data, _ = await read_legal_versions()
+    assert data == {"required": True, "terms_version": "terms-test-v1", "privacy_version": "privacy-test-v1"}
+
+
+async def test_public_legal_versions_when_required_without_versions(flow):
+    flow.settings.legal_acceptance_required = True
+    flow.settings.legal_terms_version = None
+    flow.settings.legal_privacy_version = "  "
+    data, _ = await read_legal_versions()
+    assert data == {"required": True, "terms_version": None, "privacy_version": None}
+
+
+async def test_public_legal_versions_exposes_nothing_else(flow):
+    flow.settings.secret_key = "must-not-leak"
+    data, _ = await read_legal_versions()
+    assert set(data) == {"required", "terms_version", "privacy_version"}
+    route = next(r for r in signup.router.routes if getattr(r, "path", "") == "/legal-versions")
+    assert route.methods == {"GET"}

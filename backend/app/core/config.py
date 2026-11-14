@@ -135,6 +135,9 @@ class Settings(BaseSettings):
     from_email: str | None = None  # Production requires an owned talkleeai.com address.
     email_user: str | None = None  # noreply@talkleeai.com
     email_pass: str | None = None  # App Password or M365 password
+    # The mail server the account mailbox lives on, e.g. smtp.gmail.com for
+    # Google Workspace. Unset means Microsoft 365 (smtp.office365.com).
+    email_smtp_host: str | None = None
 
     # JWT Configuration
     jwt_expiry_hours: int = 24  # Default 24-hour token expiry

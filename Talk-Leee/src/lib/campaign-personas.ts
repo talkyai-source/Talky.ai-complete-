@@ -45,9 +45,9 @@ export const PERSONAS: PersonaSpec[] = [
         slots: [
             { key: "industry", label: "Industry", placeholder: "e.g. roofing", kind: "text", required: true },
             { key: "services_description", label: "Services", placeholder: "What the company does, one sentence", kind: "textarea", required: true },
-            { key: "pricing_info", label: "Pricing", placeholder: "e.g. Zero upfront — you only pay when live", kind: "textarea", required: true },
+            { key: "pricing_info", label: "Pricing", placeholder: "e.g. Zero upfront — you only pay when live", kind: "textarea" },
             { key: "coverage_area", label: "Coverage area", placeholder: "e.g. greater Phoenix within 50 miles", kind: "text", required: true },
-            { key: "company_differentiator", label: "What makes you different", placeholder: "The one reason to pick you", kind: "textarea", required: true },
+            { key: "company_differentiator", label: "What makes you different", placeholder: "The one reason to pick you", kind: "textarea" },
             { key: "value_proposition", label: "Value for the caller", placeholder: "What the caller personally gets", kind: "textarea", required: true },
             { key: "call_reason", label: "Reason for calling", placeholder: "Why are we ringing this lead?", kind: "textarea", required: true },
             { key: "qualification_questions", label: "Qualification questions", help: "One per line", kind: "list", required: true },
@@ -176,7 +176,34 @@ export function parseList(raw: string): string[] {
         .filter(Boolean);
 }
 
-/** Parse agent-name input (comma or newline separated, max 3). */
-export function parseAgentNames(raw: string): string[] {
-    return parseList(raw).slice(0, 3);
+/** The server caps the brand and the first representative name at 120 characters. */
+export const MAX_BRIEF_NAME_LENGTH = 120;
+
+/** True when the first representative name is longer than the server accepts. */
+export function representativeNameTooLong(names: string[]): boolean {
+    return (names[0]?.length ?? 0) > MAX_BRIEF_NAME_LENGTH;
 }
+
+/** Every distinct name typed (comma or newline separated). A repeat, ignoring
+ *  case, is dropped: the server refuses duplicate names. */
+function distinctAgentNames(raw: string): string[] {
+    const seen = new Set<string>();
+    return parseList(raw).filter((name) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
+
+/** Parse agent-name input (comma or newline separated, repeats removed, max 3). */
+export function parseAgentNames(raw: string): string[] {
+    return distinctAgentNames(raw).slice(0, 3);
+}
+
+/** True when more than three distinct names were typed (the rest are not used). */
+export function agentNamesOverflow(raw: string): boolean {
+    return distinctAgentNames(raw).length > 3;
+}
+
+export const AGENT_NAMES_OVERFLOW_TEXT = "Only the first 3 names are used.";

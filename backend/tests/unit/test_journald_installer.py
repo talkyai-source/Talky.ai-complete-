@@ -22,10 +22,19 @@ def test_installer_copies_retention_policy_and_activates_it(tmp_path):
     _write(shim / "install", '''#!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "install $*" >> "$OPERATIONS"
-[ "$#" = 5 ] && [ "$1" = -D ] && [ "$2" = -m ] && [ "$3" = 0644 ]
-case "$5" in
-  /etc/systemd/journald.conf.d/60-talky.conf) cp -- "$4" "$COPIED_POLICY" ;;
-  /etc/systemd/system/docker.service.d/60-talky-oom.conf) test -f "$4" ;;
+[ "$#" = 5 ] && [ "$1" = -D ] && [ "$2" = -m ]
+case "$3:$5" in
+  0644:/etc/systemd/journald.conf.d/60-talky.conf) cp -- "$4" "$COPIED_POLICY" ;;
+  0644:/etc/systemd/system/docker.service.d/60-talky-oom.conf) test -f "$4" ;;
+  # Boot-order and restart drop-ins, and the helper the first one calls.
+  0755:/opt/talky-infra/bin/wait-for-deps) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-api.service.d/20-talky-deps.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-api-web.service.d/20-talky-deps.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-dialer-worker.service.d/20-talky-deps.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-voice-worker.service.d/20-talky-deps.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-reminder-worker.service.d/20-talky-deps.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/talky-voice-gateway.service.d/20-talky-restart.conf) test -f "$4" ;;
+  0644:/etc/systemd/system/nginx.service.d/20-talky-restart.conf) test -f "$4" ;;
   *) exit 92 ;;
 esac
 ''')

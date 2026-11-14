@@ -105,7 +105,6 @@ export default function LoginClientPage() {
     const [email, setEmail] = useState(searchParams?.get("email") ?? "");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
-    const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [emailError, setEmailError] = useState("");
@@ -190,9 +189,6 @@ export default function LoginClientPage() {
                 // /auth/refresh which sends the cookie via credentials: 'include'.
                 // The legacy localStorage write was Phase A-era plumbing that
                 // never got cleaned up.
-                if (rememberMe) {
-                    try { localStorage.setItem("remember_me", "true"); } catch { /* An optional preference cannot prevent sign-in. */ }
-                }
 
                 // Seed AuthContext.user from the login response BEFORE the
                 // navigation to /dashboard. React 18 batches state updates,
@@ -266,7 +262,7 @@ export default function LoginClientPage() {
                 }
             }
         },
-        [router, rememberMe, applyLoginResult, searchParams],
+        [router, applyLoginResult, searchParams],
     );
 
     // ─── Step navigation ─────────────────────────────────────────────
@@ -454,6 +450,7 @@ export default function LoginClientPage() {
                                                 <Input
                                                     id="email"
                                                     type="email"
+                                                    autoComplete="email"
                                                     placeholder="you@example.com"
                                                     value={email}
                                                     onChange={(e) => {
@@ -486,19 +483,6 @@ export default function LoginClientPage() {
                                                 </p>
                                             )}
                                         </div>
-
-                                        {/* Remember me */}
-                                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                                            <input
-                                                type="checkbox"
-                                                checked={rememberMe}
-                                                onChange={(e) => setRememberMe(e.target.checked)}
-                                                className="h-4 w-4 rounded border-input text-primary focus:ring-ring focus:ring-offset-background accent-primary"
-                                            />
-                                            <span className="text-sm text-muted-foreground">
-                                                Remember me
-                                            </span>
-                                        </label>
 
                                         {error && (
                                             <div
@@ -579,6 +563,17 @@ export default function LoginClientPage() {
                                     aria-describedby={error ? errorId : undefined}
                                 >
                                     <CardContent className="space-y-4">
+                                        {/* Lets a password manager pair the saved login with this email. */}
+                                        <input
+                                            type="email"
+                                            name="username"
+                                            autoComplete="username"
+                                            value={email}
+                                            readOnly
+                                            tabIndex={-1}
+                                            aria-hidden
+                                            className="sr-only"
+                                        />
                                         <div className="space-y-2">
                                             <Label htmlFor="login-password">Password</Label>
                                             <div className="relative">
@@ -608,13 +603,12 @@ export default function LoginClientPage() {
                                                     onClick={() =>
                                                         setShowPassword(!showPassword)
                                                     }
-                                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+                                                    className="absolute right-0 top-1/2 -translate-y-1/2 p-2.5 text-muted-foreground hover:text-foreground transition-colors"
                                                     aria-label={
                                                         showPassword
                                                             ? "Hide password"
                                                             : "Show password"
                                                     }
-                                                    tabIndex={-1}
                                                 >
                                                     {showPassword ? (
                                                         <EyeOff className="h-4 w-4" />

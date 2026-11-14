@@ -34,7 +34,7 @@ except ImportError as e:
 from app.domain.models.dialer_job import DialerJob, JobStatus, CallOutcome
 from app.domain.models.calling_rules import CallingRules
 from app.domain.models.voice_contract import generate_talklee_call_id
-from app.domain.services.queue_service import DialerQueueService
+from app.domain.services.queue_service import DialerQueueService, QueueUnavailableError
 from app.domain.services.scheduling_rules import SchedulingRuleEngine
 from app.domain.services.phone_number_normalizer import is_strict_e164
 from app.core.db import init_db_pool, close_db_pool, Database
@@ -311,6 +311,7 @@ class DialerWorker:
     async def _run_loop(self, consecutive_errors: int) -> None:
         """The main dequeue/process loop, extracted so ``run`` can own the
         heartbeat task lifecycle in a try/finally."""
+        queue_failures = 0
         while self.running:
             try:
                 # 1. Check for due scheduled jobs (every 10s)
@@ -338,6 +339,7 @@ class DialerWorker:
 
                 # 3. Dequeue next job
                 job = await self.queue_service.dequeue_job(tenant_ids=tenant_ids, timeout=5)
+                queue_failures = 0
 
                 if job:
                     await self.process_job(job)
@@ -349,6 +351,12 @@ class DialerWorker:
             except asyncio.CancelledError:
                 logger.info("Worker received cancellation signal")
                 break
+            except QueueUnavailableError as e:
+                # Redis down is not "queue empty" and not a worker bug: log,
+                # back off, keep the process alive (no consecutive-error exit).
+                queue_failures += 1
+                logger.error("Dialer queue unavailable (%d): %s", queue_failures, e)
+                await asyncio.sleep(min(self.POLL_INTERVAL * 2 ** min(queue_failures, 5), 30))
             except Exception as e:
                 consecutive_errors += 1
                 logger.error(f"Worker error ({consecutive_errors}): {e}", exc_info=True)

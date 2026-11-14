@@ -21,6 +21,7 @@ _UNIT = re.compile(r"[A-Za-z0-9_.@:-]{1,200}\Z")
 # minute. A different set of failing health checks alerts at once.
 REPEAT_LIMIT_SECONDS = 3600
 HEALTHWATCH_FAILING_KEY = "talky:healthwatch:failing"
+HEALTHWATCH_LAST_RUN_KEY = "talky:healthwatch:last_run"
 _DETAIL = re.compile(r"[a-z_]{1,40}(?:,[a-z_]{1,40}){0,15}\Z")
 
 
@@ -59,6 +60,27 @@ async def _close(client):
             await asyncio.wait_for(client.aclose(), 1)
         except Exception:
             pass
+
+
+async def healthwatch_public_state(client):
+    """What anyone may know about the server's own health watch: whether it
+    completed a run in the last ten minutes, and how many checks it holds as
+    failing. The names and values stay in the journal. Anything unreadable is
+    reported as not clear, never as healthy."""
+    state = {"clear": False, "failing": None, "ran_recently": False}
+    if client is None:
+        return state
+    try:
+        async with asyncio.timeout(1):
+            last_run = await client.get(HEALTHWATCH_LAST_RUN_KEY)
+            failing = await client.get(HEALTHWATCH_FAILING_KEY)
+    except Exception:
+        return state
+    if isinstance(failing, (bytes, bytearray)):
+        failing = failing.decode("utf-8", "replace")
+    names = [name for name in (failing or "").split(",") if name]
+    ran_recently = last_run is not None
+    return {"clear": ran_recently and not names, "failing": len(names), "ran_recently": ran_recently}
 
 
 async def claim_alert_slot(unit, *, client_factory=None):

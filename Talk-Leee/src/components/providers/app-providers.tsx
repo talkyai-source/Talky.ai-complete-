@@ -28,6 +28,7 @@ function isOnAuthFlowPath() {
 import { ThemeProvider } from "./theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import { PrefetchOnAuth } from "./prefetch-on-auth";
+import { DisplayCurrencyProvider } from "@/components/pricing/local-price";
 import dynamic from "next/dynamic";
 
 // Keep notification toaster lazy + client-only (Next 15 SSR safety).
@@ -98,7 +99,10 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
                 <AuthProvider>
                     <NotificationsIdentityProvider />
                     <PrefetchOnAuth />
-                    {children}
+                    {/* Money amounts anywhere in the app read the visitor's
+                        currency from here. It asks nothing until a page
+                        actually shows an amount. */}
+                    <DisplayCurrencyProvider>{children}</DisplayCurrencyProvider>
                     <NotificationToaster />
                 </AuthProvider>
             </ThemeProvider>

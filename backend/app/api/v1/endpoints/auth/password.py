@@ -56,8 +56,10 @@ async def change_password(
       6. Revoke ALL other sessions (OWASP: invalidate sessions on password change).
          The current session (if any) is preserved so the user stays logged in.
     """
-    old_password = body.old_password.strip() if body.old_password else ""
-    new_password = body.new_password.strip() if body.new_password else ""
+    # Exactly as typed: sign-in compares the password unstripped, so a stripped
+    # copy stored here could never be typed back in (forms audit A-pw).
+    old_password = body.old_password or ""
+    new_password = body.new_password or ""
 
     if not old_password or not new_password:
         raise HTTPException(

@@ -191,3 +191,9 @@ alone.
 
 No vendor, subscription, scheduled GitHub workflow or additional monitoring
 agent is introduced by this document.
+
+## GitHub Actions outside watch (no new account, limited)
+
+`.github/workflows/uptime-watch.yml` runs `scripts/uptime_watch.py` every 10 minutes from a GitHub runner, outside the application host. It checks `/health`, the website, `/healthz/deep`, `/healthz/workers` (public fields only) and the TLS certificate of both hosts (at least 14 days left); each check is retried 3 times, 20 s apart. It opens one issue labelled `uptime`, repeats a comment at most hourly (at once if the failing set changes), and closes the issue on recovery. The run fails (exit 1) only when it opens or repeats an alert.
+
+Limits: scheduled workflows can start late or be skipped under GitHub load, so detection is minutes, not the 60-second figure above; GitHub disables schedules after 60 days without repository activity; there is no phone/SMS delivery, only GitHub issue and failed-run notifications to whoever has them enabled. It does not replace the external monitor, the alert recipient or the nginx drill above, and has not yet run on GitHub.

@@ -283,3 +283,56 @@ test("FX3a2 password reset: Send reset code and Reset password", async () => {
     assert.equal(hasButton("Reset password"), true);
     assert.equal(hasButton("Reset Password"), false);
 });
+
+// ── Forms audit A-F7: browsers and password managers can fill and save ─────
+const autocomplete = (label: string | RegExp) => screen.getByLabelText(label).getAttribute("autocomplete");
+
+test("A-F7 sign-up form fields name what they hold", () => {
+    renderPage(<RegisterPage />);
+    assert.equal(autocomplete("Your Name"), "name");
+    assert.equal(autocomplete("Business Name"), "organization");
+    assert.equal(autocomplete("Work Email"), "email");
+});
+
+test("A-F7 reset screens use email, one-time-code and new-password", async () => {
+    mock.method(api, "request", async () => ({ message: "sent" }));
+    renderPage(<ForgotPasswordPage />, "");
+    assert.equal(autocomplete("Email"), "email");
+    input("Email", "person@example.test");
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
+    await screen.findByLabelText("Code");
+    assert.equal(autocomplete("Code"), "one-time-code");
+    assert.equal(autocomplete("New password"), "new-password");
+    assert.equal(autocomplete("Confirm new password"), "new-password");
+});
+
+test("A-F11 a code that expired on the password step returns to the code step with Resend and the message", async () => {
+    mock.method(api, "signupStart", async () => startResponse);
+    mock.method(api, "signupVerifyCode", async () => ({ email: startResponse.email, message: "Verified" }));
+    mock.method(api, "signupComplete", async () => { throw new Error("Verification code expired or not found. Please request a new code."); });
+    renderPage(<RegisterPage />);
+    startRegistration();
+    await screen.findByLabelText("Verification code");
+    input("Verification code", "123456");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByLabelText("Password");
+    input("Password", "a secure password");
+    input("Confirm Password", "a secure password");
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
+    await screen.findByLabelText("Verification code");
+    assert.match(screen.getByRole("alert").textContent!, /expired or not found/);
+    assert.ok(screen.getByRole("button", { name: /Resend/ }));
+    assert.equal(screen.queryByLabelText("Password"), null);
+});
+
+test("A-F12 callback uses theme colours, an h1, and never prints text taken from the link", async () => {
+    mock.method(api, "getMe", async () => { throw anonymousSession; });
+    window.history.replaceState({}, "", "/auth/callback?error=access_denied&error_description=Call%20555-0100%20to%20claim%20your%20prize");
+    const { container } = renderPage(<CallbackPage />);
+    await screen.findByRole("heading", { level: 1, name: "Authentication failed" });
+    assert.equal(screen.queryByText(/prize|555-0100/), null);
+    assert.match(screen.getByText(/The sign-in provider reported a problem/).textContent!, /Please try again/);
+    assert.equal(container.innerHTML.includes("bg-white"), false);
+    assert.equal(/text-gray-\d/.test(container.innerHTML), false);
+    assert.equal(container.querySelector("h2"), null);
+});

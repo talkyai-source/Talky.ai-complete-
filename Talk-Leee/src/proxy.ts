@@ -209,7 +209,25 @@ function readCookieFromHeader(req: NextRequest, name: string) {
     return undefined;
 }
 
+// QA F4-14: the production Vercel alias answered with the full site, which
+// split cookies, CORS and search indexing across two public origins. Only this
+// exact host is redirected: preview deployments (talkleeai-git-*, talkleeai-<hash>-*)
+// and localhost are other hosts and fall through.
+const VERCEL_ALIAS_HOST = "talkleeai.vercel.app";
+const CANONICAL_ORIGIN = "https://talkleeai.com";
+
+function vercelAliasRedirect(req: NextRequest) {
+    const hostHeader = req.headers.get("host") ?? req.nextUrl.host;
+    const host = hostHeader.split(":")[0]?.trim().toLowerCase();
+    if (host !== VERCEL_ALIAS_HOST) return null;
+    const target = new URL(req.nextUrl.pathname + req.nextUrl.search, CANONICAL_ORIGIN);
+    return NextResponse.redirect(target, 308);
+}
+
 export async function proxy(req: NextRequest) {
+    const aliasRedirect = vercelAliasRedirect(req);
+    if (aliasRedirect) return aliasRedirect;
+
     const { pathname } = req.nextUrl;
 
     const inProd = process.env.NODE_ENV === "production";

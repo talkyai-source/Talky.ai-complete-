@@ -16,9 +16,9 @@ _METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
 _PUBLIC = {
     ("get", path) for path in (
         "/", "/health", "/api/v1/health", "/api/v1/healthz/live", "/api/v1/healthz/ready",
-        "/api/v1/healthz/deep", "/api/v1/healthz/workers", "/api/v1/plans/", "/api/v1/plans/payg",
+        "/api/v1/healthz/deep", "/api/v1/healthz/workers", "/api/v1/healthz/watch", "/api/v1/plans/", "/api/v1/plans/payg",
         "/api/v1/billing/plans", "/api/v1/billing/config", "/api/v1/connectors/providers",
-        "/api/v1/connectors/callback", "/api/v1/auth/verify-email", "/api/v1/ask-ai/greeting",
+        "/api/v1/connectors/callback", "/api/v1/auth/verify-email", "/api/v1/auth/legal-versions", "/api/v1/ask-ai/greeting",
     )
 } | {
     ("post", path) for path in (

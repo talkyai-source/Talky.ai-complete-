@@ -3,7 +3,9 @@ Email Service - Microsoft 365 SMTP Integration (GoDaddy)
 Handles sending transactional emails using Microsoft 365 SMTP services.
 
 Configuration:
-  - Host: smtp.office365.com
+  - Host: EMAIL_SMTP_HOST, default smtp.office365.com (Microsoft 365).
+    Set it to smtp.gmail.com when the mailbox is on Google Workspace; Google
+    accepts an App Password here, not the mailbox's normal password.
   - Port: 587 (STARTTLS)
   - Credentials: From environment (EMAIL_USER, EMAIL_PASS)
   - Sender: noreply@talkleeai.com
@@ -18,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime
 from html import escape
 from typing import Optional
@@ -41,10 +44,31 @@ def frontend_link(path_or_link: str, *, base_url: str | None = None) -> str:
     return urlunsplit((base.scheme, base.netloc, path, target.query, target.fragment))
 
 
-class EmailService:
-    """Async email service using Microsoft 365 SMTP (GoDaddy)."""
+_SMTP_HOST_RE = re.compile(r"(?=.{1,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+")
 
-    # Microsoft 365 SMTP Configuration
+
+def account_smtp_host() -> str:
+    """The mail server account email is sent through.
+
+    EMAIL_SMTP_HOST names it; unset, the Microsoft 365 default applies. The
+    host used to be fixed in code. When the mailbox moved to Google Workspace
+    (November 2026) every sign-up code, password reset and invite kept being
+    offered to a server the mailbox no longer lived on, and was refused.
+    """
+    configured = (getattr(get_settings(), "email_smtp_host", None) or "").strip().lower()
+    if not configured:
+        return EmailService.SMTP_HOST
+    if not _SMTP_HOST_RE.fullmatch(configured):
+        logger.error("EMAIL_SMTP_HOST is not a host name; using the default mail server")
+        return EmailService.SMTP_HOST
+    return configured
+
+
+class EmailService:
+    """Async account email over SMTP (STARTTLS on port 587)."""
+
+    # The default mail server: Microsoft 365. EMAIL_SMTP_HOST overrides it
+    # (see account_smtp_host); both Microsoft 365 and Google use port 587.
     SMTP_HOST = "smtp.office365.com"
     SMTP_PORT = 587
     SMTP_USE_TLS = True
@@ -70,6 +94,7 @@ class EmailService:
         settings = get_settings()
         self.sender_email = sender_email or settings.email_user
         self.sender_password = sender_password or settings.email_pass
+        self.smtp_host = account_smtp_host()
         self.from_email = getattr(settings, "from_email", None) or self.sender_email
         self.brand_name = getattr(settings, "brand_name", "Talk-Lee")
         self.frontend_url = settings.frontend_url
@@ -128,7 +153,7 @@ class EmailService:
             # against 587. Correct flag is `start_tls=True`.
             async with asyncio.timeout(20):
                 async with aiosmtplib.SMTP(
-                    hostname=self.SMTP_HOST,
+                    hostname=self.smtp_host,
                     port=self.SMTP_PORT,
                     start_tls=self.SMTP_USE_TLS,
                     timeout=10,

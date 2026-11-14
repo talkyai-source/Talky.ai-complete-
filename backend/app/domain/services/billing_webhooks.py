@@ -92,6 +92,14 @@ class BillingWebhookProcessor:
                     )
                     if receipt is None:
                         raise BillingWebhookRetryable("receipt_missing")
+                    if receipt["state"] == "dismissed":
+                        # An operator reviewed and closed this receipt without
+                        # replay. Acknowledge the redelivery; apply nothing.
+                        return {
+                            "status": "duplicate",
+                            "event_id": event_id,
+                            "event_type": event_type,
+                        }
                     if receipt["state"] in {"legacy_unverified", "needs_review"}:
                         raise BillingWebhookReviewRequired(
                             receipt["last_error_code"] or receipt["state"]
@@ -161,7 +169,7 @@ class BillingWebhookProcessor:
                         """UPDATE processed_webhook_events SET
                            state=CASE WHEN state='legacy_unverified' THEN state ELSE $2 END,
                            attempt_count=attempt_count+1,last_error_code=$3
-                           WHERE event_id=$1 AND state<>'completed'
+                           WHERE event_id=$1 AND state NOT IN ('completed','dismissed')
                            AND (state<>'needs_review' OR $2='needs_review')""",
                         event_id,
                         "needs_review" if needs_review else "failed",

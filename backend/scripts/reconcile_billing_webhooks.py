@@ -2,6 +2,7 @@
 
 Default/list and inspect are read-only. Retrying money handlers requires one
 explicit event ID; legacy/ambiguous events require a recorded review first.
+`dismiss` closes one needs_review receipt without replay (one event per call).
 """
 
 import argparse
@@ -31,6 +32,10 @@ async def run(args):
             result = await reconciliation.authorize_retry(
                 args.event_id, operator=args.operator, reason=args.reason
             )
+        elif args.action == "dismiss":
+            result = await reconciliation.dismiss(
+                args.event_id, operator=args.operator, reason=args.reason
+            )
         elif args.action == "retry-unsent-notification":
             result = await reconciliation.retry_unsent_notification(
                 args.notification_id, operator=args.operator, reason=args.reason
@@ -46,10 +51,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
     commands.add_parser("list").add_argument("--limit", type=int, default=25)
-    for action in ("inspect", "retry", "authorize-retry", "refresh-details"):
+    for action in ("inspect", "retry", "authorize-retry", "refresh-details", "dismiss"):
         command = commands.add_parser(action)
         command.add_argument("--event-id", required=True)
-        if action in {"authorize-retry", "refresh-details"}:
+        if action in {"authorize-retry", "refresh-details", "dismiss"}:
             command.add_argument("--operator", required=True)
             command.add_argument("--reason", required=True)
     command = commands.add_parser("retry-unsent-notification")

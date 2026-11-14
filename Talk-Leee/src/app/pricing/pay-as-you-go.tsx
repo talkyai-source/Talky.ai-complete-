@@ -3,6 +3,8 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import { z } from "zod";
 import { apiBaseUrl } from "@/lib/env";
+import { BILLING_CURRENCY, formatEstimate } from "@/lib/display-currency";
+import { useDisplayCurrency } from "@/components/pricing/local-price";
 
 // Pay-as-you-go prices live in the backend and change without a release, so the
 // page reads them instead of hard-coding them.
@@ -55,6 +57,7 @@ export function PayAsYouGoCard({ bundles, className, style, titleClassName, body
   titleClassName?: string;
   bodyClassName?: string;
 }) {
+  const display = useDisplayCurrency();
   return (
     <div className={className} style={style}>
       <h2 className={titleClassName}>Pay as you go</h2>
@@ -68,7 +71,16 @@ export function PayAsYouGoCard({ bundles, className, style, titleClassName, body
         <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground" aria-label="Pay-as-you-go bundles">
           {bundles.map((bundle) => (
             <li key={bundle.code}>
-              &bull; {bundle.minutes.toLocaleString("en-US")} minutes: {formatBundlePrice(bundle)}
+              &bull; {bundle.minutes.toLocaleString("en-US")} minutes:{" "}
+              {/* The estimate converts from dollars, so it leads only for a dollar price. */}
+              {display && bundle.currency.toUpperCase() === BILLING_CURRENCY ? (
+                <>
+                  <span data-testid="local-estimate">
+                    ≈ {formatEstimate(bundle.price_cents / 10 ** (bundle.currency_exponent ?? 2), display.rate, display.currency)}
+                  </span>{" "}
+                  ({formatBundlePrice(bundle)} charged in US dollars)
+                </>
+              ) : formatBundlePrice(bundle)}
             </li>
           ))}
         </ul>

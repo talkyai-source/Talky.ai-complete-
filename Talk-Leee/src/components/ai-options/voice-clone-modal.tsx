@@ -19,6 +19,8 @@ const SAMPLE_SCRIPT =
     "Hi, thanks for taking my call today. I'm reaching out to share something I think " +
     "you'll find genuinely useful, and I'd love just a minute of your time to walk you through it.";
 
+const MAX_SAMPLE_BYTES = 12 * 1024 * 1024;
+
 export function VoiceCloneModal({
     open, onClose, onCloned,
 }: {
@@ -78,6 +80,12 @@ export function VoiceCloneModal({
 
     const onFile = (f: File | null) => {
         if (!f) return;
+        // The server refuses samples over 12 MB (clone.py _MAX_SAMPLE_BYTES).
+        if (f.size > MAX_SAMPLE_BYTES) {
+            setError("That file is too large. Choose a sample under 12 MB.");
+            return;
+        }
+        setError(null);
         if (sample) URL.revokeObjectURL(sample.url);
         setSample({ blob: f, url: URL.createObjectURL(f), label: f.name });
     };

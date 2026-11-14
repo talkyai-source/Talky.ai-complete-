@@ -124,6 +124,25 @@ async function readBody(res: Response) {
     }
 }
 
+// A 422 from this API lists the refused fields in `details` (our envelope) or
+// as a raw `detail` list (FastAPI). Say which field and why, up to three.
+function fieldErrorMessage(status: number | undefined, details: unknown): string | undefined {
+    if (status !== 422 || !Array.isArray(details)) return undefined;
+    const parts: string[] = [];
+    for (const item of details) {
+        if (!item || typeof item !== "object") continue;
+        const { loc, msg } = item as { loc?: unknown; msg?: unknown };
+        if (typeof msg !== "string" || !msg.trim()) continue;
+        const text = msg.replace(/^Value error,\s*/i, "").trim();
+        const name = Array.isArray(loc) ? [...loc].reverse().find((seg) => typeof seg === "string" && seg !== "body") : undefined;
+        const label = typeof name === "string" ? name.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : undefined;
+        const part = label ? `${label}: ${text}` : text;
+        if (!parts.includes(part)) parts.push(part);
+        if (parts.length === 3) break;
+    }
+    return parts.length ? parts.join("; ") : undefined;
+}
+
 function defaultMessageForStatus(status?: number) {
     if (status === 401) return "Unauthorized";
     if (status === 403) return "Forbidden";
@@ -772,8 +791,12 @@ export function createHttpClient(config: HttpClientConfig) {
                           : "http_error";
 
             const code = envelopeCode ?? legacyCode ?? defaultCode;
-            const message = envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
             const detailsForError = envelopeDetails ?? legacyObjectDetails ?? body;
+            const message =
+                (code === "validation_error" || !(envelopeMessage ?? legacyObjectMessage ?? legacyMessage)
+                    ? fieldErrorMessage(res.status, detailsForError)
+                    : undefined) ??
+                envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
 
             // Single source of truth for token expiry — clear the
             // stored token, then fire the global session-expired
@@ -912,11 +935,17 @@ export function createHttpClient(config: HttpClientConfig) {
             const legacyObjectDetails = legacyRecord && "details" in legacyRecord
                 ? legacyRecord.details
                 : legacyDetail;
+            const rawCode = envelopeCode ?? legacyCode ?? defaultCode;
+            const rawDetails = envelopeDetails ?? legacyObjectDetails ?? body;
             throw new ApiClientError({
                 status: res.status,
-                code: envelopeCode ?? legacyCode ?? defaultCode,
-                message: envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
-                details: envelopeDetails ?? legacyObjectDetails ?? body,
+                code: rawCode,
+                message:
+                    (rawCode === "validation_error" || !(envelopeMessage ?? legacyObjectMessage ?? legacyMessage)
+                        ? fieldErrorMessage(res.status, rawDetails)
+                        : undefined) ??
+                    envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
+                details: rawDetails,
                 url,
                 method,
                 requestId,

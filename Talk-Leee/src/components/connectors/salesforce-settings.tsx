@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { clampIntText } from "@/lib/number-text";
 import type { SalesforceImportInput, SalesforceSettingsUpdateInput } from "@/lib/backend-api";
 import {
     useImportSalesforcePeople,
@@ -95,7 +96,9 @@ export function SalesforceSettingsView({
     const logCalls = effective.log_calls;
     const createLeads = effective.create_leads;
     const syncInbound = effective.sync_inbound;
-    const priority = effective.callback_priority;
+    // What the user typed in the priority box, kept as text until blur or save.
+    const [priorityTyped, setPriorityTyped] = useState<string | null>(null);
+    const priority = priorityTyped === null ? effective.callback_priority : clampIntText(priorityTyped, 1, 10, effective.callback_priority);
     const setCallbackCampaignId = (v: string) => setDraft((d) => ({ ...d, callback_campaign_id: v || null }));
     const setLogCalls = (v: boolean) => setDraft((d) => ({ ...d, log_calls: v }));
     const setCreateLeads = (v: boolean) => setDraft((d) => ({ ...d, create_leads: v }));
@@ -144,6 +147,7 @@ export function SalesforceSettingsView({
         try {
             await onSave(input);
             setDraft({});
+            setPriorityTyped(null);
         } catch (err) {
             setSaveError(formatError(err));
         }
@@ -286,8 +290,13 @@ export function SalesforceSettingsView({
                                         type="number"
                                         min={1}
                                         max={10}
-                                        value={priority}
-                                        onChange={(e) => setPriority(Math.max(1, Math.min(10, Number.parseInt(e.target.value, 10) || 8)))}
+                                        value={priorityTyped ?? priority}
+                                        onChange={(e) => setPriorityTyped(e.target.value)}
+                                        onBlur={() => {
+                                            if (priorityTyped === null) return;
+                                            setPriority(priority);
+                                            setPriorityTyped(null);
+                                        }}
                                     />
                                 </div>
                             </div>

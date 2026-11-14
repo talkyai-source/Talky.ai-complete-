@@ -118,9 +118,8 @@ export const privacyBlocks: LegalBlock[] = [
     items: [
       `We do not collect Social Security numbers or national identity documents`,
       `We do not collect biometric data — passkey public keys are cryptographic, not biometric`,
-      `We do not collect precise geolocation data`,
-      `We do not read email body content (only metadata: sender, subject, date)`,
-      `We do not access Google Drive files other than those created by Talk-Lee`,
+      `We do not collect precise geolocation data. To show prices and amounts in your local currency, the website uses only the country your connection appears to come from, and does not store it`,
+      `We do not read your email or your Google Drive files unless you connect that account. Section 5 says what Talk-Lee can read once you do`,
       `We do not collect data from children under 13 (US/COPPA) or 16 (EU/UK GDPR)`,
     ],
   },
@@ -133,7 +132,7 @@ export const privacyBlocks: LegalBlock[] = [
       `Running AI voice calling campaigns — speech-to-text via Deepgram or AssemblyAI, language models via Groq, Google Gemini, OpenAI, Cerebras, or DeepSeek, and text-to-speech via Cartesia, ElevenLabs, Google, or Deepgram (see Section 4.1)`,
       `Routing calls through SIP telephony infrastructure (Asterisk, OpenSIPS, RTPEngine)`,
       `Booking appointments in Google Calendar during AI calls`,
-      `Sending confirmation emails via Gmail (send only)`,
+      `Sending confirmation emails from your connected Gmail account`,
       `Sending SMS notifications via Vonage`,
       `Leaving voicemail messages when calls are unanswered`,
       `Syncing call outcomes to HubSpot CRM when connected`,
@@ -225,7 +224,7 @@ export const privacyBlocks: LegalBlock[] = [
   {
     type: "ul",
     items: [
-      `Google Calendar booking page — the Book a Demo page shows Google's appointment booking form inside our page. What you type there, such as your name, email address and any notes, goes to Google and to the Talk-Lee calendar the booking is made in. Google's own privacy policy applies to that form`,
+      `Google Calendar booking page — the Book a Demo page shows Google's appointment booking form inside our page. What you type there, such as your name, email address and any notes, goes to Google and to the Talk-Lee calendar the booking is made in. Google's own privacy policy applies to that form. The short form above it on the same page (your name, email address, business name and your answers to two questions about your business) is sent to Talk-Lee, not to Google, and is kept with the enquiries we receive so that we can prepare for your demo`,
       `Pwned Passwords (Have I Been Pwned) — when you enter a password on the sign-in form, your browser sends the first five characters of a one-way hash of it to api.pwnedpasswords.com to check whether it has appeared in a known data breach. The password itself is never sent, and no account details are attached to the request`,
     ],
   },
@@ -251,19 +250,17 @@ export const privacyBlocks: LegalBlock[] = [
     type: "ul",
     items: [
       `Google Calendar — create and manage appointments booked by AI during calls`,
-      `Gmail (send only) — send confirmation emails from your Gmail account after bookings`,
-      `Gmail metadata — sender, subject, and date only; never email body content`,
-      `Google Drive (files created by Talk-Lee only) — store call recordings and transcripts`,
+      `Gmail — send emails from your Gmail account (for example a confirmation after a booking), and read your messages, including their content, when you ask the assistant to find or read an email`,
+      `Google Drive — store the files Talk-Lee creates, and list and read the files in your Drive, including Google Docs, Sheets and Slides, when you ask the assistant to find or read one`,
     ],
   },
   { type: "h3", text: "5.2 What We Do Not Access" },
   {
     type: "ul",
     items: [
-      `Email body content`,
+      `Your emails or Drive files for any purpose other than carrying out what you ask the assistant to do`,
       `Your contacts list`,
-      `Files you did not create through Talk-Lee`,
-      `Google Docs, Sheets, Slides, or Photos`,
+      `Google Photos`,
       `Your search history or any other Google service`,
     ],
   },

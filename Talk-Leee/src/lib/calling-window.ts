@@ -78,3 +78,15 @@ export function checkCallingWindow(s?: CampaignCallingSchedule | null, now: Date
         tz,
     };
 }
+
+/** Shown when the end time is before the start time. */
+export const HOURS_ORDER_ERROR = "Calling hours must start before they end on the same day (they can't run past midnight).";
+
+/** True when both times are set and the end is before the start. Mirrors the
+ *  server rule (an equal start and end is accepted; only start > end is refused). */
+export function callingHoursInverted(s?: CampaignCallingSchedule | null): boolean {
+    const start = s?.time_window_start;
+    const end = s?.time_window_end;
+    if (!start || !end) return false;
+    return toMin(start) > toMin(end);
+}

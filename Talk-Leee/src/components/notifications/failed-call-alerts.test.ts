@@ -13,6 +13,7 @@ import { renderWithQueryClient } from "@/test-utils/render";
 ensureDom();
 const A = { userId: "user-a", tenantId: "tenant-a" };
 const originalListCalls = dashboardApi.listCalls;
+const originalListCallsCursor = dashboardApi.listCallsCursor;
 
 function call(id: string, outcome: string | undefined, campaign_name = "Spring promo"): Call {
     return { id, campaign_id: "camp-1", campaign_name, lead_id: "", phone_number: "+15550001111", status: "completed",
@@ -20,7 +21,7 @@ function call(id: string, outcome: string | undefined, campaign_name = "Spring p
 }
 let requests = 0;
 function stubCalls(calls: Call[]) {
-    dashboardApi.listCalls = async () => { requests += 1; return { calls, total: calls.length }; };
+    dashboardApi.listCallsCursor = async () => { requests += 1; return { calls, nextCursor: null }; };
 }
 function items() { return notificationsStore.getSnapshot().notifications; }
 function titles() { return items().map((item) => item.title); }
@@ -47,6 +48,7 @@ afterEach(() => {
     cleanup();
     notificationsStore.setIdentity(null);
     dashboardApi.listCalls = originalListCalls;
+    dashboardApi.listCallsCursor = originalListCallsCursor;
     window.localStorage.clear();
 });
 
@@ -150,4 +152,17 @@ test("the badge clears after reading a Failed call notification, on reload and i
     reloaded.setIdentity(A);
     assert.equal(reloaded.getSnapshot().notifications.filter((item) => !item.readAt).length, 0);
     reloaded.dispose();
+});
+
+test("the poll asks for the first cursor page (pagination=cursor) and never the offset list with a total", async () => {
+    const cursorArgs: unknown[][] = [];
+    let offsetRequests = 0;
+    dashboardApi.listCalls = async () => { offsetRequests += 1; return { calls: [], total: 0 }; };
+    dashboardApi.listCallsCursor = async (...args) => { requests += 1; cursorArgs.push(args); return { calls: [], nextCursor: null }; };
+    mount();
+    await waitRequested(1);
+    assert.equal(offsetRequests, 0);
+    assert.equal(cursorArgs[0][0], null);
+    assert.equal(cursorArgs[0][1], 100);
+    assert.deepEqual(cursorArgs[0][2], {});
 });

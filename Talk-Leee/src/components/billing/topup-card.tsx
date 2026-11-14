@@ -18,6 +18,9 @@ import {
 import { isApiClientError } from "@/lib/http-client";
 import { failedReadMessage } from "@/components/states/page-states";
 import { approvedCheckoutUrl } from "@/lib/billing-purchase";
+import { LocalMinorAmount } from "@/components/billing/local-money";
+import { localAmountText, useDisplayCurrency } from "@/components/pricing/local-price";
+import { usdFromMinor } from "@/lib/display-currency";
 import { useAuth } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/api-hooks";
 import { billingKeys } from "@/lib/billing-api";
@@ -63,6 +66,7 @@ export function TopupCard({
   const params = useSearchParams();
   const qc = useQueryClient();
   const { refreshUser } = useAuth();
+  const display = useDisplayCurrency();
 
   const returned = params.get("topup"); // "success" | "cancelled" | null
   const returnedOrder = params.get("order_id");
@@ -122,10 +126,13 @@ export function TopupCard({
   const pending = start.isPending;
   const [chosen, setChosen] = useState<string | null>(null);
   const [mockNotice, setMockNotice] = useState<string | null>(null);
+  // The order was created but the payment page could not be opened.
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function buy(pkg: TopupPackage) {
     if (pending) return; // the double-click guard — a second order is a second charge
     setMockNotice(null);
+    setNotice(null);
     setChosen(pkg.code);
     try {
       const result = await start.mutateAsync(pkg.code);
@@ -148,7 +155,16 @@ export function TopupCard({
         // Leaves the app entirely. The button stays disabled behind us because
         // `pending` never clears before navigation. Only Stripe's own checkout
         // host is followed, as for plan checkout.
-        window.location.assign(approvedCheckoutUrl(result.checkout_url));
+        try {
+          window.location.assign(approvedCheckoutUrl(result.checkout_url));
+        } catch (err) {
+          // The order may already exist: say why the payment page did not open.
+          setNotice(`${err instanceof Error ? err.message : "The payment page could not be opened."} Check your saved orders before trying again.`);
+          setChosen(null);
+        }
+      } else {
+        setNotice("The payment page could not be opened because no payment address came back. Check your saved orders before trying again.");
+        setChosen(null);
       }
     } catch (err) {
       // A refusal the backend can only make after the click (test-mode team
@@ -239,13 +255,13 @@ export function TopupCard({
           <Button variant="outline" size="sm" onClick={() => { void ordersQ.refetch(); void balanceQ.refetch(); }}>Refresh saved status</Button>
         </div>}
 
-        {mockNotice ? (
+        {mockNotice ?? notice ? (
           <div
             role="alert"
             className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-            <span>{mockNotice}</span>
+            <span>{mockNotice ?? notice}</span>
           </div>
         ) : null}
 
@@ -341,7 +357,7 @@ export function TopupCard({
                     minutes
                   </div>
                   <div className="mt-1.5 text-sm font-semibold text-foreground">
-                    {formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent)}
+                    <LocalMinorAmount minor={pkg.price_cents} currency={pkg.currency} exponent={pkg.currency_exponent} />
                   </div>
                   {pkg.expires_days ? (
                     <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -359,7 +375,7 @@ export function TopupCard({
                     className="mt-2 w-full"
                     onClick={() => buy(pkg)}
                     disabled={pending || refusal !== null || pkg.currency === null || pkg.currency_exponent === null}
-                    aria-label={`Buy ${pkg.minutes} minutes for ${formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent)}`}
+                    aria-label={`Buy ${pkg.minutes} minutes for ${localAmountText(display, usdFromMinor(pkg.price_cents, pkg.currency, pkg.currency_exponent), formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent))}`}
                   >
                     {busy ? (
                       <>
@@ -408,7 +424,7 @@ export function TopupCard({
                   <div className="min-w-0">
                     <div className="font-medium text-foreground tabular-nums">
                       {o.minutes.toLocaleString()} minutes ·{" "}
-                      {formatMoney(o.price_cents, o.currency, o.currency_exponent)}
+                      <LocalMinorAmount minor={o.price_cents} currency={o.currency} exponent={o.currency_exponent} />
                     </div>
                     <div className="text-xs text-muted-foreground">
                       {o.paid_at

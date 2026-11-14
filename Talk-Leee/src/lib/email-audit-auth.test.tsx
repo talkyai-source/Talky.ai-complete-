@@ -190,7 +190,7 @@ for (const failure of [false, true]) test(`late send completion cannot update em
     let pending!: ReturnType<typeof send.mutateAsync>;
     let checked!: Promise<unknown>;
     await act(async () => {
-        pending = send.mutateAsync({ to: [recipientA], templateId: "synthetic-template" });
+        pending = send.mutateAsync({ to: [recipientA], templateId: "synthetic-template", html: "<p>Synthetic</p>" });
         checked = failure ? assert.rejects(pending, /synthetic A failure/) : pending;
         await started.promise;
     });

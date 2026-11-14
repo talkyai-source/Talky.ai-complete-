@@ -122,7 +122,7 @@ async function readyButton(name: string): Promise<HTMLButtonElement> {
 }
 
 function startDialog() {
-    const dialog = screen.queryByRole("dialog", { name: "Who speaks first?" });
+    const dialog = screen.queryByRole("dialog", { name: "Start campaign" });
     return dialog ? within(dialog) : null;
 }
 
