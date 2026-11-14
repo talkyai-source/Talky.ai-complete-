@@ -225,7 +225,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
             </div>
             {recovery ? null : (
               <p className="text-xs text-muted-foreground text-center">
-                Open your authenticator app and enter the 6-digit code
+                Open your authenticator app and enter the 6-8 digit code
               </p>
             )}
           </div>

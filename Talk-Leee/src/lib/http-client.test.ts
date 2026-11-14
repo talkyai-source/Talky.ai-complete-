@@ -265,3 +265,60 @@ test("requestRaw preserves canonical error codes for binary endpoints", async ()
     }
 });
 
+
+async function refusal(body: unknown, status = 422, raw = false): Promise<ApiClientError> {
+    __resetRefreshStateForTests();
+    const prevFetch = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () =>
+        new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    try {
+        const client = createHttpClient({ baseUrl: "http://example.test" });
+        await (raw ? client.requestRaw({ path: "/x", method: "POST" }) : client.request({ path: "/x", method: "POST" }));
+    } catch (e) {
+        assert.ok(e instanceof ApiClientError);
+        return e;
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prevFetch;
+    }
+    throw new Error("expected a refusal");
+}
+
+const GENERIC = { code: "validation_error", message: "Request payload failed validation" };
+
+test("a 422 envelope names the refused field and the server's reason", async () => {
+    const err = await refusal({
+        error: {
+            ...GENERIC,
+            details: [{ type: "string_too_long", loc: ["body", "business_name"], msg: "String should have at most 100 characters" }],
+        },
+    });
+    assert.equal(err.message, "Business name: String should have at most 100 characters");
+    assert.equal(err.code, "validation_error");
+});
+
+test("a 422 shows at most three fields and strips the 'Value error,' prefix", async () => {
+    const err = await refusal({
+        error: {
+            ...GENERIC,
+            details: [
+                { type: "value_error", loc: ["body", "name"], msg: "Value error, Name must not be blank." },
+                { type: "x", loc: ["body", "email"], msg: "Bad email" },
+                { type: "x", loc: ["body", "business_name"], msg: "Too long" },
+                { type: "x", loc: ["body", "phone"], msg: "Fourth" },
+            ],
+        },
+    });
+    assert.equal(err.message, "Name: Name must not be blank.; Email: Bad email; Business name: Too long");
+});
+
+test("a raw FastAPI 422 list and requestRaw read the same way", async () => {
+    const list = { detail: [{ type: "x", loc: ["body", "email"], msg: "value is not a valid email address" }] };
+    assert.equal((await refusal(list)).message, "Email: value is not a valid email address");
+    assert.equal((await refusal(list, 422, true)).message, "Email: value is not a valid email address");
+});
+
+test("a 422 without field errors, or a non-422, keeps its own message", async () => {
+    assert.equal((await refusal({ error: { ...GENERIC, details: [] } })).message, "Request payload failed validation");
+    assert.equal((await refusal({ error: { code: "legal_acceptance_required", message: "Accept the terms", details: [{ loc: ["body", "x"], msg: "no" }] } })).message, "Accept the terms");
+    assert.equal((await refusal({ error: { ...GENERIC, details: [{ loc: ["body", "x"], msg: "no" }] } }, 400)).message, "Request payload failed validation");
+});
