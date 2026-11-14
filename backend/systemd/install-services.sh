@@ -21,6 +21,21 @@ systemctl restart systemd-journald.service
 install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/docker-oom.conf" \
   /etc/systemd/system/docker.service.d/60-talky-oom.conf
 
+# Boot-order and restart drop-ins (sources: deploy/infra/systemd/). Without them
+# the Python services can start before Postgres/Redis after a reboot, and
+# the gateway and nginx stay down after a crash. install overwrites, so a re-run
+# is idempotent. The deps drop-in runs /opt/talky-infra/bin/wait-for-deps, so
+# that root-owned helper is installed first (same as prepare-service-user.sh).
+install -D -m 0755 "$SCRIPT_DIR/../deploy/infra/wait-for-deps" /opt/talky-infra/bin/wait-for-deps
+for unit in talky-api talky-api-web talky-dialer-worker talky-voice-worker talky-reminder-worker; do
+  install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/talky-deps.conf" \
+    "/etc/systemd/system/$unit.service.d/20-talky-deps.conf"
+done
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/talky-restart.conf" \
+  /etc/systemd/system/talky-voice-gateway.service.d/20-talky-restart.conf
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/nginx-restart.conf" \
+  /etc/systemd/system/nginx.service.d/20-talky-restart.conf
+
 # 1. Symlink every service/target/timer file in this directory.
 #
 # backend/systemd/ is now the SINGLE source of truth for units. The second
