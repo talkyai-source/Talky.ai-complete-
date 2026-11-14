@@ -2,7 +2,11 @@ name: Outside uptime watch
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    # Every 10 minutes, but never on a round minute: GitHub delays scheduled
+    # runs under load, most at the start of an hour and on round minutes, and
+    # may drop them. On 14 Nov 2026 the "*/10" schedule did not start once in
+    # five hours.
+    - cron: "7,17,27,37,47,57 * * * *"
   workflow_dispatch:
 
 permissions:

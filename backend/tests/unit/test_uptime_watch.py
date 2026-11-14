@@ -260,7 +260,11 @@ def test_workflow_guards():
     perms = re.search(r"^permissions:\n((?:  .*\n)+)", text, re.MULTILINE).group(1)
     assert sorted(l.strip() for l in perms.strip().splitlines()) == ["contents: read", "issues: write"]
     assert re.search(r"^concurrency:\n  group: \S+", text, re.MULTILINE)
-    assert 'cron: "*/10 * * * *"' in text
+    # Six runs an hour, none on a round minute (GitHub delays or drops those under load).
+    cron = re.search(r'^    - cron: "([^"]+)"$', text, re.MULTILINE).group(1)
+    minutes, *rest = cron.split()
+    assert rest == ["*", "*", "*", "*"]
+    assert [int(m) for m in minutes.split(",")] == [7, 17, 27, 37, 47, 57]
     assert "workflow_dispatch:" in text
     assert "if: github.repository == 'talkyai-source/Talky.ai-complete-'" in text
     assert "timeout-minutes: 5" in text
