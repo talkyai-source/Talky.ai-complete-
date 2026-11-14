@@ -29,6 +29,10 @@ from app.infrastructure.metrics.provider_observations import read_recent
 
 IO_TIMEOUT_SECONDS = 0.5
 FAILING_KEY = "talky:healthwatch:failing"  # read by app.core.operational_alerts
+LAST_RUN_KEY = "talky:healthwatch:last_run"  # read by GET /healthz/watch
+# The watch's own unit is running while this script runs, never failed.
+_OWN_UNITS = frozenset({"talky-healthwatch.service"})
+_UNIT_NAME = re.compile(r"[A-Za-z0-9@_.:-]{1,200}\Z")
 _MAX_TRUNKS = 1000
 _UNAVAILABLE = {"status": "unavailable", "reason": "observation_unavailable"}
 _TRUNK_STATE = """
@@ -70,6 +74,22 @@ def check_resources(*, disk_path="/", meminfo_path=Path("/proc/meminfo")):
 def _command(args):
     return subprocess.run(args, capture_output=True, text=True, timeout=2,
                           env=dict(os.environ, LC_ALL="C"), shell=False)
+
+
+def check_failed_units():
+    """Talky units that systemd holds as failed: the nightly backup, the hourly
+    inbound test call, the alert sender itself. Each of them used to fail with
+    nobody told, because its own alert went by the email that was down."""
+    try:
+        done = _command(["systemctl", "list-units", "talky-*", "--state=failed", "--no-legend", "--plain"])
+        if done.returncode != 0:
+            return dict(_UNAVAILABLE)
+        failed = sorted({line.split()[0] for line in done.stdout.splitlines() if line.split()} - _OWN_UNITS)
+        if len(failed) > 50 or any(not _UNIT_NAME.match(name) for name in failed):
+            return dict(_UNAVAILABLE)
+        return {"status": "alert" if failed else "ok", "failed": failed}
+    except Exception:
+        return dict(_UNAVAILABLE)
 
 
 def check_ntp():
@@ -237,6 +257,16 @@ async def _redis_client():
                           socket_timeout=1, socket_connect_timeout=1, max_connections=REDIS_MAX_CONNECTIONS)
 
 
+async def _record_run(redis, now):
+    """Mark that the watch completed a run. An outside caller reads this through
+    GET /healthz/watch, so a watch that has stopped is not mistaken for a
+    healthy server. Ten minutes covers several missed one-minute runs."""
+    try:
+        await asyncio.wait_for(redis.set(LAST_RUN_KEY, str(now.timestamp()), ex=600), IO_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+
+
 async def _record_failing_checks(redis, result):
     """Name the failing checks for the failure alert (talky-notify@), which
     alerts again at once when this set changes. Names only, never values."""
@@ -259,6 +289,7 @@ async def run():
         async with asyncio.timeout(20):
             result.update(await asyncio.to_thread(check_resources, disk_path=os.getenv("TALKY_MONITOR_DISK_PATH", "/")))
             result["ntp"] = await asyncio.to_thread(check_ntp)
+            result["units"] = await asyncio.to_thread(check_failed_units)
             paths = [Path(value.strip()) for value in os.getenv("TALKY_MONITOR_CERTIFICATE_PATHS", "").split(",") if value.strip()]
             if not paths or len(paths) > 8:
                 result["certificates"] = check_certificates(paths, now=now)
@@ -290,6 +321,7 @@ async def run():
                 pass
             result.update(await check_database(pool, redis, now=now))
             await _record_failing_checks(redis, result)
+            await _record_run(redis, now)
     except TimeoutError:
         result["monitor"] = {"status": "unavailable", "reason": "monitor_deadline_exceeded"}
     finally:

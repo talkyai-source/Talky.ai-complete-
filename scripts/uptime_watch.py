@@ -21,7 +21,7 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
-ISSUE_TITLE = "Outside check: site or API is not answering"
+ISSUE_TITLE = "Outside check: the site, the API or the server needs attention"
 ISSUE_LABEL = "uptime"
 REPEAT_MINUTES = 60
 RETRIES = 3
@@ -44,7 +44,15 @@ HTTP_CHECKS = [
     ("website", f"https://{SITE_HOST}/", 15, None),
     ("api-readiness", f"https://{API_HOST}/api/v1/healthz/deep", 10, "ready"),
     ("api-workers", f"https://{API_HOST}/api/v1/healthz/workers", 10, "healthy"),
+    # The server's own health watch (disk, certificates, payments, phone trunks,
+    # failed units such as the backup, the inbound test call and the alert
+    # sender). Its own alerts go by email; this path does not.
+    ("server-health-watch", f"https://{API_HOST}/api/v1/healthz/watch", 10, "clear"),
 ]
+# What a failed JSON predicate means, for the checks where "not ready" would mislead.
+NOT_OK_DETAIL = {
+    "server-health-watch": "the server's own health watch holds a failing check, or has not run for 10 minutes",
+}
 TLS_CHECKS = [("tls-website", SITE_HOST), ("tls-api", API_HOST)]
 
 
@@ -86,7 +94,7 @@ def check_http(name, url, timeout, json_key, opener):
         except Exception:
             return {"name": name, "ok": False, "detail": "HTTP 200 unexpected body"}
         if not ok:
-            return {"name": name, "ok": False, "detail": "HTTP 200 not ready"}
+            return {"name": name, "ok": False, "detail": NOT_OK_DETAIL.get(name, "HTTP 200 not ready")}
     return {"name": name, "ok": True, "detail": "HTTP 200"}
 
 
