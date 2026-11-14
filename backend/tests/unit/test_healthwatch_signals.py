@@ -186,6 +186,44 @@ async def test_worker_signal_uses_actual_registered_heartbeat_age(watch, age, ex
         "dialer:heartbeat_ts", "voice:heartbeat_ts", "reminder:heartbeat_ts"}
 
 
+async def test_the_watch_redis_pool_admits_every_concurrent_heartbeat_read(watch, monkeypatch):
+    """check_workers reads all worker heartbeats at once. In production (14 Nov
+    2026) the watch built a pool of two connections for three reads, so the last
+    worker was always reported as heartbeat_read_unavailable while it was alive."""
+    import redis.asyncio as real_redis
+    import redis.exceptions
+    from app.api.v1.endpoints.health import _WORKER_HEARTBEAT_KEYS
+    built = {}
+    def from_url(url, **kwargs):
+        built.update(kwargs)
+        return fakeredis.aioredis.FakeRedis(decode_responses=kwargs["decode_responses"],
+                                            max_connections=kwargs["max_connections"])
+    monkeypatch.delenv("REDIS_MODE", raising=False)
+    monkeypatch.setattr(real_redis, "from_url", from_url)
+    monkeypatch.setattr("app.core.container._build_redis_url", lambda: "redis://synthetic.invalid/0")
+    client = await watch._redis_client()
+    held = []
+    try:
+        # One connection per read that check_workers starts together.
+        try:
+            for _ in _WORKER_HEARTBEAT_KEYS:
+                held.append(await client.connection_pool.get_connection("GET"))
+        except redis.exceptions.ConnectionError as refused:
+            pytest.fail(f"the watch pool refused concurrent read {len(held) + 1} of {len(_WORKER_HEARTBEAT_KEYS)}: {refused}")
+        finally:
+            for connection in held:
+                await client.connection_pool.release(connection)
+        for key in _WORKER_HEARTBEAT_KEYS.values():
+            await client.set(key, str(NOW.timestamp() - 5))
+        result = await watch.check_workers(client, now=NOW)
+    finally:
+        await client.aclose()
+    assert built["max_connections"] > len(_WORKER_HEARTBEAT_KEYS) - 1
+    assert result["status"] == "ok"
+    assert [(row["name"], row["reason"]) for row in result["workers"]] == [
+        (name, "recent_heartbeat") for name in _WORKER_HEARTBEAT_KEYS]
+
+
 @pytest.mark.parametrize("observations,expected", [(None, "unavailable"), ([], "no_recent_evidence"),
     ([NS(component="llm", provider="groq", outcome="failed", error_category="rate_limit")], "alert"),
     ([NS(component="stt", provider="deepgram", outcome="recognized", error_category="none")], "ok")])

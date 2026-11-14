@@ -22,7 +22,7 @@ import asyncpg
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.api.v1.endpoints.health import read_worker_heartbeats
+from app.api.v1.endpoints.health import _WORKER_HEARTBEAT_KEYS, read_worker_heartbeats
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
 from app.infrastructure.metrics.provider_observations import read_recent
@@ -217,6 +217,12 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
     return result
 
 
+# check_workers reads every worker heartbeat at once, so the pool must admit one
+# connection per registered worker. A pool of two refused the third read and
+# reported a live reminder worker as heartbeat_read_unavailable (prod, 14 Nov 2026).
+REDIS_MAX_CONNECTIONS = len(_WORKER_HEARTBEAT_KEYS) + 1
+
+
 async def _redis_client():
     from app.core.container import _build_cluster_client, _build_redis_url, _build_sentinel_client
     import redis.asyncio as redis
@@ -228,7 +234,7 @@ async def _redis_client():
     if mode != "single":
         raise ValueError("Unsupported Redis mode")
     return redis.from_url(_build_redis_url(), decode_responses=True,
-                          socket_timeout=1, socket_connect_timeout=1, max_connections=2)
+                          socket_timeout=1, socket_connect_timeout=1, max_connections=REDIS_MAX_CONNECTIONS)
 
 
 async def _record_failing_checks(redis, result):
