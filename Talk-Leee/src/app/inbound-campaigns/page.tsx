@@ -6,6 +6,7 @@ import { ArrowRight, PhoneIncoming, Plus, Search, ShieldAlert } from "lucide-rea
 
 import { InboundEmptyState, InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { InboundStatusBadge, ReadinessBadge } from "@/components/inbound/inbound-status";
+import { UnfinishedInboundSetups } from "@/components/inbound/unfinished-inbound-setups";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { Button } from "@/components/ui/button";
@@ -82,6 +83,9 @@ export default function InboundCampaignsPage() {
                             </div>
                         </section>
                     ) : null}
+
+                    {/* Only for those who can finish the setup: step 2 needs both rights. */}
+                    {capabilities.canCreate && capabilities.canAssignNumber ? <UnfinishedInboundSetups /> : null}
 
                     <div className="content-card flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                         <div className="relative w-full md:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9 max-sm:placeholder:text-[13px]" type="search" aria-label="Search inbound campaigns" placeholder="Search campaign, number, or SIP trunk" /></div>

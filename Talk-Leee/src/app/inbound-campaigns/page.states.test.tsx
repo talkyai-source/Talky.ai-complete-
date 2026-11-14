@@ -48,6 +48,8 @@ let controls: Q = {};
 loader._load = function (id, ...args) {
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.endsWith("hooks/useAuth")) return { useAuth: () => ({ user: { id: "user-a", role: "user" } }) };
+    // Reads the campaign list by itself and has its own test (unfinished-inbound-setups.test.tsx).
+    if (id.includes("components/inbound/unfinished-inbound-setups")) return { UnfinishedInboundSetups: nothing };
     if (id.includes("lib/queries/inbound-queries")) {
         return {
             useEffectivePermissions: () => permissions,
