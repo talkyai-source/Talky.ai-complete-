@@ -9,6 +9,7 @@ import { CampaignForm } from "@/components/campaigns/campaign-form";
 import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { InboundCampaignForm } from "@/components/inbound/inbound-campaign-form";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
+import { InboundSetupNeedsNotice } from "@/components/inbound/inbound-setup-needs-notice";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useAuth } from "@/hooks/useAuth";
 import { afterCampaignCreateHref, INBOUND_RETURN } from "@/lib/campaign-create-return";
@@ -160,6 +161,7 @@ function NewInboundCampaignPageInner() {
             ) : (
                 <>
                     <StepIndicator step={1} />
+                    <InboundSetupNeedsNotice canAssignNumber={capabilities.canAssignNumber} />
                     <div className="mb-6 flex items-center justify-between">
                         <Link
                             href="/inbound-campaigns"
