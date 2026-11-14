@@ -36,18 +36,23 @@ import {
     type CampaignBriefDraft,
 } from "@/lib/campaign-brief";
 import {
+    AGENT_NAMES_OVERFLOW_TEXT,
+    MAX_BRIEF_NAME_LENGTH,
     PERSONAS,
     PersonaSpec,
     SlotDef,
+    agentNamesOverflow,
     isRecommendedVoiceForPersona,
     parseAgentNames,
     parseKvList,
     parseList,
+    representativeNameTooLong,
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
+import { callingHoursInverted, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
     CampaignLeadFieldsPicker,
@@ -617,6 +622,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setError("Select a voice from the active global TTS provider before saving the campaign.");
             return;
         }
+        if (!formData.name.trim()) {
+            setError("Add a campaign name.");
+            return;
+        }
         const agentNames = parseAgentNames(agentNamesRaw);
         if (agentNames.length === 0) {
             setError("Add at least one agent name (up to three — we rotate per call).");
@@ -624,6 +633,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!companyName.trim()) {
             setError("Add the company or business name your agent represents.");
+            return;
+        }
+        if (representativeNameTooLong(agentNames)) {
+            setError("The first representative name must be 120 characters or fewer.");
             return;
         }
         if (!isRealtime && !guidance.valid) {
@@ -635,6 +648,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!isRealtime && briefError) {
             setError(briefError);
+            return;
+        }
+        if (direction === "outbound" && callingHoursInverted(schedule)) {
+            setError(HOURS_ORDER_ERROR);
             return;
         }
         const missing = missingRequiredSlots();
@@ -649,7 +666,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
         const payload = {
             ...voiceSelection,
-            name: formData.name,
+            name: formData.name.trim(),
             description: formData.description || undefined,
             system_prompt: formData.system_prompt,
             voice_id: formData.voice_id,
@@ -1258,6 +1275,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 name="company_name"
                                 placeholder="The name your agent says on the call"
                                 value={companyName}
+                                maxLength={MAX_BRIEF_NAME_LENGTH}
                                 onChange={(e) => setCompanyName(e.target.value)}
                                 required
                                 disabled={submitting}
@@ -1276,6 +1294,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             />
                             <p className="text-xs text-muted-foreground">
                                 Comma-separated. One is picked per call — supply 2–3 to rotate.
+                                {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                             </p>
                             {/*
                              * Voice-gender attention notice — surfaces ONLY when the

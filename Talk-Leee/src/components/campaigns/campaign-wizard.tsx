@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { api } from "@/lib/api";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
-import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
+import { AGENT_NAMES_OVERFLOW_TEXT, MAX_BRIEF_NAME_LENGTH, PERSONAS, agentNamesOverflow, parseAgentNames, representativeNameTooLong } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
@@ -42,6 +42,7 @@ import {
     useCampaignLeadFieldDraft,
 } from "@/components/campaigns/campaign-lead-fields";
 import { leadDetailsApi, type CampaignLeadField } from "@/lib/lead-details-api";
+import { callingHoursInverted } from "@/lib/calling-window";
 import { DraftRestoredNotice } from "@/components/campaigns/draft-restored-notice";
 
 /**
@@ -272,13 +273,27 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     });
     const briefError = campaignBriefValidation(briefDraft);
     const guidance = guidanceBudgetStatus(campaignBriefGuidanceText(goal, campaignBrief));
+    const hasVoice = Boolean(isRealtime ? voiceSelection.realtime_voice : voiceId);
+    // What is still missing on step 1, in plain words (shown under the disabled Next).
+    const basicsMissing = [
+        !name.trim() && "a campaign name",
+        !companyName.trim() && "a brand / company name",
+        agentNames.length < 1 && "at least one representative name",
+        agentNames.length >= 1 && representativeNameTooLong(agentNames) && "a shorter first representative name (120 characters at most)",
+        !hasVoice && "a voice",
+        !isRealtime && briefError && "the campaign brief (see the red message above)",
+        !isRealtime && !guidance.valid && "valid campaign guidance (see the counter above)",
+        !inbound && callingHoursInverted(schedule) && "calling hours that end after they start",
+    ].filter((item): item is string => typeof item === "string");
     const basicsValid = Boolean(
         name.trim()
         && companyName.trim()
         && agentNames.length >= 1
+        && !representativeNameTooLong(agentNames)
         && (isRealtime ? voiceSelection.realtime_voice : voiceId)
         && (isRealtime || !briefError)
-        && (isRealtime || guidance.valid),
+        && (isRealtime || guidance.valid)
+        && (inbound || !callingHoursInverted(schedule)),
     );
 
     const onPickFile = (f: File | null) => {
@@ -400,27 +415,40 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         setSubmitting(true);
         setError(null);
         let campaignId = createdCampaignId;
+        let updateFailed = false;
         try {
+            const body = {
+                ...voiceSelection,
+                name: name.trim(),
+                description: undefined,
+                system_prompt: goal.trim(),      // additional instructions
+                voice_id: voiceId,
+                tts_provider: provider || undefined,   // per-campaign engine
+                goal: goal.trim() || undefined,
+                persona_type: personaType,
+                company_name: companyName.trim(),
+                agent_names: agentNames,
+                agent_name_genders: pruneGenders(agentGenders, agentNames),
+                campaign_slots: {},
+                campaign_brief: campaignBrief,
+                knowledge_driven: true,
+            };
             if (!campaignId) {
                 const { campaign } = await dashboardApi.createCampaign({
-                    ...voiceSelection,
-                    name: name.trim(),
-                    description: undefined,
-                    system_prompt: goal.trim(),      // additional instructions
-                    voice_id: voiceId,
-                    tts_provider: provider || undefined,   // per-campaign engine
-                    goal: goal.trim() || undefined,
-                    persona_type: personaType,
-                    company_name: companyName.trim(),
-                    agent_names: agentNames,
-                    agent_name_genders: pruneGenders(agentGenders, agentNames),
-                    campaign_slots: {},
-                    campaign_brief: campaignBrief,
-                    knowledge_driven: true,
+                    ...body,
                     ...(inbound ? { direction: "inbound" as const } : { calling_schedule: callingSchedulePayload(schedule) }),
                 });
                 campaignId = campaign.id;
                 setCreatedCampaignId(campaign.id);
+            } else {
+                // A retry after a partial failure: the user may have changed step 1
+                // since the first attempt, so send the current values too.
+                updateFailed = true;
+                await dashboardApi.updateCampaign(campaignId, {
+                    ...body,
+                    ...(inbound ? {} : { calling_schedule: callingSchedulePayload(schedule) }),
+                });
+                updateFailed = false;
             }
             await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             // The outbound campaign exists: its draft must not come back.
@@ -440,7 +468,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to create campaign";
             setError(
-                campaignId
+                campaignId && !updateFailed
                     ? `Campaign details were created, but its contact-field policy was not saved. Retry to finish without creating a duplicate. ${detail}`
                     : detail,
             );
@@ -481,12 +509,12 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                     <div className="space-y-5">
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div>
-                                <Label htmlFor="cw-name">Campaign name</Label>
+                                <Label htmlFor="cw-name">Campaign name <span className="text-destructive" aria-hidden="true">*</span></Label>
                                 <Input id="cw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Web Dev Outreach" className="mt-1" />
                             </div>
                             <div>
-                                <Label htmlFor="cw-company">Brand / company name</Label>
-                                <Input id="cw-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
+                                <Label htmlFor="cw-company">Brand / company name <span className="text-destructive" aria-hidden="true">*</span></Label>
+                                <Input id="cw-company" value={companyName} maxLength={MAX_BRIEF_NAME_LENGTH} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
                             </div>
                         </div>
 
@@ -511,12 +539,14 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         </div>
 
                         <div>
-                            <Label htmlFor="cw-agents">Representative names</Label>
+                            <Label htmlFor="cw-agents">Representative names <span className="text-destructive" aria-hidden="true">*</span></Label>
                             <Input id="cw-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
                             <p className="mt-1 text-xs text-muted-foreground">
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
                                 {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
+                                {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                             </p>
+                            {representativeNameTooLong(agentNames) && <p role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
                             <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 
@@ -565,10 +595,15 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             </div>
                         )}
 
-                        <div className="flex justify-end pt-1">
+                        <div className="flex flex-col items-end gap-1 pt-1">
                             <Button onClick={() => { setError(null); goToStep(1); }} disabled={!basicsValid}>
                                 Next: Knowledge <ArrowRight className="h-4 w-4" />
                             </Button>
+                            {!basicsValid && basicsMissing.length > 0 && (
+                                <p className="text-xs text-muted-foreground" data-testid="cw-next-missing">
+                                    To continue, add {basicsMissing.join(", ")}.
+                                </p>
+                            )}
                         </div>
                     </div>
                 )}
