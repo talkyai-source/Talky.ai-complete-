@@ -22,7 +22,9 @@ export function FailedCallAlerts() {
 
 function ScopedFailedCallAlerts({ scopeKey, generation }: { scopeKey: string; generation: number }) {
     const { data } = useAccountAlertQuery("failed-call-alerts", scopeKey, generation,
-        (signal) => dashboardApi.listCalls(1, PAGE_SIZE, {}, signal));
+        // Cursor mode, first page only (QA F6-03): the newest calls are all this
+        // needs, and the server then skips the total count and the OFFSET scan.
+        (signal) => dashboardApi.listCallsCursor(null, PAGE_SIZE, {}, signal));
     const { create, capture } = useNotificationsActions();
 
     useEffect(() => {
