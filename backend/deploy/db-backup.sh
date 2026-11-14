@@ -102,6 +102,7 @@ printf '%s  %s\n' "$digest" "$dump" > "${checksum_file}"
 sha256sum --check --quiet "${checksum_file}"
 trap - EXIT INT TERM HUP
 
+recordings_failed=0
 # Preserve snapshot/principal verification and the flat artifacts. A configured
 # encrypted off-host DB+recordings copy must verify before local retention.
 if [[ -n "${TALKY_OFFHOST_ROOT:-}" ]]; then
@@ -112,6 +113,12 @@ fi
 # Settings live in /etc/talky/db-backup.env (root only); see offsite_ftp.py.
 if [[ -n "${TALKY_FTP_BACKUP_URL:-}" ]]; then
     python3 "${script_dir}/../../scripts/database/offsite_ftp.py" publish --dump "${dump}"
+    # F8-02, opt-in: encrypted recordings to the same FTP account. Runs AFTER the
+    # database copy; a failure is remembered and fails the unit at the end, it
+    # never prevents or undoes the database upload.
+    if [[ "${TALKY_OFFSITE_FTP_RECORDINGS:-}" == "1" ]]; then
+        python3 "${script_dir}/../../scripts/database/offsite_ftp.py" sync-recordings || recordings_failed=1
+    fi
 fi
 
 # --- retention ----------------------------------------------------------------
@@ -122,5 +129,10 @@ echo "db-backup: ok ${dump} size=${size} table_data=${table_data} sha256=${diges
 
 if [[ -n "$shrunk_from" ]]; then
     echo "DB-BACKUP CRITICAL: dump is ${size} bytes, previous good was ${shrunk_from} — published anyway so the baseline moves; confirm the shrink was a legitimate purge (${dump})" >&2
+    exit 1
+fi
+
+if [[ "$recordings_failed" == "1" ]]; then
+    echo "DB-BACKUP CRITICAL: the database copy is safe, but the off-site FTP recordings sync failed (offsite_ftp.py sync-recordings)" >&2
     exit 1
 fi

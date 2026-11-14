@@ -15,13 +15,27 @@ compares it with the local dump's .sha256: a restore from the FTP server works.
 
 Settings (environment): TALKY_FTP_BACKUP_URL (ftp://host/dir/), TALKY_FTP_NETRC,
 TALKY_FTP_PASSPHRASE_FILE, TALKY_FTP_KEEP_DAYS (default 30), TALKY_BACKUP_DIR.
+
+Recordings (F8-02, off by default): ``sync-recordings`` encrypts each file in
+TALKY_RECORDINGS_DIR (else LOCAL_RECORDINGS_DIR, the app's setting) with the
+same passphrase and uploads it as rec-<id>.gpg; an encrypted manifest on the
+server (recordings-manifest.json.gpg) makes runs incremental. It never deletes,
+stops after TALKY_OFFSITE_FTP_RECORDINGS_MAX_BYTES (default 524288000) and
+reports how many files remain and how many manifest entries have no local
+file (orphans). Recordings deleted locally stay on the FTP server until someone
+removes them there, which matters for erase requests. ``verify-recordings`` downloads the newest N
+(--sample, default 3), decrypts and compares with the manifest. db-backup.sh
+runs the sync only when TALKY_OFFSITE_FTP_RECORDINGS=1, after the DB upload.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -37,6 +51,10 @@ REMOTE = re.compile(r"talky-(\d{8}T\d{6}Z)\.dump\.gpg\Z")
 URL = re.compile(r"ftp://[A-Za-z0-9.-]+(:\d{1,5})?/([A-Za-z0-9._-]+/)*\Z")
 KEEP_NEWEST = 3
 CURL_TIMEOUT = 1800
+RECORDINGS_MANIFEST = "recordings-manifest.json.gpg"
+DEFAULT_RECORDINGS_BUDGET = 500 * 1024 * 1024
+DEFAULT_VERIFY_SAMPLE = 3
+MANIFEST_EVERY = 25
 
 
 def _stamp(value: str) -> datetime:
@@ -172,6 +190,174 @@ def verify(ftp: Ftp, cipher, backup_dir: Path, name: str | None = None) -> str:
     return f"offsite-ftp: verify ok {name} decrypts sha256={decrypted[:12]}… bytes={size} (no local copy to compare)"
 
 
+def _recordings_dir() -> Path:
+    # Same directory the app writes to (LOCAL_RECORDINGS_DIR); offhost.py's
+    # TALKY_RECORDINGS_DIR wins when set so both routes read the same tree.
+    configured = os.getenv("TALKY_RECORDINGS_DIR") or os.getenv("LOCAL_RECORDINGS_DIR")
+    return Path(configured) if configured else Path(__file__).resolve().parents[2] / "backend" / "recordings"
+
+
+def _inventory(root: Path) -> list[tuple[str, Path, int, int]]:
+    """Regular files under root (symlinks ignored), newest first."""
+    root = root.resolve(strict=True)
+    found = []
+
+    def walk_failed(error):
+        raise RecoveryError("the recordings directory could not be read completely") from error
+
+    for directory, _subdirs, names in os.walk(root, followlinks=False, onerror=walk_failed):
+        for name in names:
+            path = Path(directory) / name
+            try:
+                info = path.lstat()
+            except OSError:
+                continue
+            if not stat.S_ISREG(info.st_mode):
+                continue
+            relative = path.relative_to(root).as_posix()
+            found.append((relative, path, info.st_size, info.st_mtime_ns))
+    found.sort(key=lambda item: (-item[3], item[0]))
+    return found
+
+
+def _load_manifest(ftp: Ftp, cipher, work: Path) -> dict:
+    if RECORDINGS_MANIFEST not in ftp.names():
+        return {}
+    encrypted, plain = work / "manifest.in", work / "manifest.json"
+    ftp.download(RECORDINGS_MANIFEST, encrypted)
+    cipher.decrypt(encrypted, plain)
+    try:
+        manifest = json.loads(plain.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise RecoveryError("the remote recordings manifest is unreadable") from exc
+    files = manifest.get("files") if isinstance(manifest, dict) else None
+    if not isinstance(files, dict):
+        raise RecoveryError("the remote recordings manifest is malformed")
+    return files
+
+
+def _store_manifest(ftp: Ftp, cipher, files: dict, work: Path) -> None:
+    plain, encrypted = work / "manifest.out", work / RECORDINGS_MANIFEST
+    plain.write_text(json.dumps({"format": 1, "files": files}, sort_keys=True), encoding="utf-8")
+    cipher.encrypt(plain, encrypted)
+    ftp.upload(encrypted, RECORDINGS_MANIFEST)
+    if ftp.size(RECORDINGS_MANIFEST) != encrypted.stat().st_size:
+        raise RecoveryError("the FTP copy of the recordings manifest does not match what was sent")
+
+
+def sync_recordings(root: Path, ftp: Ftp, cipher, budget_bytes: int = DEFAULT_RECORDINGS_BUDGET) -> str:
+    """Upload new or changed recordings, encrypted, newest first, until the byte
+    budget is spent. Never deletes anything. A file already on the server with
+    the same relative path and content hash (per the remote manifest) is skipped.
+    """
+    try:
+        inventory = _inventory(root)
+    except OSError as exc:
+        raise RecoveryError("the recordings directory is missing or unreadable") from exc
+    present = {item[0] for item in inventory}
+    work = Path(tempfile.mkdtemp(prefix="talky-offsite-rec-"))
+    uploaded = skipped = failed = sent = 0
+    remaining = 0
+    orphans = 0
+    dirty = False
+    error: RecoveryError | None = None
+    try:
+        files = _load_manifest(ftp, cipher, work)
+        orphans = sum(1 for name in files if name not in present)
+
+        def recorded(relative: str, size: int, mtime_ns: int) -> bool:
+            entry = files.get(relative)
+            return isinstance(entry, dict) and entry.get("bytes") == size and entry.get("mtime_ns") == mtime_ns
+
+        for position, (relative, path, size, mtime_ns) in enumerate(inventory):
+            if recorded(relative, size, mtime_ns):
+                skipped += 1  # same size and mtime as when uploaded: not read again
+                continue
+            try:
+                plain_sha = digest(path)
+            except OSError:
+                failed += 1
+                continue
+            entry = files.get(relative)
+            if isinstance(entry, dict) and entry.get("sha256") == plain_sha:
+                entry.update(bytes=size, mtime_ns=mtime_ns)  # touched, not changed
+                dirty = True
+                skipped += 1
+                continue
+            if uploaded and sent + size > budget_bytes:
+                remaining = sum(1 for r, _p, sz, mt in inventory[position:] if not recorded(r, sz, mt))
+                break  # budget spent: the next run continues from here
+            remote = f"rec-{hashlib.sha256(relative.encode()).hexdigest()[:16]}-{plain_sha[:16]}.gpg"
+            encrypted = work / "file.gpg"
+            try:
+                cipher.encrypt(path, encrypted)
+                decrypted, _size = cipher.decrypted_digest(encrypted)
+                if decrypted != plain_sha:
+                    raise RecoveryError("an encrypted recording does not decrypt to the original")
+                local_size = encrypted.stat().st_size
+                ftp.upload(encrypted, remote)
+                if ftp.size(remote) != local_size:
+                    raise RecoveryError("an FTP recording copy's size does not match what was sent")
+            except OSError:
+                failed += 1
+                continue
+            except RecoveryError as exc:
+                error = exc
+                break
+            finally:
+                encrypted.unlink(missing_ok=True)
+            files[relative] = {"sha256": plain_sha, "bytes": size, "remote": remote, "mtime_ns": mtime_ns}
+            uploaded += 1
+            sent += size
+            if uploaded % MANIFEST_EVERY == 0:
+                try:
+                    _store_manifest(ftp, cipher, files, work)
+                except RecoveryError as exc:
+                    error = exc
+                    break
+        if uploaded or dirty:
+            try:
+                _store_manifest(ftp, cipher, files, work)
+            except RecoveryError as exc:
+                error = error or exc
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if error is not None:
+        raise error
+    if failed:
+        raise RecoveryError(f"{failed} recording(s) could not be read or encrypted; uploaded={uploaded}")
+    return (f"offsite-ftp: recordings ok uploaded={uploaded} skipped={skipped} bytes={sent} "
+            f"remaining={remaining} orphans={orphans} budget={budget_bytes}")
+
+
+def verify_recordings(ftp: Ftp, cipher, sample: int = DEFAULT_VERIFY_SAMPLE) -> str:
+    """Download the newest `sample` uploaded recordings, decrypt, compare to the manifest hash."""
+    work = Path(tempfile.mkdtemp(prefix="talky-offsite-rec-verify-"))
+    try:
+        files = _load_manifest(ftp, cipher, work)
+        if not files:
+            raise RecoveryError("there are no uploaded recordings in the remote manifest")
+        newest = sorted(files.items(), key=lambda item: (-int(item[1].get("mtime_ns", 0)), item[0]))[:max(1, sample)]
+        bad = 0
+        for _relative, entry in newest:
+            target = work / "sample.gpg"
+            try:
+                ftp.download(entry["remote"], target)
+                decrypted, _size = cipher.decrypted_digest(target)
+            except (RecoveryError, KeyError):
+                bad += 1
+                continue
+            finally:
+                target.unlink(missing_ok=True)
+            if decrypted != entry.get("sha256"):
+                bad += 1
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+    if bad:
+        raise RecoveryError(f"{bad} of {len(newest)} sampled recordings failed verification")
+    return f"offsite-ftp: recordings verify ok sampled={len(newest)} total_uploaded={len(files)}"
+
+
 def _settings() -> tuple[Ftp, Gpg, int]:
     url = os.getenv("TALKY_FTP_BACKUP_URL", "")
     netrc = os.getenv("TALKY_FTP_NETRC", "")
@@ -194,10 +380,23 @@ def main(argv: list[str] | None = None) -> int:
     pub.add_argument("--dump", required=True, type=Path)
     ver = sub.add_parser("verify", help="download, decrypt and check the newest (or a named) remote copy")
     ver.add_argument("--name")
+    sub.add_parser("sync-recordings", help="encrypt and upload new recordings, within a byte budget")
+    rver = sub.add_parser("verify-recordings", help="download, decrypt and check the newest uploaded recordings")
+    rver.add_argument("--sample", type=int, default=DEFAULT_VERIFY_SAMPLE)
     args = parser.parse_args(argv)
     try:
         ftp, cipher, keep_days = _settings()
-        if args.command == "publish":
+        if args.command == "sync-recordings":
+            try:
+                budget = int(os.getenv("TALKY_OFFSITE_FTP_RECORDINGS_MAX_BYTES", str(DEFAULT_RECORDINGS_BUDGET)))
+            except ValueError as exc:
+                raise RecoveryError("TALKY_OFFSITE_FTP_RECORDINGS_MAX_BYTES must be a whole number of bytes") from exc
+            if budget < 1:
+                raise RecoveryError("TALKY_OFFSITE_FTP_RECORDINGS_MAX_BYTES must be positive")
+            print(sync_recordings(_recordings_dir(), ftp, cipher, budget))
+        elif args.command == "verify-recordings":
+            print(verify_recordings(ftp, cipher, args.sample))
+        elif args.command == "publish":
             print(publish(args.dump, ftp, cipher, keep_days))
         else:
             backup_dir = Path(os.getenv("TALKY_BACKUP_DIR", "/var/backups/talky"))
