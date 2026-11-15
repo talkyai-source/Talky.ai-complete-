@@ -29,7 +29,7 @@ CONTACT_TOOL_SPEC = {
     "function": {
         "name": CONTACT_TOOL_NAME,
         "description": (
-            "Record the caller's own email, phone, full name or company. "
+            "Record the caller's own email, phone, full name, company or address (only if they state one). "
             "Interpret spelling and corrections in context; never guess missing parts or "
             "record another person's details or the agent's company as the caller's. Keep name/company "
             "spelling and case; do not split names. Set keeps a pending candidate, quoting the "
@@ -37,7 +37,7 @@ CONTACT_TOOL_SPEC = {
             "confirm records the caller's clear agreement in this turn to that exact candidate. "
             "If they agreed to a detail you never set, set it, then confirm. For a phone, give "
             "the number exactly as the caller said it; never ask for, add or change a country code. "
-            "Add preserves a confirmed email/phone when the caller offers another; name/company "
+            "Add preserves a confirmed email/phone when the caller offers another; name/company/address "
             "each have one current value. Withdraw "
             "removes the selected contact. Use its field_key to correct or withdraw an earlier "
             "contact; omit it for the current contact. Quote their current words exactly. Ask naturally "
@@ -50,7 +50,7 @@ CONTACT_TOOL_SPEC = {
                 "operation": {"type": "string", "enum": ["set", "add", "confirm", "withdraw"]},
                 "value": {"type": ["string", "null"], "description": "Complete intended value, or incomplete caller-provided value to retain for clarification; null for withdrawal."},
                 "expected_value": {"type": ["string", "null"], "description": "Exact selected candidate shown in contact state, or null when absent. Never substitute the replacement here."},
-                "field_key": {"type": ["string", "null"], "description": "Existing contact key from state or tool results (email, email_2, phone, full_name, company_name); omitted/null selects current. Add is current email/phone only."},
+                "field_key": {"type": ["string", "null"], "description": "Existing contact key from state or tool results (email, email_2, phone, full_name, company_name, address); omitted/null selects current. Add is current email/phone only."},
                 "source_quote": {"type": "string", "description": "The caller's exact words supporting this operation: where they gave the detail, or their agreement now for confirm."},
             },
             "required": ["kind", "operation", "value", "expected_value", "source_quote"],
@@ -230,6 +230,8 @@ def _normalise(kind, value):
         if kind == "phone":
             # Exactly as said, for any country: no region, nothing added.
             return normalize_phone_as_said(value.strip())
+        if kind == "address":
+            value = " ".join(value.split())  # one line, single spaces; the words stay the caller's
         if any(ord(char) < 32 or ord(char) == 127 for char in value):
             return None
         return value.strip()  # Identity spelling/case belongs to the caller/model, not a parser.

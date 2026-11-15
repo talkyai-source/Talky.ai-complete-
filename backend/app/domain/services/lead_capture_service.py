@@ -56,6 +56,9 @@ VALID_TYPES = frozenset({
 })
 
 IDENTITY_FIELDS = frozenset({"full_name", "company_name"})
+# A campaign may define its own "address" field of any type. It is managed like an
+# identity only for the live tool's text row (see _is_live_address).
+LIVE_ADDRESS_FIELD = "address"
 
 MAX_VALUE_CHARS = 4000
 CONTACT_VALIDATION_STATUSES = frozenset({
@@ -84,7 +87,7 @@ def project_contact_evidence(row: dict, transcript_json) -> dict:
             evidence = {}
     evidence = dict(evidence) if isinstance(evidence, dict) else {}
     result["evidence"] = evidence
-    identity = result.get("field_key") in IDENTITY_FIELDS and result.get("field_type") == "text"
+    identity = (result.get("field_key") in IDENTITY_FIELDS or result.get("field_key") == LIVE_ADDRESS_FIELD) and result.get("field_type") == "text"
     if (result.get("field_type") not in {"email", "phone"} and not identity) or result.get("source") != "caller_stated":
         return result
     owners = {name: evidence.get(name) for name in ("value_source", "confirmation_source", "status_source")}
@@ -269,7 +272,8 @@ class LeadCaptureService:
         stored = normalise_value(value, field_type)
         # Generic historical/imported identity writes retain their prior behavior.
         # Live identities opt in with status/source evidence and the existing CAS.
-        managed_identity = identity and (validation_status is not None or expected_contact is not None
+        managed_identity = (identity or (key == LIVE_ADDRESS_FIELD and field_type == "text")) and (
+            validation_status is not None or expected_contact is not None
             or any((evidence or {}).get(name) is not None
                    for name in ("value_source", "confirmation_source", "status_source")))
         is_contact = field_type in {"email", "phone"} or managed_identity
@@ -499,7 +503,7 @@ class LeadCaptureService:
         """
         key = str(field_key or "").strip()
         match = re.fullmatch(r"(email|phone)(?:_([2-9]|[1-9][0-9]+))?", key)
-        if not match and key not in IDENTITY_FIELDS:
+        if not match and key not in IDENTITY_FIELDS and key != LIVE_ADDRESS_FIELD:
             raise InvalidCaptureError("only recorded contact or identity fields can be revoked")
         field_type = match.group(1) if match else "text"
         if validation_status not in CONTACT_VALIDATION_STATUSES - {"confirmed"}:
@@ -720,5 +724,6 @@ class LeadCaptureService:
         return [row["field_key"] for row in rows
                 if (saved := details.get(row["field_key"])) is None or saved.get("value") is None
                 or ((row["field_type"] in {"email", "phone"}
-                     or (row["field_key"] in IDENTITY_FIELDS and saved.get("validation_status") is not None))
+                     or ((row["field_key"] in IDENTITY_FIELDS or row["field_key"] == LIVE_ADDRESS_FIELD)
+                         and saved.get("validation_status") is not None))
                     and (not saved.get("confirmed") or saved.get("validation_status") != "confirmed"))]
