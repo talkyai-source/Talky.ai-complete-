@@ -4,6 +4,8 @@ import { createElement } from "react";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { SalesforceSettingsView, type SalesforceSettingsViewProps } from "@/components/connectors/salesforce-settings";
 import type { SalesforceSettingsResponse } from "@/lib/models";
+import { ApiClientError } from "@/lib/http-client";
+import { EXPECTED_PERMISSION, fillContactPermission } from "@/test-utils/contact-permission";
 import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
 
@@ -123,11 +125,44 @@ test("Reveal and Test connection call their handlers and show the probe result",
 test("Import sends the chosen object, campaign and clamped limit and shows counts", async () => {
     const calls = renderView();
     fireEvent.change(screen.getByLabelText("Max records"), { target: { value: "99999" } });
+    fillContactPermission();
     fireEvent.click(screen.getByTestId("salesforce-import"));
     await waitFor(() => assert.equal(calls.import.length, 1));
-    assert.deepEqual(calls.import[0], { campaign_id: "camp-1", object_type: "Lead", limit: 2000, where: undefined, list_name: undefined });
+    assert.deepEqual(calls.import[0], { campaign_id: "camp-1", object_type: "Lead", limit: 2000, where: undefined, list_name: undefined, permission: EXPECTED_PERMISSION });
     await waitFor(() => assert.ok(screen.getByTestId("salesforce-import-result")));
     assert.match(screen.getByTestId("salesforce-import-result").textContent ?? "", /imported 2/);
+});
+
+test("Import with the permission block empty sends nothing and shows the errors", async () => {
+    const calls = renderView();
+    fireEvent.click(screen.getByTestId("salesforce-import"));
+    assert.equal(calls.import.length, 0);
+    assert.ok(screen.getByText("Choose why you can call them."));
+    assert.ok(screen.getByText("Tick this box to confirm."));
+    fillContactPermission({ skipConfirm: true });
+    fireEvent.click(screen.getByTestId("salesforce-import"));
+    assert.equal(calls.import.length, 0, "the tick is still missing");
+});
+
+test("a 422 for the permission date shows beside the date field, not as a generic import error", async () => {
+    renderView({
+        onImport: async () => {
+            throw new ApiClientError({
+                status: 422,
+                code: "contact_permission_invalid",
+                message: "The date cannot be in the future.",
+                details: { code: "contact_permission_invalid", field: "permission_date", message: "The date cannot be in the future." },
+                url: "u",
+                method: "POST",
+            });
+        },
+    });
+    fillContactPermission();
+    fireEvent.click(screen.getByTestId("salesforce-import"));
+    const date = screen.getByLabelText("Date permission was given");
+    await waitFor(() => assert.equal(date.getAttribute("aria-invalid"), "true"));
+    const described = (date.getAttribute("aria-describedby") ?? "").split(" ").map((id) => document.getElementById(id)?.textContent);
+    assert.ok(described.includes("The date cannot be in the future."));
 });
 
 test("callback priority box can be cleared and retyped; clamps on blur and save (forms audit B-F17)", async () => {

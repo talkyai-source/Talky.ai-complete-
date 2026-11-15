@@ -3,6 +3,7 @@ import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import type { CampaignBrief } from "@/lib/campaign-brief";
+import type { ContactListPermission, ContactPermission } from "@/lib/contact-permission";
 
 // Dashboard Types
 export interface DashboardSummary {
@@ -435,6 +436,8 @@ export interface ContactList {
     is_active: boolean;
     contact_count: number;
     created_at: string | null;
+    /** Permission to call this list. Absent until the backend sends it: treat as unknown. */
+    permission?: ContactListPermission;
 }
 
 /** Result of POST /contact-lists/{id}/call — placing REAL outbound calls now. */
@@ -724,14 +727,24 @@ class DashboardApi {
         });
     }
 
+    /** Records the permission-to-call confirmation on a list that has none yet. */
+    async recordContactListPermission(listId: string, permission: ContactPermission): Promise<ContactList> {
+        return this.client.request({
+            path: `/contact-lists/${listId}/permission`,
+            method: "POST",
+            body: permission,
+        });
+    }
+
     async addContact(
         campaignId: string,
         data: ContactMutation,
+        permission: ContactPermission,
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts`,
             method: "POST",
-            body: data,
+            body: { ...data, permission },
         });
     }
 

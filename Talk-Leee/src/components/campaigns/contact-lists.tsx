@@ -21,6 +21,10 @@ import { Loader2, Phone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Modal } from "@/components/ui/modal";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
+import { contactPermissionBasisLabel, type ContactListPermission } from "@/lib/contact-permission";
 import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
@@ -31,6 +35,25 @@ export const UNGROUPED_LIST_ID = "ungrouped";
 
 function errText(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback;
+}
+
+const ALREADY_RECORDED_CODE = "contact_permission_already_recorded";
+const ALREADY_RECORDED_TEXT = "Permission is already recorded for this list.";
+
+function formatPermissionDate(value: string): string {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return value;
+    return parsed.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** One line about permission to call; nothing when the backend does not send it yet (unknown). */
+function permissionLine(permission: ContactListPermission | undefined): string | null {
+    if (!permission) return null;
+    if (permission.confirmed === false) return "Permission to call not confirmed";
+    if (permission.confirmed !== true) return null;
+    const when = permission.confirmed_at ?? permission.permission_date;
+    const why = permission.basis ? contactPermissionBasisLabel(permission.basis) : "";
+    return `Permission confirmed${when ? ` on ${formatPermissionDate(when)}` : ""}${why ? `: ${why}` : ""}`;
 }
 
 function activeStateFromCallError(err: unknown, listId: string): boolean | undefined {
@@ -75,6 +98,11 @@ export function ContactLists({
     const [callingId, setCallingId] = useState<string | null>(null);
     // The list the "Call this list" dialog is asking about.
     const [callTarget, setCallTarget] = useState<ContactList | null>(null);
+    // The list the "Confirm permission" dialog is for.
+    const [permissionTarget, setPermissionTarget] = useState<ContactList | null>(null);
+    const [savingPermission, setSavingPermission] = useState(false);
+    const [permissionNotice, setPermissionNotice] = useState("");
+    const permissionForm = useContactPermissionForm();
     const readiness = useCampaignReadiness([campaignId], lists.some((list) => list.id !== UNGROUPED_LIST_ID));
 
     // Keep callbacks in refs so they aren't effect dependencies (parents often
@@ -137,6 +165,48 @@ export function ContactLists({
             });
         } finally {
             setTogglingId(null);
+        }
+    }
+
+    function openPermissionDialog(list: ContactList) {
+        permissionForm.reset();
+        setPermissionNotice("");
+        setPermissionTarget(list);
+    }
+
+    function closePermissionDialog() {
+        permissionForm.reset();
+        setPermissionNotice("");
+        setPermissionTarget(null);
+    }
+
+    async function handleSavePermission() {
+        if (!permissionTarget || savingPermission) return;
+        const confirmation = permissionForm.require();
+        if (!confirmation) return;
+        const list = permissionTarget;
+        setSavingPermission(true);
+        setPermissionNotice("");
+        try {
+            const updated = await dashboardApi.recordContactListPermission(list.id, confirmation);
+            setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, ...updated } : l)));
+            closePermissionDialog();
+        } catch (err) {
+            const code = isApiClientError(err) ? err.code : "";
+            if (code === ALREADY_RECORDED_CODE || (isApiClientError(err) && err.status === 409)) {
+                setPermissionNotice(ALREADY_RECORDED_TEXT);
+                // Refresh the cards behind the dialog without the loading flash that would close it.
+                try {
+                    const fresh = await dashboardApi.listContactLists(campaignId);
+                    if (Array.isArray(fresh)) setLists(fresh);
+                } catch {
+                    /* the cards keep their last state; the message above still tells the person */
+                }
+            } else if (!permissionForm.showServerError(err)) {
+                setPermissionNotice(errText(err, "Could not save the confirmation."));
+            }
+        } finally {
+            setSavingPermission(false);
         }
     }
 
@@ -248,6 +318,18 @@ export function ContactLists({
                                     </span>
                                 </div>
                             </button>
+                            {permissionLine(list.permission) ? (
+                                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs">
+                                    <span className={list.permission?.confirmed ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}>
+                                        {permissionLine(list.permission)}
+                                    </span>
+                                    {list.permission?.confirmed === false && !isUngrouped && !readOnly && (
+                                        <Button size="sm" variant="outline" onClick={() => openPermissionDialog(list)}>
+                                            Confirm permission
+                                        </Button>
+                                    )}
+                                </div>
+                            ) : null}
 
                             {!isUngrouped && !readOnly && (
                                 <div className="mt-4 flex items-center justify-between gap-2">
@@ -294,6 +376,25 @@ export function ContactLists({
                     );
                 })}
             </div>
+            <Modal
+                open={permissionTarget !== null}
+                onOpenChange={(open) => { if (!open) closePermissionDialog(); }}
+                title="Confirm permission"
+                description={permissionTarget ? `“${permissionTarget.name}”` : undefined}
+                size="lg"
+                footer={(
+                    <div className="flex justify-end gap-2">
+                        <Button variant="ghost" onClick={closePermissionDialog} disabled={savingPermission}>Cancel</Button>
+                        <Button onClick={() => void handleSavePermission()} disabled={savingPermission}>
+                            {savingPermission ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                            Save confirmation
+                        </Button>
+                    </div>
+                )}
+            >
+                <ContactPermissionFields idPrefix="list-permission" disabled={savingPermission} {...permissionForm.fieldProps} />
+                {permissionNotice ? <p role="alert" className="mt-3 text-sm text-destructive">{permissionNotice}</p> : null}
+            </Modal>
             {/* handleCall reports its own result as a toast and never rejects,
                 so the dialog closes once the request has answered. */}
             <ConfirmDialog
