@@ -652,6 +652,11 @@ async def call_contact_list(
         jobs_enqueued = result.jobs_enqueued
         started = True
         message = f"List activated — {jobs_enqueued} contact(s) queued for dialing."
+        withheld = int(getattr(result, "jobs_withheld", 0) or 0)
+        if withheld:
+            # CONTACT_PERMISSION_DIAL_GATE: say why contacts were not queued.
+            from app.domain.services.campaign_service import CampaignService
+            message += CampaignService._withheld_note(withheld)
     except HTTPException:
         # Preserve lifecycle conflicts (notably the outbound/inbound 409)
         # rather than returning an HTTP-200 partial-success envelope.

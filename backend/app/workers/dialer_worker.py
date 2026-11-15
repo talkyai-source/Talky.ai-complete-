@@ -2152,6 +2152,9 @@ class DialerWorker:
         A failed read raises ``ComplianceLookupUnavailable`` (the caller
         defers; an unreadable state is never a licence to dial).
         """
+        from app.domain.services.dialer.block_reasons import (
+            contact_permission_dial_gate_enabled,
+        )
         from app.domain.services.dialer.job_states import ACTIVE_STATUSES
 
         try:
@@ -2161,12 +2164,16 @@ class DialerWorker:
                     SELECT j.status       AS job_status,
                            l.id           AS lead_row_id,
                            l.status       AS lead_status,
-                           l.do_not_call  AS lead_do_not_call
+                           l.do_not_call  AS lead_do_not_call,
+                           l.list_id      AS lead_list_id,
+                           cl.consent_confirmed_at AS list_confirmed_at
                       FROM (SELECT 1) AS base
                       LEFT JOIN dialer_jobs AS j
                         ON j.id = $1::uuid AND j.tenant_id = $2::uuid
                       LEFT JOIN leads AS l
                         ON l.id = $3::uuid AND l.tenant_id = $2::uuid
+                      LEFT JOIN contact_lists AS cl
+                        ON cl.id = l.list_id AND cl.tenant_id = $2::uuid
                     """,
                     str(job.job_id),
                     str(job.tenant_id),
@@ -2188,6 +2195,12 @@ class DialerWorker:
             or bool(row["lead_do_not_call"])
         ):
             return "lead_not_dialable"
+        # CONTACT_PERMISSION_DIAL_GATE (off by default): a contact whose list has
+        # no calling-permission confirmation, or that has no list, is not dialled.
+        if contact_permission_dial_gate_enabled() and (
+            row.get("lead_list_id") is None or row.get("list_confirmed_at") is None
+        ):
+            return "contact_permission_missing"
         return None
 
     async def _drop_stale_payload(self, job: DialerJob, reason: str) -> None:
@@ -2199,13 +2212,20 @@ class DialerWorker:
         ``lead_not_dialable`` ends the still-active job. The lead is never
         touched: a removed contact must not be written back to 'pending', so a
         failed job write is logged, not raised into the failure boundary.
+        ``contact_permission_missing`` (CONTACT_PERMISSION_DIAL_GATE) ends the
+        job SKIPPED the same way, so the lead's one-active-job slot is freed:
+        the attempt number, the lead and its status are untouched, and once a
+        person confirms the list and starts the campaign again the contact gets
+        a fresh job. The user is shown the reason (campaign block state).
         """
         logger.warning(
             "dialer_stale_payload_dropped job=%s lead=%s campaign=%s reason=%s",
             job.job_id, job.lead_id, job.campaign_id, reason,
         )
         await self.queue_service.mark_skipped(job.job_id, reason=reason)
-        if reason == "lead_not_dialable":
+        if reason == "contact_permission_missing":
+            await self._publish_block(job, reason)
+        if reason in ("lead_not_dialable", "contact_permission_missing"):
             try:
                 await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
             except Exception as exc:  # noqa: BLE001
@@ -2502,7 +2522,8 @@ class DialerWorker:
                     # those calls were never handed to a carrier.
                     "AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') "
                     "IN ('line_not_ready', 'telephony_unavailable', "
-                    "'platform_at_capacity'))",
+                    "'platform_at_capacity', "
+                    "'stale_payload:contact_permission_missing'))",
                     lead_id,
                 )
                 return int(val or 0)
