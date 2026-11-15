@@ -14,9 +14,11 @@ import { AlertTriangle, Loader2 } from "lucide-react";
 import type { CampaignCallingSchedule, CampaignEffectiveSchedule } from "@/lib/dashboard-api";
 import { checkCallingWindow } from "@/lib/calling-window";
 import {
+    CALL_ANYTIME_LABEL,
     CALLING_HOURS_RULE_TEXT,
     OUTSIDE_HOURS_TEXT,
     SCHEDULE_NOT_SET_TEXT,
+    callAnytimeInForce,
     enforcedSchedule,
     formatCallingSchedule,
     scheduleMissingWarning,
@@ -38,13 +40,19 @@ export function CallingScheduleLine({
 }) {
     const line = formatCallingSchedule(enforcedSchedule(effectiveSchedule) ?? callingConfig);
     return (
-        <p className={className} data-testid={testId}>
-            {line ? (
-                <>
-                    <span className="font-medium text-foreground">Calling schedule:</span>{" "}{line}
-                </>
-            ) : SCHEDULE_NOT_SET_TEXT}
-        </p>
+        <>
+            <p className={className} data-testid={testId}>
+                {line ? (
+                    <>
+                        <span className="font-medium text-foreground">Calling schedule:</span>{" "}{line}
+                    </>
+                ) : SCHEDULE_NOT_SET_TEXT}
+            </p>
+            {/* The dialer ignores the hours above: say so directly under them. */}
+            {callAnytimeInForce(effectiveSchedule) ? (
+                <p className="text-sm text-muted-foreground" data-testid={`${testId}-anytime`}>{CALL_ANYTIME_LABEL}</p>
+            ) : null}
+        </>
     );
 }
 
@@ -60,12 +68,14 @@ export function CallingScheduleStartNotice({
     const missing = scheduleMissingWarning(callingConfig);
     // The out-of-hours warning is worked out from the hours shown on the line above.
     const shown = enforcedSchedule(effectiveSchedule) ?? callingConfig;
-    const win = !reading && shown ? checkCallingWindow(shown) : null;
+    // No out-of-hours warning while the dialer ignores the hours.
+    const win = !reading && shown && !callAnytimeInForce(effectiveSchedule) ? checkCallingWindow(shown) : null;
     return (
         <>
             {reading ? (
                 <div role="status" aria-busy="true" data-testid="calling-schedule-reading" className="flex h-5 items-center text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    <span className="sr-only">Loading…</span>
                 </div>
             ) : (
                 <CallingScheduleLine callingConfig={callingConfig} effectiveSchedule={effectiveSchedule} />

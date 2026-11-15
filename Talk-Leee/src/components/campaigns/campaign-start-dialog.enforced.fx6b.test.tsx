@@ -92,16 +92,19 @@ test("one campaign from the list: an answer with effective_schedule null, or wit
     assert.deepEqual(lines(second.dialog), [SAVED_LINE]);
 });
 
-test("one campaign from the list: call anytime asked for and allowed shows the saved values; asked for but not allowed shows the enforced hours", async () => {
+// FX6c Task 0.1 replaced the FX6b reading (the saved values): the enforced hours show, with the editor's label under them.
+test("one campaign from the list: call anytime asked for and allowed shows the enforced hours with the label under them; asked for but not allowed shows the enforced hours alone", async () => {
     const target = campaign("c1", "Alpha", "paused", { ...SAVED, ignore_schedule: true });
     const allowed = await open([target]);
     await allowed.answer("c1", { campaign: target, effective_schedule: enforced("Europe/London", { ignore_schedule_requested: true, ignore_schedule: true }) });
-    assert.deepEqual(lines(allowed.dialog), [SAVED_LINE]);
+    assert.deepEqual(lines(allowed.dialog), ["Calling schedule: Europe/London · 08:00–17:00 · Mon, Tue"]);
+    assert.equal(allowed.dialog.getByTestId("calling-schedule-line").nextElementSibling?.textContent, "Call anytime (ignore these hours)");
     cleanup();
     mock.restoreAll();
     const refused = await open([target]);
     await refused.answer("c1", { campaign: target, effective_schedule: enforced("Europe/London", { ignore_schedule_requested: true, ignore_schedule_allowed: false, ignore_schedule: false }) });
     assert.deepEqual(lines(refused.dialog), ["Calling schedule: Europe/London · 08:00–17:00 · Mon, Tue"]);
+    assert.equal(refused.dialog.queryByText("Call anytime (ignore these hours)") === null, true);
 });
 
 test("two campaigns from the list: each is read and shows its own enforced hours, loaded or failed on its own", async () => {

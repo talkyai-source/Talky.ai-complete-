@@ -50,10 +50,11 @@ test("enforcedSchedule: call anytime asked for but not allowed is still enforced
     assert.equal(enforcedSchedule(refused) !== null, true);
 });
 
-test("enforcedSchedule: null when there is none, when the dialer ignores the hours, or when a field is missing", () => {
+// FX6c Task 0.1: the dialer ignoring the hours no longer hides them (they show with the "Call anytime" label).
+test("enforcedSchedule: null when there is none or when a field is missing; the hours stay when the dialer ignores them", () => {
     assert.equal(enforcedSchedule(null), null);
     assert.equal(enforcedSchedule(undefined), null);
-    assert.equal(enforcedSchedule({ ...SCHEDULE, ignore_schedule_requested: true, ignore_schedule: true }), null);
+    assert.deepEqual(enforcedSchedule({ ...SCHEDULE, ignore_schedule_requested: true, ignore_schedule: true }), enforcedSchedule(SCHEDULE));
     assert.equal(enforcedSchedule({ ...SCHEDULE, timezone: "" }), null);
     assert.equal(enforcedSchedule({ ...SCHEDULE, allowed_days: [] }), null);
 });

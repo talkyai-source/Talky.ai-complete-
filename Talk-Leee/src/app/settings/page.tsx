@@ -1,7 +1,7 @@
 "use client";
 
 import { remainingMinutesLabel } from "@/lib/minutes-allowance";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useId, useMemo } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
@@ -22,6 +22,9 @@ import { ProviderKeysSection } from "@/components/settings/provider-keys-section
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
+import { FIELD_NOT_SET_TEXT } from "@/lib/calling-schedule-text";
+import { supportedTimeZones } from "@/lib/contact-form";
+import { isApiClientError } from "@/lib/http-client";
 import { clampIntText } from "@/lib/number-text";
 import { Loader2 } from "lucide-react";
 
@@ -55,6 +58,12 @@ export default function SettingsPage() {
     const [profileName, setProfileName] = useState("");
     const [profileBusiness, setProfileBusiness] = useState("");
     const [savingProfile, setSavingProfile] = useState(false);
+    // The account's reporting timezone (3.7): report dates only, never calling hours.
+    const [profileTimezone, setProfileTimezone] = useState("");
+    // The server's own refusal (403 / 422) of a timezone save, shown on the field.
+    const [timezoneError, setTimezoneError] = useState<string | null>(null);
+    const timezoneErrorId = useId();
+    const timeZones = useMemo(() => supportedTimeZones(), []);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the editable profile fields from AuthContext when the loaded user changes
@@ -62,12 +71,21 @@ export default function SettingsPage() {
         setProfileBusiness(user?.business_name ?? "");
     }, [user?.name, user?.business_name]);
 
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the Timezone field from AuthContext when the account's zone changes
+        setProfileTimezone(user?.account_timezone ?? "");
+    }, [user?.account_timezone]);
+
     // Only a tenant admin or above may rename the business (the server refuses others).
     const canEditBusinessName = ["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"].includes(String(user?.role ?? ""));
 
+    // The timezone follows the same server rule (tenant admin or above) and is saved only when it changed.
+    const timezoneChanged = canEditBusinessName && profileTimezone !== "" && profileTimezone !== (user?.account_timezone ?? "");
+
     const profileDirty =
         (user?.name ?? "") !== profileName.trim() ||
-        (user?.business_name ?? "") !== profileBusiness.trim();
+        (user?.business_name ?? "") !== profileBusiness.trim() ||
+        timezoneChanged;
 
     async function handleSaveProfile() {
         setSavingProfile(true);
@@ -78,9 +96,24 @@ export default function SettingsPage() {
                 if (!profileBusiness.trim()) throw new Error("Business name cannot be empty");
                 payload.business_name = profileBusiness.trim();
             }
-            if (Object.keys(payload).length === 0) return;
-            await api.updateMe(payload);
-            await refreshUser();
+            const profileChanged = Object.keys(payload).length > 0;
+            if (!profileChanged && !timezoneChanged) return;
+            if (profileChanged) await api.updateMe(payload);
+            let timezoneRefused = false;
+            if (timezoneChanged) {
+                try {
+                    await api.updateAccountTimezone(profileTimezone);
+                    setTimezoneError(null);
+                } catch (e: unknown) {
+                    // The server's own refusal (not a tenant admin, or not a valid zone) belongs to the field.
+                    if (!isApiClientError(e) || (e.status !== 403 && e.status !== 422)) throw e;
+                    setTimezoneError(e.message);
+                    timezoneRefused = true;
+                }
+            }
+            // The profile is read again: every "Timezone: {zone}" label follows the saved zone.
+            if (profileChanged || !timezoneRefused) await refreshUser();
+            if (timezoneRefused && !profileChanged) return;
             createNotification({
                 type: "success",
                 title: "Profile updated",
@@ -302,6 +335,37 @@ export default function SettingsPage() {
                                                     disabled={!canEditBusinessName}
                                                     placeholder="Acme Inc."
                                                 />
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label htmlFor="profileTimezone">Timezone</Label>
+                                                {canEditBusinessName ? (
+                                                    <Select
+                                                        id="profileTimezone"
+                                                        ariaLabel="Timezone"
+                                                        value={profileTimezone}
+                                                        onChange={(next) => { setProfileTimezone(next); setTimezoneError(null); }}
+                                                        ariaInvalid={timezoneError ? true : undefined}
+                                                        ariaDescribedBy={timezoneError ? timezoneErrorId : undefined}
+                                                    >
+                                                        {!profileTimezone && <option value="" disabled>{FIELD_NOT_SET_TEXT}</option>}
+                                                        {profileTimezone && !timeZones.includes(profileTimezone) && (
+                                                            <option value={profileTimezone}>{profileTimezone}</option>
+                                                        )}
+                                                        {timeZones.map((zone) => (
+                                                            <option key={zone} value={zone}>{zone}</option>
+                                                        ))}
+                                                    </Select>
+                                                ) : (
+                                                    <Input
+                                                        id="profileTimezone"
+                                                        value={user.account_timezone ?? FIELD_NOT_SET_TEXT}
+                                                        readOnly
+                                                        disabled
+                                                    />
+                                                )}
+                                                {timezoneError ? (
+                                                    <p id={timezoneErrorId} role="alert" className="text-sm text-red-600 dark:text-red-400">{timezoneError}</p>
+                                                ) : null}
                                             </div>
                                             <div className="space-y-2">
                                                 <Label htmlFor="profileEmail">Email</Label>

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2, ShieldAlert } from "lucide-react";
 import { type MeResponse } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
+import { SUBSCRIPTION_SUSPENDED_TEXT, isSubscriptionSuspended } from "@/lib/account-state";
 import { cn } from "@/lib/utils";
 
 // 30-second freshness for suspension state. After Phase 3 the parallel
@@ -20,6 +21,8 @@ type SuspensionState = {
     partnerStatus: "active" | "suspended";
     tenantStatus: "active" | "suspended";
     suspended: boolean;
+    /** Admin "Suspend" (account_state suspended_subscription): a banner only, nothing is made inert. */
+    subscriptionSuspended: boolean;
     scope: SuspensionScope;
     reason: string | null;
     suspendedAt: string | null;
@@ -45,6 +48,7 @@ const defaultState: SuspensionState = {
     partnerStatus: "active",
     tenantStatus: "active",
     suspended: false,
+    subscriptionSuspended: false,
     scope: null,
     reason: null,
     suspendedAt: null,
@@ -75,6 +79,7 @@ function deriveSuspensionState(me: Partial<MeResponse> | null | undefined): Susp
         partnerStatus,
         tenantStatus,
         suspended: partnerStatus === "suspended" || tenantStatus === "suspended",
+        subscriptionSuspended: isSubscriptionSuspended(me),
         scope,
         reason: me.suspension_reason?.trim() ? me.suspension_reason : null,
         suspendedAt: me.suspended_at?.trim() ? me.suspended_at : null,
@@ -236,35 +241,41 @@ export function useSuspensionState() {
 export function SuspensionBanner({ className }: { className?: string }) {
     const { state, loading } = useSuspensionState();
 
-    if (!state.suspended && !loading) return null;
+    // A hold outranks a suspended subscription, as on the server.
+    const subscriptionOnly = state.subscriptionSuspended && !state.suspended;
+    const flagged = state.suspended || subscriptionOnly;
+
+    if (!flagged && !loading) return null;
 
     return (
         <div
             className={cn(
                 "rounded-2xl border px-4 py-3 shadow-sm",
-                state.suspended ? "border-red-500/30 bg-red-500/10 text-red-50" : "border-amber-500/30 bg-amber-500/10 text-foreground",
+                flagged ? "border-red-500/30 bg-red-500/10 text-red-50" : "border-amber-500/30 bg-amber-500/10 text-foreground",
                 className
             )}
             role="status"
             aria-live="polite"
+            data-testid="account-status-banner"
         >
             <div className="flex items-start gap-3">
                 <div
                     className={cn(
                         "mt-0.5 flex h-9 w-9 items-center justify-center rounded-full border shrink-0",
-                        state.suspended ? "border-red-500/30 bg-red-500/20 text-red-100" : "border-amber-500/30 bg-amber-500/20 text-amber-100"
+                        flagged ? "border-red-500/30 bg-red-500/20 text-red-100" : "border-amber-500/30 bg-amber-500/20 text-amber-100"
                     )}
                 >
-                    {loading && !state.suspended ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : state.suspended ? <ShieldAlert className="h-4 w-4" aria-hidden /> : <AlertTriangle className="h-4 w-4" aria-hidden />}
+                    {loading && !flagged ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : flagged ? <ShieldAlert className="h-4 w-4" aria-hidden /> : <AlertTriangle className="h-4 w-4" aria-hidden />}
                 </div>
                 <div className="min-w-0">
-                    <div className="text-sm font-semibold text-foreground">{state.suspended ? "Account suspended" : "Refreshing account access"}</div>
+                    <div className="text-sm font-semibold text-foreground">{flagged ? "Account suspended" : "Refreshing account access"}</div>
                     <div className="mt-1 text-sm text-muted-foreground">
-                        {state.suspended
+                        {subscriptionOnly
+                            ? SUBSCRIPTION_SUSPENDED_TEXT
+                            : state.suspended
                             ? `This ${state.scope === "partner" ? "partner" : "tenant"} account is suspended. Interactive actions are disabled until access is restored.`
                             : "Checking the latest account status from the backend before allowing protected actions."}
                     </div>
-                    {state.reason ? <div className="mt-2 text-xs text-muted-foreground">Reason: {state.reason}</div> : null}
                 </div>
             </div>
         </div>

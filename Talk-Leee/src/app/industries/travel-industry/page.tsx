@@ -489,8 +489,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>Integrations</p>
           <h2 className={`mt-3 ${headingClassName}`}>Connect With the Hospitality Tools You Already Use</h2>
           <p className={bodyClassName}>
-            Keep the systems you trust while connecting reservations, guest information, calendars, and daily operations into one
-            connected workflow.
+            Keep the systems you trust while connecting calendars and daily operations into one connected workflow.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {integrations.map((item) => (

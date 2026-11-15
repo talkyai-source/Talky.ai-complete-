@@ -19,6 +19,8 @@ import { Modal } from "@/components/ui/modal";
 import { CallingScheduleStartNotice } from "@/components/campaigns/calling-schedule-notice";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 import { canStartCampaign, notStartedText, outOfMinutesText, runCampaignStarts, type CampaignStartOutcome } from "@/lib/campaign-control";
+import { SUBSCRIPTION_SUSPENDED_TEXT, isSubscriptionSuspended } from "@/lib/account-state";
+import { useSignedInUser } from "@/lib/auth-context";
 import { campaignStatusLabel } from "@/lib/campaign-status";
 import { dashboardApi, isMinutesExhausted, type Campaign, type CampaignEffectiveSchedule, type MinutesStatus } from "@/lib/dashboard-api";
 
@@ -67,6 +69,8 @@ export function useCampaignStartDialog(options: {
     const [readSchedules, setReadSchedules] = useState<Record<string, CampaignEffectiveSchedule | null>>({});
     const schedulesRead = useRef(0);
     const confirming = useRef(false);
+    // Admin "Suspend": the server refuses every campaign Start (403 tenant_suspended), so Start is not offered.
+    const accountSuspended = isSubscriptionSuspended(useSignedInUser());
 
     // Only a draft, paused or stopped campaign can start; the others in a set
     // are listed with their status and never checked or sent.
@@ -98,7 +102,7 @@ export function useCampaignStartDialog(options: {
     const skipped = verdicts
         .filter((verdict) => !verdict.ready && verdict.reason && (listed || outOfMinutes))
         .map((verdict) => ({ id: verdict.target.id, name: verdict.target.name, reason: verdict.reason as string }));
-    const canConfirm = !running && minutes !== undefined && !readiness.checking && startable.length > 0;
+    const canConfirm = !accountSuspended && !running && minutes !== undefined && !readiness.checking && startable.length > 0;
     // The readiness notice: always for one campaign's own button; for a listed
     // set only while a first readiness answer is still awaited.
     const showReadinessNotice = !listed
@@ -181,7 +185,7 @@ export function useCampaignStartDialog(options: {
     }
 
     return {
-        isOpen, open, close, confirm, targets, startable, skipped, single, paced, readiness, showReadinessNotice, running, canConfirm, scheduleFor,
+        isOpen, open, close, confirm, targets, startable, skipped, single, paced, readiness, showReadinessNotice, running, canConfirm, scheduleFor, accountSuspended,
         firstSpeaker, setFirstSpeaker, batchSize, setBatchSize, callGap, setCallGap,
     };
 }
@@ -216,6 +220,15 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
             }
         >
             <div className="space-y-2" data-testid="campaign-start-dialog">
+                {dialog.accountSuspended ? (
+                    <div
+                        role="status"
+                        data-testid="campaign-start-account-suspended"
+                        className="min-w-0 break-words rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-300"
+                    >
+                        {SUBSCRIPTION_SUSPENDED_TEXT}
+                    </div>
+                ) : null}
                 {dialog.showReadinessNotice ? <CampaignReadinessNotice readiness={dialog.readiness} /> : null}
                 {dialog.skipped.length > 0 ? (
                     <div

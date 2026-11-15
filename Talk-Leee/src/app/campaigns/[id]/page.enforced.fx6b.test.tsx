@@ -157,10 +157,12 @@ test("header: \"call anytime\" asked for but not allowed shows the enforced hour
     assert.equal(header(), "Calling schedule: Europe/London · 08:00–17:00 · Mon, Tue");
 });
 
-test("header: \"call anytime\" asked for and allowed reads exactly as the page did before (the saved values)", async () => {
+// FX6c Task 0.1 replaced the FX6b reading (the saved values): the enforced hours show, with the editor's label under them.
+test("header: \"call anytime\" asked for and allowed shows the enforced hours with the \"Call anytime\" label directly under them", async () => {
     wire({ status: "draft", callingConfig: { ...SAVED, ignore_schedule: true }, schedule: effective({ ignore_schedule_requested: true, ignore_schedule_allowed: true, ignore_schedule: true }) });
     await mount();
-    assert.equal(header(), "Calling schedule: Asia/Karachi · 10:00–22:00 · Sat, Sun");
+    assert.equal(header(), "Calling schedule: Europe/London · 08:00–17:00 · Mon, Tue");
+    assert.equal(screen.getByTestId("campaign-calling-schedule").nextElementSibling?.textContent, "Call anytime (ignore these hours)");
 });
 
 test("header: effective_schedule null reads exactly as before, saved values or the Not set hedge", async () => {
