@@ -1,3 +1,4 @@
+import { scrubSentryBreadcrumb, scrubSentryEvent, scrubSentryTransaction } from "./lib/sentry-scrub";
 import { appEnvironment, commitSha, sentryEnabled, sentryProfilesSampleRate, sentryTracesSampleRate } from "./lib/env";
 
 export async function register() {
@@ -16,6 +17,10 @@ export async function register() {
             release: commitSha(),
             tracesSampleRate: sentryTracesSampleRate(),
             profilesSampleRate: sentryProfilesSampleRate(),
+            sendDefaultPii: false,
+            beforeSend: scrubSentryEvent,
+            beforeSendTransaction: scrubSentryTransaction,
+            beforeBreadcrumb: scrubSentryBreadcrumb,
         });
         return;
     }
@@ -27,6 +32,10 @@ export async function register() {
             environment: appEnvironment(),
             release: commitSha(),
             tracesSampleRate: sentryTracesSampleRate(),
+            sendDefaultPii: false,
+            beforeSend: scrubSentryEvent,
+            beforeSendTransaction: scrubSentryTransaction,
+            beforeBreadcrumb: scrubSentryBreadcrumb,
         });
     }
 }
