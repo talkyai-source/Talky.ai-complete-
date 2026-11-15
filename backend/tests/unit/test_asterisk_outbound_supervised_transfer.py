@@ -460,3 +460,50 @@ def test_adapter_reports_whether_a_phone_number_transfer_can_be_proved(monkeypat
 def test_adapter_reports_not_available_when_the_switch_is_unset(monkeypatch):
     monkeypatch.delenv(SWITCH, raising=False)
     assert AsteriskAdapter().outbound_pstn_transfer_available is False
+
+
+# ------------------------------- the two phone legs end together (outbound, non-durable)
+async def _connected_outbound(switch_on):
+    adapter, parent = _live_outbound_adapter()
+    rig = _Rig(adapter, parent)
+    _register_callbacks(adapter)
+    task = await rig.start(trunk_endpoint=TRUNK, ring_seconds=12)
+    leg = adapter._transfers_by_parent[parent]
+    await adapter._handle_ari_event(
+        {"type": "ChannelStateChange", "channel": {"id": leg.target_id, "state": "Up"}}
+    )
+    assert (await asyncio.wait_for(task, timeout=1))["status"] == "completed"
+    return adapter, parent, rig, leg
+
+
+@pytest.mark.asyncio
+async def test_a_connected_outbound_leg_stays_owned_and_hanging_up_the_parent_hangs_up_both(switch_on):
+    adapter, parent, rig, leg = await _connected_outbound(switch_on)
+    assert leg.durable is False and leg.connected is True
+    assert adapter._transfers_by_parent[parent] is leg
+    assert adapter._transfers_by_target[leg.target_id] is leg
+
+    assert await adapter.hangup_confirmed(parent) is True
+
+    deleted = [path for method, path, _ in rig.ari if method == "DELETE"]
+    assert f"/channels/{parent}" in deleted
+    assert f"/channels/{leg.target_id}" in deleted
+
+
+@pytest.mark.asyncio
+async def test_the_connected_outbound_target_ending_ends_the_parent(switch_on):
+    adapter, parent, rig, leg = await _connected_outbound(switch_on)
+
+    await adapter._handle_ari_event(
+        {
+            "type": "ChannelDestroyed",
+            "channel": {"id": leg.target_id},
+            "cause": 16,
+            "cause_txt": "Normal Clearing",
+        }
+    )
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+    deleted = [path for method, path, _ in rig.ari if method == "DELETE"]
+    assert f"/channels/{parent}" in deleted

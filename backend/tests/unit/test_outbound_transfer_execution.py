@@ -12,6 +12,8 @@ from unittest.mock import patch
 import pytest
 
 import app.api.v1.endpoints.telephony_bridge as bridge
+from app.domain.services.call_guard import CheckResult, GuardCheck, TenantCallLimits
+from tests.unit.test_transfer_destination_policy import _guard
 
 
 TENANT = "22222222-2222-2222-2222-222222222222"
@@ -110,10 +112,19 @@ async def _run(
     destination=TARGET,
     mode="blind",
     attempt=None,
+    guard=None,
     **kwargs,
 ):
     conn = conn or _Conn(brief=_brief(), leg=_leg())
     adapter = adapter or _Adapter()
+    if guard is None:
+        guard, _seen = _guard(TenantCallLimits())
+    guard_args = []
+
+    def _make_guard(**guard_kwargs):
+        guard_args.append(guard_kwargs)
+        return guard
+
     tenants = []
 
     @asynccontextmanager
@@ -124,6 +135,7 @@ async def _run(
     container = SimpleNamespace(is_initialized=True, db_pool=object(), redis=None)
     with (
         patch.object(bridge, "_adapter", adapter),
+        patch.object(bridge, "CallGuard", _make_guard),
         patch("app.core.db_utils.acquire_with_tenant", _acquire),
         patch("app.core.container.get_container", return_value=container),
         patch.object(
@@ -137,6 +149,7 @@ async def _run(
 
         policy.side_effect = _policy
         result = await bridge._execute_transfer(CALL, destination, mode, **kwargs)
+    _run.guard_args = guard_args
     return result, conn, adapter, tenants
 
 
@@ -412,3 +425,110 @@ async def test_switch_off_leaves_an_extension_transfer_as_today(destination):
     assert adapter.calls == [((CALL, destination, "blind"), {})]
     assert conn.reads == [] and tenants == []
     assert result == {"status": "completed"}
+
+
+# ------------------------------------------------ destination rules and minutes
+def _events(conn):
+    return [event[3] for event in conn.events]
+
+
+@pytest.mark.asyncio
+async def test_an_allowed_number_passes_the_destination_policy():
+    result, _conn, adapter, _t = await _run()
+    assert result == {"status": "completed"} and len(adapter.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("number", "limits", "code"),
+    [
+        ("+449012345678", TenantCallLimits(), "premium_rate_destination"),
+        ("+442071234567", TenantCallLimits(blocked_prefixes=["+4420"]), "blocked_prefix"),
+        ("+442071234567", TenantCallLimits(blocked_country_codes=["GB"]), "blocked_country"),
+        ("+442071234567", TenantCallLimits(allowed_country_codes=["US"]), "country_not_allowed"),
+    ],
+)
+async def test_a_number_the_tenant_rules_refuse_is_not_dialled(number, limits, code):
+    brief = {"transfer_destinations": [{"name": "Sales", "number": number, "when": ""}]}
+    guard, _seen = _guard(limits)
+    result, conn, adapter, _t = await _run(
+        conn=_Conn(brief=brief, leg=_leg()), destination=number, guard=guard
+    )
+    assert adapter.calls == []
+    assert result["status"] == "failed"
+    assert result["error"] == "transfer_destination_not_permitted"
+    assert result["caller_media_retained"] is True
+    assert _events(conn) == ["transfer_requested", "transfer_failed"]
+    failed = conn.events[-1][4]
+    assert '"error": "transfer_destination_not_permitted"' in failed
+    assert code in failed
+    assert number not in str(conn.events)
+
+
+@pytest.mark.asyncio
+async def test_unreadable_tenant_limits_refuse_the_transfer():
+    guard, _seen = _guard(None, raises=RuntimeError("db down"))
+    result, conn, adapter, _t = await _run(guard=guard)
+    assert adapter.calls == []
+    assert result["error"] == "transfer_destination_not_permitted"
+    assert result["caller_media_retained"] is True
+    assert _events(conn) == ["transfer_requested", "transfer_failed"]
+
+
+@pytest.mark.asyncio
+async def test_no_minutes_left_refuses_before_any_phone_action():
+    quota = CheckResult(
+        check=GuardCheck.MINUTES_QUOTA, passed=False, reason="minutes_quota_exhausted: 5/5 used"
+    )
+    guard, seen = _guard(TenantCallLimits(), quota=quota)
+    result, conn, adapter, _t = await _run(guard=guard)
+    assert adapter.calls == []
+    assert result["error"] == "transfer_no_minutes"
+    assert result["caller_media_retained"] is True
+    assert _events(conn) == ["transfer_requested", "transfer_failed"]
+    assert seen["quota_calls"] == [(TENANT, {"call_id": CALL})]
+    assert "balance" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_not_on_the_list_wins_over_the_destination_policy_and_minutes():
+    guard, seen = _guard(None, raises=RuntimeError("db down"))
+    result, _c, adapter, _t = await _run(destination="+442079999999", guard=guard)
+    assert result["error"] == "transfer_destination_not_allowed"
+    assert adapter.calls == [] and seen["tenants"] == [] and seen["quota_calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_outside_hours_wins_over_the_destination_policy_and_minutes():
+    guard, seen = _guard(None, raises=RuntimeError("db down"))
+    conn = _Conn(brief=_brief(transfer_hours=CLOSED_HOURS), leg=_leg())
+    result, _c, adapter, _t = await _run(conn=conn, guard=guard)
+    assert result["error"] == "transfer_closed"
+    assert adapter.calls == [] and seen["tenants"] == [] and seen["quota_calls"] == []
+
+
+@pytest.mark.asyncio
+async def test_the_guard_is_asked_about_the_calls_own_tenant():
+    _r, _conn, _a, _t = await _run()
+    assert _run.guard_args and set(_run.guard_args[0]) == {"db_pool", "redis_client"}
+    guard, seen = _guard(TenantCallLimits())
+    await _run(guard=guard)
+    assert seen["tenants"] == [TENANT]
+    assert seen["quota_calls"][0][0] == TENANT
+
+
+@pytest.mark.asyncio
+async def test_the_destination_policy_is_checked_before_the_switch():
+    guard, _seen = _guard(TenantCallLimits(blocked_country_codes=["GB"]))
+    result, _c, adapter, _t = await _run(adapter=_switched_off_adapter(), guard=guard)
+    assert result["error"] == "transfer_destination_not_permitted"
+    assert adapter.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("destination", ["1001", "sales_queue"])
+async def test_an_extension_transfer_never_reaches_the_guard(destination):
+    guard, seen = _guard(None, raises=RuntimeError("must not be read"))
+    result, _c, adapter, _t = await _run(destination=destination, guard=guard)
+    assert result == {"status": "completed"} and len(adapter.calls) == 1
+    assert seen["tenants"] == [] and seen["quota_calls"] == []

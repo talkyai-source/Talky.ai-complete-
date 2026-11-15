@@ -131,6 +131,35 @@ def test_hours_require_transfer_approved():
     rejected_by_both("transfer", approved_next_actions=["end_call"], transfer_hours=HOURS)
 
 
+# ------------------------------------------------------ premium-rate numbers
+PREMIUM = "+449012345678"
+
+
+def test_a_premium_rate_number_in_the_list_is_refused_on_save():
+    bad = {"name": "Chat line", "number": PREMIUM, "when": ""}
+    rejected_by_both("premium-rate", transfer_destinations=[bad])
+    rejected_by_both("premium-rate", transfer_destinations=[SALES, {**bad, "when": "Anything."}])
+
+
+def test_a_premium_rate_number_written_loosely_is_refused_on_save():
+    bad = {"name": "Chat line", "number": "+44 (0)90 1234 5678", "when": ""}
+    with pytest.raises(ValueError):
+        norm(transfer_destinations=[bad])
+
+
+@pytest.mark.parametrize("legacy", [PREMIUM, "+44 90 1234 5678"])
+def test_a_premium_rate_number_in_the_legacy_single_field_is_refused_on_save(legacy):
+    with pytest.raises(ValueError, match="(?i)premium-rate"):
+        norm(transfer_destination=legacy)
+
+
+@pytest.mark.parametrize("number", ["+442071234567", "+448451234567", "1001", "sales_queue"])
+def test_an_ordinary_number_or_an_extension_is_accepted_on_save(number):
+    brief = norm(transfer_destinations=[{"name": "Sales", "number": number, "when": ""}])
+    assert brief["transfer_destinations"][0]["number"] == number
+    assert norm(transfer_destination=number)["transfer_destination"] == number
+
+
 # ------------------------------------------------------------- compatibility
 def test_legacy_only_brief_normalises_as_before():
     brief = norm(transfer_destination="Sales desk")

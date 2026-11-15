@@ -3641,7 +3641,26 @@ async def _prepare_outbound_transfer(attempt, call_id: str, destination: str, mo
         refusal = _refuse("transfer_destination_not_allowed")
     elif not transfer_open_now(brief):
         refusal = _refuse("transfer_closed")
-    elif not getattr(_adapter, "outbound_pstn_transfer_available", True):
+    if refusal is None:
+        # Same destination rules a normal call passes (premium-rate, blocked
+        # prefixes/countries, allow-list) on the tenant's CURRENT limits, then
+        # the minutes the second phone leg will use. Fails closed.
+        guard = CallGuard(
+            db_pool=get_container().db_pool,
+            redis_client=getattr(get_container(), "redis", None),
+        )
+        verdict = await guard.check_transfer_destination(outbound["tenant_id"], destination)
+        if not verdict.passed:
+            refusal = _refuse("transfer_destination_not_permitted")
+        else:
+            verdict = await guard.check_transfer_minutes(
+                outbound["tenant_id"], call_id=outbound["call_id"]
+            )
+            if not verdict.passed:
+                refusal = _refuse("transfer_no_minutes")
+        if refusal is not None:
+            summary = {**summary, "guard_reason": verdict.reason}
+    if refusal is None and not getattr(_adapter, "outbound_pstn_transfer_available", True):
         # Switch off: refuse here instead of sending a redirect that cannot be
         # confirmed as answered.
         refusal = _refuse("outbound_transfer_not_enabled")

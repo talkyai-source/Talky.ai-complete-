@@ -144,6 +144,28 @@ _WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Satur
 _CLOCK_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
 
 
+_PREMIUM_TRANSFER_MESSAGE = "A premium-rate number cannot be a transfer destination."
+
+
+def _refuse_premium_rate_transfer(number: str) -> None:
+    """Raise when ``number`` is a premium-rate phone number (extensions pass).
+
+    Same rule the call guard applies to every outbound call; the guard checks
+    it again when the transfer happens.
+    """
+    from app.domain.services.call_guard import _is_premium_rate
+    from app.domain.services.telephony.transfer_validation import (
+        validate_any_transfer_destination,
+    )
+
+    try:
+        canonical = validate_any_transfer_destination(str(number or "").strip())
+    except ValueError:
+        return  # free text or an extension: not a phone number
+    if canonical.startswith("+") and _is_premium_rate(canonical):
+        raise ValueError(_PREMIUM_TRANSFER_MESSAGE)
+
+
 def normalize_transfer_destinations(value: object) -> list[dict[str, str]]:
     """Validate the named transfer destinations (1-5); numbers are checked on save."""
     from app.domain.services.telephony.transfer_validation import (
@@ -175,6 +197,7 @@ def normalize_transfer_destinations(value: object) -> list[dict[str, str]]:
             raise ValueError(
                 f"transfer_destinations.number for {name!r} is not a valid transfer number"
             ) from None
+        _refuse_premium_rate_transfer(number)
         when = _clean(item.get("when"), field="transfer_destinations.when",
                       max_len=MAX_TRANSFER_WHEN_CHARS)
         result.append({"name": name, "number": number, "when": when})
@@ -314,6 +337,8 @@ def normalize_campaign_brief(
         field="transfer_destination",
         max_len=MAX_TRANSFER_DESTINATION_CHARS,
     )
+    if transfer_destination:
+        _refuse_premium_rate_transfer(transfer_destination)
     transfer_destinations = None
     if raw.get("transfer_destinations"):
         transfer_destinations = normalize_transfer_destinations(raw["transfer_destinations"])

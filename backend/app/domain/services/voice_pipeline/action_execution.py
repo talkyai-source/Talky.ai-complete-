@@ -42,9 +42,11 @@ _END_NEXT = " Tell the caller, then end the call politely; do not promise anothe
 _PRE_DIAL = frozenset({"outbound_trunk_unavailable", "invalid_trunk_endpoint", "invalid_caller_id",
                        "inbound_trunk_unavailable", "inbound_trunk_identity_unavailable",
                        "invalid_transfer_destination", "transfer_destination_not_allowed", "transfer_closed",
-                       "outbound_transfer_not_enabled"})
+                       "outbound_transfer_not_enabled", "transfer_destination_not_permitted",
+                       "transfer_no_minutes"})
 _NOT_ALLOWED = frozenset({"transfer_destination_not_allowed", "invalid_transfer_destination",
-                          "outbound_transfer_not_enabled"})
+                          "outbound_transfer_not_enabled", "transfer_destination_not_permitted",
+                          "transfer_no_minutes"})
 
 
 def _transfer_outcome(receipt):

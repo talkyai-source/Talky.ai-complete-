@@ -364,6 +364,8 @@ PRE_DIAL = {
     "transfer_destination_not_allowed": "A transfer is not available for this call.",
     "transfer_closed": "The team is outside its hours for transfers.",
     "outbound_transfer_not_enabled": "A transfer is not available for this call.",
+    "transfer_destination_not_permitted": "A transfer is not available for this call.",
+    "transfer_no_minutes": "A transfer is not available for this call.",
 }
 
 
