@@ -449,3 +449,14 @@ def test_ring_time_helper_never_raises_and_keeps_the_limits(value, expected):
     from app.infrastructure.telephony.asterisk_adapter import _clamped_ring_seconds
 
     assert _clamped_ring_seconds(value) == expected
+
+
+@pytest.mark.parametrize("value,expected", [("1", True), ("true", True), ("", False), ("0", False), ("off", False)])
+def test_adapter_reports_whether_a_phone_number_transfer_can_be_proved(monkeypatch, value, expected):
+    monkeypatch.setenv(SWITCH, value)
+    assert AsteriskAdapter().outbound_pstn_transfer_available is expected
+
+
+def test_adapter_reports_not_available_when_the_switch_is_unset(monkeypatch):
+    monkeypatch.delenv(SWITCH, raising=False)
+    assert AsteriskAdapter().outbound_pstn_transfer_available is False

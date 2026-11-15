@@ -41,8 +41,10 @@ _END_NEXT = " Tell the caller, then end the call politely; do not promise anothe
 # nothing was dialled, so the caller is certainly still with the agent.
 _PRE_DIAL = frozenset({"outbound_trunk_unavailable", "invalid_trunk_endpoint", "invalid_caller_id",
                        "inbound_trunk_unavailable", "inbound_trunk_identity_unavailable",
-                       "invalid_transfer_destination", "transfer_destination_not_allowed", "transfer_closed"})
-_NOT_ALLOWED = frozenset({"transfer_destination_not_allowed", "invalid_transfer_destination"})
+                       "invalid_transfer_destination", "transfer_destination_not_allowed", "transfer_closed",
+                       "outbound_transfer_not_enabled"})
+_NOT_ALLOWED = frozenset({"transfer_destination_not_allowed", "invalid_transfer_destination",
+                          "outbound_transfer_not_enabled"})
 
 
 def _transfer_outcome(receipt):
@@ -94,6 +96,10 @@ def enabled_voice_actions(session, now=None):
     return {"end_call", *capabilities.keys()}
 
 
+def _is_phone_number(value):
+    return re.fullmatch(r"\+[1-9][0-9]{6,14}", re.sub(r"[\s().-]", "", str(value or ""))) is not None
+
+
 def _brief_destinations(brief):
     listed = [dict(item) for item in brief.get("transfer_destinations") or [] if isinstance(item, dict)]
     if not listed:
@@ -109,10 +115,14 @@ def offered_transfer_destinations(context):
     unnamed entry. Inbound calls keep only destinations that passed the
     inbound allow-list check."""
     listed = _brief_destinations((context or {}).get("brief") or {})
-    if (context.get("call_direction", context.get("direction")) == "inbound"
-            and "inbound_transfer_numbers" in context):
+    inbound = context.get("call_direction", context.get("direction")) == "inbound"
+    if inbound and "inbound_transfer_numbers" in context:
         allowed = context["inbound_transfer_numbers"]
         listed = [item for item in listed if item["number"] in allowed]
+    elif not inbound and context.get("outbound_pstn_transfer") is False:
+        # The phone system cannot yet prove that a phone number answered on an
+        # outbound call, so a phone number is not offered at all.
+        listed = [item for item in listed if not _is_phone_number(item["number"])]
     return listed
 
 
@@ -222,6 +232,8 @@ async def _context(session, pool):
             from app.domain.services.telephony.adapter_registry import get_adapter
             adapter = get_adapter()
             context["transfer_connected"] = bool(adapter and adapter.connected)
+            context["outbound_pstn_transfer"] = bool(
+                getattr(adapter, "outbound_pstn_transfer_available", True))
         except Exception:
             pass
     return context

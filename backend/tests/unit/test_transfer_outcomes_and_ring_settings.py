@@ -363,6 +363,7 @@ PRE_DIAL = {
     "invalid_transfer_destination": "A transfer is not available for this call.",
     "transfer_destination_not_allowed": "A transfer is not available for this call.",
     "transfer_closed": "The team is outside its hours for transfers.",
+    "outbound_transfer_not_enabled": "A transfer is not available for this call.",
 }
 
 
@@ -420,3 +421,42 @@ async def test_fallback_action_does_not_change_unproved_or_unknown_messages(monk
     _, _, base = await _run(monkeypatch, dict(OUTCOMES[name][0]))
     _, _, result = await _run(monkeypatch, {**OUTCOMES[name][0], "fallback_action": "end_call"})
     assert result["message"] == base["message"] and result["status"] == base["status"]
+
+
+# ------------------------------------------- outbound switch off: not offered
+def _offer_context(numbers, **extra):
+    brief = {"approved_next_actions": ["transfer"], "transfer_destinations": [
+        {"name": f"Team {index}", "number": number, "when": "x"}
+        for index, number in enumerate(numbers)]}
+    return {"brief": brief, "call_direction": "outbound", "direction": "outbound",
+            "call_status": "in_progress", "provider": "asterisk", "transfer_connected": True,
+            "email_connected": False, **extra}
+
+
+def test_phone_number_is_not_offered_on_an_outbound_call_while_the_switch_is_off():
+    context = _offer_context([NUMBER], outbound_pstn_transfer=False)
+    assert action_execution.offered_transfer_destinations(context) == []
+    assert "transfer_call" not in action_execution._capabilities(context)
+
+
+def test_phone_number_is_offered_on_an_outbound_call_when_the_switch_is_on():
+    context = _offer_context([NUMBER], outbound_pstn_transfer=True)
+    assert [item["number"] for item in action_execution.offered_transfer_destinations(context)] == [NUMBER]
+    assert "transfer_call" in action_execution._capabilities(context)
+
+
+def test_switch_off_keeps_an_extension_and_drops_only_the_phone_number():
+    context = _offer_context([NUMBER, "1001"], outbound_pstn_transfer=False)
+    assert [item["number"] for item in action_execution.offered_transfer_destinations(context)] == ["1001"]
+    assert "transfer_call" in action_execution._capabilities(context)
+
+
+def test_a_context_without_the_switch_reading_offers_as_before():
+    context = _offer_context([NUMBER])
+    assert [item["number"] for item in action_execution.offered_transfer_destinations(context)] == [NUMBER]
+
+
+def test_switch_reading_does_not_change_the_inbound_list():
+    context = _offer_context([NUMBER], outbound_pstn_transfer=False)
+    context.update(call_direction="inbound", direction="inbound", inbound_transfer_numbers={NUMBER})
+    assert [item["number"] for item in action_execution.offered_transfer_destinations(context)] == [NUMBER]

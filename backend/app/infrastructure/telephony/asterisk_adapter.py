@@ -742,6 +742,15 @@ class AsteriskAdapter(CallControlAdapter):
     def connected(self) -> bool:
         return self._connected_flag
 
+    @property
+    def outbound_pstn_transfer_available(self) -> bool:
+        """Whether an outbound call can be handed to a phone number with answer proof.
+
+        While the switch is off the policy layer neither offers nor runs such a
+        transfer: the only other route is a redirect nobody can confirm.
+        """
+        return _outbound_supervised_transfer_enabled()
+
     def get_transfer_metrics(self) -> Dict[str, Any]:
         """Expose Asterisk transfer state through the generic dashboard API.
 

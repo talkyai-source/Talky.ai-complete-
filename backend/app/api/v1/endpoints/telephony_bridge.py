@@ -3641,6 +3641,10 @@ async def _prepare_outbound_transfer(attempt, call_id: str, destination: str, mo
         refusal = _refuse("transfer_destination_not_allowed")
     elif not transfer_open_now(brief):
         refusal = _refuse("transfer_closed")
+    elif not getattr(_adapter, "outbound_pstn_transfer_available", True):
+        # Switch off: refuse here instead of sending a redirect that cannot be
+        # confirmed as answered.
+        refusal = _refuse("outbound_transfer_not_enabled")
     if refusal is not None:
         await _audit_outbound_transfer_event(
             outbound, "transfer_failed", None, {**summary, "error": refusal["error"]}

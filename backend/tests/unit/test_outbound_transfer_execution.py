@@ -375,3 +375,40 @@ async def test_non_asterisk_adapter_is_called_as_before(name):
     result, conn, adapter, tenants = await _run(adapter=_Adapter(name=name), ring_seconds=20)
     assert adapter.calls == [((CALL, TARGET, "blind"), {})]
     assert conn.reads == [] and tenants == []
+
+
+# ------------------------------------------------------------- switch is off
+def _switched_off_adapter():
+    adapter = _Adapter()
+    adapter.outbound_pstn_transfer_available = False
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_switch_off_refuses_a_phone_number_before_any_phone_action():
+    result, conn, adapter, _t = await _run(adapter=_switched_off_adapter())
+    assert adapter.calls == []
+    assert result["status"] == "failed"
+    assert result["error"] == "outbound_transfer_not_enabled"
+    assert result["caller_media_retained"] is True
+    assert [event[3] for event in conn.events] == ["transfer_requested", "transfer_failed"]
+
+
+@pytest.mark.asyncio
+async def test_switch_off_still_reports_a_number_that_is_not_on_the_list():
+    result, _conn, adapter, _t = await _run(
+        adapter=_switched_off_adapter(), destination="+442079999999"
+    )
+    assert adapter.calls == []
+    assert result["error"] == "transfer_destination_not_allowed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("destination", ["1001", "sales_queue"])
+async def test_switch_off_leaves_an_extension_transfer_as_today(destination):
+    result, conn, adapter, tenants = await _run(
+        adapter=_switched_off_adapter(), destination=destination
+    )
+    assert adapter.calls == [((CALL, destination, "blind"), {})]
+    assert conn.reads == [] and tenants == []
+    assert result == {"status": "completed"}
