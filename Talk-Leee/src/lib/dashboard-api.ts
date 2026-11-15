@@ -296,7 +296,11 @@ export interface Call {
     transfer_legs?: TransferLeg[];
 }
 
-/** Body of POST /campaigns/{id}/start. `first_speaker` is a per-start choice. */
+/**
+ * Body of POST /campaigns/{id}/start. The backend saves `first_speaker` in the
+ * campaign's calling_config; the Start dialog opens on that saved value and
+ * sends what it shows.
+ */
 export interface CampaignStartOptions {
     first_speaker: "agent" | "user";
     batch_size?: number;
@@ -603,8 +607,8 @@ class DashboardApi {
         });
     }
 
-    // `first_speaker` has no default here: it is not saved on the campaign, so
-    // every start must carry the choice made in the shared Start dialog.
+    // `first_speaker` has no default here: every start carries the choice shown
+    // in the shared Start dialog, which opens on the campaign's saved value.
     async startCampaign(
         id: string,
         opts: CampaignStartOptions,
