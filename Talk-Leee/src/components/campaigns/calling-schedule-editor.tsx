@@ -29,7 +29,7 @@ import {
 // A short, friendly timezone list covering the common US zones + a few global
 // ones; "My timezone" resolves the browser's. Free-text isn't needed —
 // these cover the vast majority of outbound use.
-const TZ_OPTIONS: Array<{ value: string; label: string }> = [
+export const TZ_OPTIONS: Array<{ value: string; label: string }> = [
     { value: "America/New_York", label: "Eastern (New York)" },
     { value: "America/Chicago", label: "Central (Chicago)" },
     { value: "America/Denver", label: "Mountain (Denver)" },

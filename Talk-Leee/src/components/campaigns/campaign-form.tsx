@@ -1344,6 +1344,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         onChange={setBriefDraft}
                         requiredLeadFields={requiredLeadFields}
                         disabled={submitting}
+                        direction={direction}
                     />
 
                     {/* Persona-specific slot fields */}
