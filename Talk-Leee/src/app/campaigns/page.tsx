@@ -117,7 +117,7 @@ export default function CampaignsPage() {
     }
 
     // The copy itself is made by the shared duplicateCampaign (a real
-    // POST /campaigns, see lib/campaign-duplicate); the table calls this once
+    // POST /campaigns/{id}/duplicate, see lib/campaign-duplicate); the table calls this once
     // it exists. The row is never written into the cache here: the list is
     // read again so the copy shows the backend's own values.
     async function handleDuplicate() {
