@@ -229,3 +229,123 @@ test("an inbound campaign says transfers are not switched on yet; an outbound on
     render(<CampaignBriefFields idPrefix="any" value={withTransfer} onChange={() => undefined} requiredLeadFields={[]} />);
     assert.equal(screen.queryByTestId("any-transfer-inbound-note"), null);
 });
+
+// ---- "If nobody answers": ring time and what happens next ----
+const ringBox = () => screen.getByLabelText("Ring for") as HTMLInputElement;
+const thenRadio = (name: string) => screen.getByRole("radio", { name }) as HTMLInputElement;
+const RING_MESSAGE = /enter a whole number from 10 to 60/i;
+const withDest = { ...approved, transfer_destinations: [SALES] };
+
+test("no-answer controls: hidden and unsent with Transfer unticked", async () => {
+    const { saved, user } = setup(base);
+    assert.equal(screen.queryByLabelText("Ring for"), null);
+    assert.equal(screen.queryByRole("radiogroup", { name: "Then" }), null);
+    await user.click(saveButton());
+    assert.equal("transfer_ring_seconds" in saved[0]!, false);
+    assert.equal("transfer_if_no_answer" in saved[0]!, false);
+});
+
+test("no-answer controls: shown with Transfer ticked, labelled, nothing chosen, nothing sent", async () => {
+    const { saved, user } = setup(base);
+    await user.click(transferBox());
+    assert.ok(screen.getByText("If nobody answers"));
+    assert.equal(ringBox().value, "");
+    assert.ok(screen.getByText("seconds"));
+    assert.ok(screen.getByText("How long the person's phone rings before the agent gives up. Leave empty for 30 seconds."));
+    assert.ok(screen.getByRole("radiogroup", { name: "Then" }));
+    assert.equal(thenRadio("Stay with the caller").checked, false);
+    assert.equal(thenRadio("End the call").checked, false);
+    assert.equal(thenRadio("Use the standard behaviour (stay with the caller)").checked, true);
+    assert.ok(screen.getByText("The agent tells the caller nobody is available and offers to take a message."));
+    assert.ok(screen.getByText("The agent tells the caller nobody is available and ends the call politely."));
+    await user.type(within(rows()[0]!).getByLabelText("Name"), SALES.name);
+    await user.type(within(rows()[0]!).getByLabelText("Phone number"), SALES.number);
+    await user.click(saveButton());
+    assert.equal("transfer_ring_seconds" in saved[0]!, false);
+    assert.equal("transfer_if_no_answer" in saved[0]!, false);
+});
+
+test("ring time 20 is sent as the number 20", async () => {
+    const { saved, user } = setup(withDest);
+    await user.type(ringBox(), "20");
+    assert.equal(saveButton().disabled, false);
+    await user.click(saveButton());
+    assert.strictEqual(saved[0]!.transfer_ring_seconds, 20);
+});
+
+for (const bad of ["9", "61", "12.5"]) {
+    test(`ring time ${bad} shows the message and blocks save; clearing removes it and sends no key`, async () => {
+        const { saved, user } = setup(withDest);
+        await user.type(ringBox(), bad);
+        assert.ok(screen.getByText(RING_MESSAGE));
+        assert.equal(ringBox().getAttribute("aria-invalid"), "true");
+        assert.ok(ringBox().getAttribute("aria-describedby"));
+        assert.equal(saveButton().disabled, true);
+        await user.click(saveButton());
+        assert.equal(saved.length, 0);
+        await user.clear(ringBox());
+        assert.equal(screen.queryByText(RING_MESSAGE), null);
+        assert.equal(saveButton().disabled, false);
+        await user.click(saveButton());
+        assert.equal("transfer_ring_seconds" in saved[0]!, false);
+    });
+}
+
+test("a non-number loaded into the draft shows the message and blocks save", async () => {
+    setup({ ...withDest, transfer_ring_seconds: "abc" });
+    assert.ok(screen.getByText(RING_MESSAGE));
+    assert.equal(saveButton().disabled, true);
+});
+
+test("the then-choice sends end_call or return_to_agent, and the standard option sends nothing", async () => {
+    const { saved, user } = setup(withDest);
+    await user.click(thenRadio("End the call"));
+    await user.click(saveButton());
+    assert.equal(saved[0]!.transfer_if_no_answer, "end_call");
+    await user.click(thenRadio("Stay with the caller"));
+    await user.click(saveButton());
+    assert.equal(saved[1]!.transfer_if_no_answer, "return_to_agent");
+    await user.click(thenRadio("Use the standard behaviour (stay with the caller)"));
+    await user.click(saveButton());
+    assert.equal("transfer_if_no_answer" in saved[2]!, false);
+});
+
+test("a campaign saved with both settings loads them back and re-saves them unchanged", async () => {
+    const { saved, user } = setup(campaignBriefDraft({
+        approved_next_actions: ["transfer"],
+        transfer_destination: SALES.number,
+        transfer_destinations: [SALES],
+        transfer_ring_seconds: 45,
+        transfer_if_no_answer: "end_call",
+        opening_objective: "Confirm who owns vendor selection.",
+    }));
+    assert.equal(ringBox().value, "45");
+    assert.equal(thenRadio("End the call").checked, true);
+    await user.click(saveButton());
+    assert.strictEqual(saved[0]!.transfer_ring_seconds, 45);
+    assert.equal(saved[0]!.transfer_if_no_answer, "end_call");
+});
+
+test("a campaign saved before these settings existed sends neither key untouched", async () => {
+    const { saved, user } = setup(campaignBriefDraft({
+        approved_next_actions: ["transfer"],
+        transfer_destination: SALES.number,
+        opening_objective: "Confirm who owns vendor selection.",
+    }));
+    assert.equal(ringBox().value, "");
+    await user.click(saveButton());
+    assert.equal("transfer_ring_seconds" in saved[0]!, false);
+    assert.equal("transfer_if_no_answer" in saved[0]!, false);
+});
+
+test("unticking Transfer clears both settings", async () => {
+    const { saved, user } = setup({ ...withDest, transfer_ring_seconds: "40", transfer_if_no_answer: "end_call" });
+    await user.click(transferBox());
+    assert.equal(screen.queryByLabelText("Ring for"), null);
+    await user.click(saveButton());
+    assert.equal("transfer_ring_seconds" in saved[0]!, false);
+    assert.equal("transfer_if_no_answer" in saved[0]!, false);
+    await user.click(transferBox());
+    assert.equal(ringBox().value, "");
+    assert.equal(thenRadio("End the call").checked, false);
+});

@@ -15,12 +15,19 @@ import {
     type CampaignTransferDay,
     type CampaignTransferDestination,
     type CampaignTransferHours,
+    type CampaignTransferIfNoAnswer,
     type CampaignBriefDraft,
     type CampaignBriefLeadField,
     type CampaignNextAction,
     type CampaignFormField,
 } from "@/lib/campaign-brief";
 import { TZ_OPTIONS } from "@/components/campaigns/calling-schedule-editor";
+
+const NO_ANSWER_OPTIONS: ReadonlyArray<{ value: CampaignTransferIfNoAnswer | ""; label: string; description?: string }> = [
+    { value: "return_to_agent", label: "Stay with the caller", description: "The agent tells the caller nobody is available and offers to take a message." },
+    { value: "end_call", label: "End the call", description: "The agent tells the caller nobody is available and ends the call politely." },
+    { value: "", label: "Use the standard behaviour (stay with the caller)" },
+];
 
 // The same timezone list the calling-schedule editor offers.
 const TRANSFER_TZ_OPTIONS = TZ_OPTIONS;
@@ -114,7 +121,7 @@ export function CampaignBriefFields({
         update({
             approved_next_actions: [...new Set(next)],
             ...(action === "transfer" && !checked
-                ? { transfer_destination: "", transfer_destinations: undefined, transfer_hours: undefined }
+                ? { transfer_destination: "", transfer_destinations: undefined, transfer_hours: undefined, transfer_ring_seconds: undefined, transfer_if_no_answer: undefined }
                 : {}),
             ...(action === "send_email" && !checked ? { email_action: undefined } : {}),
             ...(action === "submit_form" && !checked ? { form_action: undefined } : {}),
@@ -421,6 +428,57 @@ export function CampaignBriefFields({
                         <p className="text-xs text-muted-foreground">
                             Outside these hours the agent tells the caller the team is unavailable and offers to take a message.
                         </p>
+                    </div>
+
+                    <div className="space-y-3 border-t border-border pt-3">
+                        <p className="text-sm font-medium text-foreground">If nobody answers</p>
+                        <div className="space-y-1">
+                            <Label htmlFor={`${idPrefix}-transfer-ring`}>Ring for</Label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    id={`${idPrefix}-transfer-ring`}
+                                    type="number"
+                                    inputMode="numeric"
+                                    min={10}
+                                    max={60}
+                                    step={5}
+                                    value={value.transfer_ring_seconds ?? ""}
+                                    onChange={(event) => update({ transfer_ring_seconds: event.target.value })}
+                                    aria-invalid={transferErrors.ring ? true : undefined}
+                                    aria-describedby={`${idPrefix}-transfer-ring-help${transferErrors.ring ? ` ${idPrefix}-transfer-ring-error` : ""}`}
+                                    className={`${TRANSFER_INPUT_CLASS} w-24`}
+                                />
+                                <span className="text-sm text-muted-foreground">seconds</span>
+                            </div>
+                            {transferErrors.ring && <p id={`${idPrefix}-transfer-ring-error`} className="text-xs text-destructive">{transferErrors.ring}</p>}
+                            <p id={`${idPrefix}-transfer-ring-help`} className="text-xs text-muted-foreground">
+                                How long the person&apos;s phone rings before the agent gives up. Leave empty for 30 seconds.
+                            </p>
+                        </div>
+                        <div role="radiogroup" aria-label="Then" className="space-y-2">
+                            <p className="text-sm font-medium text-foreground" aria-hidden>Then</p>
+                            {NO_ANSWER_OPTIONS.map((option) => (
+                                <div key={option.value || "standard"} className="flex items-start gap-2">
+                                    <input
+                                        id={`${idPrefix}-transfer-noanswer-${option.value || "standard"}`}
+                                        type="radio"
+                                        name={`${idPrefix}-transfer-noanswer`}
+                                        checked={(value.transfer_if_no_answer ?? "") === option.value}
+                                        onChange={() => update({ transfer_if_no_answer: option.value || undefined })}
+                                        aria-describedby={option.description ? `${idPrefix}-transfer-noanswer-${option.value}-help` : undefined}
+                                        className="mt-1 h-4 w-4 accent-emerald-600"
+                                    />
+                                    <div>
+                                        <label htmlFor={`${idPrefix}-transfer-noanswer-${option.value || "standard"}`} className="text-sm text-foreground">
+                                            {option.label}
+                                        </label>
+                                        {option.description && (
+                                            <p id={`${idPrefix}-transfer-noanswer-${option.value}-help`} className="text-xs text-muted-foreground">{option.description}</p>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                     <p className="text-xs text-muted-foreground">
                         The agent offers a transfer during a live call only when your phone line supports it, a destination on this list fits, and the call is inside your hours (if you set them). Otherwise it carries on without transferring.

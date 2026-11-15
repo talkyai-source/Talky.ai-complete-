@@ -41,6 +41,8 @@ export const MAX_TRANSFER_DESTINATIONS = 5;
 export const MAX_TRANSFER_NAME_CHARS = 40;
 export const MAX_TRANSFER_WHEN_CHARS = 200;
 
+export type CampaignTransferIfNoAnswer = "return_to_agent" | "end_call";
+
 export interface CampaignBriefDraft {
     decision_maker_role: string;
     approved_next_actions: CampaignNextAction[];
@@ -49,6 +51,10 @@ export interface CampaignBriefDraft {
     transfer_destinations?: CampaignTransferDestination[];
     /** undefined = "Only during these hours" is off. */
     transfer_hours?: CampaignTransferHours;
+    /** Raw text of the "Ring for" box; undefined or "" = not set (the standard 30 seconds). */
+    transfer_ring_seconds?: string;
+    /** undefined = not set (the standard behaviour: stay with the caller). */
+    transfer_if_no_answer?: CampaignTransferIfNoAnswer;
     opening_objective: string;
     max_objection_attempts: number;
     email_action?: CampaignEmailAction;
@@ -63,6 +69,8 @@ export interface CampaignBrief {
     transfer_destination: string | null;
     transfer_destinations?: CampaignTransferDestination[] | null;
     transfer_hours?: CampaignTransferHours | null;
+    transfer_ring_seconds?: number | null;
+    transfer_if_no_answer?: CampaignTransferIfNoAnswer | null;
     required_lead_fields: CampaignBriefLeadField[];
     opening_objective: string | null;
     max_objection_attempts: number;
@@ -143,6 +151,8 @@ export function campaignBriefDraft(value?: Partial<CampaignBrief> | null): Campa
             ? { transfer_destinations: value.transfer_destinations.map((item) => ({ name: item.name, number: item.number, when: item.when ?? "" })) }
             : {}),
         ...(value?.transfer_hours ? { transfer_hours: { ...value.transfer_hours, days: [...value.transfer_hours.days] } } : {}),
+        ...(value?.transfer_ring_seconds != null ? { transfer_ring_seconds: String(value.transfer_ring_seconds) } : {}),
+        ...(value?.transfer_if_no_answer ? { transfer_if_no_answer: value.transfer_if_no_answer } : {}),
         ...(value?.email_action ? { email_action: { ...value.email_action } } : {}),
         ...(value?.form_action ? { form_action: { ...value.form_action, fields: [...value.form_action.fields] } } : {}),
     };
@@ -168,6 +178,12 @@ export function buildCampaignBrief({
         ...(transferListInUse(draft) ? { transfer_destinations: cleanTransferRows(draft.transfer_destinations ?? []) } : {}),
         ...(draft.approved_next_actions.includes("transfer") && draft.transfer_hours
             ? { transfer_hours: cleanTransferHours(draft.transfer_hours) }
+            : {}),
+        ...(draft.approved_next_actions.includes("transfer") && draft.transfer_ring_seconds?.trim()
+            ? { transfer_ring_seconds: Number(draft.transfer_ring_seconds.trim()) }
+            : {}),
+        ...(draft.approved_next_actions.includes("transfer") && draft.transfer_if_no_answer
+            ? { transfer_if_no_answer: draft.transfer_if_no_answer }
             : {}),
         required_lead_fields: requiredLeadFields.map((field) => ({
             field_key: normalizeStructuredText(field.field_key),
@@ -234,6 +250,7 @@ export interface CampaignTransferErrors {
     days?: string;
     start?: string;
     end?: string;
+    ring?: string;
 }
 
 export const TRANSFER_ERROR_TEXT = {
@@ -246,6 +263,7 @@ export const TRANSFER_ERROR_TEXT = {
     daysRequired: "Choose at least one day.",
     startRequired: "Choose a start time.",
     endRequired: "Choose an end time.",
+    ringInvalid: "Enter a whole number from 10 to 60.",
     endNotAfterStart: "End time must be later than the start time. Overnight hours are not supported.",
 } as const;
 
@@ -275,11 +293,15 @@ export function campaignTransferErrors(draft: CampaignBriefDraft): CampaignTrans
         if (!hours.end) result.end = TRANSFER_ERROR_TEXT.endRequired;
         if (hours.start && hours.end && hours.start >= hours.end) result.end = TRANSFER_ERROR_TEXT.endNotAfterStart;
     }
+    const ring = draft.approved_next_actions.includes("transfer") ? draft.transfer_ring_seconds?.trim() : "";
+    if (ring && !(/^\d+$/.test(ring) && Number(ring) >= 10 && Number(ring) <= 60)) {
+        result.ring = TRANSFER_ERROR_TEXT.ringInvalid;
+    }
     return result;
 }
 
 function hasTransferErrors(errors: CampaignTransferErrors): boolean {
-    return Boolean(errors.days || errors.start || errors.end
+    return Boolean(errors.days || errors.start || errors.end || errors.ring
         || errors.rows.some((row) => row.name || row.number || row.when));
 }
 
@@ -302,7 +324,8 @@ export function campaignBriefValidation(draft: CampaignBriefDraft): string | nul
     if (transferApproved && !transferListInUse(draft) && !draft.transfer_destination.trim()) {
         return "Add a transfer destination or remove Transfer from the approved next actions.";
     }
-    if (!transferApproved && (draft.transfer_destination.trim() || draft.transfer_destinations?.length || draft.transfer_hours)) {
+    if (!transferApproved && (draft.transfer_destination.trim() || draft.transfer_destinations?.length || draft.transfer_hours
+        || draft.transfer_ring_seconds?.trim() || draft.transfer_if_no_answer)) {
         return "Select Transfer as an approved next action or clear the transfer destination.";
     }
     if (hasTransferErrors(campaignTransferErrors(draft))) {
