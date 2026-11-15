@@ -548,16 +548,16 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ea3ad603e3a5a7688bef1e0299892afcbecd7a78365bfbcebf194d521156ce8f",
+      "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2495,
+      "line": 2515,
       "method": "fetchval",
       "tables": [
         "calls",
         "leads"
       ],
-      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable', 'platform_at_capacity'))",
+      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable', 'platform_at_capacity', 'stale_payload:contact_permission_missing'))",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1640,7 +1640,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "395c7ae35a551820617e7541444bdad50a0122e699e7a6345dff75266ce29280",
+      "id": "a1322a91dca74f5679947d6b8b3453fc2a243b7476ca5feed861dc6ae4851cbc",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
       "line": 1181,
@@ -1650,7 +1650,7 @@
         "campaigns",
         "dialer_jobs"
       ],
-      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'platform_gap', 'platform_at_capacity', 'call_guard_throttled', 'call_guard_queued', 'destination_busy') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
+      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'platform_gap', 'platform_at_capacity', 'call_guard_throttled', 'call_guard_queued', 'destination_busy', 'contact_permission_missing') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -1991,23 +1991,6 @@
         "leads"
       ],
       "sql": "SELECT last_called_at FROM leads WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "48b4c9c9551ce71e525630b7bc5477899f1b5e6876570d1acd6c8a55cf5b1c95",
-      "file": "app/workers/dialer_worker.py",
-      "function": "DialerWorker._stale_payload_reason",
-      "line": 2081,
-      "method": "fetchrow",
-      "tables": [
-        "dialer_jobs",
-        "leads"
-      ],
-      "sql": "SELECT j.status AS job_status, l.id AS lead_row_id, l.status AS lead_status, l.do_not_call AS lead_do_not_call FROM (SELECT 1) AS base LEFT JOIN dialer_jobs AS j ON j.id = $1::uuid AND j.tenant_id = $2::uuid LEFT JOIN leads AS l ON l.id = $3::uuid AND l.tenant_id = $2::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -3709,10 +3692,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "61e5bda2ff5eaa5a720ec6ce0c9fc5a6912283ece1a63f61585fc4396cf489f1",
+      "id": "6fc3a4e92db1afb56b54caed9ed57517125a8d64964dbc65d452121d83ff14bc",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 3929,
+      "line": 3950,
       "method": "execute",
       "tables": [
         "leads"
@@ -5916,7 +5899,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "148286ee5369a89d7bc6cb2e6e7f15a29cbff64c21fd7a2832436ee90b99f2e3",
+      "id": "72f0a6a9472450327bd09d51615f32d979668fe4508978b66a464edd9e7b0c07",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
       "line": 1053,
@@ -6670,10 +6653,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d27e62358b852dc250cd87bd6de742a4f76bf7ad97059cee96a21e9ce444064a",
+      "id": "012ac33a839b02b762898189fa06a210abf3a0c61a77940d08c161744fd98f0d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3615,
+      "line": 3636,
       "method": "execute",
       "tables": [
         "calls"
@@ -7056,7 +7039,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0904818a11e62d733ba116ed67dc3ea3c65949a251f220386c8fe28283da157f",
+      "id": "40aa7486f733084e2626ce7575ee942582d3d924d67356406cf644c896491ba7",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
       "line": 448,
@@ -7744,7 +7727,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b11bb039d87e1cb153d51212e58f71492b2ecbae17d443034ccb7fdb09192e64",
+      "id": "a8165016cf3ea55c5b5869a88f0ca11950bcb0add2bd808dd40c74f1264dbb3a",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
       "line": 908,
@@ -9087,7 +9070,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "5919059c2a11cce931d27f03dfca6246239cf7fdc372b77b8b3c64c90e7b2690",
+      "id": "881171e51263ebd21f78fc7d16790bb038dd2b3b8d117969c13436b20d68f5e0",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1180,
@@ -9253,7 +9236,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "9f3101206aaffa4e373fa7f0f92d5d517bcfbe098450c13bbe81bb49a7eda6d2",
+      "id": "4f04014a5740fe168f711b47f859dedfbf5bdfe206da8b3988cbdc65db7f5d5d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 735,
@@ -9821,7 +9804,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "7573450bb3cf4b13ce21102637f74c00a606e1dd5604c7e4114c6aff9b725e2f",
+      "id": "36a4feb5dc6e4572a7c93a26ead8aec753a1576010a2dacd25a34f591f3f7f8e",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1549,
@@ -10131,10 +10114,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "ea0556393fd6e5ac38221489e7babc9db172fac17fc0800104de84586ffa9b0b",
+      "id": "6952dfc36397af20727ea3c24913eb1b995c9f116d231f9aeec3f689c26a63f6",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2237,
+      "line": 2269,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10302,7 +10285,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "bafd5e31f0409ff85cf8c0210c5b3d0dadf8206557e289cc62c70ac40428eeee",
+      "id": "572d68159bdcaa29e8865a64264056c6542c6d8be93351eacd560df5f9d87b15",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1007,
@@ -10400,10 +10383,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "6dd49d5d3d6f95a45d46e4e1a1006cd41e6cd96313a974303a116d35d4a542dd",
+      "id": "f252ed48304507d8cab79db4cb5f9dd963c6b6bb114f86f5afb8719cc4cdcd55",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2100,
+      "line": 2132,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -11026,7 +11009,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "50bdcd983216d3511c05ad828427a39a1a0c8d8a6e7f64a5c0182ac1e7ec72fa",
+      "id": "a55abc1e4684c365caf25cc0578d5ec4dd45c4298f631bc7ceb74709aee348fa",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
       "line": 1483,
@@ -11890,7 +11873,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "ae87aea01ae16747d283a2fe9189ca5bd7b187736a1b255d45a876f1ab844d4b",
+      "id": "c622ec99c1363788744ffd0132cbf2c79465c682c45a514a2bfa9138319973e1",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
       "line": 1439,
@@ -12584,6 +12567,25 @@
       "category": "operator_billing_reconciliation",
       "count": 1,
       "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:275."
+    },
+    {
+      "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
+      "file": "app/workers/dialer_worker.py",
+      "function": "DialerWorker._stale_payload_reason",
+      "line": 2162,
+      "method": "fetchrow",
+      "tables": [
+        "contact_lists",
+        "dialer_jobs",
+        "leads"
+      ],
+      "sql": "SELECT j.status AS job_status, l.id AS lead_row_id, l.status AS lead_status, l.do_not_call AS lead_do_not_call, l.list_id AS lead_list_id, cl.consent_confirmed_at AS list_confirmed_at FROM (SELECT 1) AS base LEFT JOIN dialer_jobs AS j ON j.id = $1::uuid AND j.tenant_id = $2::uuid LEFT JOIN leads AS l ON l.id = $3::uuid AND l.tenant_id = $2::uuid LEFT JOIN contact_lists AS cl ON cl.id = l.list_id AND cl.tenant_id = $2::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2162.",
+      "category": "reviewed_tenant_scoped"
     }
   ]
 }
