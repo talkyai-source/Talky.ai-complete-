@@ -329,6 +329,25 @@ TRANSFER_INFLIGHT = _get_or_create_gauge(
     "In-flight transfer attempts (pending/accepted).",
 )
 
+ACTIVE_CALLS = _get_or_create_gauge(
+    "talky_active_calls",
+    "Live voice calls held by this process.",
+)
+POD_CAPACITY = _get_or_create_gauge(
+    "talky_pod_capacity",
+    "Live voice call limit of this process (0 when it does not handle calls).",
+)
+PROVIDER_INFLIGHT = _get_or_create_gauge(
+    "talky_provider_inflight",
+    "Provider requests in flight in this process.",
+    labelnames=("provider",),
+)
+PROVIDER_MAX_CONCURRENT = _get_or_create_gauge(
+    "talky_provider_max_concurrent",
+    "Provider concurrency limit of this process.",
+    labelnames=("provider",),
+)
+
 RUNTIME_ACTIVATION_ATTEMPTS = _get_or_create_gauge(
     "talky_telephony_runtime_activation_attempts",
     "Distinct runtime activation request IDs created after the canary run baseline.",
@@ -772,6 +791,20 @@ async def refresh_telephony_slo_metrics(
     METRICS_SCRAPE_SUCCESS.set(1.0 if success else 0.0)
     METRICS_SCRAPE_TIMESTAMP_SECONDS.set(now)
     METRICS_SCRAPE_DURATION_SECONDS.set(max(0.0, time.monotonic() - started))
+
+
+def set_call_capacity_metrics(
+    *, active_calls: int, pod_capacity: int, providers: list[dict]
+) -> None:
+    """Publish live calls, the call limit and per-provider concurrency."""
+    ACTIVE_CALLS.set(float(active_calls))
+    POD_CAPACITY.set(float(pod_capacity))
+    PROVIDER_INFLIGHT.clear()
+    PROVIDER_MAX_CONCURRENT.clear()
+    for snap in providers:
+        name = str(snap["provider"])
+        PROVIDER_INFLIGHT.labels(provider=name).set(float(snap["in_flight"]))
+        PROVIDER_MAX_CONCURRENT.labels(provider=name).set(float(snap["max"]))
 
 
 def render_prometheus_metrics() -> bytes:
