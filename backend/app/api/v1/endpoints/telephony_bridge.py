@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 from contextlib import asynccontextmanager
@@ -1809,6 +1810,38 @@ def _outbound_capacity_refusal(destination: object) -> Optional[dict]:
     }
 
 
+def _provider_capacity_refusal(failure_reason: Optional[str]) -> Optional[dict]:
+    """503 detail when the warmup failed only because a speech provider's
+    simultaneous-use limit is full, else None. Two signals: the guard's own
+    timeout text, or the warmup timeout while some guard is full."""
+    from app.infrastructure.providers.provider_concurrency import all_guards
+
+    text = failure_reason or ""
+    low = text.lower()
+    named = re.search(r"([a-z0-9_]+) concurrency guard exhausted", low)
+    if "concurrency guard exhausted" in low:
+        name = named.group(1) if named else "unknown"
+        guards = {g.provider_name: g for g in all_guards()}
+        guard = guards.get(name)
+        return {
+            "error": "provider_at_capacity",
+            "provider": name,
+            "in_flight": guard.in_flight if guard else None,
+            "max_concurrent": guard.max_concurrent if guard else None,
+        }
+    if "pre_originate_warmup_timeout" in low:
+        full = [g for g in all_guards() if g.in_flight >= g.max_concurrent]
+        if full:
+            top = max(full, key=lambda g: g.in_flight / g.max_concurrent)
+            return {
+                "error": "provider_at_capacity",
+                "provider": top.provider_name,
+                "in_flight": top.in_flight,
+                "max_concurrent": top.max_concurrent,
+            }
+    return None
+
+
 @router.post("/call")
 async def make_call(request: Request, body: MakeCallRequest):
     """
@@ -2198,6 +2231,20 @@ async def make_call(request: Request, body: MakeCallRequest):
     # Agent-first mode: greeting buffered. User-first mode: STT + TTS WS open
     # so Flux is ready to listen the instant the callee picks up.
     if pre_warm_session is None:
+        # A full speech-provider limit is capacity, not a fault: no critical
+        # event, and the dialer holds the same attempt (see dialer_worker).
+        _provider_full = _provider_capacity_refusal(prewarm.failure_reason)
+        if _provider_full is not None:
+            logger.warning(
+                "make_call_provider_at_capacity provider=%s in_flight=%s max=%s dest=%s",
+                _provider_full["provider"], _provider_full["in_flight"],
+                _provider_full["max_concurrent"], destination,
+            )
+            raise HTTPException(
+                status_code=503,
+                headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+                detail=_provider_full,
+            )
         # Surface WHY the call couldn't start in the live activity feed so the
         # operator sees it in the dashboard (e.g. "TTS out of credits") instead
         # of only a server log. Best-effort — never blocks the 503.

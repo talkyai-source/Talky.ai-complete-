@@ -1537,10 +1537,14 @@ class DialerWorker:
             "telephony_not_active_on_node",
             "telephony_disabled_on_node",
             "pod_draining",
-            "pod_at_capacity",
             "telephony_adapter_unavailable",
         }
     )
+    # 503 codes that mean the platform is simply full (the call service's call
+    # limit, or a speech provider's simultaneous-use limit). Normal load: held
+    # 30 s at a time on the SAME attempt, never an outage, never an alert.
+    _CAPACITY_CODES = frozenset({"pod_at_capacity", "provider_at_capacity"})
+    _CAPACITY_HOLD_SECONDS = 30
 
     # The HTTP result is unknown after a transport timeout/disconnect, or the
     # bridge explicitly reports proof-aware cleanup in progress. Retrying as a
@@ -1643,6 +1647,8 @@ class DialerWorker:
         from app.workers.retry_policy import parse_bridge_error
 
         code, _ = parse_bridge_error(self._last_bridge_body)
+        if code in self._CAPACITY_CODES:
+            return "platform_at_capacity"
         if code in self._TELEPHONY_UNAVAILABLE_CODES:
             return "telephony_unavailable"
         return "voice_pipeline_unavailable"
@@ -2495,7 +2501,8 @@ class DialerWorker:
                     # Nor may intents released while the line was refused:
                     # those calls were never handed to a carrier.
                     "AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') "
-                    "IN ('line_not_ready', 'telephony_unavailable'))",
+                    "IN ('line_not_ready', 'telephony_unavailable', "
+                    "'platform_at_capacity'))",
                     lead_id,
                 )
                 return int(val or 0)
@@ -3173,6 +3180,31 @@ class DialerWorker:
         hold_reason = self._pipeline_hold_reason()
         spent = await self._pipeline_unavailable_defer_count(job)
         over_budget = spent > self._pipeline_unavailable_max_defers()
+        if hold_reason == "platform_at_capacity":
+            # The platform is full: normal load. Same attempt, 30 s at a time;
+            # past the budget (or the stuck-call horizon) release the never-sent
+            # intent and keep waiting -- no alert, no back-off, no raise.
+            delay = self._CAPACITY_HOLD_SECONDS
+            if (
+                over_budget or not await self._held_intent_has_headroom(job, intent, delay)
+            ) and intent is not None:
+                if not await self._release_intent_line_not_ready(
+                    job, intent, reason="platform_at_capacity",
+                ):
+                    await self._park_uncertain_origination(job, intent)
+                    return
+                logger.info(
+                    "dialer_platform_at_capacity_deferred job=%s attempt=%s redefer=%ss "
+                    "(same attempt, nothing consumed)",
+                    job.job_id, job.attempt_number, delay,
+                )
+            await self._publish_block(
+                job, hold_reason, rules=rules, retry_after_seconds=delay,
+            )
+            await self._redefer_before_intent_resolution(
+                job, reason=hold_reason, delay_seconds=delay,
+            )
+            return
         if over_budget or not await self._held_intent_has_headroom(job, intent, 60):
             if hold_reason == "telephony_unavailable" and intent is not None:
                 # The PHONE SYSTEM is down (adapter disconnected, telephony
@@ -3574,7 +3606,9 @@ class DialerWorker:
         """
         # Whitelisted literal (never caller text): which outage released it.
         reason_literal = (
-            "telephony_unavailable" if reason == "telephony_unavailable" else "line_not_ready"
+            reason
+            if reason in ("telephony_unavailable", "platform_at_capacity")
+            else "line_not_ready"
         )
         try:
             async with self._acquire_db() as conn:

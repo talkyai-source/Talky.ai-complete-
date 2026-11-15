@@ -311,6 +311,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Calls start a few seconds apart so they do not all begin at once. This number dials automatically when its turn comes — no action needed.",
         "info", "pacing",
     )),
+    ("platform_at_capacity", IssueAdvice(
+        "All lines are busy",
+        "Every call line is in use right now. This number dials automatically when a line frees up — no action needed.",
+        "info", "pacing",
+    )),
     ("destination_busy", IssueAdvice(
         "Number already on a call",
         "This number is on another call from this account (another campaign or attempt). It dials automatically as soon as that call ends — no action needed.",

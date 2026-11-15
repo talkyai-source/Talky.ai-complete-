@@ -155,6 +155,7 @@ _CODE_TO_CATEGORY: dict[str, FailureCategory] = {
     # Infra
     "pipeline_unavailable": FailureCategory.TRANSIENT_NETWORK,
     "pod_at_capacity": FailureCategory.TRANSIENT_NETWORK,
+    "provider_at_capacity": FailureCategory.TRANSIENT_NETWORK,
     "pod_draining": FailureCategory.TRANSIENT_NETWORK,
     "telephony_not_active_on_node": FailureCategory.TRANSIENT_NETWORK,
     "telephony_disabled_on_node": FailureCategory.TRANSIENT_NETWORK,

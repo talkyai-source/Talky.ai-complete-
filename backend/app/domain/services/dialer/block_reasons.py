@@ -67,6 +67,7 @@ class BlockCode(str, Enum):
     CALL_GAP = "call_gap"
     TENANT_GAP = "tenant_gap"
     PLATFORM_GAP = "platform_gap"
+    PLATFORM_AT_CAPACITY = "platform_at_capacity"
     DESTINATION_BUSY = "destination_busy"
 
     # Safety
@@ -112,6 +113,7 @@ SELF_CLEARING_CODES: frozenset[BlockCode] = frozenset({
     BlockCode.CALL_GAP,
     BlockCode.TENANT_GAP,
     BlockCode.PLATFORM_GAP,
+    BlockCode.PLATFORM_AT_CAPACITY,
     BlockCode.CALL_GUARD_THROTTLED,
     BlockCode.CALL_GUARD_QUEUED,
     BlockCode.DESTINATION_BUSY,
@@ -358,7 +360,6 @@ _TELEPHONY_DOWN_TOKENS = (
     "telephony_not_active_on_node",
     "telephony_disabled_on_node",
     "pod_draining",
-    "pod_at_capacity",
 )
 
 
@@ -624,6 +625,19 @@ def classify(
         return BlockReason(
             BlockCode.PLATFORM_GAP,
             "Waiting a few seconds so calls do not all start at once.",
+            severity="info", stage="pacing",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
+        )
+    # The call service's own refusal codes mean the same thing: a full platform
+    # is waiting, never "not connected".
+    if any(
+        token in low
+        for token in ("platform_at_capacity", "pod_at_capacity", "provider_at_capacity")
+    ):
+        return BlockReason(
+            BlockCode.PLATFORM_AT_CAPACITY,
+            "All call lines are in use. Calls start as lines free up.",
             severity="info", stage="pacing",
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,
