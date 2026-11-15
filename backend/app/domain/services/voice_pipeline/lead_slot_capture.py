@@ -688,3 +688,59 @@ async def record_contact_outcome(
             _stash(session, "_lead_capture_failure_notice", bool(failed_fields))
     except Exception as exc:  # noqa: BLE001 - teardown must never break
         logger.warning("contact_capture_outcome_failed call=%s err=%s", str(call_id)[:8], exc)
+
+
+RELATIONSHIP_FIELD = "customer_relationship"
+_RELATIONSHIP_WRITTEN_ATTR = "_customer_relationship_written"
+
+
+async def record_customer_relationship(
+    session: Any,
+    *,
+    pool: Any,
+    call_id: Optional[str],
+    tenant_id: Optional[str],
+    campaign_id: Optional[str] = None,
+    lead_id: Optional[str] = None,
+) -> bool:
+    """Save the caller's latest own "I am / am not a customer" statement.
+
+    One row, ``customer_relationship`` = "denied" or "affirmed", taken from the
+    same function the live guard uses; nothing is written when the caller never
+    said either. Stored unconfirmed (nobody read it back) with the caller as
+    its source. Never raises.
+    """
+    try:
+        from app.domain.services.voice_pipeline.speech_guard import caller_relationship
+
+        stance = caller_relationship(getattr(session, "conversation_history", None))
+        target_call_id, tenant = _as_uuid(call_id), _as_uuid(tenant_id)
+        if stance is None or pool is None or not target_call_id or not tenant:
+            return False
+        if getattr(session, _RELATIONSHIP_WRITTEN_ATTR, None) == stance:
+            return True
+        is_test = getattr(session, _IS_TEST_ATTR, None)
+        if is_test is None:
+            is_test = await _call_is_test(pool, tenant, target_call_id)
+        if is_test or is_test is None:
+            return False
+        from app.domain.services.lead_capture_service import LeadCaptureService
+
+        stored = await LeadCaptureService(pool).capture(
+            tenant_id=tenant,
+            call_id=target_call_id,
+            field_key=RELATIONSHIP_FIELD,
+            value=stance,
+            source=CAPTURE_SOURCE,
+            field_type="text",
+            confirmed=False,
+            campaign_id=_as_uuid(campaign_id),
+            lead_id=_as_uuid(lead_id),
+            evidence={"status": "caller_statement", "derived_from": "caller_turns"},
+        )
+        if stored:
+            _stash(session, _RELATIONSHIP_WRITTEN_ATTR, stance)
+        return bool(stored)
+    except Exception as exc:  # noqa: BLE001 - teardown must never break
+        logger.warning("customer_relationship_save_failed call=%s err=%s", str(call_id)[:8], exc)
+        return False

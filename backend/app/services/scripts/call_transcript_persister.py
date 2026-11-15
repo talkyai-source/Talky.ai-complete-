@@ -413,6 +413,24 @@ async def _flush_lead_details_on_hangup(
                 or getattr(call_session, "lead_id", None)
             ),
         )
+        from app.domain.services.voice_pipeline.lead_slot_capture import (
+            record_customer_relationship,
+        )
+
+        await record_customer_relationship(
+            call_session,
+            pool=db_pool,
+            call_id=dialer_call_id,
+            tenant_id=tenant_id_str,
+            campaign_id=(
+                getattr(voice_session, "_dialer_campaign_id", None)
+                or getattr(call_session, "campaign_id", None)
+            ),
+            lead_id=(
+                getattr(voice_session, "_dialer_lead_id", None)
+                or getattr(call_session, "lead_id", None)
+            ),
+        )
     except Exception as exc:  # noqa: BLE001 - teardown must not break
         logger.warning(
             "lead_details_hangup_flush_failed call=%s err=%s",
