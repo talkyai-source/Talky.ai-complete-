@@ -2444,10 +2444,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "27f8718cdd0ed66a6bf218e871fb50c72a96ee7b2217b6e723b56a56db334aa3",
+      "id": "2b61be07dff59b7c673bc24d2328e777493386ea5cf217154f8b4596d7b94246",
       "file": "app/domain/services/lead_capture_service.py",
       "function": "LeadCaptureService.fields_for_campaign",
-      "line": 208,
+      "line": 211,
       "method": "fetch",
       "tables": [
         "campaign_lead_fields"
