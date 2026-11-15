@@ -859,61 +859,110 @@ async def _read_outbound_balance(tenant_id: str) -> Optional[int]:
     return await asyncio.wait_for(_read(), timeout=_BALANCE_READ_TIMEOUT_S)
 
 
-async def _refresh_one_tenant_balance(tenant_id: str, sessions: list) -> None:
-    now = _loop_now()
-    used = [max(0.0, now - float(vs._answered_at_monotonic)) for vs in sessions]
+#: One lock per tenant so two refreshes (answer-time task, watchdog tick) never
+#: interleave. Dropped again once the tenant has no live outbound calls.
+_balance_tenant_locks: dict = {}
+
+
+def _live_outbound_sessions(tenant_id: str) -> list:
+    """The tenant's live answered outbound sessions, listed right now."""
+    sessions = []
+    for _call_id, vs in _state().iter_voice_session_items():
+        try:
+            if _balance_tenant_of(vs) == tenant_id:
+                sessions.append(vs)
+        except Exception:  # noqa: BLE001 — a half-built session is skipped
+            continue
+    return sessions
+
+
+def _drop_idle_balance_lock(tenant_id: str) -> None:
+    lock = _balance_tenant_locks.get(tenant_id)
+    if lock is not None and not lock.locked() and not _live_outbound_sessions(tenant_id):
+        _balance_tenant_locks.pop(tenant_id, None)
+
+
+async def _refresh_one_tenant_balance(tenant_id: str) -> None:
+    lock = _balance_tenant_locks.setdefault(tenant_id, asyncio.Lock())
     try:
-        remaining = await _read_outbound_balance(tenant_id)
-    except Exception as exc:  # noqa: BLE001 — never end the call, never leave it uncapped
-        if tenant_id not in _balance_outage_tenants:
-            _balance_outage_tenants.add(tenant_id)
-            logger.warning(
-                "outbound_balance_unreadable tenant=%s err=%s, provisional %ds talk-time cap",
-                tenant_id[:8], type(exc).__name__, _OUTBOUND_BALANCE_UNKNOWN_CAP_S,
-            )
-        for vs, spent in zip(sessions, used):
-            vs._balance_deadline_seconds = (
-                vs.call_session.get_duration_seconds()
-                + max(0.0, _OUTBOUND_BALANCE_UNKNOWN_CAP_S - spent)
-            )
-            # Billing is not clamped to a guess.
-            vs._balance_talk_cap_seconds = None
-        return
-    _balance_outage_tenants.discard(tenant_id)
-    if remaining is None:
-        for vs in sessions:
-            vs._balance_deadline_seconds = None
-            vs._balance_talk_cap_seconds = None
-        return
-    # Live calls are not in ``remaining``: take what each has already used out
-    # of the pool, then split the rest evenly from now.
-    pool = max(0.0, float(remaining) - sum(used))
-    share = float(int(pool // len(sessions)))
-    for vs, spent in zip(sessions, used):
-        # The watchdog measures from session creation (ringing included), so
-        # "share seconds from now" is duration-now + share on that clock;
-        # ringing was never counted in ``used``.
-        vs._balance_deadline_seconds = vs.call_session.get_duration_seconds() + share
-        vs._balance_talk_cap_seconds = spent + share
+        async with lock:
+            error = None
+            remaining = None
+            try:
+                remaining = await _read_outbound_balance(tenant_id)
+            except Exception as exc:  # noqa: BLE001 — never end the call, never leave it uncapped
+                error = exc
+            # Re-list AFTER the read, and do not await again before the limits
+            # are written: a call answered during the read is included, one
+            # that ended is not, and no other refresh can interleave.
+            sessions = _live_outbound_sessions(tenant_id)
+            if not sessions:
+                _balance_outage_tenants.discard(tenant_id)
+                return
+            now = _loop_now()
+            used = [max(0.0, now - float(vs._answered_at_monotonic)) for vs in sessions]
+            if error is not None:
+                if tenant_id not in _balance_outage_tenants:
+                    _balance_outage_tenants.add(tenant_id)
+                    logger.warning(
+                        "outbound_balance_unreadable tenant=%s err=%s, provisional %ds talk-time cap",
+                        tenant_id[:8], type(error).__name__, _OUTBOUND_BALANCE_UNKNOWN_CAP_S,
+                    )
+                for vs, spent in zip(sessions, used):
+                    # A guess: no one-tick margin, so it is never stricter than stated.
+                    vs._balance_deadline_seconds = (
+                        vs.call_session.get_duration_seconds()
+                        + max(0.0, _OUTBOUND_BALANCE_UNKNOWN_CAP_S - spent)
+                    )
+                return
+            _balance_outage_tenants.discard(tenant_id)
+            if remaining is None:
+                for vs in sessions:
+                    vs._balance_deadline_seconds = None
+                return
+            # Live calls are not in ``remaining``: take what each has already
+            # used out of the pool, then split the rest evenly from now.
+            pool = max(0.0, float(remaining) - sum(used))
+            share = float(int(pool // len(sessions)))
+            for vs in sessions:
+                # The watchdog measures from session creation (ringing
+                # included), so "share seconds from now" is duration-now +
+                # share on that clock; ringing was never counted in ``used``.
+                # It only looks every _DURATION_WATCHDOG_TICK_S, so the deadline
+                # is set one tick early: the call ends no later than the moment
+                # its share runs out, at the cost of up to one tick of unused
+                # balance. A share smaller than one tick gets a deadline of
+                # "now" and can still run on to the next tick.
+                vs._balance_deadline_seconds = vs.call_session.get_duration_seconds() + max(
+                    0.0, share - _DURATION_WATCHDOG_TICK_S
+                )
+    finally:
+        _drop_idle_balance_lock(tenant_id)
 
 
 async def _refresh_outbound_balance_caps(session_items, *, tenant_id: Optional[str] = None) -> None:
     """Share each tenant's remaining balance among its live outbound calls.
 
-    One balance read per tenant (``tenant_id`` limits it to one). Never raises.
+    ``session_items`` only decides WHICH tenants to refresh; each refresh
+    re-lists its own sessions after the balance read. One balance read per
+    tenant (``tenant_id`` limits it to one). Never raises.
     """
     try:
-        by_tenant: dict = {}
+        live_tenants: set = set()
         for _call_id, vs in session_items:
             try:
                 tenant = _balance_tenant_of(vs)
             except Exception:  # noqa: BLE001 — a half-built session is skipped
                 continue
-            if tenant is not None and (tenant_id is None or tenant == str(tenant_id)):
-                by_tenant.setdefault(tenant, []).append(vs)
-        if by_tenant:
+            if tenant is not None:
+                live_tenants.add(tenant)
+        for stale in [t for t in _balance_tenant_locks if t not in live_tenants]:
+            if not _balance_tenant_locks[stale].locked():
+                _balance_tenant_locks.pop(stale, None)
+        targets = [t for t in live_tenants if tenant_id is None or t == str(tenant_id)]
+        if targets:
             await asyncio.gather(
-                *(_refresh_one_tenant_balance(t, v) for t, v in by_tenant.items()),
+                *(_refresh_one_tenant_balance(t) for t in targets),
                 return_exceptions=True,
             )
     except Exception as exc:  # noqa: BLE001
@@ -3859,9 +3908,6 @@ def _confirmed_outbound_duration_seconds(
     )
     if isinstance(cap, bool) or not isinstance(cap, (int, float)) or cap <= 0:
         cap = _SESSION_MAX_DURATION_S
-    balance_cap = _balance_limit(voice_session, "_balance_talk_cap_seconds")
-    if balance_cap is not None:
-        return min(elapsed, int(cap), int(balance_cap))
     return min(elapsed, int(cap))
 
 
