@@ -1772,6 +1772,35 @@ async def _load_agent_lead_context(lead_id, tenant_id) -> Optional[dict]:
         return None
 
 
+def _outbound_capacity_refusal(destination: object) -> Optional[dict]:
+    """503 detail when this pod cannot take another outbound call, else None.
+
+    Counts ringing outbound calls (``committed_call_load``) as well as answered
+    sessions, so a call that would be hung up on at answer is refused before
+    it is dialled.
+    """
+    from app.core import readiness as _readiness
+    from app.domain.services.telephony.lifecycle import committed_call_load
+
+    committed = committed_call_load()
+    if not (_readiness.is_pod_at_capacity() or committed >= _MAX_TELEPHONY_SESSIONS):
+        return None
+    active = get_state_backend().voice_session_count()
+    logger.warning(
+        "make_call_pod_at_capacity active=%d committed_calls=%d cap=%d dest=%s",
+        active,
+        committed,
+        _MAX_TELEPHONY_SESSIONS,
+        destination,
+    )
+    return {
+        "error": "pod_at_capacity",
+        "active_sessions": active,
+        "committed_calls": committed,
+        "max_sessions": _MAX_TELEPHONY_SESSIONS,
+    }
+
+
 @router.post("/call")
 async def make_call(request: Request, body: MakeCallRequest):
     """
@@ -1889,22 +1918,12 @@ async def make_call(request: Request, body: MakeCallRequest):
             headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
             detail={"error": "pod_draining"},
         )
-    if _readiness.is_pod_at_capacity():
-        _active_session_count = get_state_backend().voice_session_count()
-        logger.warning(
-            "make_call_pod_at_capacity active=%d cap=%d dest=%s",
-            _active_session_count,
-            _MAX_TELEPHONY_SESSIONS,
-            destination,
-        )
+    _capacity_refusal = _outbound_capacity_refusal(destination)
+    if _capacity_refusal is not None:
         raise HTTPException(
             status_code=503,
             headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
-            detail={
-                "error": "pod_at_capacity",
-                "active_sessions": _active_session_count,
-                "max_sessions": _MAX_TELEPHONY_SESSIONS,
-            },
+            detail=_capacity_refusal,
         )
 
     # effective_tenant_id was resolved up-front by resolve_call_tenant (the
@@ -2435,6 +2454,20 @@ async def make_call(request: Request, body: MakeCallRequest):
                 getattr(container, "db_pool", None),
                 tenant_id=str(effective_tenant_id),
                 campaign_id=str(campaign_id),
+            )
+
+        # Capacity again, after the awaits above (call guard, warmup, campaign
+        # lock) and before this attempt is claimed: an inbound call admitted in
+        # those seconds may have taken the last slot. The check near the top is
+        # the cheap early refusal; this one is the one that counts. A short
+        # window remains, because the claim below awaits before the ringing
+        # call is stored; the answer-time check stays as the last defence.
+        _capacity_refusal = _outbound_capacity_refusal(destination)
+        if _capacity_refusal is not None:
+            raise HTTPException(
+                status_code=503,
+                headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+                detail=_capacity_refusal,
             )
 
         if internal_dialer_intent is not None:
