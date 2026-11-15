@@ -548,16 +548,16 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "16d53828a43592973dee037e6a09b434122162747f444580cdf36657571380d7",
+      "id": "ea3ad603e3a5a7688bef1e0299892afcbecd7a78365bfbcebf194d521156ce8f",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2417,
+      "line": 2495,
       "method": "fetchval",
       "tables": [
         "calls",
         "leads"
       ],
-      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable'))",
+      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable', 'platform_at_capacity'))",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1640,17 +1640,17 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2ca2c97ee438cd21bd54bf7b5cb1884ec5f1b473bbfd1d1c141281707e9cac53",
+      "id": "395c7ae35a551820617e7541444bdad50a0122e699e7a6345dff75266ce29280",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1180,
+      "line": 1181,
       "method": "fetch",
       "tables": [
         "calls",
         "campaigns",
         "dialer_jobs"
       ],
-      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'call_guard_throttled', 'call_guard_queued', 'destination_busy') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
+      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'platform_gap', 'platform_at_capacity', 'call_guard_throttled', 'call_guard_queued', 'destination_busy') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -3709,10 +3709,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a296d298f760a17d1e74e25a50306126bd7b8ad7fb7919c187a1d202c1d2a926",
+      "id": "61e5bda2ff5eaa5a720ec6ce0c9fc5a6912283ece1a63f61585fc4396cf489f1",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 3858,
+      "line": 3929,
       "method": "execute",
       "tables": [
         "leads"
@@ -5916,7 +5916,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8c1546804b59ddaad795360930888c69415d3ae0e238e387eb415b958f812b1c",
+      "id": "148286ee5369a89d7bc6cb2e6e7f15a29cbff64c21fd7a2832436ee90b99f2e3",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
       "line": 1053,
@@ -6670,15 +6670,15 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6d5b03a4ded02e79250c2f8781c453975edd1c6166edb960f912b8bf7177ec43",
+      "id": "d27e62358b852dc250cd87bd6de742a4f76bf7ad97059cee96a21e9ce444064a",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3544,
+      "line": 3615,
       "method": "execute",
       "tables": [
         "calls"
       ],
-      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[Eq()], comparators=[Constant(value='telephony_unavailable')]), body=Constant(value='telephony_unavailable'), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
+      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='telephony_unavailable'), Constant(value='platform_at_capacity')], ctx=Load())]), body=Name(id='reason', ctx=Load()), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -7056,7 +7056,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "68100d2724717246930dbc9c497fba8e017c4226c359dec886bd64cbdedf85e3",
+      "id": "0904818a11e62d733ba116ed67dc3ea3c65949a251f220386c8fe28283da157f",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
       "line": 448,
@@ -7744,7 +7744,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e41294c8f02f3b99a90f6c0792e20e2899a326ab7680a4a865083471de2f62e8",
+      "id": "b11bb039d87e1cb153d51212e58f71492b2ecbae17d443034ccb7fdb09192e64",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
       "line": 908,
@@ -11026,10 +11026,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "5dcf6278cfc6554ed32e4de6ce3bab94ab2e63c7e3ef394ce2f8a64dbcd58756",
+      "id": "50bdcd983216d3511c05ad828427a39a1a0c8d8a6e7f64a5c0182ac1e7ec72fa",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1482,
+      "line": 1483,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11890,10 +11890,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "31a7ecbac1167930c31988d20e9ec7d19836ef6b2a29d4952381e386df5bc9bf",
+      "id": "ae87aea01ae16747d283a2fe9189ca5bd7b187736a1b255d45a876f1ab844d4b",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1438,
+      "line": 1439,
       "method": "fetch",
       "tables": [
         "call_feedback",
