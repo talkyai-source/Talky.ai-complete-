@@ -1,6 +1,10 @@
 """Realtime tool wire format; execution remains in shared business services."""
 from typing import Any
-from app.domain.services.voice_pipeline.action_tools import VOICE_ACTION_NAMES, _ACTION_PARAMETERS
+from app.domain.services.voice_pipeline.action_tools import (
+    VOICE_ACTION_NAMES,
+    action_description_suffix,
+    action_parameters,
+)
 
 # Realtime wording is independent; names and argument schemas remain the shared
 # execution contract. Keep descriptions consistent with prompts.py.
@@ -27,8 +31,8 @@ def realtime_voice_action_tools(session=None) -> list[dict[str, Any]]:
             {
                 "type": "function",
                 "name": action,
-                "description": _REALTIME_ACTION_DESCRIPTIONS[action],
-                "parameters": _ACTION_PARAMETERS[action],
+                "description": _REALTIME_ACTION_DESCRIPTIONS[action] + action_description_suffix(action, session),
+                "parameters": action_parameters(action, session),
             }
         )
     return tools

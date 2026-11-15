@@ -362,13 +362,54 @@ def action_from_validation_reason(reason: str | None) -> str | None:
     return None
 
 
-def _chat_tool_spec(action: str) -> dict[str, Any]:
+def _named_transfer_destinations(session: Any) -> list[dict[str, Any]]:
+    context = getattr(session, "_voice_action_context", None) if session is not None else None
+    if not context:
+        return []
+    from app.domain.services.voice_pipeline.action_execution import offered_transfer_destinations
+
+    return [item for item in offered_transfer_destinations(context) if item.get("name")]
+
+
+def action_parameters(action: str, session: Any = None) -> dict[str, Any]:
+    """Argument schema shared by the cascaded and Realtime tool definitions."""
+    named = _named_transfer_destinations(session) if action == ACTION_TRANSFER_CALL else []
+    if len(named) < 2:
+        return _ACTION_PARAMETERS[action]
+    return {
+        "type": "object",
+        "properties": {
+            "destination": {
+                "type": "string",
+                "enum": [item["name"] for item in named],
+                "description": "The team to transfer to, chosen by the conditions in the tool description.",
+            }
+        },
+        "required": ["destination"],
+        "additionalProperties": False,
+    }
+
+
+def action_description_suffix(action: str, session: Any = None) -> str:
+    """Per-call detail appended to a tool description (transfer destinations)."""
+    named = _named_transfer_destinations(session) if action == ACTION_TRANSFER_CALL else []
+    if not named:
+        return ""
+    # One clause per destination, so a condition written without a full stop
+    # cannot run into the next name.
+    return " Destinations: " + "; ".join(
+        f"{item['name']}: {str(item['when']).rstrip('. ')}" if item.get("when") else item["name"]
+        for item in named
+    ) + "."
+
+
+def _chat_tool_spec(action: str, session: Any = None) -> dict[str, Any]:
     return {
         "type": "function",
         "function": {
             "name": action,
-            "description": _ACTION_DESCRIPTIONS[action],
-            "parameters": _ACTION_PARAMETERS[action],
+            "description": _ACTION_DESCRIPTIONS[action] + action_description_suffix(action, session),
+            "parameters": action_parameters(action, session),
         },
     }
 
@@ -380,16 +421,18 @@ def _provider_supports_action_tools(provider: Any) -> bool:
     )
 
 
-def action_tools_for_turn(messages: Iterable[Any], provider: Any, *, session=None) -> list[dict[str, Any]]:
+def action_tools_for_turn(
+    messages: Iterable[Any], provider: Any, *, session=None, now=None
+) -> list[dict[str, Any]]:
     """Offer the connected actions; the model interprets the caller's intent."""
     if not _provider_supports_action_tools(provider):
         return []
     actions = VOICE_ACTION_NAMES
     if session is not None:
         from app.domain.services.voice_pipeline.action_execution import enabled_voice_actions
-        enabled = enabled_voice_actions(session)
+        enabled = enabled_voice_actions(session, now)
         actions = [action for action in actions if action in enabled]
-    return [_chat_tool_spec(action) for action in actions]
+    return [_chat_tool_spec(action, session) for action in actions]
 
 
 def action_tool_system_addendum(available_actions: Iterable[str] | None = None) -> str:

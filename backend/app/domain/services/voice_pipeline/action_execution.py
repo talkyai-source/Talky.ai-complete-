@@ -27,8 +27,38 @@ def _result(action, status, message, **extra):
             "confirmation_allowed": False, "message": message, **extra}
 
 
-def enabled_voice_actions(session):
-    return {"end_call", *getattr(session, "_voice_action_capabilities", {}).keys()}
+def enabled_voice_actions(session, now=None):
+    capabilities = dict(getattr(session, "_voice_action_capabilities", {}))
+    if "transfer_call" in capabilities:
+        # Checked on every call of this function (each turn), not once at call
+        # start, so a call that crosses closing time stops offering transfer.
+        from app.domain.services.campaign_brief import transfer_open_now
+        brief = (getattr(session, "_voice_action_context", None) or {}).get("brief") or {}
+        if not transfer_open_now(brief, now):
+            capabilities.pop("transfer_call")
+    return {"end_call", *capabilities.keys()}
+
+
+def _brief_destinations(brief):
+    listed = [dict(item) for item in brief.get("transfer_destinations") or [] if isinstance(item, dict)]
+    if not listed:
+        legacy = str(brief.get("transfer_destination") or "").strip()
+        listed = [{"name": "", "number": legacy, "when": ""}] if legacy else []
+    return listed
+
+
+def offered_transfer_destinations(context):
+    """Named destinations the agent may use on this call: [{name, number, when}].
+
+    Numbers always come from the stored brief. A legacy single destination is one
+    unnamed entry. Inbound calls keep only destinations that passed the
+    inbound allow-list check."""
+    listed = _brief_destinations((context or {}).get("brief") or {})
+    if (context.get("call_direction", context.get("direction")) == "inbound"
+            and "inbound_transfer_numbers" in context):
+        allowed = context["inbound_transfer_numbers"]
+        listed = [item for item in listed if item["number"] in allowed]
+    return listed
 
 
 async def _pool(session):
@@ -39,7 +69,7 @@ async def _pool(session):
     return pool
 
 
-def _inbound_transfer_policy_available(context, tenant):
+def _inbound_transfer_policy_available(context, tenant, destination=None):
     """Read-only capability check; final admission still owns limits and effects."""
     from app.domain.services.telephony.inbound_transfer import (
         inbound_transfer_destination_approved,
@@ -50,7 +80,7 @@ def _inbound_transfer_policy_available(context, tenant):
         snapshot = _object(context.get("route_snapshot"))
         route = _object(snapshot.get("route"))
         policy = _object(_object(snapshot.get("inbound_config")).get("transfer_policy"))
-        destination = normalize_did(context["brief"].get("transfer_destination"))
+        destination = normalize_did(destination or context["brief"].get("transfer_destination"))
         return bool(
             inbound_transfer_scope_available(tenant_id=tenant, config_id=route.get("config_id"))
             and context.get("admission_status") == "allowed"
@@ -110,9 +140,15 @@ async def _context(session, pool):
                   AND c.status='active' AND a.status='active')
         """, str(tenant)))
         context["inbound_transfer_available"] = False
+        context["inbound_transfer_numbers"] = set()
         allowed = set(context["brief"].get("approved_next_actions") or [])
-        if ("transfer" in allowed and context.get("call_direction") == "inbound"
-                and _inbound_transfer_policy_available(context, str(tenant))):
+        if "transfer" in allowed and context.get("call_direction") == "inbound":
+            # The allow-list check runs for EACH destination.
+            context["inbound_transfer_numbers"] = {
+                item["number"] for item in _brief_destinations(context["brief"])
+                if _inbound_transfer_policy_available(context, str(tenant), item["number"])
+            }
+        if context["inbound_transfer_numbers"]:
             context["inbound_transfer_available"] = await conn.fetchval(
                 "SELECT inbound_transfer_enabled FROM platform_runtime_controls WHERE id=1"
             ) is True
@@ -136,7 +172,7 @@ async def _context(session, pool):
     return context
 
 
-def _capabilities(context):
+def _capabilities(context, now=None):
     if not context:
         return {}
     from app.domain.services.call_status import TERMINAL_CALL_STATUSES
@@ -155,7 +191,9 @@ def _capabilities(context):
             and context.get("lead_id") and context.get("phone_number")
             and not context.get("do_not_call") and context.get("lead_status") != "deleted"):
         out["schedule_callback"] = "Schedule the confirmed number and exact time in the existing dialer."
-    if ("transfer" in allowed and brief.get("transfer_destination") and context.get("transfer_connected")
+    from app.domain.services.campaign_brief import transfer_open_now
+    if ("transfer" in allowed and offered_transfer_destinations(context)
+            and transfer_open_now(brief, now) and context.get("transfer_connected")
             and context.get("provider") in {"asterisk", "freeswitch"}
             and (context.get("call_direction", context.get("direction")) != "inbound"
                  or context.get("inbound_transfer_available") is True)):
@@ -234,11 +272,26 @@ def _parameters(session, context, action, arguments):
         local_text = datetime.fromisoformat(local).strftime("%d %B %Y at %I:%M %p")
         return {"phone": phone, "contact_revision": revision, "scheduled_at": when, "timezone": zone}, f"schedule a callback to {phone} on {local_text} in {zone}"
     if action == "transfer_call":
-        destination = str(brief["transfer_destination"]).strip()
-        requested = str(arguments.get("destination") or "").strip()
-        if requested and requested != destination:
-            raise ValueError("Only the campaign's configured transfer destination is available.")
-        return {"destination": destination}, f"transfer this call to {destination}"
+        offered = offered_transfer_destinations(context)
+        requested = str(arguments.get("destination") or "").strip().casefold()
+        if len(offered) == 1 and offered[0]["name"]:
+            # One named destination: omitted, empty or its name all mean it.
+            chosen = offered[0] if not requested or requested == offered[0]["name"].casefold() else None
+        elif len(offered) == 1:
+            # Legacy free-text destination keeps its exact-match rule.
+            chosen = offered[0] if not requested or requested == offered[0]["number"].casefold() else None
+        else:
+            chosen = next((item for item in offered if item["name"].casefold() == requested), None)
+        if chosen is None:
+            # Name the choices so the model can correct itself. A destination
+            # with no name is a stored number or reference: never echo it back.
+            names = ", ".join(item["name"] for item in offered if item["name"])
+            raise ValueError(
+                "Choose one of the configured transfer destinations: " + names + "."
+                if names else "Only the campaign's configured transfer destination is available.")
+        # The dialled value always comes from the brief, never from the model.
+        shown = chosen["name"] or chosen["number"]
+        return {"destination": chosen["number"]}, f"transfer this call to {shown}"
     if action == "submit_form":
         form = brief["form_action"]
         if arguments.get("form_name") and arguments["form_name"] != form["name"]:
