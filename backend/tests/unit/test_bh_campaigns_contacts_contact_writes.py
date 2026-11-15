@@ -7,6 +7,13 @@ import asyncio
 from app.api.v1.endpoints import campaigns as campaigns_ep
 from app.api.v1.schemas.campaigns import ContactCreate, ContactUpdate
 
+PERMISSION = {
+    "basis": "express_consent",
+    "source": "Customer sign-up form, March 2026",
+    "permission_date": "2026-03-14",
+    "statement_version": "2026-11-v1",
+}
+
 
 class _Resp:
     def __init__(self, data, count=None):
@@ -101,7 +108,7 @@ def test_readding_a_deleted_dnc_contact_keeps_do_not_call():
     }])
     asyncio.run(campaigns_ep.add_contact_to_campaign(
         campaign_id="c1",
-        contact=ContactCreate(phone_number="+14155550124", first_name="Ann"),
+        contact=ContactCreate(phone_number="+14155550124", first_name="Ann", permission=PERMISSION),
         current_user=_User(), supabase=db,
     ))
     lead = db.tables["leads"][0]
@@ -118,7 +125,7 @@ def test_readding_a_deleted_contact_can_still_set_do_not_call():
     }])
     asyncio.run(campaigns_ep.add_contact_to_campaign(
         campaign_id="c1",
-        contact=ContactCreate(phone_number="+14155550124", do_not_call=True),
+        contact=ContactCreate(phone_number="+14155550124", do_not_call=True, permission=PERMISSION),
         current_user=_User(), supabase=db,
     ))
     assert db.tables["leads"][0]["do_not_call"] is True
@@ -153,7 +160,7 @@ def test_readding_keeps_do_not_call_from_any_deleted_duplicate():
     ])
     asyncio.run(campaigns_ep.add_contact_to_campaign(
         campaign_id="c1",
-        contact=ContactCreate(phone_number="+14155550124", first_name="Ann"),
+        contact=ContactCreate(phone_number="+14155550124", first_name="Ann", permission=PERMISSION),
         current_user=_User(), supabase=db,
     ))
     revived = [r for r in db.tables["leads"] if r["status"] == "pending"]

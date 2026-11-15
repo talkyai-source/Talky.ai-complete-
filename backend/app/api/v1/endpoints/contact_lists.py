@@ -23,9 +23,9 @@ creates (or reuses) exactly one list and tags every imported lead with it.
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Body, HTTPException, Depends
 from pydantic import BaseModel
 
 from app.core.postgres_adapter import Client
@@ -39,6 +39,13 @@ from app.domain.services.campaign_direction_guard import (
     OutboundCampaignDirectionConflict,
     raise_for_outbound_direction_guard,
 )
+from app.domain.services.contact_permission import (
+    ContactPermission,
+    ContactPermissionError,
+    contact_permission_required,
+    permission_required_error,
+    validate_contact_permission,
+)
 from app.utils.tenant_filter import apply_tenant_filter
 
 logger = logging.getLogger(__name__)
@@ -50,6 +57,15 @@ router = APIRouter(tags=["contact-lists"])
 # Schemas
 # =============================================================================
 
+class ContactListPermission(BaseModel):
+    """The customer's recorded permission confirmation for a list."""
+    confirmed: bool = False
+    basis: Optional[str] = None
+    source: Optional[str] = None
+    permission_date: Optional[str] = None
+    confirmed_at: Optional[str] = None
+
+
 class ContactListOut(BaseModel):
     """A contact list as returned to the client."""
     id: str
@@ -58,6 +74,7 @@ class ContactListOut(BaseModel):
     is_active: bool
     contact_count: int
     created_at: Optional[str] = None
+    permission: ContactListPermission = ContactListPermission()
 
 
 class ContactListToggle(BaseModel):
@@ -84,6 +101,82 @@ class CallListResponse(BaseModel):
 UNGROUPED_ID = "ungrouped"
 
 
+_CONSENT_COLUMNS = (
+    "consent_confirmed_at, consent_basis, consent_source, consent_permission_date"
+)
+LIST_UNAVAILABLE_DETAIL = (
+    "The contact list could not be saved, so no contacts were added. Please try again."
+)
+
+
+def resolve_contact_permission(raw: Any) -> Optional[ContactPermission]:
+    """Validate a confirmation sent with an import, or answer 422.
+
+    ``None`` means nothing was sent: 422 while the requirement is on, and
+    ``None`` back (import as before) while it is off. A confirmation that IS
+    sent is always validated.
+    """
+    try:
+        if raw is None:
+            if contact_permission_required():
+                raise permission_required_error()
+            return None
+        return validate_contact_permission(raw)
+    except ContactPermissionError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail()) from exc
+
+
+def permission_from_form(
+    basis: Optional[str],
+    source: Optional[str],
+    permission_date: Optional[str],
+    statement_version: Optional[str],
+) -> Optional[dict]:
+    """Collect the four multipart fields; ``None`` when none was sent."""
+    fields = {
+        "basis": basis,
+        "source": source,
+        "permission_date": permission_date,
+        "statement_version": statement_version,
+    }
+    if all(v is None or (isinstance(v, str) and not v.strip()) for v in fields.values()):
+        return None
+    return fields
+
+
+def validate_for_route(raw: Any) -> ContactPermission:
+    """Validate a confirmation that is mandatory for the route (422 otherwise)."""
+    try:
+        return validate_contact_permission(raw)
+    except ContactPermissionError as exc:
+        raise HTTPException(status_code=422, detail=exc.detail()) from exc
+
+
+def list_display_name(
+    db_client: Client, list_id: Optional[str], tenant_id: Optional[str], fallback: str,
+) -> str:
+    """The stored name of a list (a confirmed import may have been named "x (2)")."""
+    if list_id is None:
+        return fallback
+    try:
+        resp = db_client.table("contact_lists").select("id, name")\
+            .eq("id", list_id).eq("tenant_id", tenant_id).execute()
+        if getattr(resp, "data", None):
+            return str(resp.data[0].get("name") or fallback)
+    except Exception:  # noqa: BLE001 — cosmetic
+        pass
+    return fallback
+
+
+def _same_confirmation(row: dict, permission: ContactPermission) -> bool:
+    return (
+        row.get("consent_basis") == permission.basis
+        and str(row.get("consent_source") or "").strip() == permission.source
+        and str(row.get("consent_permission_date") or "")[:10]
+        == permission.permission_date.isoformat()
+    )
+
+
 def create_contact_list(
     db_client: Client,
     *,
@@ -91,6 +184,8 @@ def create_contact_list(
     tenant_id: Optional[str],
     name: str,
     source: str,
+    permission: Optional[ContactPermission] = None,
+    confirmed_by: Optional[str] = None,
 ) -> Optional[str]:
     """Create (or reuse) a contact list for an upload and return its id.
 
@@ -102,32 +197,73 @@ def create_contact_list(
     the user's perspective (the list's contact_count just grows). A caller that
     wants a distinct list should pass a distinct name.
 
-    Best-effort: on an ordinary list failure returns None so the caller falls
-    back to an Ungrouped import (leads with list_id NULL). A database direction
-    guard is different: it raises ``OutboundCampaignDirectionConflict`` so an
-    API cannot claim an inbound campaign import partially succeeded.
+    With a ``permission`` the list carries the customer's confirmation, and an
+    active list is reused ONLY when its stored basis, source and permission date
+    equal it. Otherwise (unconfirmed, or a different confirmation) the old list
+    is left untouched and a new one is created as "<name> (2)", "(3)", ... so a
+    confirmation is never spread over contacts it was not given for.
+
+    Without a ``permission`` this is best-effort: on an ordinary list failure
+    returns None so the caller falls back to an Ungrouped import (leads with
+    list_id NULL). With a ``permission`` a list failure raises HTTP 503 so no
+    contact is stored without its confirmation. A database direction guard
+    always raises ``OutboundCampaignDirectionConflict`` so an API cannot claim
+    an inbound campaign import partially succeeded.
     """
     name = (name or "").strip() or "Untitled list"
     src = source if source in ("csv", "paste", "manual") else "manual"
     try:
-        existing = db_client.table("contact_lists").select("id")\
-            .eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
-            .eq("name", name).eq("is_active", True).execute()
-        if getattr(existing, "error", None):
-            raise RuntimeError("contact-list lookup failed")
-        if getattr(existing, "data", None):
-            return str(existing.data[0]["id"])
+        if permission is None:
+            existing = db_client.table("contact_lists").select("id")\
+                .eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
+                .eq("name", name).eq("is_active", True).execute()
+            if getattr(existing, "error", None):
+                raise RuntimeError("contact-list lookup failed")
+            if getattr(existing, "data", None):
+                return str(existing.data[0]["id"])
+            list_name = name
+        else:
+            rows_resp = db_client.table("contact_lists").select(
+                "id, name, is_active, " + _CONSENT_COLUMNS
+            ).eq("campaign_id", campaign_id).eq("tenant_id", tenant_id)\
+                .eq("is_active", True).execute()
+            if getattr(rows_resp, "error", None):
+                raise RuntimeError("contact-list lookup failed")
+            by_name: dict = {}
+            for row in getattr(rows_resp, "data", None) or []:
+                by_name.setdefault(row.get("name"), []).append(row)
+            list_name = name
+            number = 1
+            while True:
+                holders = by_name.get(list_name) or []
+                for row in holders:
+                    if _same_confirmation(row, permission):
+                        return str(row["id"])
+                if not holders:
+                    break
+                number += 1
+                list_name = f"{name} ({number})"
 
         new_id = str(uuid.uuid4())
-        inserted = db_client.table("contact_lists").insert({
+        row_out = {
             "id": new_id,
             "campaign_id": campaign_id,
             "tenant_id": tenant_id,
-            "name": name,
+            "name": list_name,
             "source": src,
             "is_active": True,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        }
+        if permission is not None:
+            row_out.update({
+                "consent_confirmed_at": datetime.now(timezone.utc).isoformat(),
+                "consent_confirmed_by": confirmed_by,
+                "consent_basis": permission.basis,
+                "consent_source": permission.source,
+                "consent_permission_date": permission.permission_date.isoformat(),
+                "consent_statement_version": permission.statement_version,
+            })
+        inserted = db_client.table("contact_lists").insert(row_out).execute()
         if getattr(inserted, "error", None):
             raise_for_outbound_direction_guard(inserted.error, campaign_id)
             raise RuntimeError("contact-list insert was not applied")
@@ -137,6 +273,12 @@ def create_contact_list(
     except OutboundCampaignDirectionConflict:
         raise
     except Exception as exc:  # noqa: BLE001 — never fail an import over the list
+        if permission is not None:
+            logger.error(
+                "create_contact_list failed for campaign %s (%r) with a permission "
+                "confirmation: %s — import refused", campaign_id, name, exc,
+            )
+            raise HTTPException(status_code=503, detail=LIST_UNAVAILABLE_DETAIL) from exc
         logger.warning(
             "create_contact_list failed for campaign %s (%r): %s — importing as "
             "Ungrouped", campaign_id, name, exc,
@@ -172,13 +314,29 @@ def _fetch_list_or_404(db_client: Client, list_id: str, current_user: CurrentUse
             detail="The Ungrouped bucket is not a real list and cannot be toggled or called.",
         )
     q = db_client.table("contact_lists").select(
-        "id, campaign_id, tenant_id, name, source, is_active, created_at"
+        "id, campaign_id, tenant_id, name, source, is_active, created_at, "
+        + _CONSENT_COLUMNS
     ).eq("id", list_id)
     q = apply_tenant_filter(q, current_user.tenant_id)
     resp = q.execute()
     if not resp.data:
         raise HTTPException(status_code=404, detail="Contact list not found")
     return resp.data[0]
+
+
+def _permission_out(row: dict) -> ContactListPermission:
+    """The stored confirmation as returned to the client (all null when none)."""
+    confirmed_at = row.get("consent_confirmed_at")
+    if not confirmed_at:
+        return ContactListPermission()
+    pdate = row.get("consent_permission_date")
+    return ContactListPermission(
+        confirmed=True,
+        basis=row.get("consent_basis"),
+        source=row.get("consent_source"),
+        permission_date=str(pdate)[:10] if pdate else None,
+        confirmed_at=str(confirmed_at),
+    )
 
 
 def _live_count(
@@ -219,7 +377,7 @@ async def list_contact_lists(
     _verify_campaign(db_client, campaign_id, current_user)
 
     q = db_client.table("contact_lists").select(
-        "id, name, source, is_active, created_at"
+        "id, name, source, is_active, created_at, " + _CONSENT_COLUMNS
     ).eq("campaign_id", campaign_id)
     q = apply_tenant_filter(q, current_user.tenant_id)
     resp = q.order("created_at", desc=True).execute()
@@ -239,6 +397,7 @@ async def list_contact_lists(
                 tenant_id=current_user.tenant_id,
             ),
             created_at=str(r.get("created_at")) if r.get("created_at") else None,
+            permission=_permission_out(r),
         ))
 
     ungrouped_count = _live_count(
@@ -332,6 +491,79 @@ async def toggle_contact_list(
             tenant_id=current_user.tenant_id,
         ),
         created_at=str(updated.get("created_at")) if updated.get("created_at") else None,
+        permission=_permission_out({**row, **updated}),
+    )
+
+
+# =============================================================================
+# POST /contact-lists/{list_id}/permission
+# =============================================================================
+
+@router.post(
+    "/contact-lists/{list_id}/permission",
+    response_model=ContactListOut,
+    dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
+)
+async def record_contact_list_permission(
+    list_id: str,
+    body: Optional[dict] = Body(None),
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Record the permission confirmation on an older list that has none.
+
+    Tenant-scoped like PATCH. A list that already has a confirmation answers 409
+    and is never overwritten.
+    """
+    permission = validate_for_route(body)
+    row = _fetch_list_or_404(db_client, list_id, current_user)
+    campaign_id = str(row["campaign_id"])
+    require_owned_outbound_campaign(
+        db_client,
+        campaign_id,
+        tenant_id=current_user.tenant_id,
+    )
+    already = HTTPException(
+        status_code=409,
+        detail={
+            "code": "contact_permission_already_recorded",
+            "message": "Permission is already recorded for this list.",
+        },
+    )
+    if row.get("consent_confirmed_at"):
+        raise already
+
+    upd = db_client.table("contact_lists").update({
+        "consent_confirmed_at": datetime.now(timezone.utc).isoformat(),
+        "consent_confirmed_by": current_user.id,
+        "consent_basis": permission.basis,
+        "consent_source": permission.source,
+        "consent_permission_date": permission.permission_date.isoformat(),
+        "consent_statement_version": permission.statement_version,
+    }).eq("id", list_id).eq("campaign_id", campaign_id).is_("consent_confirmed_at", None)
+    upd = apply_tenant_filter(upd, current_user.tenant_id)
+    resp = upd.execute()
+    write_error = getattr(resp, "error", None)
+    if write_error:
+        logger.error("contact_list permission failed list=%s error=%s", list_id, write_error)
+        raise HTTPException(
+            status_code=503,
+            detail="Permission could not be recorded; please try again.",
+        )
+    if not getattr(resp, "data", None):
+        # Someone recorded one between our read and the conditional update.
+        raise already
+    updated = resp.data[0]
+    return ContactListOut(
+        id=str(updated["id"]),
+        name=updated.get("name") or "Untitled list",
+        source=updated.get("source") or "manual",
+        is_active=bool(updated.get("is_active", True)),
+        contact_count=_live_count(
+            db_client, campaign_id, list_id, tenant_id=current_user.tenant_id,
+        ),
+        created_at=str(updated.get("created_at")) if updated.get("created_at") else None,
+        permission=_permission_out({**row, **updated}),
     )
 
 

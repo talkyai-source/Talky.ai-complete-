@@ -66,7 +66,9 @@ async def test_dnc_writes_keep_the_us_fallback_that_matches_the_call_guard():
     assert await _write_country(None, None, None) == "US"
 
 
-async def test_the_assistant_refuses_a_national_number_with_no_country_and_says_why():
+async def test_the_assistant_refuses_a_national_number_with_no_country_and_says_why(monkeypatch):
+    # This test is about the phone rule; the permission requirement would refuse first.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     from app.infrastructure.assistant.tools.campaign_admin import manage_lead
     from tests.unit.test_assistant_campaign_admin import FakeDbClient
 

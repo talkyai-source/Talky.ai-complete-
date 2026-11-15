@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import pytz
 from datetime import timedelta
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.domain.services.contact_fields import _valid_timezone
@@ -478,6 +478,9 @@ class ContactCreate(BaseModel):
     preferred_contact_method: Optional[str] = Field(None, max_length=32)
     do_not_call: bool = False
     custom_fields: Optional[dict] = Field(default_factory=dict)
+    # The customer's confirmation that they may call this contact:
+    # {basis, source, permission_date, statement_version}; validated in the route.
+    permission: Optional[Any] = None
 
     @field_validator("phone_number")
     @classmethod
