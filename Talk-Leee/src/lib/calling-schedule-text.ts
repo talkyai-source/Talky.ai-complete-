@@ -5,7 +5,7 @@
 // (backend/app/domain/models/calling_rules.py: per-lead timezone first,
 // then the campaign timezone; tenant default 09:00–19:00 UTC, Mon–Fri).
 
-import type { CampaignCallingSchedule } from "@/lib/dashboard-api";
+import type { CampaignCallingSchedule, CampaignEffectiveSchedule } from "@/lib/dashboard-api";
 
 export const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
@@ -95,4 +95,19 @@ export function formatCallingSchedule(value: CampaignCallingSchedule | null | un
     const start = hasText(value?.time_window_start) ? value.time_window_start : FIELD_NOT_SET_TEXT;
     const end = hasText(value?.time_window_end) ? value.time_window_end : FIELD_NOT_SET_TEXT;
     return `${tz} · ${start}–${end} · ${formatScheduleDays(value?.allowed_days)}`;
+}
+
+/** The hours the server enforces (GET /campaigns/{id} `effective_schedule`),
+ *  in the saved-schedule shape. Null when the server sent none, sent an
+ *  incomplete one, or says the dialer ignores the hours ("call anytime" asked
+ *  for and allowed): the caller then shows the saved values exactly as before. */
+export function enforcedSchedule(effective: CampaignEffectiveSchedule | null | undefined): CampaignCallingSchedule | null {
+    if (!effective || effective.ignore_schedule === true) return null;
+    const enforced: CampaignCallingSchedule = {
+        timezone: effective.timezone,
+        time_window_start: effective.time_window_start,
+        time_window_end: effective.time_window_end,
+        allowed_days: effective.allowed_days,
+    };
+    return missingScheduleFields(enforced).length === 0 ? enforced : null;
 }

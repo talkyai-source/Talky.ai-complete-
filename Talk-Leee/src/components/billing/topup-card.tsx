@@ -24,7 +24,7 @@ import { usdFromMinor } from "@/lib/display-currency";
 import { useAuth } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/api-hooks";
 import { billingKeys } from "@/lib/billing-api";
-import { classifyBillingRefusal, recordBillingRefusal, useBillingRefusal } from "@/lib/billing-refusal";
+import { classifyBillingRefusal, recordBillingRefusal, sameBillingReason, useBillingRefusal } from "@/lib/billing-refusal";
 import {
   canTopUp,
   formatMoney,
@@ -35,6 +35,8 @@ import {
   returnOutcome,
   TOPUP_SETTLE_POLL_MS,
   TOPUP_SETTLE_TIMEOUT_MS,
+  topupsClosedReason,
+  useBillingConfig,
   useStartTopup,
   useTopupBalance,
   useTopupOrders,
@@ -52,6 +54,9 @@ function formatTopupError(err: unknown): string {
   }
   return failedReadMessage(err, "The request did not complete.");
 }
+
+/** The general sentence: no bundle on offer, or top-ups closed with no reason given. */
+const NO_BUNDLES_TEXT = "No top-up bundles are available on your account right now. Contact the billing team for a review.";
 
 /** A refusal made before any order or payment existed, in the server's words. */
 function refusedBeforeOrder(err: unknown): string | null {
@@ -92,7 +97,17 @@ export function TopupCard({
   const outcome = returnOutcome(returned, ordersQ.isSuccess, newest);
   const balanceQ = useTopupBalance(settleActive && outcome === "unconfirmed" ? settlePollMs : undefined);
   const start = useStartTopup();
-  const refusal = useBillingRefusal("topup");
+  const recordedRefusal = useBillingRefusal("topup");
+  // Known before a click (GET /billing/config): the server's reason when it
+  // says top-ups are closed. Null when open or when that read gave no answer,
+  // and then the card behaves as it did without the read.
+  const configQ = useBillingConfig();
+  const closedReason = topupsClosedReason(configQ.data);
+  // The server says top-ups are closed, with or without a reason: no Buy is offered.
+  const topupsClosed = configQ.data?.topups_open === false;
+  // One reason is shown once: a refusal recorded after a click that says the
+  // same thing as the reason already known is not repeated.
+  const refusal = recordedRefusal && closedReason && sameBillingReason(recordedRefusal.message, closedReason) ? null : recordedRefusal;
 
   // A verified payment changes every minute figure in the app at once: the
   // overview's included minutes (billing plan/usage), the dashboard summary
@@ -184,6 +199,8 @@ export function TopupCard({
   const offerTopups = canTopUp(balance);
   const unlimited = balance?.unlimited ?? false;
   const lowBalance = isLowBalance(balance);
+  // Bundles the server still lists while it says top-ups are closed.
+  const closedWithBundles = topupsClosed && !catalogueFailed && !unlimited && offerTopups && !packagesQ.isLoading && packages.length > 0;
   const bestValueCode = packages.length > 1 && packages.every((pkg) => pkg.currency === packages[0].currency && pkg.currency_exponent === packages[0].currency_exponent)
     ? packages.reduce((best, pkg) =>
         pkg.price_per_minute_cents < best.price_per_minute_cents ? pkg : best,
@@ -265,7 +282,17 @@ export function TopupCard({
           </div>
         ) : null}
 
-        {refusal ? (
+        {closedWithBundles ? (
+          // The backend's own reason (the general sentence when it gave none),
+          // once, above the bundles it will refuse.
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <span>{closedReason ?? NO_BUNDLES_TEXT}</span>
+          </div>
+        ) : refusal ? (
           // The backend's own words, once, above the bundles it refused.
           <div
             role="alert"
@@ -324,14 +351,18 @@ export function TopupCard({
           <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
             Your plan has unlimited minutes, so there is nothing to top up.
           </p>
-        ) : !offerTopups || packagesQ.isLoading ? (
+        ) : !offerTopups || packagesQ.isLoading || (packages.length === 0 && configQ.isLoading) ? (
           <div className="flex items-center justify-center py-8 text-muted-foreground">
             <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading bundles…
           </div>
+        ) : packages.length === 0 && closedReason !== null ? (
+          // The server's own reason, in place of the general sentence below.
+          <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            {closedReason}
+          </p>
         ) : packages.length === 0 ? (
           <p className="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-            No top-up bundles are available on your account right now. Contact
-            the billing team for a review.
+            {NO_BUNDLES_TEXT}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
@@ -374,7 +405,7 @@ export function TopupCard({
                     size="sm"
                     className="mt-2 w-full"
                     onClick={() => buy(pkg)}
-                    disabled={pending || refusal !== null || pkg.currency === null || pkg.currency_exponent === null}
+                    disabled={pending || refusal !== null || topupsClosed || pkg.currency === null || pkg.currency_exponent === null}
                     aria-label={`Buy ${pkg.minutes} minutes for ${localAmountText(display, usdFromMinor(pkg.price_cents, pkg.currency, pkg.currency_exponent), formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent))}`}
                   >
                     {busy ? (

@@ -2,19 +2,22 @@
 
 /**
  * Read-only calling-schedule block for the campaign detail page's Start
- * dialog (production-readiness 2.3). Shows ONLY the saved `calling_config`:
+ * dialog (production-readiness 2.3). Shows the hours the server enforces
+ * (`effective_schedule` of GET /campaigns/{id}) when it sent them, otherwise
+ * ONLY the saved `calling_config`:
  * the "Calling schedule:" line, the rule the dialer enforces, the
  * missing-information warning for an incomplete schedule, and the live
  * out-of-hours warning. Advisory only; it never blocks Start.
  */
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Loader2 } from "lucide-react";
 
-import type { CampaignCallingSchedule } from "@/lib/dashboard-api";
+import type { CampaignCallingSchedule, CampaignEffectiveSchedule } from "@/lib/dashboard-api";
 import { checkCallingWindow } from "@/lib/calling-window";
 import {
     CALLING_HOURS_RULE_TEXT,
     OUTSIDE_HOURS_TEXT,
     SCHEDULE_NOT_SET_TEXT,
+    enforcedSchedule,
     formatCallingSchedule,
     scheduleMissingWarning,
 } from "@/lib/calling-schedule-text";
@@ -25,9 +28,15 @@ const WARNING_CLASS =
 /** The read-only "Calling schedule: …" line, or the exact Not set text when
  *  nothing is saved. Shown in the campaign header and in the Start dialog. */
 export function CallingScheduleLine({
-    callingConfig, testId = "calling-schedule-line", className = "text-sm text-muted-foreground",
-}: { callingConfig: CampaignCallingSchedule | null | undefined; testId?: string; className?: string }) {
-    const line = formatCallingSchedule(callingConfig);
+    callingConfig, effectiveSchedule, testId = "calling-schedule-line", className = "text-sm text-muted-foreground",
+}: {
+    callingConfig: CampaignCallingSchedule | null | undefined;
+    /** What the server enforces (GET /campaigns/{id}); shown in place of the saved values when present. */
+    effectiveSchedule?: CampaignEffectiveSchedule | null;
+    testId?: string;
+    className?: string;
+}) {
+    const line = formatCallingSchedule(enforcedSchedule(effectiveSchedule) ?? callingConfig);
     return (
         <p className={className} data-testid={testId}>
             {line ? (
@@ -39,12 +48,28 @@ export function CallingScheduleLine({
     );
 }
 
-export function CallingScheduleStartNotice({ callingConfig }: { callingConfig: CampaignCallingSchedule | null | undefined }) {
+export function CallingScheduleStartNotice({
+    callingConfig, effectiveSchedule, reading = false,
+}: {
+    callingConfig: CampaignCallingSchedule | null | undefined;
+    /** What the server enforces (GET /campaigns/{id}); null or absent = the saved values, as before. */
+    effectiveSchedule?: CampaignEffectiveSchedule | null;
+    /** The read of the enforced hours is still running. */
+    reading?: boolean;
+}) {
     const missing = scheduleMissingWarning(callingConfig);
-    const win = callingConfig ? checkCallingWindow(callingConfig) : null;
+    // The out-of-hours warning is worked out from the hours shown on the line above.
+    const shown = enforcedSchedule(effectiveSchedule) ?? callingConfig;
+    const win = !reading && shown ? checkCallingWindow(shown) : null;
     return (
         <>
-            <CallingScheduleLine callingConfig={callingConfig} />
+            {reading ? (
+                <div role="status" aria-busy="true" data-testid="calling-schedule-reading" className="flex h-5 items-center text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                </div>
+            ) : (
+                <CallingScheduleLine callingConfig={callingConfig} effectiveSchedule={effectiveSchedule} />
+            )}
             <p className="text-xs text-muted-foreground">{CALLING_HOURS_RULE_TEXT}</p>
             {missing && (
                 <div className={WARNING_CLASS} role="status" data-testid="calling-schedule-missing">

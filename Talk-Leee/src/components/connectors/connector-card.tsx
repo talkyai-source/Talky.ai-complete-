@@ -166,7 +166,10 @@ export function ConnectorCard({
 
     const canConnect = available && mayConnect && status === "disconnected";
     const canReconnect = available && mayConnect && (status === "expired" || status === "error");
-    const canDisconnect = available && mayDisconnect && (status === "connected" || status === "expired" || status === "error");
+    // Disconnect does not need the provider's sign-in: the server disables the
+    // connector locally first and treats the provider's revocation as a
+    // separate, best-effort step, so a card that became unavailable keeps it.
+    const canDisconnect = mayDisconnect && (status === "connected" || status === "expired" || status === "error");
 
     const connectOrReconnect = useCallback(async () => {
         setInlineError(undefined);

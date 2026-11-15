@@ -229,15 +229,6 @@ export default function TravelIndustryIndustryPage() {
 
   const integrations = [
     {
-      title: "Property Management Systems",
-      description:
-        "Sync guest profiles, room availability, reservations, and booking updates automatically with your existing PMS.",
-    },
-    {
-      title: "Booking Platforms",
-      description: "Keep reservations, availability, and confirmations synchronized across your preferred booking systems.",
-    },
-    {
       title: "Calendar & Scheduling",
       description:
         "Coordinate spa appointments, restaurant reservations, airport transfers, and other guest services with real-time availability.",
@@ -294,11 +285,6 @@ export default function TravelIndustryIndustryPage() {
       question: "Can AI act as a virtual receptionist for hotels?",
       answer:
         "AI can use approved hotel information and collect guest requests for review. Live human transfer is not currently available.",
-    },
-    {
-      question: "Does it integrate with our hotel management software?",
-      answer:
-        "Yes. The platform connects with leading property management systems, booking platforms, calendars, and CRM solutions to keep guest information synchronized.",
     },
     {
       question: "How quickly can we get started?",

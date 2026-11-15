@@ -119,6 +119,41 @@ export interface CampaignCallingSchedule {
     ignore_schedule?: boolean;
 }
 
+/** Where one enforced schedule field comes from (GET /campaigns/{id}). */
+export type CampaignScheduleSource = "campaign" | "account" | "platform_default";
+
+/**
+ * The schedule the dialer enforces for one campaign, as GET /campaigns/{id}
+ * sends it (backend describe_schedule). Null when the server's side read failed.
+ */
+export interface CampaignEffectiveSchedule {
+    timezone: string;
+    time_window_start: string;           // "HH:MM"
+    time_window_end: string;             // "HH:MM"
+    allowed_days: number[];              // 0=Mon … 6=Sun
+    sources?: Partial<Record<"timezone" | "time_window_start" | "time_window_end" | "allowed_days", CampaignScheduleSource>>;
+    account_rules?: Record<string, unknown>;
+    ignore_schedule_requested?: boolean;
+    ignore_schedule_allowed?: boolean;
+    /** What the dialer does: true only when "call anytime" was asked for AND is allowed. */
+    ignore_schedule?: boolean;
+    contact_timezones?: Record<string, unknown>;
+}
+
+/** What a campaign is doing now (GET /campaigns/{id} only). Null when the server's side read failed. */
+export interface CampaignProgress {
+    live_calls?: number;
+    jobs_awaiting_dispatch?: number;
+    /** "preparing" | "stopping" | "pausing", otherwise the stored status. */
+    phase?: string | null;
+}
+
+export interface CampaignDetailAnswer {
+    campaign: Campaign;
+    effective_schedule?: CampaignEffectiveSchedule | null;
+    progress?: CampaignProgress | null;
+}
+
 export interface CampaignCreate extends CampaignVoiceSettingsValue {
     /** 2026-09-09: inbound campaigns are created with the SAME creator; only this differs. Default outbound. */
     direction?: "outbound" | "inbound";
@@ -507,7 +542,7 @@ class DashboardApi {
         });
     }
 
-    async getCampaign(id: string): Promise<{ campaign: Campaign }> {
+    async getCampaign(id: string): Promise<CampaignDetailAnswer> {
         return this.client.request({
             path: `/campaigns/${id}`,
             method: "GET",
