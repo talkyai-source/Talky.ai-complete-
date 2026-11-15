@@ -15,7 +15,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Clock, RefreshCw } from "lucide-react";
 
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { extendedApi } from "@/lib/extended-api";
 
 type AttemptStat = { attempt: number; total: number; answered: number; answer_rate: number };
@@ -35,6 +35,7 @@ export function DialerInsights() {
     // undefined = no failure; a string is the request's own message ("" when
     // it gave none, which leaves the shared ErrorState on its default).
     const [failure, setFailure] = useState<string | undefined>(undefined);
+    const [failureRequestId, setFailureRequestId] = useState<string | undefined>();
     const alive = useRef(true);
 
     const load = useCallback(async () => {
@@ -54,6 +55,7 @@ export function DialerInsights() {
             setFailure(undefined);
         } catch (err) {
             if (alive.current) setFailure(failedReadMessage(err, ""));
+            if (alive.current) setFailureRequestId(failedReadRequestId(err));
         } finally {
             if (alive.current) setLoading(false);
         }
@@ -69,7 +71,7 @@ export function DialerInsights() {
     const maxAttemptTotal = Math.max(1, ...attempts.map((a) => a.total));
 
     if (failure !== undefined) {
-        return <ErrorState message={failure || undefined} onRetry={load} />;
+        return <ErrorState message={failure || undefined} requestId={failureRequestId} onRetry={load} />;
     }
 
     if (loading) {

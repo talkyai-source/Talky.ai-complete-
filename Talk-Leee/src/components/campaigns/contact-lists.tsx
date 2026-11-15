@@ -21,7 +21,7 @@ import { Loader2, Phone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
@@ -70,6 +70,7 @@ export function ContactLists({
     const [lists, setLists] = useState<ContactList[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const [togglingId, setTogglingId] = useState<string | null>(null);
     const [callingId, setCallingId] = useState<string | null>(null);
     // The list the "Call this list" dialog is asking about.
@@ -92,8 +93,9 @@ export function ContactLists({
             // An answer that is not a list is a failed read, not an empty one.
             if (!Array.isArray(data)) throw new Error("Failed to load contact lists");
             setLists(data);
-        } catch {
+        } catch (err) {
             setError("Failed to load contact lists");
+            setErrorRequestId(failedReadRequestId(err));
         } finally {
             setLoading(false);
         }
@@ -183,7 +185,7 @@ export function ContactLists({
 
     // Fail-soft: an error state in this panel, but never a blanked page.
     if (error) {
-        return <ErrorState message={error} onRetry={load} />;
+        return <ErrorState message={error} requestId={errorRequestId} onRetry={load} />;
     }
 
     if (lists.length === 0) return null;

@@ -1,11 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
 
 export default function AssistantPage() {
+    // FX5: the server does not serve this page's feature; the address answers with the not-found page.
+    notFound();
     const { theme } = useTheme();
     const isDark = theme === "dark";
 

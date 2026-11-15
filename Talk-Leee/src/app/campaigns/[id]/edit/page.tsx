@@ -23,7 +23,7 @@ import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { ArrowLeft } from "lucide-react";
-import { ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 import { RoleNotice } from "@/components/states/role-notice";
 import { motion } from "framer-motion";
@@ -71,6 +71,7 @@ export default function EditCampaignPage() {
 
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const [initial, setInitial] = useState<CampaignFormInitial | null>(null);
     const [knowledgeDriven, setKnowledgeDriven] = useState(false);
     const [ttsProvider, setTtsProvider] = useState<string | null>(null);
@@ -88,6 +89,7 @@ export default function EditCampaignPage() {
             try {
                 setLoading(true);
                 setError("");
+                setErrorRequestId(undefined);
                 const { campaign } = await dashboardApi.getCampaign(campaignId);
                 if (cancelled) return;
                 if (!isOutboundCampaign(campaign)) {
@@ -136,6 +138,7 @@ export default function EditCampaignPage() {
             } catch (err) {
                 if (cancelled) return;
                 setError(failedReadMessage(err, "Failed to load campaign"));
+                setErrorRequestId(failedReadRequestId(err));
             } finally {
                 if (!cancelled) setLoading(false);
             }
@@ -173,7 +176,7 @@ export default function EditCampaignPage() {
                 </div>
             ) : error ? (
                 <div className="max-w-2xl">
-                    <ErrorState message={error} onRetry={() => setReloadToken((t) => t + 1)} />
+                    <ErrorState message={error} requestId={errorRequestId} onRetry={() => setReloadToken((t) => t + 1)} />
                 </div>
             ) : !mayChange ? (
                 <RoleNotice

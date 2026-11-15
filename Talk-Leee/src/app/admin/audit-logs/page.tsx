@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useAuditLogs } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import type { AuditLogEvent } from "@/lib/models";
 
 /**
@@ -120,6 +120,7 @@ export default function AuditLogsPage() {
                 clean audit history when in fact nothing was read. */}
             {logsQuery.isError && (
               <ErrorState
+                requestId={failedReadRequestId(logsQuery.error)}
                 title="The audit log could not be loaded, so none of it is shown."
                 message={
                   failedReadMessage(logsQuery.error, "Request failed") +
@@ -151,7 +152,7 @@ export default function AuditLogsPage() {
                       <tr key={log.id} className="border-b border-border transition-colors last:border-b-0 hover:bg-muted/20">
                         <td className="whitespace-nowrap px-4 py-3 text-xs text-muted-foreground">{formatTimestamp(log.timestamp)}</td>
                         <td className="px-4 py-3">
-                          <div className="break-all font-mono text-xs text-foreground">{actorLabel(log)}</div>
+                          <div title={actorLabel(log)} className="max-w-[14rem] truncate font-mono text-xs text-foreground">{actorLabel(log)}</div>
                         </td>
                         <td className="px-4 py-3">
                           <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">{log.actionType}</code>

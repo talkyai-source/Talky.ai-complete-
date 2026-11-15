@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { ChevronDown, ChevronRight, MessageSquare, Phone } from "lucide-react";
 import {
     extendedApi,
@@ -138,6 +138,7 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
     const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
 
     const load = useCallback(
         async (nextPage: number) => {
@@ -156,6 +157,7 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
                 setPage(resp.page);
             } catch (err) {
                 setError(err instanceof Error ? err.message : "Failed to load transcripts");
+                setErrorRequestId(failedReadRequestId(err));
             } finally {
                 setLoading(false);
             }
@@ -190,7 +192,7 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
             </div>
 
             {error && (
-                <ErrorState className="mb-3" message="Failed to load transcripts" onRetry={() => load(page)} />
+                <ErrorState className="mb-3" message="Failed to load transcripts" requestId={errorRequestId} onRetry={() => load(page)} />
             )}
 
             {loading && items.length === 0 ? (

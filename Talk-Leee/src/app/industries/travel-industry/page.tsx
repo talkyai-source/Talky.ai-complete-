@@ -249,7 +249,7 @@ export default function TravelIndustryIndustryPage() {
     },
   ];
 
-  const integrationLogos = ["Oracle OPERA", "Cloudbeds", "Mews", "Google Calendar", "Outlook", "Zapier"];
+  const integrationLogos = ["Google Calendar", "Outlook"];
 
   const howItWorks = [
     {
@@ -271,54 +271,6 @@ export default function TravelIndustryIndustryPage() {
       title: "Stay Connected",
       description:
         "Booking confirmations, reminders, check-in details, and follow-up messages are sent automatically, keeping guests informed at every stage.",
-    },
-  ];
-
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      blurb: "Perfect for hotels, vacation rentals, and small hospitality businesses exploring AI.",
-      features: [
-        "One Property Workspace",
-        "AI Booking Assistant",
-        "Guest Support Automation",
-        "Reservation Management",
-        "Email Support",
-      ],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-    },
-    {
-      name: "Growth",
-      price: "Custom Pricing",
-      blurb: "Built for growing hotels, resorts, and travel companies.",
-      features: [
-        "Multiple Property Workspaces",
-        "AI Travel Call Automation",
-        "Hospitality Workflow Automation",
-        "Booking Platform Integrations",
-        "Priority Support",
-      ],
-      ctaLabel: "Book a Demo",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      blurb: "Designed for hotel groups, resorts, and enterprise travel organizations.",
-      features: [
-        "Property Configuration Review",
-        "Advanced AI Hospitality Workflows",
-        "Enterprise Integrations",
-        "Dedicated Customer Success Manager",
-        "Premium Support",
-      ],
-      ctaLabel: "Talk to an Expert",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
     },
   ];
 
@@ -579,46 +531,6 @@ export default function TravelIndustryIndustryPage() {
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{item.title}</h3>
                 <p className={cardBodyClassName}>{item.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <p className={eyebrowClassName}>Flexible Plans</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Pricing for Every Travel &amp; Hospitality Business</h2>
-          <p className={bodyClassName}>
-            Whether you operate a boutique hotel or a global hospitality brand, choose a plan designed to automate guest
-            communication and grow with your business.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  {plan.ctaVariant === "primary" ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
               </div>
             ))}
           </div>

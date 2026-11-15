@@ -4,7 +4,7 @@ import { RealtimeControls } from "@/components/realtime/ai-options-controls";
 import { Select } from "@/components/ui/select";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
 import { AI_OPTIONS_READ_ONLY_NOTICE, canEditAiOptions } from "@/components/ai-options/controls";
@@ -430,6 +430,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     // Falls back to a small hardcoded catalog until the backend ships
     // `providers.realtime` (see getRealtimeCatalog above).
     const realtimeCatalog = providers?.realtime;
+    const realtimeUnavailable = providers?.realtime?.available === false;
     const pipelineMode = config?.pipeline_mode ?? "cascaded";
 
     function setPipelineMode(mode: "cascaded" | "realtime") {
@@ -494,7 +495,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
             {loading || (!config && !loadFailed) ? (
                 <LoadingState />
             ) : !providers || !config ? (
-                <ErrorState message={error || "AI options failed to load from the backend."} onRetry={() => { providersQuery.refetch(); voicesQuery.refetch(); configQuery.refetch(); }} />
+                <ErrorState requestId={failedReadRequestId(providersQuery.error ?? configQuery.error)} message={error || "AI options failed to load from the backend."} onRetry={() => { providersQuery.refetch(); voicesQuery.refetch(); configQuery.refetch(); }} />
             ) : (
                 // A role that cannot change AI settings gets every control on
                 // the page disabled, not only Save: a disabled fieldset turns
@@ -529,10 +530,15 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                 onChange={(v) => setPipelineMode(v as "cascaded" | "realtime")}
                                 options={[
                                     { value: "cascaded", label: "Standard Pipeline" },
-                                    { value: "realtime", label: "Realtime (speech-to-speech)" },
+                                    // FX5: the server said Realtime is unavailable, so it is shown the way an
+                                    // unavailable transcription engine is: disabled, with the server's reason.
+                                    realtimeUnavailable
+                                        ? { value: "realtime", label: "Realtime (speech-to-speech) (unavailable)", disabled: true, describedBy: "pipeline-realtime-unavailable" }
+                                        : { value: "realtime", label: "Realtime (speech-to-speech)" },
                                 ]}
                             />
                         </div>
+                        {realtimeUnavailable && <p id="pipeline-realtime-unavailable" className="mt-3 text-xs text-muted-foreground">Realtime (speech-to-speech): {providers?.realtime?.unavailable_reason || "OpenAI is not configured"}</p>}
                     </Card>
 
                     {/* Banners */}
@@ -593,6 +599,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                     }}
                                     ariaInvalid={llmModelUnavailable}
                                     ariaDescribedBy={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
+                                    valueTitle
                                     selectClassName={sharedSelectCls}
                                 >
                                     {llmModelUnavailable && (
@@ -800,7 +807,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             {voicesQuery.isLoading ? (
                                 <div className="col-span-full"><LoadingState /></div>
                             ) : voicesQuery.isError ? (
-                                <div className="col-span-full"><ErrorState message={(voicesQuery.error as { code?: unknown } | null)?.code === "timeout" ? "Voices took too long to load. Reload to fetch them." : "Voices could not be loaded."} onRetry={() => void voicesQuery.refetch()} /></div>
+                                <div className="col-span-full"><ErrorState requestId={failedReadRequestId(voicesQuery.error)} message={(voicesQuery.error as { code?: unknown } | null)?.code === "timeout" ? "Voices took too long to load. Reload to fetch them." : "Voices could not be loaded."} onRetry={() => void voicesQuery.refetch()} /></div>
                             ) : filteredVoices.length === 0 && (
                                 <div className="col-span-full rounded-lg border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-500">
                                     {ttsProvider === "elevenlabs" && elevenLabsError
@@ -940,13 +947,13 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                     </div>
                                     </fieldset>
                                     <div>
-                                        <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Turn-0 minimum confidence <span className="ml-1 text-muted-foreground">default 0.4</span></span><span className="font-mono text-emerald-500">{minConf !== undefined ? minConf.toFixed(2) : "—"}</span></div>
-                                        <input type="range" min={0} max={1} step={0.05} value={minConf ?? 0.4} onChange={(e) => updateVoiceTuningField("turn_0_min_confidence", parseFloat(e.target.value))} className={rangeCls} />
+                                        <div className="flex items-center justify-between text-xs"><span id="turn-0-min-confidence-label" className="font-medium text-foreground">Turn-0 minimum confidence <span className="ml-1 text-muted-foreground">default 0.4</span></span><span className="font-mono text-emerald-500">{minConf !== undefined ? minConf.toFixed(2) : "—"}</span></div>
+                                        <input type="range" aria-labelledby="turn-0-min-confidence-label" min={0} max={1} step={0.05} value={minConf ?? 0.4} onChange={(e) => updateVoiceTuningField("turn_0_min_confidence", parseFloat(e.target.value))} className={rangeCls} />
                                         {minConf !== undefined && <button type="button" onClick={() => resetVoiceTuningField("turn_0_min_confidence")} className={resetLink}>Reset to default</button>}
                                     </div>
                                     <div>
-                                        <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Turn-0 minimum alpha chars <span className="ml-1 text-muted-foreground">default 2</span></span><span className="font-mono text-emerald-500">{minChars !== undefined ? minChars : "—"}</span></div>
-                                        <input type="number" min={1} max={10} step={1} value={minChars ?? 2} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("turn_0_min_alpha_chars", v); }} className={numCls} />
+                                        <div className="flex items-center justify-between text-xs"><span id="turn-0-min-alpha-chars-label" className="font-medium text-foreground">Turn-0 minimum alpha chars <span className="ml-1 text-muted-foreground">default 2</span></span><span className="font-mono text-emerald-500">{minChars !== undefined ? minChars : "—"}</span></div>
+                                        <input type="number" aria-labelledby="turn-0-min-alpha-chars-label" min={1} max={10} step={1} value={minChars ?? 2} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("turn_0_min_alpha_chars", v); }} className={numCls} />
                                         {minChars !== undefined && <button type="button" onClick={() => resetVoiceTuningField("turn_0_min_alpha_chars")} className={resetLink}>Reset to default</button>}
                                     </div>
                                 </div>
@@ -959,7 +966,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                         <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" right={saveConfigButton("ml-auto hidden md:flex px-4 py-2")} />
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
-                                <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
+                                <input type="text" aria-label="Send a message to the selected model" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
                                 <button onClick={handleTestLLM} disabled={testing || !canEdit || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
                                 {saveConfigButton("flex md:hidden w-full sm:w-auto justify-center px-6 py-2.5")}
                             </div>

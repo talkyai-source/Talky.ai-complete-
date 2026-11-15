@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, X } from "lucide-react";
-import { ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { extendedApi } from "@/lib/extended-api";
 
 type Issue = {
@@ -36,6 +36,7 @@ export function CallIssuesBanner() {
     const [dismissed, setDismissed] = useState<Set<string>>(new Set());
     // undefined = the last read answered; a string is the failed read's message.
     const [failure, setFailure] = useState<string | undefined>(undefined);
+    const [failureRequestId, setFailureRequestId] = useState<string | undefined>();
     const stopped = useRef(false);
 
     const load = useCallback(async () => {
@@ -49,6 +50,7 @@ export function CallIssuesBanner() {
         } catch (err) {
             // A failed read is shown with Retry; it never breaks the page.
             if (!stopped.current) setFailure(failedReadMessage(err));
+            if (!stopped.current) setFailureRequestId(failedReadRequestId(err));
         }
     }, []);
 
@@ -64,7 +66,7 @@ export function CallIssuesBanner() {
     }, [load]);
 
     if (failure !== undefined) {
-        return <ErrorState className="mb-4" message={failure} onRetry={load} />;
+        return <ErrorState className="mb-4" message={failure} requestId={failureRequestId} onRetry={load} />;
     }
 
     const visible = issues.filter((i) => !dismissed.has(i.id));

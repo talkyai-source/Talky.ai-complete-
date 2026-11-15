@@ -26,7 +26,6 @@ export default function SoftwareTechSupportIndustryPage() {
   const bodyClassName =
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
-  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -149,45 +148,6 @@ export default function SoftwareTechSupportIndustryPage() {
     "Requests for team review",
     "24/7 availability",
     "Scalable customer communication",
-  ];
-
-  const plans = [
-    {
-      name: "Launch",
-      blurb: "For early-stage software companies building their first automated support experience.",
-      features: ["AI customer support", "Basic call automation", "Onboarding assistance", "Essential workflows"],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-    },
-    {
-      name: "Scale",
-      blurb: "For growing SaaS teams handling increasing customer demand.",
-      features: [
-        "Advanced support automation",
-        "AI voice agents",
-        "Technical support workflows",
-        "Customer call routing",
-        "Priority assistance",
-      ],
-      ctaLabel: "See Growth Plans",
-      ctaHref: "/pricing",
-      ctaVariant: "outline" as const,
-    },
-    {
-      name: "Enterprise",
-      blurb: "For organizations requiring advanced automation across departments.",
-      features: [
-        "Custom AI workflows",
-        "Advanced integrations",
-        "High-volume conversations",
-        "Enterprise support",
-        "Dedicated success team",
-      ],
-      ctaLabel: "Request a Demo",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
   ];
 
   const faqs = [
@@ -381,38 +341,6 @@ export default function SoftwareTechSupportIndustryPage() {
                 <li key={point}>&bull; {point}</li>
               ))}
             </ul>
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Solutions for Every Stage of Growth</h2>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className={listClassName}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  {plan.ctaVariant === "primary" ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 

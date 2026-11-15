@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { notFound } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { RouteGuard } from "@/components/guards/route-guard";
@@ -75,6 +76,8 @@ function EmailContent() {
 }
 
 export default function EmailPage() {
+    // FX5: the server does not serve this page's feature; the address answers with the not-found page.
+    notFound();
     return (
         <DashboardLayout title="Email" description="Preview templates, send emails, and review audit history.">
             <RouteGuard title="Email" description="Preview templates, send emails, and review audit history." requiredConnectors={["email"]}>

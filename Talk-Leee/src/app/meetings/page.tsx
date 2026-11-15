@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { notFound } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -921,6 +922,8 @@ function MeetingsContent() {
 }
 
 export default function MeetingsPage() {
+    // FX5: the server does not serve this page's feature; the address answers with the not-found page.
+    notFound();
     return (
         <DashboardLayout title="Meetings" description="Upcoming and recent meetings.">
             <RouteGuard title="Meetings" description="Upcoming and recent meetings." requiredConnectors={["calendar"]}>

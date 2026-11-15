@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { PrintButton } from "@/components/ui/print-support";
 import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
-import { LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { useAuth } from "@/lib/auth-context";
 import { extendedApi } from "@/lib/extended-api";
@@ -274,7 +274,7 @@ export default function CallDetailPage() {
             {callQuery.isLoading ? (
                 <LoadingState />
             ) : error ? (
-                <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
+                <CallLoadError message={error} requestId={failedReadRequestId(callQuery.error)} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
                 <div className="call-detail-page columns-1 xl:columns-2 gap-6 print:columns-1">
                     {/* Call Info */}
@@ -340,6 +340,7 @@ export default function CallDetailPage() {
                                 // about the call.
                                 <CallLoadError
                                     message={failedReadMessage(transcriptQuery.error, "Failed to load transcript.")}
+                                    requestId={failedReadRequestId(transcriptQuery.error)}
                                     onRetry={() => void transcriptQuery.refetch()}
                                 />
                             ) : transcriptQuery.isLoading ? (

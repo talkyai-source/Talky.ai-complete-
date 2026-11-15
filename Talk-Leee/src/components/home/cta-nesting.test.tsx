@@ -45,8 +45,10 @@ function renderPublic(pathname: string, ui: React.ReactElement) {
 const BUTTON_BASE = ["inline-flex", "items-center", "justify-center"];
 
 const cases: Array<[string, React.ComponentType, number]> = [
-    ["/industries/healthcare/", HealthcarePage, 9],
-    ["/industries/education/", EducationPage, 9],
+    // FX5: 6, not 9. The three made-up plan cards (Starter / Growth or Practice / Enterprise)
+    // and their three buttons were removed from each page.
+    ["/industries/healthcare/", HealthcarePage, 6],
+    ["/industries/education/", EducationPage, 6],
     ["/pricing/", PricingPage, 4],
     ["/", CTASection, 1],
 ];

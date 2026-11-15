@@ -6,10 +6,10 @@ export function InboundLoadingState({ label = "Loading inbound campaign…" }: {
     return <LoadingState title={label} />;
 }
 
-export function InboundErrorState({ title = "Inbound data is unavailable", message, onRetry }: { title?: string; message: string; onRetry?: () => void }) {
+export function InboundErrorState({ title = "Inbound data is unavailable", message, requestId, onRetry }: { title?: string; message: string; requestId?: string; onRetry?: () => void }) {
     // A failed read: the shared ErrorState with Retry. Without a retry this is
     // a notice about the campaign's state, not a failed read.
-    if (onRetry) return <ErrorState title={title} message={message} onRetry={onRetry} />;
+    if (onRetry) return <ErrorState title={title} message={message} requestId={requestId} onRetry={onRetry} />;
     return (
         <div className="content-card flex min-h-64 flex-col items-center justify-center text-center" role="alert">
             <span className="flex h-11 w-11 items-center justify-center rounded-full bg-destructive/10 text-destructive"><AlertCircle className="h-5 w-5" aria-hidden /></span>

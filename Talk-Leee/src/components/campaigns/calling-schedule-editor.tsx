@@ -12,7 +12,7 @@
  * "Not set" and is never replaced by the browser zone or 09:00/19:00, so
  * what the user sees is what will be saved (production-readiness 2.3).
  */
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { AlertTriangle, Clock } from "lucide-react";
 
 import { Select } from "@/components/ui/select";
@@ -54,6 +54,7 @@ export function CallingScheduleEditor({
     onChange: (next: CampaignCallingSchedule) => void;
 }) {
     const set = (patch: Partial<CampaignCallingSchedule>) => onChange({ ...value, ...patch });
+    const hoursErrorId = useId();
 
     const browserTz = useMemo(
         () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
@@ -108,6 +109,8 @@ export function CallingScheduleEditor({
                     <input
                         type="time"
                         aria-label="Calling start time"
+                        aria-invalid={callingHoursInverted(value) || undefined}
+                        aria-describedby={callingHoursInverted(value) ? hoursErrorId : undefined}
                         value={value.time_window_start ?? ""}
                         onChange={(e) => set({ time_window_start: e.target.value })}
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -121,6 +124,8 @@ export function CallingScheduleEditor({
                     <input
                         type="time"
                         aria-label="Calling end time"
+                        aria-invalid={callingHoursInverted(value) || undefined}
+                        aria-describedby={callingHoursInverted(value) ? hoursErrorId : undefined}
                         value={value.time_window_end ?? ""}
                         onChange={(e) => set({ time_window_end: e.target.value })}
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -132,7 +137,7 @@ export function CallingScheduleEditor({
             </div>
 
             {callingHoursInverted(value) && (
-                <p role="alert" className="text-xs text-destructive" data-testid="calling-hours-order-error">{HOURS_ORDER_ERROR}</p>
+                <p id={hoursErrorId} role="alert" className="text-xs text-destructive" data-testid="calling-hours-order-error">{HOURS_ORDER_ERROR}</p>
             )}
 
             {/* Days */}

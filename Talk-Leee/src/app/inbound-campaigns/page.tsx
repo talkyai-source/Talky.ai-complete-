@@ -8,7 +8,7 @@ import { InboundEmptyState, InboundErrorState, InboundLoadingState, InboundPermi
 import { InboundStatusBadge, ReadinessBadge } from "@/components/inbound/inbound-status";
 import { UnfinishedInboundSetups } from "@/components/inbound/unfinished-inbound-setups";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,7 @@ export default function InboundCampaignsPage() {
     return (
         <DashboardLayout title="Inbound Campaigns" description="Verified number routing, AI behavior, readiness, and lifecycle control">
             {permissions.isLoading ? <InboundLoadingState label="Checking inbound permissions…" /> : permissions.isError ? (
-                <InboundErrorState title="Permissions could not be verified" message="Inbound data and routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
+                <InboundErrorState requestId={failedReadRequestId(permissions.error)} title="Permissions could not be verified" message="Inbound data and routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canView ? <InboundPermissionState onRetry={() => void permissions.refetch()} /> : (
                 <div className="space-y-5">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -69,7 +69,7 @@ export default function InboundCampaignsPage() {
                                     <span className={cn("mt-0.5 rounded-lg p-2", tenantControls.data?.inbound_enabled ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300")}><ShieldAlert className="h-4 w-4" aria-hidden /></span>
                                     <div className="min-w-0 flex-1">
                                         <h2 id="tenant-inbound-control-heading" className="text-sm font-semibold text-foreground">Tenant inbound admission</h2>
-                                        {tenantControls.isLoading ? <div className="mt-2"><LoadingState title="Loading the authoritative switch…" /></div> : tenantControls.isError ? <div className="mt-2"><ErrorState message="The switch could not be verified, so it cannot be changed." onRetry={() => void tenantControls.refetch()} /></div> : (
+                                        {tenantControls.isLoading ? <div className="mt-2"><LoadingState title="Loading the authoritative switch…" /></div> : tenantControls.isError ? <div className="mt-2"><ErrorState requestId={failedReadRequestId(tenantControls.error)} message="The switch could not be verified, so it cannot be changed." onRetry={() => void tenantControls.refetch()} /></div> : (
                                             <>
                                                 <p className="mt-1 text-sm text-muted-foreground">{tenantControls.data?.inbound_enabled ? "Enabled. Campaign readiness still applies to every new call." : "Disabled. New inbound calls fail closed before answer."}</p>
                                                 {tenantControls.data?.reason ? <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">Last reason: {tenantControls.data.reason}</p> : null}
@@ -94,7 +94,7 @@ export default function InboundCampaignsPage() {
                         </div>
                     </div>
 
-                    {query.isLoading ? <InboundLoadingState label="Loading inbound campaigns…" /> : query.isError ? <InboundErrorState message={failedReadMessage(query.error, "The campaign list could not be loaded.")} onRetry={() => void query.refetch()} /> : (query.data ?? []).length === 0 ? <InboundEmptyState createHref={capabilities.canCreate ? "/inbound-campaigns/new" : undefined} /> : visible.length === 0 ? (
+                    {query.isLoading ? <InboundLoadingState label="Loading inbound campaigns…" /> : query.isError ? <InboundErrorState requestId={failedReadRequestId(query.error)} message={failedReadMessage(query.error, "The campaign list could not be loaded.")} onRetry={() => void query.refetch()} /> : (query.data ?? []).length === 0 ? <InboundEmptyState createHref={capabilities.canCreate ? "/inbound-campaigns/new" : undefined} /> : visible.length === 0 ? (
                         <EmptyState title="No campaigns match" message="Clear the search or choose a different status." actionLabel="Clear filters" onAction={() => { setSearch(""); setStatus("all"); }} />
                     ) : (
                         <div className="grid gap-4 lg:grid-cols-2">

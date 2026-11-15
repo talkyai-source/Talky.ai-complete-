@@ -21,6 +21,10 @@ import { LegalAcceptanceField, useLegalAcceptance } from "@/components/auth/lega
 
 type Step = "form" | "otp" | "password";
 
+const BUSINESS_NAME_REQUIRED = "Enter your business name.";
+const PASSWORDS_DO_NOT_MATCH = "Passwords do not match.";
+const LEGAL_REQUIRED = "Accept the Terms of Service and Privacy Policy to continue.";
+
 export default function RegisterClientPage() {
     const router = useRouter();
     const { applyLoginResult } = useAuth();
@@ -75,6 +79,11 @@ export default function RegisterClientPage() {
         return fallback;
     }
 
+    // Which field the current error is about (the error texts are the ones set below).
+    const businessNameError = error === BUSINESS_NAME_REQUIRED;
+    const confirmPasswordError = error === PASSWORDS_DO_NOT_MATCH;
+    const legalError = error === LEGAL_REQUIRED;
+
     async function handleFormSubmit(e: React.FormEvent) {
         e.preventDefault();
         setError("");
@@ -84,7 +93,7 @@ export default function RegisterClientPage() {
             return;
         }
         if (!formData.businessName.trim()) {
-            setError("Enter your business name.");
+            setError(BUSINESS_NAME_REQUIRED);
             return;
         }
         setLoading(true);
@@ -137,12 +146,12 @@ export default function RegisterClientPage() {
             return;
         }
         if (password !== confirmPassword) {
-            setError("Passwords do not match.");
+            setError(PASSWORDS_DO_NOT_MATCH);
             return;
         }
 
         if (legal.blocked) {
-            setError("Accept the Terms of Service and Privacy Policy to continue.");
+            setError(LEGAL_REQUIRED);
             return;
         }
 
@@ -304,8 +313,8 @@ export default function RegisterClientPage() {
                                             maxLength={100}
                                             disabled={loading}
                                             ref={nameInputRef}
-                                            aria-invalid={error ? true : undefined}
-                                            aria-describedby={error ? errorId : undefined}
+                                            aria-invalid={error && !businessNameError ? true : undefined}
+                                            aria-describedby={error && !businessNameError ? errorId : undefined}
                                         />
                                     </div>
                                 </div>
@@ -326,6 +335,8 @@ export default function RegisterClientPage() {
                                             required
                                             maxLength={100}
                                             disabled={loading}
+                                            aria-invalid={businessNameError ? true : undefined}
+                                            aria-describedby={businessNameError ? errorId : undefined}
                                         />
                                     </div>
                                 </div>
@@ -495,8 +506,8 @@ export default function RegisterClientPage() {
                                             disabled={loading}
                                             autoComplete="new-password"
                                             ref={passwordInputRef}
-                                            aria-invalid={error ? true : undefined}
-                                            aria-describedby={[passwordHelpId, error ? errorId : null].filter(Boolean).join(" ")}
+                                            aria-invalid={error && !confirmPasswordError && !legalError ? true : undefined}
+                                            aria-describedby={[passwordHelpId, error && !confirmPasswordError && !legalError ? errorId : null].filter(Boolean).join(" ")}
                                         />
                                     </div>
                                     <p id={passwordHelpId} className="text-xs text-muted-foreground">
@@ -519,7 +530,8 @@ export default function RegisterClientPage() {
                                             minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
-                                            aria-describedby={confirmPassword && confirmPassword !== password ? mismatchId : undefined}
+                                            aria-invalid={(confirmPassword && confirmPassword !== password) || confirmPasswordError ? true : undefined}
+                                            aria-describedby={[confirmPassword && confirmPassword !== password ? mismatchId : null, confirmPasswordError ? errorId : null].filter(Boolean).join(" ") || undefined}
                                         />
                                     </div>
                                     {confirmPassword && confirmPassword !== password ? (
@@ -529,7 +541,7 @@ export default function RegisterClientPage() {
                                     ) : null}
                                 </div>
 
-                                <LegalAcceptanceField legal={legal} disabled={loading} />
+                                <LegalAcceptanceField legal={legal} disabled={loading} errorId={legalError ? errorId : undefined} />
 
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">

@@ -287,7 +287,7 @@ export function PackagesSection() {
                   "AI voice agents connect with live calendars to manage scheduling for dental clinics, beauty salons, dealerships, and more.",
                 points: [
                   "Live calendar integration",
-                  "Works with GoHighLevel, Calendly, Cal.com, Google & Apple Calendar",
+                  "Works with Google Calendar",
                 ],
               },
               {

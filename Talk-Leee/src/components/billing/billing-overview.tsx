@@ -22,7 +22,7 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useTopupBalance } from "@/lib/topup-api";
@@ -232,6 +232,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
     return (
       <div className="space-y-6">
         <ErrorState
+          requestId={failedReadRequestId(coreFailure)}
           title="Billing data did not load"
           message={`${formatBillingError(coreFailure)} Your plan, minutes and invoices are unchanged — this page just could not read them.`}
           troubleshooting={[

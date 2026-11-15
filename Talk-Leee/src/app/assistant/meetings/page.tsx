@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { RouteGuard } from "@/components/guards/route-guard";
 import { useMeetings } from "@/lib/api-hooks";
@@ -11,6 +12,8 @@ function formatError(err: unknown) {
 }
 
 export default function AssistantMeetingsPage() {
+    // FX5: the server does not serve this page's feature; the address answers with the not-found page.
+    notFound();
     const q = useMeetings();
     const items = q.data?.items ?? [];
 

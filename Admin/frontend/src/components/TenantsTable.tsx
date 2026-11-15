@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type RefObject } from 'react';
 import {
     Building2,
     Search,
@@ -81,6 +81,38 @@ function OwnedTenantsTable({
         document.addEventListener('scroll', close, true);
         return () => { window.removeEventListener('resize', close); document.removeEventListener('scroll', close, true); };
     }, [activeMenu]);
+    // Opening the row menu moves focus to its first item. The menu is still
+    // parked off-screen at this point, so the focus must not scroll to it.
+    useEffect(() => {
+        if (!activeMenu) return;
+        menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus({ preventScroll: true });
+    }, [activeMenu]);
+    const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+        const button = event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn');
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            button?.focus();
+            setActiveMenu(null);
+            return;
+        }
+        if (event.key === 'Tab') {
+            // The menu closes and the browser moves on from the row's button.
+            button?.focus();
+            setActiveMenu(null);
+            return;
+        }
+        const items = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+        const at = items.indexOf(document.activeElement as HTMLElement);
+        let next = -1;
+        if (event.key === 'ArrowDown') next = (at + 1) % items.length;
+        else if (event.key === 'ArrowUp') next = (at - 1 + items.length) % items.length;
+        else if (event.key === 'Home') next = 0;
+        else if (event.key === 'End') next = items.length - 1;
+        if (next < 0) return;
+        event.preventDefault();
+        items[next]?.focus();
+    };
     const openMenu = (tenantId: string, button: HTMLElement) => {
         if (activeMenu === tenantId) { setActiveMenu(null); return; }
         const rect = button.getBoundingClientRect();
@@ -384,20 +416,23 @@ function OwnedTenantsTable({
                                             <button
                                                 className="action-menu-btn"
                                                 aria-label={`Actions for ${tenant.business_name}`}
+                                                aria-haspopup="menu"
                                                 aria-expanded={activeMenu === tenant.id}
                                                 onClick={(event) => openMenu(tenant.id, event.currentTarget)}
                                             >
                                                 <MoreVertical size={16} />
                                             </button>
                                             {activeMenu === tenant.id && (
-                                                <div className="action-menu" ref={menuRef} style={menuStyle}>
-                                                    {onFormalHolds && <button className="action-menu-item" onClick={(event) => {
+                                                <div className="action-menu" role="menu" aria-label={`Actions for ${tenant.business_name}`} ref={menuRef} style={menuStyle} onKeyDown={onMenuKeyDown}>
+                                                    {onFormalHolds && <button className="action-menu-item" role="menuitem" tabIndex={-1} onClick={(event) => {
                                                         event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                         setActiveMenu(null); onFormalHolds(tenant);
                                                     }}>Formal holds</button>}
                                                     {tenant.status === 'active' || tenant.status === 'trialing' ? (
                                                         <button
                                                             className="action-menu-item danger"
+                                                            role="menuitem"
+                                                            tabIndex={-1}
                                                             onClick={(event) => {
                                                                 event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                                 setActionError(null);
@@ -415,6 +450,8 @@ function OwnedTenantsTable({
                                                     ) : (
                                                         <button
                                                             className="action-menu-item"
+                                                            role="menuitem"
+                                                            tabIndex={-1}
                                                             onClick={(event) => {
                                                                 event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                                 setActionError(null);
@@ -432,6 +469,8 @@ function OwnedTenantsTable({
                                                     )}
                                                     <button
                                                         className="action-menu-item"
+                                                        role="menuitem"
+                                                        tabIndex={-1}
                                                         onClick={(event) => {
                                                             event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                             setActionError(null);

@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
+import { moveChartPointFocus } from "@/components/ui/dashboard-charts";
 import { reportingDateRange } from "@/lib/reporting-time";
 import { isApiClientError } from "@/lib/http-client";
 import { formatUtcDateLabel, timezoneLabel } from "@/lib/utc-date-label";
@@ -300,7 +301,7 @@ export default function AnalyticsPage() {
 
                                     <div className="overflow-x-auto">
                                         <div className="min-w-max">
-                                        <div className="flex items-end justify-center gap-3 h-40 px-2">
+                                        <div className="flex items-end justify-center gap-3 h-40 px-2" onKeyDown={moveChartPointFocus}>
                                         {data.map((item, index) => (
                                             <motion.div
                                                 key={index}
@@ -340,7 +341,8 @@ export default function AnalyticsPage() {
                                                 onBlur={() => {
                                                     setBarTooltip(null);
                                                 }}
-                                                tabIndex={0}
+                                                tabIndex={index === 0 ? 0 : -1}
+                                                data-chart-point
                                                 role="group"
                                                 aria-label={`${formatDate(item.date)}: total ${item.total_calls}, answered ${item.answered}, failed ${item.failed}`}
                                             >

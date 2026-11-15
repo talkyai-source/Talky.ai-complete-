@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
@@ -197,6 +197,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // Result of the last Start / Pause / Stop, shown inline (never an alert()).
     const [controlNotice, setControlNotice] = useState<CampaignControlNotice | null>(null);
     const [error, setError] = useState("");
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
     const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
     const loadGeneration = useRef(0);
     const scopeActive = useRef(true);
@@ -309,6 +310,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         } catch (err) {
             if (superseded()) return;
             setError(failedReadMessage(err, "Failed to load campaign"));
+            setErrorRequestId(failedReadRequestId(err));
         } finally {
             if (!superseded()) setLoading(false);
         }
@@ -506,7 +508,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             {loading && !campaign ? (
                 <LoadingState />
             ) : error && !campaign ? (
-                <ErrorState message={error} onRetry={loadData} />
+                <ErrorState message={error} requestId={errorRequestId} onRetry={loadData} />
             ) : campaign ? (
                 <div className="space-y-6">
                     {error ? (

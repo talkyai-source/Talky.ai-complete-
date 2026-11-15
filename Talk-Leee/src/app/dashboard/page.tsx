@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
-import { EmptyState, ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 import { calendarBucketBounds, calendarHourBounds, reportingDateRange } from "@/lib/reporting-time";
@@ -93,6 +93,7 @@ function KpiCard({
     valueSuffix,
     deltaAbs,
     deltaPct,
+    hasPrevious,
     lastUpdatedMs,
     status,
     icon: Icon,
@@ -102,6 +103,8 @@ function KpiCard({
     valueSuffix?: string;
     deltaAbs: number;
     deltaPct: number;
+    /** The server sent a previous-period value for this figure; without one no comparison is shown. */
+    hasPrevious: boolean;
     lastUpdatedMs: number;
     status: "green" | "yellow" | "red";
     icon?: React.ComponentType<{ className?: string }>;
@@ -154,7 +157,7 @@ function KpiCard({
                     </div>
                 </div>
 
-                <div className="mt-4 flex items-baseline justify-between gap-4">
+                {hasPrevious ? <div className="mt-4 flex items-baseline justify-between gap-4">
                     <div className="flex items-baseline gap-2 text-sm font-semibold leading-none">
                         {up ? (
                             <span className="text-emerald-700 font-black">▲</span>
@@ -169,7 +172,7 @@ function KpiCard({
                         {deltaAbs >= 0 ? "+" : "−"}
                         {Math.abs(deltaAbs).toLocaleString()} vs previous
                     </div>
-                </div>
+                </div> : null}
             </div>
         </motion.div>
     );
@@ -674,6 +677,8 @@ export default function DashboardPage() {
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+    // How many campaigns the account has (any direction); null until the list has been read.
+    const [campaignCount, setCampaignCount] = useState<number | null>(null);
     const [daily, setDaily] = useState<ReturnType<typeof dailySnapshot>>({ series: [], buckets: [], lastUpdatedMs: 0 });
     const series = daily.series;
     // Real hourly buckets (heatmap) + real per-campaign series (campaign lines).
@@ -690,6 +695,7 @@ export default function DashboardPage() {
     // One entry per first request that failed. Each card reads only its own
     // sources, so one failure never replaces the whole page.
     const [sourceErrors, setSourceErrors] = useState<Partial<Record<DashboardSource, string>>>({});
+    const [sourceRequestIds, setSourceRequestIds] = useState<Partial<Record<DashboardSource, string>>>({});
     // Sources that failed only because the summary, which reports the zone
     // they are cut in, failed. They are read again once a summary arrives.
     const [zoneBlockedSources, setZoneBlockedSources] = useState<readonly DashboardSource[]>([]);
@@ -729,7 +735,6 @@ export default function DashboardPage() {
         const snap = (ms: number) => Math.round(ms / stepMs) * stepMs;
         const end = snap(sim.lastUpdatedMs);
         const start = snap(end - liveRangeHours * 60 * 60 * 1000);
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds custom range bounds once, from the live clock, the first time custom mode is entered
         setCustomEndMs(end);
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
@@ -782,6 +787,12 @@ export default function DashboardPage() {
         const prevTotal = sum(previousBucketsBase, "total");
         const prevAnswered = sum(previousBucketsBase, "answered");
         const prevSuccessRate = prevTotal > 0 ? (prevAnswered / prevTotal) * 100 : 0;
+        // FX5: a comparison is shown only for a figure the server sent a previous-period
+        // value for: an analytics row (series[].total_calls / answered) inside the
+        // previous window. The summary's active_calls has none, and the rows carry no
+        // duration (avgDurationSec stays null).
+        const hasPreviousCalls = previousBucketsBase.some((b) => typeof b.total === "number");
+        const hasPreviousDuration = previousBucketsBase.some((b) => typeof b.total === "number" && typeof b.avgDurationSec === "number");
 
         const currentAvgDurationSec = (() => {
             let totalWeight = 0;
@@ -837,6 +848,7 @@ export default function DashboardPage() {
                 valueSuffix: "",
                 deltaAbs: totalDelta.abs,
                 deltaPct: totalDelta.pct,
+                hasPrevious: hasPreviousCalls,
                 status: statusVariant(currentTotal, { green: 500, yellow: 250 }),
                 icon: PhoneCall,
             },
@@ -846,6 +858,7 @@ export default function DashboardPage() {
                 valueSuffix: "%",
                 deltaAbs: successDelta.abs,
                 deltaPct: successDelta.pct,
+                hasPrevious: hasPreviousCalls && prevTotal > 0,
                 status: statusVariant(currentSuccessRate, { green: 92, yellow: 85 }),
                 icon: TrendingUp,
             },
@@ -855,6 +868,7 @@ export default function DashboardPage() {
                 valueSuffix: "",
                 deltaAbs: activeDelta.abs,
                 deltaPct: activeDelta.pct,
+                hasPrevious: false,
                 status: statusVariant(currentActiveCalls, { green: 30, yellow: 18 }),
                 icon: Bot,
             },
@@ -864,6 +878,7 @@ export default function DashboardPage() {
                 valueSuffix: "s",
                 deltaAbs: avgDurDelta.abs,
                 deltaPct: avgDurDelta.pct,
+                hasPrevious: hasPreviousDuration,
                 status: statusVariantLowerBetter(effectiveAvgDurationSec, { green: 70, yellow: 95 }),
                 icon: Clock,
             },
@@ -1021,6 +1036,7 @@ export default function DashboardPage() {
             campaigns: async () => {
                 const campaignsData = await dashboardApi.listCampaigns();
                 setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
+                setCampaignCount((campaignsData.campaigns ?? []).length);
             },
             daily: async () => {
                 const summaryData = await reportingZone("daily");
@@ -1055,6 +1071,7 @@ export default function DashboardPage() {
                 const message = failedReadMessage(err, "Failed to load dashboard");
                 markZoneBlocked(source, waitedForZone.has(source));
                 setSourceErrors((previous) => ({ ...previous, [source]: message }));
+                setSourceRequestIds((previous) => ({ ...previous, [source]: failedReadRequestId(err) }));
             }
         }));
     }
@@ -1066,7 +1083,7 @@ export default function DashboardPage() {
         // stream) is data: it replaces the error card without a click.
         const failed = sources.filter((source) => sourceErrors[source] && !(source === "summary" && liveSummary));
         if (failed.length === 0) return null;
-        return <ErrorState className={className} message={sourceErrors[failed[0]]} onRetry={() => loadSources(failed)} />;
+        return <ErrorState className={className} message={sourceErrors[failed[0]]} requestId={sourceRequestIds[failed[0]]} onRetry={() => loadSources(failed)} />;
     };
 
     useEffect(() => {
@@ -1485,7 +1502,6 @@ export default function DashboardPage() {
     const [campaignEnabled, setCampaignEnabled] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- preserves existing per-campaign toggle state while adding/removing keys as the campaign list changes
         setCampaignEnabled((prev) => {
             const next: Record<string, boolean> = { ...prev };
             for (const c of campaignLineSeries.campaigns) {
@@ -1544,7 +1560,7 @@ export default function DashboardPage() {
 
     return (
         <DashboardLayout title="Dashboard" description={`Outbound campaign performance and shared voice usage${summary?.timezone ? ` · Reporting: ${summary.timezone}` : ""}`}>
-            <FirstCallSetup />
+            {campaignCount === 0 ? <FirstCallSetup /> : null}
             <CallIssuesBanner />
             {loading ? (
                 // QA F1-34: the shape of the cards and chart being loaded, not a lone spinner.
@@ -1574,6 +1590,7 @@ export default function DashboardPage() {
                                 valueSuffix={k.valueSuffix}
                                 deltaAbs={k.deltaAbs}
                                 deltaPct={k.deltaPct}
+                                hasPrevious={k.hasPrevious}
                                 lastUpdatedMs={sim.lastUpdatedMs}
                                 status={k.status}
                                 icon={k.icon}

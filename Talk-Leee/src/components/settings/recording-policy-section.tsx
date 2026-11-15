@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
@@ -68,6 +68,7 @@ export function RecordingPolicyView({
     policy,
     isLoading,
     error,
+    requestId,
     canEdit,
     onSave,
     onRetry,
@@ -77,6 +78,8 @@ export function RecordingPolicyView({
     isLoading?: boolean;
     /** The policy read failed. No form is shown: its defaults may be untrue. */
     error?: string | null;
+    /** The server's reference for the failed read, when it sent one. */
+    requestId?: string;
     onRetry?: () => void | Promise<void>;
     canEdit: boolean;
     onSave: (input: RecordingPolicyInput) => Promise<unknown>;
@@ -131,7 +134,7 @@ export function RecordingPolicyView({
     };
 
     if (error) {
-        return <ErrorState message={error} onRetry={onRetry} />;
+        return <ErrorState message={error} requestId={requestId} onRetry={onRetry} />;
     }
 
     return (
@@ -253,6 +256,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
     const [policy, setPolicy] = useState<RecordingPolicy | undefined>(undefined);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>(undefined);
     const [saving, setSaving] = useState(false);
 
     const load = useCallback((signal?: AbortSignal) => fetchRecordingPolicy(signal)
@@ -263,6 +267,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
         .catch((err) => {
             if (signal?.aborted) return;
             setError(failedReadMessage(err, "Request failed"));
+            setErrorRequestId(failedReadRequestId(err));
         })
         .finally(() => {
             if (!signal?.aborted) setIsLoading(false);
@@ -294,6 +299,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
             policy={policy}
             isLoading={isLoading}
             error={error}
+            requestId={errorRequestId}
             canEdit={canEdit}
             onSave={onSave}
             onRetry={() => load()}

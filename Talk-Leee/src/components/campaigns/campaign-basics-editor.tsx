@@ -213,13 +213,13 @@ export function CampaignBasicsEditor({
 
                 <div>
                     <Label htmlFor="ce-agents">Representative names</Label>
-                    <Input id="ce-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
+                    <Input id="ce-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" aria-invalid={representativeNameTooLong(agentNames) || undefined} aria-describedby={representativeNameTooLong(agentNames) ? "ce-agents-error" : undefined} />
                     <p className="mt-1 text-xs text-muted-foreground">
                         1–3 names, comma-separated.
                         {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                         {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                     </p>
-                    {representativeNameTooLong(agentNames) && <p role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
+                    {representativeNameTooLong(agentNames) && <p id="ce-agents-error" role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
                     <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                 </div>
 
@@ -243,9 +243,10 @@ export function CampaignBasicsEditor({
                     <textarea
                         id="ce-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
                         aria-invalid={guidance.overBudget || undefined}
+                        aria-describedby={guidance.overBudget ? "ce-goal-error" : undefined}
                         className={`mt-1 w-full rounded-md border bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 ${guidance.overBudget ? "border-destructive" : "border-gray-300 dark:border-white/15"}`}
                     />
-                    <p className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
+                    <p id={guidance.overBudget ? "ce-goal-error" : undefined} className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
                         {guidance.overBudget
                             ? guidance.message
                             : "The counter includes the structured brief and this freeform layer. Nothing is trimmed automatically."}

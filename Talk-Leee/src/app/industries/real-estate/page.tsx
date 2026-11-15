@@ -26,7 +26,6 @@ export default function RealEstateIndustryPage() {
   const bodyClassName =
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
-  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
   const statValueClassName = "text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground";
   const pillClassName =
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
@@ -254,56 +253,6 @@ export default function RealEstateIndustryPage() {
     "Intelligent Routing",
     "Automated Follow-Up",
     "Multilingual Conversations",
-  ];
-
-  const pricingPlans = [
-    {
-      name: "Solo",
-      price: "See pricing",
-      description: "For individual agents and small teams testing AI.",
-      features: [
-        "AI call answering",
-        "Lead capture",
-        "Basic qualification",
-        "Appointment scheduling",
-        "Essential call routing",
-      ],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaPrimary: true,
-    },
-    {
-      name: "Team",
-      price: "Custom Pricing",
-      description: "For growing agencies and brokerages.",
-      features: [
-        "Advanced lead qualification",
-        "AI voice agents",
-        "Showing scheduling",
-        "Automated follow-ups",
-        "Intelligent routing",
-        "Workflow automation",
-      ],
-      ctaLabel: "See Team Plans",
-      ctaHref: "/pricing",
-      ctaPrimary: false,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      description: "For large brokerages and multi-location organizations.",
-      features: [
-        "High-volume AI conversations",
-        "Advanced workflows",
-        "CRM & calendar integrations",
-        "Multi-team routing",
-        "Custom AI experiences",
-        "Dedicated success support",
-      ],
-      ctaLabel: "Request a Demo",
-      ctaHref: "/book-a-demo",
-      ctaPrimary: false,
-    },
   ];
 
   const faqs = [
@@ -610,39 +559,6 @@ export default function RealEstateIndustryPage() {
                 <li key={item}>&bull; {item}</li>
               ))}
             </ul>
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Plans for Real Estate Teams</h2>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {pricingPlans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-2 text-base sm:text-lg font-semibold text-blue-600 dark:text-blue-400">{plan.price}</p>
-                <p className={cardBodyClassName}>{plan.description}</p>
-                <ul className={`${listClassName} flex-1`}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className={centeredCtaClassName}>
-                  {plan.ctaPrimary ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 

@@ -24,9 +24,11 @@ import { formatTimestamp } from "@/lib/timestamps";
 
 const INVITES_QUERY_KEY = ["team", "invites"] as const;
 const INVITE_EMAIL_ID = "invite-email";
+const INVITE_EMAIL_ERROR_ID = "invite-email-error";
 const emailSchema = z.string().email();
 
-type Notice = { tone: "success" | "warning" | "error"; text: string };
+// `field` marks an error that belongs to the Email field of the form.
+type Notice = { tone: "success" | "warning" | "error"; text: string; field?: boolean };
 const NOTICE_TONE: Record<Notice["tone"], string> = {
     success: "text-emerald-700 dark:text-emerald-400",
     warning: "text-amber-700 dark:text-amber-400",
@@ -57,7 +59,7 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
         await qc.invalidateQueries({ queryKey: INVITES_QUERY_KEY });
     }
 
-    async function sendInvite(email: string, role: AssignableRole) {
+    async function sendInvite(email: string, role: AssignableRole, fromForm = false) {
         setSending(true);
         setNotice(null);
         try {
@@ -67,7 +69,10 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
                 : { tone: "warning", text: `The invite to ${sent.email} was saved, but the email did not go out. Use Resend to try again.` });
             return true;
         } catch (err) {
-            setNotice({ tone: "error", text: isApiClientError(err) ? err.message : "Could not send the invite. Try again." });
+            // Only a refusal about the address itself is the Email field's error:
+            // 422 (not a valid email) and 409 (the email already has an account).
+            const aboutEmail = isApiClientError(err) && (err.status === 409 || err.status === 422);
+            setNotice({ tone: "error", text: isApiClientError(err) ? err.message : "Could not send the invite. Try again.", field: fromForm && aboutEmail });
             return false;
         } finally {
             setSending(false);
@@ -79,10 +84,10 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
         event.preventDefault();
         const email = inviteEmail.trim().toLowerCase();
         if (!emailSchema.safeParse(email).success) {
-            setNotice({ tone: "error", text: "Enter a valid email address." });
+            setNotice({ tone: "error", text: "Enter a valid email address.", field: true });
             return;
         }
-        if (await sendInvite(email, inviteRole)) setInviteEmail("");
+        if (await sendInvite(email, inviteRole, true)) setInviteEmail("");
     }
 
     return (
@@ -102,6 +107,8 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
                                 value={inviteEmail}
                                 onChange={(event) => setInviteEmail(event.target.value)}
                                 placeholder="name@company.com"
+                                aria-invalid={notice?.field ? true : undefined}
+                                aria-describedby={notice?.field ? INVITE_EMAIL_ERROR_ID : undefined}
                             />
                         </div>
                         <Select ariaLabel="Role for the new person" value={inviteRole} onChange={(next) => setInviteRole(next as AssignableRole)} className="w-44">
@@ -115,7 +122,7 @@ export function TeamInvites({ timeZone }: { timeZone?: string }) {
                         </Button>
                     </form>
                     {notice ? (
-                        <p role={notice.tone === "error" ? "alert" : "status"} className={`mt-3 text-sm ${NOTICE_TONE[notice.tone]}`}>{notice.text}</p>
+                        <p id={notice.field ? INVITE_EMAIL_ERROR_ID : undefined} role={notice.tone === "error" ? "alert" : "status"} className={`mt-3 text-sm ${NOTICE_TONE[notice.tone]}`}>{notice.text}</p>
                     ) : null}
                     <p className="mt-3 text-xs text-muted-foreground">The link works for 7 days and only once. Someone who already has an account cannot be invited.</p>
 

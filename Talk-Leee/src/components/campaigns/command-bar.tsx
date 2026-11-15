@@ -89,19 +89,6 @@ export function CommandBar({
 
     const results = useMemo<Result[]>(() => {
         const q = parsed.query.trim();
-        const users: Array<{ id: string; name: string; role: string }> = [
-            { id: "usr-001", name: "Alex Operator", role: "Ops" },
-            { id: "usr-002", name: "Morgan Analyst", role: "Analytics" },
-            { id: "usr-003", name: "Jamie Admin", role: "Admin" },
-        ];
-
-        const tags: Array<{ id: string; name: string }> = [
-            { id: "tag-priority", name: "priority" },
-            { id: "tag-sales", name: "sales" },
-            { id: "tag-support", name: "support" },
-            { id: "tag-survey", name: "survey" },
-        ];
-
         const base: Result[] = [
             { id: "nav-analytics", category: "Reports", title: "Analytics Dashboard", href: "/analytics" },
             { id: "nav-settings", category: "Settings", title: "Settings", href: "/ai-options" },
@@ -147,7 +134,6 @@ export function CommandBar({
                     id: "action-pause-active",
                     category: "Campaigns",
                     title: "Pause all active campaigns",
-                    subtitle: "Prototype action",
                     hidden: !allowed.update,
                     action: async () => {
                         await onPause(campaigns.filter((c) => (c.status || "").toLowerCase() === "running"));
@@ -178,43 +164,10 @@ export function CommandBar({
             return scored;
         }
 
-        if (parsed.prefix === "@") {
-            const scored = users
-                .map((u) => ({
-                    r: {
-                        id: `user-${u.id}`,
-                        category: "Settings" as const,
-                        title: u.name,
-                        subtitle: u.role,
-                        action: () => router.push(`/ai-options?user=${encodeURIComponent(u.id)}`),
-                    },
-                    score: matchScore(u.name, q) + matchScore(u.id, q) * 0.2,
-                }))
-                .filter((x) => x.score > 0 || q.length === 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 12)
-                .map((x) => x.r);
-            return scored;
-        }
-
-        if (parsed.prefix === "#") {
-            const scored = tags
-                .map((t) => ({
-                    r: {
-                        id: `tag-${t.id}`,
-                        category: "Reports" as const,
-                        title: `#${t.name}`,
-                        subtitle: "Filter view (prototype)",
-                        action: () => router.push(`/campaigns?tag=${encodeURIComponent(t.name)}`),
-                    },
-                    score: matchScore(t.name, q) + matchScore(t.id, q) * 0.2,
-                }))
-                .filter((x) => x.score > 0 || q.length === 0)
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 12)
-                .map((x) => x.r);
-            return scored;
-        }
+        // FX5: campaigns have no tags and the list reads no tag filter, so "#" offers nothing.
+        if (parsed.prefix === "#") return [];
+        // FX5b: the page has no list of people to search, so "@" offers nothing.
+        if (parsed.prefix === "@") return [];
 
         const scored = [...campaignResults, ...base]
             .map((r) => ({ r, score: matchScore(r.title, q) + (r.subtitle ? matchScore(r.subtitle, q) * 0.2 : 0) }))
@@ -331,7 +284,7 @@ export function CommandBar({
                     </div>
                     {resumeVisible && <CampaignReadinessNotice readiness={resumeReadiness} />}
                     <div className="text-xs font-semibold text-muted-foreground">
-                        Prefixes: <span className="text-foreground">/</span> actions, <span className="text-foreground">&gt;</span> navigation, <span className="text-foreground">@</span> users, <span className="text-foreground">#</span> tags
+                        Prefixes: <span className="text-foreground">/</span> actions, <span className="text-foreground">&gt;</span> navigation
                     </div>
                 </div>
             </Modal>

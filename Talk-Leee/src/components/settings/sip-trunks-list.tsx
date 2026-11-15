@@ -286,7 +286,7 @@ export function SipTrunksList() {
                 {trunksQuery.isLoading && !trunksFailed ? (
                     <LoadingState title="Loading your PBX connections…" />
                 ) : trunksFailed && !trunksQuery.data ? (
-                    <ErrorState message="Could not load your PBX connections." onRetry={() => void trunksQuery.refetch()} />
+                    <ErrorState requestId={failedReadRequestId(trunksQuery.error)} message="Could not load your PBX connections." onRetry={() => void trunksQuery.refetch()} />
                 ) : trunks.length === 0 ? (
                     <EmptyState title="No PBX connected yet." message="Select Connect PBX and enter the address, username and password your provider gave you." />
                 ) : (

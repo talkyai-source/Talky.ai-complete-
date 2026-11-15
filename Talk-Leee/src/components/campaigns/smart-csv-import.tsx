@@ -347,6 +347,7 @@ export function SmartCsvImport({
                                                 onChange={(e) => editCell(i, "phone", e.target.value)}
                                                 aria-label={`Phone, row ${a.row.source_row}`}
                                                 aria-invalid={bad}
+                                                aria-describedby={bad ? `campaign-import-phone-error-${i}` : undefined}
                                                 className={`w-36 rounded border px-2 py-1 text-sm bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 ${
                                                     bad
                                                         ? "border-red-400 text-red-700 dark:text-red-300 focus:ring-red-500"
@@ -356,12 +357,13 @@ export function SmartCsvImport({
                                         <td className="px-1 py-0.5 text-xs">
                                             {a.check.ok
                                                 ? <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{a.check.numbers.e164}</span>
-                                                : <span className="font-semibold text-red-700 dark:text-red-300">{a.check.error}</span>}
+                                                : <span id={`campaign-import-phone-error-${i}`} className="font-semibold text-red-700 dark:text-red-300">{a.check.error}</span>}
                                         </td>
-                                        {(["first_name", "last_name", "email"] as const).map((f) => (
+                                        {([["first_name", "First"], ["last_name", "Last"], ["email", "Email"]] as const).map(([f, header]) => (
                                             <td key={f} className="px-1 py-0.5">
                                                 <input
                                                     value={a.row[f]}
+                                                    aria-label={`${header}, row ${a.row.source_row}`}
                                                     onChange={(e) => editCell(i, f, e.target.value)}
                                                     className="w-full min-w-[100px] rounded border border-gray-300 dark:border-white/15 px-2 py-1 text-sm bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                                 />

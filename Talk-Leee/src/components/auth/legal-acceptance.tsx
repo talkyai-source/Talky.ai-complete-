@@ -94,7 +94,12 @@ export function useLegalAcceptance() {
 
 export type LegalAcceptance = ReturnType<typeof useLegalAcceptance>;
 
-export function LegalAcceptanceField({ legal, disabled }: { legal: LegalAcceptance; disabled?: boolean }) {
+export function LegalAcceptanceField({ legal, disabled, errorId }: {
+    legal: LegalAcceptance;
+    disabled?: boolean;
+    /** The id of the form's error while that error is about this checkbox. */
+    errorId?: string;
+}) {
     const checkboxId = useId();
     const noticeId = useId();
     if (!legal.required) return null;
@@ -122,7 +127,8 @@ export function LegalAcceptanceField({ legal, disabled }: { legal: LegalAcceptan
                     onChange={(event) => legal.setAccepted(event.target.checked)}
                     disabled={disabled}
                     required
-                    aria-describedby={legal.updated ? noticeId : undefined}
+                    aria-invalid={errorId ? true : undefined}
+                    aria-describedby={[legal.updated ? noticeId : null, errorId ?? null].filter(Boolean).join(" ") || undefined}
                     className="mt-1 h-4 w-4 shrink-0"
                 />
                 <label htmlFor={checkboxId} className="text-sm text-muted-foreground">

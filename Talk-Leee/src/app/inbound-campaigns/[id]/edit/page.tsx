@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { InboundCampaignForm } from "@/components/inbound/inbound-campaign-form";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { failedReadMessage } from "@/components/states/page-states";
+import { failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useEffectivePermissions, useInboundCampaign, useUpdateInboundCampaign } from "@/lib/queries/inbound-queries";
@@ -26,13 +26,13 @@ export default function EditInboundCampaignPage() {
             {permissions.isLoading ? (
                 <InboundLoadingState label="Checking edit and routing permissions…" />
             ) : permissions.isError ? (
-                <InboundErrorState title="Permissions could not be verified" message="Editing is disabled until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
+                <InboundErrorState requestId={failedReadRequestId(permissions.error)} title="Permissions could not be verified" message="Editing is disabled until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canView || !capabilities.canEdit ? (
                 <InboundPermissionState action="edit inbound campaigns" onRetry={() => void permissions.refetch()} />
             ) : campaignQuery.isLoading ? (
                 <InboundLoadingState />
             ) : campaignQuery.isError || !campaign ? (
-                <InboundErrorState title="Campaign is unavailable" message={failedReadMessage(campaignQuery.error, "The campaign could not be loaded.")} onRetry={() => void campaignQuery.refetch()} />
+                <InboundErrorState requestId={failedReadRequestId(campaignQuery.error)} title="Campaign is unavailable" message={failedReadMessage(campaignQuery.error, "The campaign could not be loaded.")} onRetry={() => void campaignQuery.refetch()} />
             ) : campaign.status === "active" || campaign.status === "archived" ? (
                 <InboundErrorState
                     title={campaign.status === "active" ? "Deactivate before editing" : "Archived campaigns are read-only"}

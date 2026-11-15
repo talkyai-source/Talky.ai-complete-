@@ -30,6 +30,7 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
 
 const emailSchema = z.string().email("Please enter a valid email address");
+const PASSWORDS_DO_NOT_MATCH = "Passwords do not match.";
 
 type Step = "email" | "reset" | "done";
 
@@ -50,6 +51,8 @@ function ForgotPasswordInner() {
     const turnstile = useTurnstile("forgot_password");
     const inputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
+    const emailErrorId = useId();
+    const passwordTooShort = `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
 
     useEffect(() => {
         if (step !== "done") return;
@@ -91,6 +94,11 @@ function ForgotPasswordInner() {
         }
     }
 
+    // Which field the current error is about (the error texts are the ones set below).
+    const newPasswordError = error === passwordTooShort;
+    const confirmPasswordError = error === PASSWORDS_DO_NOT_MATCH;
+    const codeError = Boolean(error) && !newPasswordError && !confirmPasswordError;
+
     async function handleReset(e: React.FormEvent) {
         e.preventDefault();
         setError("");
@@ -99,11 +107,11 @@ function ForgotPasswordInner() {
             return;
         }
         if (newPassword.length < MIN_PASSWORD_LENGTH) {
-            setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+            setError(passwordTooShort);
             return;
         }
         if (newPassword !== confirmPassword) {
-            setError("Passwords do not match.");
+            setError(PASSWORDS_DO_NOT_MATCH);
             return;
         }
         setLoading(true);
@@ -220,6 +228,8 @@ function ForgotPasswordInner() {
                                             maxLength={6}
                                             disabled={loading}
                                             autoFocus
+                                            aria-invalid={codeError ? true : undefined}
+                                            aria-describedby={codeError ? errorId : undefined}
                                         />
                                     </div>
                                 </div>
@@ -244,6 +254,8 @@ function ForgotPasswordInner() {
                                             required
                                             minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
+                                            aria-invalid={newPasswordError ? true : undefined}
+                                            aria-describedby={newPasswordError ? errorId : undefined}
                                         />
                                     </div>
                                 </div>
@@ -268,6 +280,8 @@ function ForgotPasswordInner() {
                                             required
                                             minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
+                                            aria-invalid={confirmPasswordError ? true : undefined}
+                                            aria-describedby={confirmPasswordError ? errorId : undefined}
                                         />
                                     </div>
                                 </div>
@@ -354,10 +368,11 @@ function ForgotPasswordInner() {
                                             aria-invalid={
                                                 emailError || error ? true : undefined
                                             }
+                                            aria-describedby={[emailError ? emailErrorId : null, error ? errorId : null].filter(Boolean).join(" ") || undefined}
                                         />
                                     </div>
                                     {emailError && (
-                                        <p className="text-sm text-red-600 dark:text-red-400">
+                                        <p id={emailErrorId} className="text-sm text-red-600 dark:text-red-400">
                                             {emailError}
                                         </p>
                                     )}

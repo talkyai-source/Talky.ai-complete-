@@ -4,7 +4,7 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { Loader2, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Device, getActiveSessions, logoutSession, logoutAllOtherSessions, formatSessionTime, getDeviceIcon } from "@/lib/session-utils";
 
@@ -20,6 +20,7 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
   const [error, setError] = useState("");
   // A failed read is its own state: the list is unknown, not empty.
   const [loadError, setLoadError] = useState("");
+  const [loadErrorRequestId, setLoadErrorRequestId] = useState<string | undefined>();
   // The "Sign out from all other devices" dialog is open.
   const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   const errorId = useId();
@@ -35,6 +36,7 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
     } catch (err) {
       const errorMsg = failedReadMessage(err, "Failed to fetch devices");
       setLoadError(errorMsg);
+      setLoadErrorRequestId(failedReadRequestId(err));
       onError?.(errorMsg);
     } finally {
       setLoading(false);
@@ -82,7 +84,7 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
   }
 
   if (loadError) {
-    return <ErrorState message={loadError} onRetry={fetchDevices} />;
+    return <ErrorState message={loadError} requestId={loadErrorRequestId} onRetry={fetchDevices} />;
   }
 
   return (
