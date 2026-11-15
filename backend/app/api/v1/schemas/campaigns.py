@@ -64,6 +64,8 @@ class CampaignBriefInput(BaseModel):
         default=None, max_length=5
     )
     transfer_hours: Optional[CampaignTransferHoursInput] = None
+    transfer_ring_seconds: Optional[int] = Field(default=None, strict=True)
+    transfer_if_no_answer: Optional[str] = None
     email_action: Optional[VoiceEmailAction] = None
     form_action: Optional[VoiceFormAction] = None
     required_lead_fields: List[CampaignBriefLeadField] = Field(default_factory=list, max_length=20)
@@ -112,6 +114,17 @@ class CampaignBriefInput(BaseModel):
             normalize_transfer_hours(self.transfer_hours.model_dump())
             if not transfer_approved:
                 raise ValueError("transfer_hours requires transfer in approved_next_actions")
+        for field in ("transfer_ring_seconds", "transfer_if_no_answer"):
+            if getattr(self, field) is not None and not transfer_approved:
+                raise ValueError(f"{field} requires transfer in approved_next_actions")
+        if self.transfer_ring_seconds is not None:
+            from app.domain.services.campaign_brief import normalize_transfer_ring_seconds
+
+            normalize_transfer_ring_seconds(self.transfer_ring_seconds)
+        if self.transfer_if_no_answer is not None:
+            from app.domain.services.campaign_brief import normalize_transfer_if_no_answer
+
+            normalize_transfer_if_no_answer(self.transfer_if_no_answer)
         if transfer_approved and not has_destination:
             raise ValueError(
                 "transfer_destination is required when transfer is approved"

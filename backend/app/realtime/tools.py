@@ -12,7 +12,7 @@ _REALTIME_ACTION_DESCRIPTIONS = {
     "schedule_callback": "Request a callback after confirming the caller's intended time and agreement. Report only the outcome returned by this tool.",
     "send_email": "Request an email after confirming the recipient, purpose and agreement to send. Report only the outcome returned by this tool.",
     "submit_form": "Request form submission after confirming the required details and agreement to submit. Report only the outcome returned by this tool.",
-    "transfer_call": "Request transfer to the confirmed destination after the caller agrees. Report only the outcome returned by this tool.",
+    "transfer_call": "Request transfer to the confirmed destination after the caller agrees. First say one short line such as \"One moment while I try them.\", then call this; it can ring for up to a minute. Never say the transfer has started or the caller is connected until the result says the person answered. Report only the outcome returned by this tool.",
     "end_call": "End the call after a short goodbye when the caller clearly asks to finish. No extra confirmation is needed; do not claim the line is already disconnected.",
 }
 

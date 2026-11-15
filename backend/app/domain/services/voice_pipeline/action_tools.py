@@ -47,8 +47,10 @@ _ACTION_DESCRIPTIONS = {
         "or application was submitted."
     ),
     ACTION_TRANSFER_CALL: (
-        "Transfer this live call to another person. Call this before saying a "
-        "transfer or connection has started."
+        "Transfer this live call to another person. First say one short line such "
+        "as \"One moment while I try them.\", then call this; it can ring for up to a "
+        "minute. Never say the transfer has started or the caller is connected until "
+        "the result says the person answered."
     ),
     ACTION_END_CALL: (
         "Request that this live call end after a short goodbye. Use only when "

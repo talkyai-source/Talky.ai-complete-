@@ -224,6 +224,19 @@ def normalize_transfer_hours(value: object) -> dict[str, Any]:
     }
 
 
+def normalize_transfer_ring_seconds(value: object) -> int:
+    """How long the human's phone rings: a whole number from 10 to 60."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 10 <= value <= 60:
+        raise ValueError("transfer_ring_seconds must be a whole number from 10 to 60")
+    return value
+
+
+def normalize_transfer_if_no_answer(value: object) -> str:
+    if value not in ("return_to_agent", "end_call"):
+        raise ValueError("transfer_if_no_answer must be 'return_to_agent' or 'end_call'")
+    return str(value)
+
+
 def _as_utc(now: datetime | None) -> datetime:
     if now is None:
         return datetime.now(timezone.utc)
@@ -330,6 +343,20 @@ def normalize_campaign_brief(
                 "campaign_brief.transfer_hours requires transfer in approved_next_actions"
             )
         optional_transfer["transfer_hours"] = normalize_transfer_hours(raw["transfer_hours"])
+    for field in ("transfer_ring_seconds", "transfer_if_no_answer"):
+        if raw.get(field) is not None:
+            if "transfer" not in actions:
+                raise ValueError(
+                    f"campaign_brief.{field} requires transfer in approved_next_actions"
+                )
+    if raw.get("transfer_ring_seconds") is not None:
+        optional_transfer["transfer_ring_seconds"] = normalize_transfer_ring_seconds(
+            raw["transfer_ring_seconds"]
+        )
+    if raw.get("transfer_if_no_answer") is not None:
+        optional_transfer["transfer_if_no_answer"] = normalize_transfer_if_no_answer(
+            raw["transfer_if_no_answer"]
+        )
 
     try:
         max_objections = int(raw.get("max_objection_attempts", 2))

@@ -27,6 +27,61 @@ def _result(action, status, message, **extra):
             "confirmation_allowed": False, "message": message, **extra}
 
 
+_STILL = " You are still with the caller."
+_NEXT = " Offer to take a message or arrange a callback if that is available; do not promise another attempt."
+_NOT_CONFIRMED = ("The transfer did not complete and its state is not confirmed. Do not say the caller is "
+                  "connected, and do not try again or offer another transfer.")
+_UNREACHABLE = frozenset({"chanunavail", "congestion", "cancel", "dontcall", "torture", "target_unavailable",
+                          "transfer_cancelled"})
+_NO_LINE = frozenset({"outbound_trunk_unavailable", "invalid_trunk_endpoint", "invalid_caller_id",
+                      "inbound_trunk_unavailable", "inbound_trunk_identity_unavailable"})
+_END_NEXT = " Tell the caller, then end the call politely; do not promise another attempt."
+# Refused before any phone-system action (adapter.transfer returns these before
+# /channels/create; the bridge policy refuses the last two before calling it):
+# nothing was dialled, so the caller is certainly still with the agent.
+_PRE_DIAL = frozenset({"outbound_trunk_unavailable", "invalid_trunk_endpoint", "invalid_caller_id",
+                       "inbound_trunk_unavailable", "inbound_trunk_identity_unavailable",
+                       "invalid_transfer_destination", "transfer_destination_not_allowed", "transfer_closed"})
+_NOT_ALLOWED = frozenset({"transfer_destination_not_allowed", "invalid_transfer_destination"})
+
+
+def _transfer_outcome(receipt):
+    """(status, success, confirmation_allowed, message): only "completed" is connected."""
+    status = str(receipt.get("status") or "").strip().lower()
+    error = str(receipt.get("error") or "").strip().lower()
+    if status == "completed":
+        return ("connected", True, True,
+                "The person answered and the call has been handed over to them. You are no longer on the "
+                "call, so say nothing more to the caller.")
+    if status == "success":
+        return "provider_accepted", True, False, "The PBX accepted the transfer request; connection is unconfirmed."
+    if status in {"cleanup_pending", "unconfirmed", "termination_unconfirmed", "in_progress"} or (
+            status == "failed" and error == "target_termination_unconfirmed"):
+        return "unknown", False, False, _NOT_CONFIRMED
+    if status == "failed":
+        retained = receipt.get("caller_media_retained") is True or error in _PRE_DIAL
+        if not retained or receipt.get("target_termination_confirmed") is False \
+                or error == "transfer_already_in_progress":
+            return "unknown", False, False, _NOT_CONFIRMED
+        if error in {"no_answer", "noanswer"}:
+            reason = "The person did not answer."
+        elif error == "busy":
+            reason = "The person's line was busy."
+        elif error in _UNREACHABLE:
+            reason = "The person could not be reached."
+        elif error == "transfer_closed":
+            reason = "The team is outside its hours for transfers."
+        elif error in _NO_LINE:
+            reason = "No line is available for transfers right now."
+        elif error in _NOT_ALLOWED:
+            reason = "A transfer is not available for this call."
+        else:
+            return "failed", False, False, "Transfer has not been confirmed."
+        next_step = _END_NEXT if receipt.get("fallback_action") == "end_call" else _NEXT
+        return "failed", False, False, reason + _STILL + next_step
+    return "unknown", False, False, "Transfer has not been confirmed."
+
+
 def enabled_voice_actions(session, now=None):
     capabilities = dict(getattr(session, "_voice_action_capabilities", {}))
     if "transfer_call" in capabilities:
@@ -403,14 +458,15 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
                            success=True, confirmation_allowed=True, **evidence)
         if action == "transfer_call":
             from app.domain.services.telephony.adapter_registry import execute_transfer
+            brief = context.get("brief") or {}
+            ring = {key: brief[field] for key, field in (
+                ("ring_seconds", "transfer_ring_seconds"), ("if_no_answer", "transfer_if_no_answer"))
+                if brief.get(field) is not None}
             receipt = await execute_transfer(str(context["provider_call_id"]), payload["destination"], "blind",
-                idempotency_key="voice-" + proposal["id"], actor_type="service", actor_role="campaign_voice")
-            connected = receipt.get("status") in {"connected", "completed", "transferred"}
-            if receipt.get("status") == "success":
-                return _result(action, "provider_accepted", "The PBX accepted the transfer request; connection is unconfirmed.",
-                               success=True, transfer_receipt=receipt)
-            return _result(action, "connected" if connected else ("failed" if receipt.get("status") == "failed" else "unknown"), "Transfer connected." if connected else "Transfer has not been confirmed.",
-                           success=connected, confirmation_allowed=connected, transfer_receipt=receipt)
+                idempotency_key="voice-" + proposal["id"], actor_type="service", actor_role="campaign_voice", **ring)
+            status, success, allowed, message = _transfer_outcome(receipt)
+            return _result(action, status, message, success=success, confirmation_allowed=allowed,
+                           transfer_receipt=receipt)
         if action == "schedule_callback":
             # The scheduled action IS the durable outbox. The existing worker
             # publishes a deterministic dialer job once the due time arrives.
