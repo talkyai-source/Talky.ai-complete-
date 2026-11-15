@@ -58,7 +58,7 @@ _SIGNED = {
 }
 _INTERNAL_OR_USER = {
     ("post", "/api/v1/sip/telephony/start"), ("post", "/api/v1/sip/telephony/stop"),
-    ("get", "/api/v1/sip/telephony/status"),
+    ("get", "/api/v1/sip/telephony/status"), ("post", "/api/v1/sip/telephony/drain"),
 }
 _INTERNAL_OR_BEARER = {
     ("post", "/api/v1/sip/telephony/hangup/{call_id}"),

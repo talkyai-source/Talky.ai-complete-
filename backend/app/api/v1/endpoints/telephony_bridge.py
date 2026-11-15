@@ -349,9 +349,17 @@ def ensure_session_management_started() -> None:
     # readiness gate can drain a saturated pod without touching internals.
     from app.core import readiness as _readiness
 
+    def _committed_calls() -> int:
+        from app.domain.services.telephony.lifecycle import committed_call_load
+
+        return committed_call_load()
+
     _readiness.set_capacity_providers(
         active_count=lambda: get_state_backend().voice_session_count(),
         max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
+        # Ringing and pre-answer calls too: a drain before a restart must wait
+        # for them, not only for calls that are already answered.
+        committed_count=_committed_calls,
     )
 
 

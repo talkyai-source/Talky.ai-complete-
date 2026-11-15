@@ -57,6 +57,7 @@ from app.api.v1.endpoints.sessions import router as sessions_router
 from app.api.v1.endpoints.plans import router as plans_router
 from app.api.v1.endpoints.recordings import router as recordings_router
 from app.api.v1.endpoints.telephony_bridge import router as telephony_bridge_router
+from app.api.v1.endpoints.telephony_drain import router as telephony_drain_router
 from app.api.v1.endpoints.telephony_concurrency import (
     router as telephony_concurrency_router,
 )
@@ -128,6 +129,7 @@ api_router.include_router(ask_ai_ws_router)
 api_router.include_router(campaign_test_ws_router)
 api_router.include_router(ai_options_router)
 api_router.include_router(telephony_bridge_router)
+api_router.include_router(telephony_drain_router)
 api_router.include_router(vonage_bridge_router)
 api_router.include_router(twilio_bridge_router)
 api_router.include_router(telephony_sip_router)

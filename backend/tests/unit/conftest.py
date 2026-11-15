@@ -51,6 +51,25 @@ def _reset_telephony_settings_singletons():
         pass
 
 
+@pytest.fixture(autouse=True)
+def _reset_drain_state():
+    """A test that starts a drain must not leave later tests refusing calls.
+
+    ``readiness._draining`` is a process-wide flag. In production the process
+    exits after a drain; in one pytest process it would stay set, and every
+    later inbound-admission test would be refused before answer.
+    """
+    from app.core import readiness
+
+    def _reset():
+        readiness._draining = False
+        readiness._drain_started_at = 0.0
+
+    _reset()
+    yield
+    _reset()
+
+
 # ── Release quarantine 2026-10-08 (owner decision) ─────────────────────────
 # Tests listed in release_quarantine_20261008.txt fail on release PR #19 itself
 # and are SKIPPED with a reason (never deleted) so they stay visible in every

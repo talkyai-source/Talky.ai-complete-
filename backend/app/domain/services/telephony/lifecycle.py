@@ -2805,6 +2805,13 @@ async def _admit_inbound_call(
     # Capacity is evaluated while the Asterisk channel is still unanswered.
     # Count already-admitted/pre-media calls as well as live sessions so a
     # burst cannot queue beyond this pod's memory budget.
+    # A drain before a restart stops NEW calls in both directions; otherwise
+    # inbound calls keep arriving and the drain never ends. Refused unanswered,
+    # so the caller is never cut off mid-call by the restart.
+    from app.core import readiness as _readiness
+
+    if _readiness.is_draining():
+        raise RuntimeError("pod draining before inbound answer")
     local_load = committed_call_load()
     if local_load >= _MAX_TELEPHONY_SESSIONS:
         raise RuntimeError("pod capacity reached before inbound answer")

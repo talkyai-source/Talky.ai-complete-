@@ -198,3 +198,48 @@ def test_inbound_call_with_a_ringing_warmup_is_counted_once(state):
     _ring(state, "inbound-1")
     lifecycle._inbound_admissions_pending.add("inbound-1")
     assert lifecycle.committed_call_load() == 1
+
+
+# -- drain before a restart ---------------------------------------------------
+@pytest.mark.asyncio
+async def test_inbound_pre_answer_refuses_while_the_process_is_draining(state, monkeypatch):
+    import app.core.container as container_module
+    from app.core import readiness
+
+    monkeypatch.setattr(
+        container_module,
+        "get_container",
+        lambda: SimpleNamespace(is_initialized=True, db_pool=object(), redis=object()),
+    )
+    monkeypatch.setattr(readiness, "is_draining", lambda: True)
+    # Plenty of room: the refusal is the drain, not capacity.
+    with pytest.raises(RuntimeError, match="pod draining before inbound answer"):
+        await lifecycle._admit_inbound_call(
+            "new-inbound",
+            {"called_did": "+15551234567", "caller_number": "+15557654321"},
+        )
+    assert "new-inbound" not in lifecycle._inbound_admissions_pending
+
+
+@pytest.mark.asyncio
+async def test_readiness_counts_ringing_calls_once_session_management_is_started(state, monkeypatch):
+    from app.core import readiness
+
+    async def _idle():
+        return None
+
+    for name in ("_session_watchdog", "_media_session_watchdog", "_account_call_authority_watchdog"):
+        monkeypatch.setattr(bridge, name, _idle)
+    for name in ("_watchdog_task", "_media_watchdog_task", "_account_authority_watchdog_task"):
+        monkeypatch.setattr(bridge, name, None)
+    monkeypatch.setattr(readiness, "_active_count_provider", None)
+    monkeypatch.setattr(readiness, "_max_capacity_provider", None)
+    monkeypatch.setattr(readiness, "_committed_count_provider", None)
+
+    bridge.ensure_session_management_started()
+    _answer(state, "live-1")
+    _ring(state, "ring-1")
+    snapshot = readiness.snapshot()
+    assert snapshot["active_sessions"] == 1
+    # The drain script waits on this number, so a ringing call must be in it.
+    assert snapshot["committed_calls"] == 2

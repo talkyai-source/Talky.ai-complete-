@@ -37,21 +37,28 @@ DRAIN_TIMEOUT_S: int = int(os.getenv("DRAIN_TIMEOUT_S", "300"))
 # the bridge module. Default returns 0 (treated as "no capacity info").
 _active_count_provider: Optional[Callable[[], int]] = None
 _max_capacity_provider: Optional[Callable[[], int]] = None
+# Calls that are live OR about to be (reserved/ringing). Optional.
+_committed_count_provider: Optional[Callable[[], int]] = None
 
 
 def set_capacity_providers(
     active_count: Callable[[], int],
     max_capacity: Callable[[], int],
+    committed_count: Optional[Callable[[], int]] = None,
 ) -> None:
     """Wire the readiness module to the bridge's session counters."""
     global _active_count_provider, _max_capacity_provider
+    global _committed_count_provider
     _active_count_provider = active_count
     _max_capacity_provider = max_capacity
+    _committed_count_provider = committed_count
 
 
 def begin_drain() -> None:
-    """Mark pod NOT_READY. Called by lifespan shutdown."""
+    """Mark pod NOT_READY. Idempotent: keeps the first start time."""
     global _draining, _drain_started_at
+    if _draining:
+        return
     _draining = True
     _drain_started_at = time.monotonic()
 
@@ -74,6 +81,18 @@ def is_pod_at_capacity() -> bool:
         return _active_count_provider() >= _max_capacity_provider()
     except Exception:
         return False
+
+
+def committed_calls() -> int:
+    """Committed call count, else the active count, else 0. Never raises."""
+    for provider in (_committed_count_provider, _active_count_provider):
+        if provider is None:
+            continue
+        try:
+            return int(provider())
+        except Exception:
+            continue
+    return 0
 
 
 def is_pod_ready() -> bool:
@@ -101,6 +120,7 @@ def snapshot() -> dict:
         "drain_elapsed_s": round(drain_seconds_elapsed(), 1),
         "drain_timeout_s": DRAIN_TIMEOUT_S,
         "active_sessions": active,
+        "committed_calls": committed_calls(),
         "max_sessions": cap,
         "at_capacity": is_pod_at_capacity(),
     }
