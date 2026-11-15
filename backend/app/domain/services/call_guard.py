@@ -913,6 +913,14 @@ class CallGuard:
                     reason=f"blocked_prefix: {prefix}",
                 )
 
+        # Country still unknown: an allow-list cannot be satisfied, so refuse;
+        # with no allow-list nothing is restricted and the call passes as before.
+        if not country_code and tenant_limits.allowed_country_codes:
+            return CheckResult(
+                check=GuardCheck.GEOGRAPHIC_ALLOWED,
+                passed=False,
+                reason="country_not_allowed: unknown",
+            )
         if not country_code:
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
@@ -1394,7 +1402,11 @@ class CallGuard:
             if phone_number.startswith(prefix):
                 return country_mappings[prefix]
 
-        return None
+        # Not in the table: ask the phonenumbers library rather than treating
+        # the country as unknown (which let any other country through).
+        from app.domain.services.phone_number_normalizer import region_of_e164
+
+        return region_of_e164(phone_number)
 
     async def _plan_concurrent_calls(self, tenant_id: str) -> Optional[int]:
         """Simultaneous calls sold with the tenant's plan.

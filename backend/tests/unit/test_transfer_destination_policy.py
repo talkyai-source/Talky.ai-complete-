@@ -164,3 +164,67 @@ def test_a_transferred_outbound_call_is_not_ended_by_the_soft_cap_or_idleness():
 def test_the_accounts_shorter_maximum_also_ends_a_transferred_outbound_call():
     vs = _session(age_s=200, idle_s=900, _transfer_connected=True, _max_call_duration_seconds=120)
     assert _classify(vs) == ([], ["out-1"])
+
+
+# ------------------------- geographic check: a country outside the table is not a pass
+# Frozen copy of the table's answers before the fix (the equivalence proof).
+_TABLE = {
+    "+1": "US", "+44": "GB", "+33": "FR", "+49": "DE", "+39": "IT", "+34": "ES", "+31": "NL",
+    "+32": "BE", "+41": "CH", "+43": "AT", "+46": "SE", "+47": "NO", "+45": "DK", "+358": "FI",
+    "+48": "PL", "+420": "CZ", "+36": "HU", "+30": "GR", "+353": "IE", "+351": "PT", "+61": "AU",
+    "+64": "NZ", "+81": "JP", "+82": "KR", "+86": "CN", "+91": "IN", "+92": "PK", "+880": "BD",
+    "+234": "NG", "+84": "VN", "+62": "ID", "+55": "BR", "+52": "MX", "+54": "AR", "+56": "CL",
+    "+57": "CO", "+27": "ZA", "+20": "EG", "+971": "AE", "+966": "SA", "+65": "SG", "+852": "HK",
+    "+886": "TW", "+7": "RU", "+380": "UA", "+90": "TR", "+98": "IR", "+963": "SY",
+}
+ESTONIA = "+37251234567"
+# +999 is an unassigned calling code: phonenumbers gives no region (checked with
+# region_of_e164, which returns None for it).
+NO_REGION = "+99912345678"
+
+
+async def _geo(number, **limits):
+    guard = CallGuard(db_pool=object(), redis_client=None)
+    return await guard._check_geographic(number, TenantCallLimits(**limits))
+
+
+@pytest.mark.asyncio
+async def test_allow_list_admits_its_country_and_refuses_the_rest():
+    assert (await _geo(ORDINARY, allowed_country_codes=["GB"])).passed is True
+    estonia = await _geo(ESTONIA, allowed_country_codes=["GB"])
+    assert estonia.passed is False and estonia.reason == "country_not_allowed: EE"
+    us = await _geo("+12015550123", allowed_country_codes=["GB"])
+    assert us.passed is False and us.reason == "country_not_allowed: US"
+
+
+@pytest.mark.asyncio
+async def test_a_blocked_country_outside_the_table_is_refused():
+    result = await _geo(ESTONIA, blocked_country_codes=["EE"])
+    assert result.passed is False and result.reason == "blocked_country: EE"
+
+
+@pytest.mark.asyncio
+async def test_a_number_with_no_region_is_refused_by_an_allow_list_only():
+    refused = await _geo(NO_REGION, allowed_country_codes=["GB"])
+    assert refused.passed is False and refused.reason == "country_not_allowed: unknown"
+    allowed = await _geo(NO_REGION)
+    assert allowed.passed is True and allowed.reason == "country_code_unknown"
+
+
+@pytest.mark.asyncio
+async def test_blocked_prefixes_still_run_first_for_an_unknown_country():
+    result = await _geo(NO_REGION, blocked_prefixes=["+999"], allowed_country_codes=["GB"])
+    assert result.reason == "blocked_prefix: +999"
+
+
+@pytest.mark.parametrize(("prefix", "code"), sorted(_TABLE.items()))
+def test_every_table_prefix_answers_as_before(prefix, code):
+    guard = CallGuard(db_pool=object(), redis_client=None)
+    assert guard._extract_country_code(prefix + "2015550123") == code
+
+
+@pytest.mark.asyncio
+async def test_no_tenant_limits_passes_as_before():
+    guard = CallGuard(db_pool=object(), redis_client=None)
+    assert (await guard._check_geographic(ESTONIA, None)).passed is True
+    assert (await guard._check_geographic(NO_REGION, None)).passed is True
