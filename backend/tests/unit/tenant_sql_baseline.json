@@ -4505,10 +4505,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "98a3391cfbd31eaeb3052a9aed626e06bf48ab151f9ce9cc6acbb7fdd2ef7eb9",
+      "id": "5acb792a57cfc6c959c7fd358508ec2a6a1f4d09f2de5efdc81de6190db26c97",
       "file": "app/domain/services/minutes_quota.py",
-      "function": "_compute_minutes_status",
-      "line": 156,
+      "function": "_allowance_row",
+      "line": 181,
       "method": "fetchrow",
       "tables": [
         "billing_ledger"
