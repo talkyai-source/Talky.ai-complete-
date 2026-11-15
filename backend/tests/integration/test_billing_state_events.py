@@ -109,6 +109,31 @@ async def test_the_account_owner_is_addressed_on_payment_emails(state_db):
             await conn.execute("DELETE FROM user_profiles WHERE id=$1", owner)
 
 
+async def test_every_active_admin_is_addressed_on_payment_emails_oldest_first(state_db):
+    # Two or more admins used to mean nobody was emailed. Each admin now gets
+    # the notice; the oldest keeps the original delivery key.
+    fixture = state_db
+    receipt, subscription, session, invoice = await _paid(fixture)
+    older, newer, inactive = uuid4(), uuid4(), uuid4()
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        for user, age, active in ((older, "2 days", True), (newer, "1 day", True), (inactive, "3 days", False)):
+            await conn.execute(
+                """INSERT INTO user_profiles (id, email, name, tenant_id, role, is_active, is_verified, email_verified_at, created_at)
+                   VALUES ($1, $2, 'Synthetic admin', $3, 'tenant_admin', $4, TRUE, now(), now() - $5::interval)""",
+                user, f"{user}@example.invalid", fixture.tenants[0], active, age)
+    try:
+        result = await _apply(fixture, "invoice.paid", {"id": invoice["id"], "parent": invoice["parent"]})
+        notices = result["notifications"]
+        assert [n["recipient"] for n in notices] == [f"{older}@example.invalid", f"{newer}@example.invalid"]
+        assert [n["delivery_key"] for n in notices] == [
+            f"invoice:{invoice['id']}:paid",
+            f"invoice:{invoice['id']}:paid:{newer}",
+        ]
+    finally:
+        async with acquire_with_tenant(fixture.pool, None) as conn:
+            await conn.execute("DELETE FROM user_profiles WHERE id = ANY($1::uuid[])", [older, newer, inactive])
+
+
 async def test_paid_invoice_first_recovers_missing_session_then_checkout_never_resets_usage(state_db):
     fixture = state_db
     receipt, subscription, session, invoice = await _paid(fixture)
