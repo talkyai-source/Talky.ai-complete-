@@ -249,7 +249,7 @@ export default function TravelIndustryIndustryPage() {
     },
   ];
 
-  const integrationLogos = ["Google Calendar", "Outlook"];
+  const integrationLogos = ["Google Calendar"];
 
   const howItWorks = [
     {
@@ -298,7 +298,7 @@ export default function TravelIndustryIndustryPage() {
     {
       question: "Does it integrate with our hotel management software?",
       answer:
-        "Yes. The platform connects with leading property management systems, booking platforms, calendars, and CRM solutions to keep guest information synchronized.",
+        "Not directly in this release. It connects to HubSpot, Salesforce and Google Calendar. A direct connection to property management or booking systems is not available yet.",
     },
     {
       question: "How quickly can we get started?",
