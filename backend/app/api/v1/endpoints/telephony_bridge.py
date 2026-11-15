@@ -3496,6 +3496,200 @@ async def _apply_inbound_transfer_failure_action(attempt, result: dict) -> dict:
     return result
 
 
+_OUTBOUND_TRANSFER_E164_RE = re.compile(r"\+[1-9][0-9]{6,14}")
+
+
+async def _audit_outbound_transfer_event(
+    outbound: dict, event_type: str, new_state: Optional[str], data: dict
+) -> None:
+    """Append one ``call_events`` line for an outbound transfer; never raises.
+
+    ``leg_id`` is left NULL (the column is nullable): an outbound transfer has
+    no transfer-leg row of its own, and inventing one would be wrong.
+    """
+    try:
+        from app.core.container import get_container
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(
+            get_container().db_pool, outbound["tenant_id"], timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+        ) as conn:
+            await conn.execute(
+                """
+                INSERT INTO call_events (
+                    call_id, talklee_call_id, leg_id, event_type, source,
+                    event_data, new_state, created_at
+                ) VALUES ($1,$2,$3,$4,'outbound_transfer',$5::jsonb,$6,NOW())
+                """,
+                outbound["call_id"],
+                outbound.get("talklee_call_id"),
+                None,
+                event_type,
+                json.dumps(data),
+                new_state,
+            )
+    except Exception as exc:  # noqa: BLE001 - audit must never fail a live transfer
+        logger.warning(
+            "outbound_transfer_audit_failed call=%s event=%s err_type=%s",
+            str(outbound.get("call_id"))[:8],
+            event_type,
+            type(exc).__name__,
+        )
+
+
+async def _prepare_outbound_transfer(attempt, call_id: str, destination: str, mode: str, ring_seconds):
+    """Server-side policy for an outbound E.164 transfer on Asterisk.
+
+    Returns ``(refusal, outbound, adapter_kwargs)``. The call, tenant and
+    talklee ids come from the attempt that ``authorize_inbound_transfer``
+    already built from the locked ``calls`` row; every read here carries that
+    tenant id. The trunk comes only from this call's own outbound leg: no
+    default trunk.
+    """
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.campaign_brief import transfer_open_now
+    from app.domain.services.voice_pipeline.action_execution import (
+        offered_transfer_destinations,
+    )
+
+    def _refuse(error: str) -> dict:
+        return {
+            "status": "failed",
+            "call_id": call_id,
+            "destination": destination,
+            "mode": mode,
+            "error": error,
+            # Refused before anything is dialled: the caller is still with the agent.
+            "caller_media_retained": True,
+        }
+
+    outbound: Optional[dict] = None
+    brief: dict = {}
+    trunk = None
+    caller_id = None
+    attempt_tenant = getattr(attempt, "tenant_id", None)
+    attempt_call = getattr(attempt, "call_id", None)
+    try:
+        if attempt_tenant and attempt_call:
+            pool = get_container().db_pool
+            outbound = {
+                "tenant_id": str(attempt_tenant),
+                "call_id": str(attempt_call),
+                "talklee_call_id": getattr(attempt, "talklee_call_id", None),
+            }
+            async with acquire_with_tenant(
+                pool, outbound["tenant_id"], timeout=_OUTBOUND_BOUNDARY_DB_TIMEOUT_S
+            ) as conn:
+                call_row = await conn.fetchrow(
+                    "SELECT campaign_id FROM calls WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                    outbound["call_id"],
+                    outbound["tenant_id"],
+                )
+                if not call_row or call_row["campaign_id"] is None:
+                    raise LookupError("campaign_not_found")
+                outbound["campaign_id"] = str(call_row["campaign_id"])
+                campaign = await conn.fetchrow(
+                    "SELECT script_config FROM campaigns WHERE id = $1::uuid AND tenant_id = $2::uuid",
+                    outbound["campaign_id"],
+                    outbound["tenant_id"],
+                )
+                leg = await conn.fetchrow(
+                    "SELECT l.metadata, l.from_number FROM call_legs l "
+                    "JOIN calls c ON c.id = l.call_id "
+                    "WHERE l.call_id = $1::uuid AND c.tenant_id = $2::uuid "
+                    "AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' "
+                    "ORDER BY l.created_at LIMIT 1",
+                    outbound["call_id"],
+                    outbound["tenant_id"],
+                )
+            config = campaign["script_config"] if campaign else None
+            if isinstance(config, str):
+                config = json.loads(config)
+            candidate = config.get("campaign_brief") if isinstance(config, dict) else None
+            brief = candidate if isinstance(candidate, dict) else {}
+            if leg:
+                meta = leg["metadata"]
+                if isinstance(meta, str):
+                    meta = json.loads(meta)
+                trunk = str((meta or {}).get("endpoint") or "").strip() or None
+                own = str(leg["from_number"] or "").strip()
+                caller_id = own if _OUTBOUND_TRANSFER_E164_RE.fullmatch(own) else None
+    except Exception as exc:  # noqa: BLE001 - uncertain policy fails closed
+        logger.error(
+            "outbound_transfer_policy_unavailable call=%s err_type=%s",
+            call_id[:12],
+            type(exc).__name__,
+        )
+        brief, trunk, caller_id = {}, None, None
+
+    if outbound is None:
+        return _refuse("transfer_destination_not_allowed"), None, {}
+    summary = {
+        "mode": mode,
+        "destination_tail": destination[-4:],
+        "trunk_recorded": bool(trunk),
+        "ring_seconds": ring_seconds,
+    }
+    await _audit_outbound_transfer_event(outbound, "transfer_requested", "transferring", summary)
+    allowed = {
+        re.sub(r"[\s().-]", "", str(item.get("number") or ""))
+        for item in offered_transfer_destinations({"brief": brief, "direction": "outbound"})
+    }
+    refusal = None
+    if destination not in allowed:
+        refusal = _refuse("transfer_destination_not_allowed")
+    elif not transfer_open_now(brief):
+        refusal = _refuse("transfer_closed")
+    if refusal is not None:
+        await _audit_outbound_transfer_event(
+            outbound, "transfer_failed", None, {**summary, "error": refusal["error"]}
+        )
+        return refusal, outbound, {}
+    return (
+        None,
+        outbound,
+        {"trunk_endpoint": trunk, "ring_seconds": ring_seconds, "caller_id": caller_id},
+    )
+
+
+async def _settle_outbound_transfer(result: dict, outbound: dict, if_no_answer) -> dict:
+    """Report the no-answer outcome and audit it; never hangs up, never retries cleanup.
+
+    With ``end_call`` the agent itself tells the caller and ends the call; this
+    only records which action was asked for and whether the caller is provably
+    still connected (same rule as the inbound ``return_to_agent`` branch).
+    """
+    status = str(result.get("status") or "").strip().lower()
+    if status == "failed" and result.get("caller_media_retained"):
+        result["fallback_action"] = "end_call" if if_no_answer == "end_call" else "return_to_agent"
+        result["fallback_status"] = (
+            "applied"
+            if result.get("target_termination_confirmed") and result.get("caller_media_retained")
+            else "unconfirmed"
+        )
+    if status in {"completed", "transferred", "connected"}:
+        event, state = "transfer_connected", "transferred"
+    elif status in {"success", "ok"}:
+        event, state = "transfer_accepted", None
+    elif status in {"cleanup_pending", "unconfirmed", "termination_unconfirmed"}:
+        event, state = "transfer_cleanup_pending", None
+    else:
+        event, state = "transfer_failed", None
+    await _audit_outbound_transfer_event(
+        outbound,
+        event,
+        state,
+        {
+            "status": status,
+            "error": result.get("error") or result.get("reason"),
+            "fallback_action": result.get("fallback_action"),
+            "fallback_status": result.get("fallback_status"),
+        },
+    )
+    return result
+
+
 async def _execute_transfer(
     call_id: str,
     destination: str,
@@ -3505,6 +3699,8 @@ async def _execute_transfer(
     actor_id: Optional[str] = None,
     actor_role: Optional[str] = None,
     actor_type: Optional[str] = None,
+    ring_seconds: Optional[int] = None,
+    if_no_answer: Optional[str] = None,
 ):
     """Run one policy-authorized transfer and always settle its reservation."""
 
@@ -3554,7 +3750,19 @@ async def _execute_transfer(
                 provider_leg_id=provider_leg_id,
             )
         else:
-            result = await _adapter.transfer(call_id, destination, mode)
+            outbound = None
+            outbound_kwargs: dict = {}
+            if getattr(
+                _adapter, "name", ""
+            ) == "asterisk" and _OUTBOUND_TRANSFER_E164_RE.fullmatch(destination):
+                refusal, outbound, outbound_kwargs = await _prepare_outbound_transfer(
+                    attempt, call_id, destination, mode, ring_seconds
+                )
+                if refusal is not None:
+                    return refusal
+            result = await _adapter.transfer(call_id, destination, mode, **outbound_kwargs)
+            if outbound is not None:
+                result = await _settle_outbound_transfer(dict(result or {}), outbound, if_no_answer)
         result = dict(result or {})
         if getattr(attempt, "inbound", False):
             result.setdefault("attempt_id", getattr(attempt, "leg_id", None))
