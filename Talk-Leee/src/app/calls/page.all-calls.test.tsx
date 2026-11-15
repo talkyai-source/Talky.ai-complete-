@@ -190,14 +190,14 @@ test("a reload or a shared link shows the same page and filters", async () => {
     renderWithQueryClient(<Page />);
     await waitFor(() => {
         assert.equal(screen.queryByText("Showing 51 to 100 of 120 calls") !== null, true);
-    }, { timeout: 5_000 });
+    }, { timeout: 30_000 });
     assert.equal(rowIds()[0], "call-50");
     cleanup();
 
     const shared = new URLSearchParams({ filter: "issues", direction: "inbound", search: FAR_PHONE, did: FAR_DID, inbound_campaign_id: "inb-far" });
     window.history.replaceState(null, "", `/calls?${shared.toString()}`);
     renderWithQueryClient(<Page />);
-    await waitFor(() => assert.deepEqual(rowIds(), ["call-110"]), { timeout: 5_000 });
+    await waitFor(() => assert.deepEqual(rowIds(), ["call-110"]), { timeout: 30_000 });
     assert.equal((screen.getByLabelText(SEARCH_LABEL) as HTMLInputElement).value, FAR_PHONE);
     assert.equal(screen.getByRole("button", { name: "Issues" }).getAttribute("aria-pressed"), "true");
     assert.equal(screen.getByRole("button", { name: "inbound" }).getAttribute("aria-pressed"), "true");

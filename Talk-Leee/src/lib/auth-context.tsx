@@ -68,6 +68,8 @@ interface AuthContextType {
     logout: () => Promise<{ serverConfirmed: boolean; identityCurrent: boolean }>;
     setToken: (token: string) => void;
     refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
+    /** The last profile read that failed; cleared by a read that succeeds. */
+    profileReadError?: unknown;
     applyLoginResult: (res: {
         user_id: string;
         tenant_id?: string;
@@ -104,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, []);
     const [loading, setLoading] = useState(true);
     const [notificationSyncAvailable, setNotificationSyncAvailable] = useState(false);
+    const [profileReadError, setProfileReadError] = useState<unknown>(undefined);
     const identityChannel = useRef<BroadcastChannel | null>(null);
     const broadcastIdentityChange = useCallback((kind: "changed" | "logout") => {
         if (!publishIdentityChange(kind, identityChannel.current)) {
@@ -352,8 +355,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (!current()) return;
             try {
                 const me = await api.getMe();
-                if (current()) setUser(me);
-            } catch {
+                if (current()) { setUser(me); setProfileReadError(undefined); }
+            } catch (err) {
                 if (!current()) return;
                 if (attempt === 0 && isWithinFreshLoginGrace()) {
                     if (process.env.NODE_ENV !== "production") {
@@ -373,6 +376,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     return;
                 }
                 // The canonical check failed; leave this provider anonymous.
+                setProfileReadError(err);
                 setUser(null);
             } finally {
                 if (current()) setLoading(false);
@@ -536,7 +540,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!silent) setLoading(true);
         try {
             const me = await api.getMe();
-            if (current()) setUser(me);
+            if (current()) { setUser(me); setProfileReadError(undefined); }
         } catch (err) {
             if (!current()) return;
             if (isWithinFreshLoginGrace()) {
@@ -552,6 +556,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // another chance to refresh.
             const isAuthFailure = isApiClientError(err) && err.code === "unauthorized";
             if (!isAuthFailure) {
+                setProfileReadError(err);
                 if (process.env.NODE_ENV !== "production") {
                     console.debug(
                         "[auth] refreshUser non-auth failure — preserving state",
@@ -657,8 +662,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [loading, user]);
 
     const value = useMemo(
-        () => ({ user, loading, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult }),
-        [loading, user, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult],
+        () => ({ user, loading, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult, profileReadError }),
+        [loading, user, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult, profileReadError],
     );
 
     return (

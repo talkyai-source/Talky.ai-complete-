@@ -10,7 +10,7 @@ import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { checkCampaignList, checkContactsPage } from "@/lib/contacts-response";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
@@ -261,6 +261,7 @@ export default function ContactsPage() {
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [contactsLoading, setContactsLoading] = useState(false);
     const [contactsError, setContactsError] = useState("");
+    const [contactsErrorRequestId, setContactsErrorRequestId] = useState<string | undefined>(undefined);
     const [search, setSearch] = useState("");
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
@@ -385,6 +386,7 @@ export default function ContactsPage() {
         } catch (err) {
             if (superseded()) return;
             setContactsError(failedReadMessage(err, "Failed to load contacts"));
+            setContactsErrorRequestId(failedReadRequestId(err));
         } finally {
             if (!superseded()) {
                 setContactsLoading(false);
@@ -1240,7 +1242,7 @@ export default function ContactsPage() {
                 </div>
             ) : contactsError && !campaignHasContacts ? (
                 <div className="max-w-5xl">
-                    <ErrorState message={contactsError} onRetry={loadContacts} />
+                    <ErrorState message={contactsError} requestId={contactsErrorRequestId} onRetry={loadContacts} />
                 </div>
             ) : campaignHasContacts ? (
                 // ─────────────── Contacts HOME ───────────────
@@ -1351,7 +1353,7 @@ export default function ContactsPage() {
                         {contactEditor}
 
                         {contactsError ? (
-                            <ErrorState message={contactsError} onRetry={loadContacts} />
+                            <ErrorState message={contactsError} requestId={contactsErrorRequestId} onRetry={loadContacts} />
                         ) : contactsLoading ? (
                             <LoadingState title="Loading contacts…" />
                         ) : contacts.length === 0 ? (

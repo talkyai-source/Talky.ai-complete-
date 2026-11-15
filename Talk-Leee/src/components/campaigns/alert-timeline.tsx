@@ -15,7 +15,7 @@ import {
 import { useAckAlert, useAlerts, useResolveAlert } from "@/lib/alerts-api";
 import { cn } from "@/lib/utils";
 
-type AlertTab = "Impact Analysis" | "Root Cause" | "Timeline Visualization" | "Recommended Actions" | "Related Incidents";
+type AlertTab = "Impact Analysis" | "Root Cause" | "Timeline Visualization" | "Recommended Actions";
 
 // Rules have no server persistence/evaluator; do not offer a local-only action.
 const ALERT_RULES_AVAILABLE = false;
@@ -343,7 +343,7 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                 {details ? (
                     <div className="space-y-4">
                         <div className="flex flex-wrap items-center gap-2">
-                            {(["Impact Analysis", "Root Cause", "Timeline Visualization", "Recommended Actions", "Related Incidents"] as AlertTab[]).map((t) => (
+                            {(["Impact Analysis", "Root Cause", "Timeline Visualization", "Recommended Actions"] as AlertTab[]).map((t) => (
                                 <Button
                                     key={t}
                                     type="button"
@@ -360,7 +360,6 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                             {tab === "Root Cause" ? <RootCausePanel alert={details} /> : null}
                             {tab === "Timeline Visualization" ? <TimelinePanel alert={details} /> : null}
                             {tab === "Recommended Actions" ? <RecommendedPanel alert={details} /> : null}
-                            {tab === "Related Incidents" ? <RelatedPanel alert={details} /> : null}
                         </div>
                     </div>
                 ) : null}
@@ -477,9 +476,6 @@ function RootCausePanel({ alert }: { alert: AlertItem }) {
     return (
         <div className="space-y-3">
             <div className="text-sm font-semibold text-foreground">Root Cause</div>
-            <div className="text-sm text-muted-foreground">
-                Prototype analysis: likely upstream dependency behavior, transient network conditions, or campaign pacing configuration.
-            </div>
             <div className="rounded-xl border border-border bg-muted/30 p-3">
                 <div className="text-xs font-semibold text-muted-foreground">Metadata</div>
                 <div className="mt-2 space-y-2">
@@ -502,7 +498,6 @@ function RootCausePanel({ alert }: { alert: AlertItem }) {
 function TimelinePanel({ alert }: { alert: AlertItem }) {
     const events = [
         { t: alert.createdAt, label: "Detected" },
-        { t: new Date(new Date(alert.createdAt).getTime() + 1000 * 60 * 6).toISOString(), label: "Investigating" },
         { t: alert.updatedAt, label: "Latest update" },
     ];
     return (
@@ -528,7 +523,7 @@ function RecommendedPanel({ alert }: { alert: AlertItem }) {
         "Acknowledge the alert and assign an owner.",
         "Inspect network/API error codes and recent deployment changes.",
         "Apply targeted retries or lower concurrency temporarily.",
-        "Create a rule to auto-escalate if conditions persist.",
+        ...(ALERT_RULES_AVAILABLE ? ["Create a rule to auto-escalate if conditions persist."] : []),
     ];
     return (
         <div className="space-y-3">
@@ -547,16 +542,6 @@ function RecommendedPanel({ alert }: { alert: AlertItem }) {
     );
 }
 
-function RelatedPanel({ alert }: { alert: AlertItem }) {
-    return (
-        <div className="space-y-3">
-            <div className="text-sm font-semibold text-foreground">Related Incidents</div>
-            <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm text-muted-foreground">
-                Prototype view: no related incidents linked for {alert.id}.
-            </div>
-        </div>
-    );
-}
 
 function RuleBuilder({ onDone }: { onDone: () => void }) {
     const [name, setName] = useState("Auto-escalate carrier errors");

@@ -394,7 +394,8 @@ function CallRow({
                             </TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
-                    <TooltipProvider delayDuration={250}>
+                    {/* FX5: offered only for a call that carries the field. */}
+                    {bestTimeToCall ? <TooltipProvider delayDuration={250}>
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <button
@@ -411,7 +412,7 @@ function CallRow({
                                 Best time to call
                             </TooltipContent>
                         </Tooltip>
-                    </TooltipProvider>
+                    </TooltipProvider> : null}
                 </div>
                 <div className="flex items-center justify-center gap-1">
                     <button
@@ -512,7 +513,7 @@ function CallRow({
 
             {/* Desktop only: the button that opens this lives in the grid row, which is hidden below 768px. */}
             <AnimatePresence initial={false}>
-                {bestTimeOpen && (
+                {bestTimeOpen && bestTimeToCall && (
                     <motion.div
                         key="best-time"
                         initial={{ opacity: 0, height: 0 }}

@@ -430,6 +430,7 @@ function AIOptionsEditor({ scope }: { scope: string }) {
     // Falls back to a small hardcoded catalog until the backend ships
     // `providers.realtime` (see getRealtimeCatalog above).
     const realtimeCatalog = providers?.realtime;
+    const realtimeUnavailable = providers?.realtime?.available === false;
     const pipelineMode = config?.pipeline_mode ?? "cascaded";
 
     function setPipelineMode(mode: "cascaded" | "realtime") {
@@ -529,10 +530,15 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                                 onChange={(v) => setPipelineMode(v as "cascaded" | "realtime")}
                                 options={[
                                     { value: "cascaded", label: "Standard Pipeline" },
-                                    { value: "realtime", label: "Realtime (speech-to-speech)" },
+                                    // FX5: the server said Realtime is unavailable, so it is shown the way an
+                                    // unavailable transcription engine is: disabled, with the server's reason.
+                                    realtimeUnavailable
+                                        ? { value: "realtime", label: "Realtime (speech-to-speech) (unavailable)", disabled: true, describedBy: "pipeline-realtime-unavailable" }
+                                        : { value: "realtime", label: "Realtime (speech-to-speech)" },
                                 ]}
                             />
                         </div>
+                        {realtimeUnavailable && <p id="pipeline-realtime-unavailable" className="mt-3 text-xs text-muted-foreground">Realtime (speech-to-speech): {providers?.realtime?.unavailable_reason || "OpenAI is not configured"}</p>}
                     </Card>
 
                     {/* Banners */}

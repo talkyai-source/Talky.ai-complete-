@@ -27,7 +27,6 @@ export default function FinancialServicesIndustryPage() {
   const bodyClassName =
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
-  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -234,11 +233,9 @@ export default function FinancialServicesIndustryPage() {
 
   const integrationPills = [
     "Salesforce",
-    "Microsoft Dynamics",
     "HubSpot",
     "Google Calendar",
     "Outlook",
-    "Zapier",
   ];
 
   const howItWorks = [
@@ -261,55 +258,6 @@ export default function FinancialServicesIndustryPage() {
       title: "Keep Customers Informed",
       description:
         "Follow-up messages, appointment reminders, and service updates are delivered automatically, keeping customers informed without additional manual effort.",
-    },
-  ];
-
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      description: "Perfect for small financial businesses exploring AI customer support.",
-      features: [
-        "One Business Workspace",
-        "AI Banking Customer Support",
-        "AI Voice Agent",
-        "Customer Call Handling",
-        "Email Support",
-      ],
-      cta: "Get Started",
-      href: "/auth/register",
-      primary: true,
-    },
-    {
-      name: "Growth",
-      price: "Custom Pricing",
-      description: "Built for growing financial institutions and fintech companies.",
-      features: [
-        "Multiple Business Workspaces",
-        "AI Call Automation for Finance",
-        "Workflow Automation",
-        "CRM Integrations",
-        "Priority Support",
-      ],
-      cta: "Book a Demo",
-      href: "/book-a-demo",
-      primary: false,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      description:
-        "Designed for banks, enterprise financial institutions, and high-volume customer service teams.",
-      features: [
-        "Configured Calling Limits",
-        "Advanced Workflow Automation",
-        "Enterprise Integrations",
-        "Dedicated Success Manager",
-        "Premium Support",
-      ],
-      cta: "Talk to an Expert",
-      href: "/book-a-demo",
-      primary: false,
     },
   ];
 
@@ -559,50 +507,6 @@ export default function FinancialServicesIndustryPage() {
               <div key={step.title} className={accentCardClassName} style={accentCardStyle}>
                 <h4 className={cardTitleClassName}>{step.title}</h4>
                 <p className={cardBodyClassName}>{step.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <p className={eyebrowClassName}>Flexible Plans</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Pricing for Every Financial Business</h2>
-          <p className={bodyClassName}>
-            From fintech startups to enterprise financial institutions, every plan is built to automate customer service
-            and scale with your business.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div
-                key={plan.name}
-                className={`${accentCardClassName} flex flex-col`}
-                style={accentCardStyle}
-              >
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.description}</p>
-                <ul className={listClassName}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-auto pt-8 flex justify-center">
-                  {plan.primary ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.href}>
-                        {plan.cta}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.href}>
-                        {plan.cta}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
               </div>
             ))}
           </div>

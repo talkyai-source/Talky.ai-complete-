@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -380,7 +380,7 @@ export function TelephonyProvidersSection() {
     }
 
     if (query.error) {
-        return <ErrorState message="Failed to load telephony settings" onRetry={() => void query.refetch()} />;
+        return <ErrorState message="Failed to load telephony settings" requestId={failedReadRequestId(query.error)} onRetry={() => void query.refetch()} />;
     }
 
     const data = query.data ?? { active: "none" as ActiveProvider, providers: [], availability: {} };

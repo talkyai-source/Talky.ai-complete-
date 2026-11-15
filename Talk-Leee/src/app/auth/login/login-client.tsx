@@ -596,6 +596,8 @@ export default function LoginClientPage() {
                                                     disabled={loading}
                                                     autoComplete="current-password"
                                                     autoFocus
+                                                    aria-invalid={error ? true : undefined}
+                                                    aria-describedby={error ? errorId : undefined}
                                                 />
                                                 {/* Password visibility toggle */}
                                                 <button

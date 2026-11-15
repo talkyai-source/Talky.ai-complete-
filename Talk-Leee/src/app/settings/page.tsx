@@ -4,7 +4,7 @@ import { remainingMinutesLabel } from "@/lib/minutes-allowance";
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -51,7 +51,7 @@ export default function SettingsPage() {
     const token = useAccessToken() ?? "";
 
     // Real profile, loaded from /auth/me via AuthContext.
-    const { user, loading: profileLoading, refreshUser } = useAuth();
+    const { user, loading: profileLoading, refreshUser, profileReadError } = useAuth();
     const [profileName, setProfileName] = useState("");
     const [profileBusiness, setProfileBusiness] = useState("");
     const [savingProfile, setSavingProfile] = useState(false);
@@ -278,7 +278,7 @@ export default function SettingsPage() {
                                         <LoadingState title="Loading profile…" />
                                     ) : !user ? (
                                         // The profile read has finished without a profile: a failed read.
-                                        <ErrorState onRetry={() => refreshUser()} />
+                                        <ErrorState requestId={failedReadRequestId(profileReadError)} onRetry={() => refreshUser()} />
                                     ) : (
                                         <div className="space-y-4">
                                             <div className="space-y-2">

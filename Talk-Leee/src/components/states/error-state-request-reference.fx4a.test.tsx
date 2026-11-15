@@ -42,13 +42,8 @@ afterEach(() => { cleanup(); mock.restoreAll(); clients.splice(0).forEach((clien
 
 // ───────── guard over the source ─────────
 
-// Not edited in FX4a: the other developer's open branches change these files.
-const HELD_FOR_BRANCHES = new Set([
-    "app/contacts/page.tsx",
-    "app/settings/page.tsx",
-    "components/settings/recording-policy-section.tsx",
-    "components/settings/telephony-providers-section.tsx",
-]);
+// Held in FX4a for the other developer's branches; covered since FX4c.
+const HELD_FOR_BRANCHES = new Set<string>([]);
 // To be hidden later.
 const HIDDEN_LATER = new Set(["app/meetings/page.tsx", "app/reminders/page.tsx"]);
 // Uses with no failed request behind them: a refused permission that was read

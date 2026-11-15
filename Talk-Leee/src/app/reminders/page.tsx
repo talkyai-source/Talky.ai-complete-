@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { notFound } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -602,6 +603,8 @@ function RemindersContent() {
 }
 
 export default function RemindersPage() {
+    // FX5: the server does not serve this page's feature; the address answers with the not-found page.
+    notFound();
     return (
         <DashboardLayout title="Reminders" description="Reminders grouped by meeting/contact with lifecycle status.">
             <RouteGuard title="Reminders" description="Reminders grouped by meeting/contact with lifecycle status." requiredConnectors={["calendar", "email"]}>

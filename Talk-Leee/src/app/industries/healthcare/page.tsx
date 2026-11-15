@@ -209,46 +209,6 @@ export default function HealthcareIndustryPage() {
     },
   ];
 
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      blurb: "For solo practices testing the waters.",
-      features: ["Up to 1 phone line", "Call intake settings", "Appointment booking", "Email support"],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-    },
-    {
-      name: "Practice",
-      price: "patients / per month",
-      blurb: "For clinics and multi-provider offices.",
-      features: [
-        "Phone configuration review",
-        "Administrative request intake",
-        "Billing & insurance Q&A",
-        "Priority technical support",
-      ],
-      ctaLabel: "Book a Consultation",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      blurb: "For hospital networks and large groups.",
-      features: [
-        "Configured calling limits",
-        "Patient AI workflows",
-        "CRM & calendar integration",
-        "Dedicated success manager",
-      ],
-      ctaLabel: "Talk to an Expert",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
-  ];
-
   const faqs = [
     {
       question: "What is Talk-Lee AI, exactly?",
@@ -499,45 +459,6 @@ export default function HealthcareIndustryPage() {
                 Discuss Your Workflow
               </Link>
             </Button>
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Plans for Every Healthcare Practice</h2>
-          <p className={bodyClassName}>Designed for businesses that need secure, scalable, intelligent communication</p>
-          <p className={bodyClassName}>
-            Review plan limits and data requirements before selecting a workflow for your practice.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  {plan.ctaVariant === "primary" ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
         </section>
 

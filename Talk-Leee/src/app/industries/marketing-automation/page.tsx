@@ -28,7 +28,6 @@ export default function MarketingAutomationIndustryPage() {
   const bodyClassName =
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
-  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -188,54 +187,6 @@ export default function MarketingAutomationIndustryPage() {
       title: "Follow Up Automatically",
       description:
         "Automated follow-ups, reminders, and conversation workflows keep every lead engaged, helping your agency maintain momentum and improve conversion rates across every client campaign.",
-    },
-  ];
-
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      description: "Perfect for agencies exploring AI automation.",
-      features: [
-        "1 Client Workspace",
-        "AI Voice Agent",
-        "Lead Qualification",
-        "Appointment Booking",
-        "Email Support",
-      ],
-      cta: "Get Started",
-      href: "/auth/register",
-      primary: true,
-    },
-    {
-      name: "Growth",
-      price: "Custom Pricing",
-      description: "Built for agencies managing multiple client accounts.",
-      features: [
-        "Multiple Client Workspaces",
-        "AI Outbound Calling",
-        "White-Label Branding",
-        "CRM Integrations",
-        "Priority Support",
-      ],
-      cta: "Book a Demo",
-      href: "/book-a-demo",
-      primary: false,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      description: "Designed for high-volume agencies and enterprise teams.",
-      features: [
-        "Client Account Configuration",
-        "Advanced AI Workflows",
-        "Custom Integrations",
-        "Dedicated Success Manager",
-        "Enterprise Support",
-      ],
-      cta: "Talk to an Expert",
-      href: "/book-a-demo",
-      primary: false,
     },
   ];
 
@@ -461,40 +412,6 @@ export default function MarketingAutomationIndustryPage() {
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{item.title}</h3>
                 <p className={cardBodyClassName}>{item.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Plans for Every Marketing Agency</h2>
-          <p className={bodyClassName}>Choose the plan that fits your agency&rsquo;s size and client portfolio.</p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex h-full flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-2 text-xl md:text-2xl font-semibold text-primary dark:text-foreground">{plan.price}</p>
-                <p className={cardBodyClassName}>{plan.description}</p>
-                <ul className={listClassName}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-auto pt-6 flex justify-center">
-                  {plan.primary ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.href}>
-                        {plan.cta}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.href}>
-                        {plan.cta}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
               </div>
             ))}
           </div>

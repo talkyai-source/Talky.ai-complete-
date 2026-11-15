@@ -213,57 +213,6 @@ export default function EducationIndustryPage() {
     },
   ];
 
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      blurb: "For small schools and institutes exploring AI.",
-      features: [
-        "One phone line",
-        "AI student support",
-        "Call answering & routing",
-        "Admission inquiry handling",
-        "Email support",
-      ],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-      ctaIcon: false,
-    },
-    {
-      name: "Growth",
-      price: "Custom Pricing",
-      blurb: "For growing education providers with higher inquiry volumes.",
-      features: [
-        "Multiple phone lines",
-        "Admission follow-up automation",
-        "Appointment scheduling",
-        "Advanced student workflows",
-        "Priority support",
-      ],
-      ctaLabel: "Book a Demo",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-      ctaIcon: true,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      blurb: "For universities, education groups, and large institutions.",
-      features: [
-        "Configured calling limits",
-        "Advanced education workflows",
-        "CRM & calendar integrations",
-        "Custom AI automation",
-        "Dedicated success manager",
-      ],
-      ctaLabel: "Talk to an Expert",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-      ctaIcon: false,
-    },
-  ];
-
   const faqs = [
     {
       question: "What is AI for education?",
@@ -488,41 +437,6 @@ export default function EducationIndustryPage() {
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{item.title}</h3>
                 <p className={cardBodyClassName}>{item.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Plans for Every Institution</h2>
-          <p className={bodyClassName}>
-            Designed to support schools, institutes, colleges, universities, and growing education businesses.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  <Button
-                    asChild
-                    size="lg"
-                    className={plan.ctaVariant === "primary" ? primaryButtonClassName : outlineButtonClassName}
-                  >
-                    <Link href={plan.ctaHref}>
-                      {plan.ctaIcon ? <Video aria-hidden /> : null}
-                      {plan.ctaLabel}
-                    </Link>
-                  </Button>
-                </div>
               </div>
             ))}
           </div>

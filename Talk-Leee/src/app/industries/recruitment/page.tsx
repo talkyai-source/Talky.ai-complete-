@@ -183,7 +183,7 @@ export default function RecruitmentIndustryPage() {
     },
   ];
 
-  const integrations = ["Workday", "Greenhouse", "Lever", "BambooHR", "Outlook", "Google Calendar", "Zapier"];
+  const integrations = ["Outlook", "Google Calendar"];
 
   const howItWorks = [
     {
@@ -221,54 +221,6 @@ export default function RecruitmentIndustryPage() {
           informed throughout the recruitment process.
         </>
       ),
-    },
-  ];
-
-  const plans = [
-    {
-      name: "Starter",
-      price: "See pricing",
-      blurb: "Perfect for small businesses and growing hiring teams.",
-      features: [
-        "1 Active Hiring Workspace",
-        "AI Candidate Screening",
-        "AI Interview Scheduling",
-        "Candidate Communication",
-        "Email Support",
-      ],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-    },
-    {
-      name: "Growth",
-      price: "Custom Pricing",
-      blurb: "Built for recruitment agencies and expanding HR teams.",
-      features: [
-        "Multiple Hiring Workspaces",
-        "AI Recruitment Call Handling",
-        "Workflow Automation",
-        "ATS Integrations",
-        "Priority Support",
-      ],
-      ctaLabel: "Book a Demo",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
-    {
-      name: "Enterprise",
-      price: "Let’s Talk",
-      blurb: "Designed for enterprise hiring and large-scale recruitment operations.",
-      features: [
-        "Hiring Workspace Configuration",
-        "Advanced AI Recruitment Automation",
-        "Enterprise Integrations",
-        "Dedicated Customer Success Manager",
-        "Premium Support",
-      ],
-      ctaLabel: "Talk to an Expert",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
     },
   ];
 
@@ -492,45 +444,6 @@ export default function RecruitmentIndustryPage() {
               <div key={step.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{step.title}</h3>
                 <p className={cardBodyClassName}>{step.description}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14">
-          <p className={eyebrowClassName}>Flexible Plans</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Pricing for Every Hiring Team</h2>
-          <p className={bodyClassName}>
-            Start small or scale confidently with recruitment automation designed for businesses of every size.
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{plan.name}</h3>
-                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
-                  {plan.price}
-                </p>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  {plan.ctaVariant === "primary" ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
               </div>
             ))}
           </div>

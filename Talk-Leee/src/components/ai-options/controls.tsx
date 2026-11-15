@@ -120,7 +120,7 @@ export function RadialKnob({
 export function Segmented<T extends string>({
     options, value, onChange, color = ACCENT, size = "md",
 }: {
-    options: { value: T; label: React.ReactNode }[];
+    options: { value: T; label: React.ReactNode; disabled?: boolean; describedBy?: string }[];
     value: T; onChange: (v: T) => void; color?: string; size?: "sm" | "md";
 }) {
     const gid = useId();
@@ -132,7 +132,8 @@ export function Segmented<T extends string>({
                 return (
                     <button
                         key={opt.value} type="button" aria-pressed={active} onClick={() => onChange(opt.value)}
-                        className={`relative rounded-lg font-medium transition-colors ${pad} ${active ? "text-white" : "text-muted-foreground hover:text-foreground"}`}
+                        disabled={opt.disabled} aria-describedby={opt.describedBy}
+                        className={`relative rounded-lg font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${pad} ${active ? "text-white" : opt.disabled ? "text-muted-foreground" : "text-muted-foreground hover:text-foreground"}`}
                     >
                         {active && (
                             <motion.span
