@@ -8176,10 +8176,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "34cb0b7c014013dc350a2c715ebbcdad390cf3fbd93b43ec5ed4a2201d542238",
+      "id": "f8068bc60cfc47896f7cd33853fb41b447ae435b73394c84bf19aec22bd18ba8",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4129,
+      "line": 4146,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8723,10 +8723,10 @@
       "category": "platform_catalog"
     },
     {
-      "id": "8dbb8fcc3d274e3c3ab429d1be156ac2959c97db44e97c446624983398bf82fe",
+      "id": "706cd81e733c9e99688025a70e78de22407ccc7003fd5d2bb6a1841772c26df1",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5030,
+      "line": 5064,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8941,10 +8941,10 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "2128115a41434c569043d3c5186066fbe7b771e839df055caadd04832c3ca9e2",
+      "id": "63c717936c2bac2c2d927501791ebe7ea3ddd8b8a12e237d28d5e717d7657a65",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3120,
+      "line": 3154,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -10896,10 +10896,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "c95488704f86e92a894f422d20ed6d53e8631e56a60851bbecf93c6bb04c444e",
+      "id": "9d40e75b80d4ab55989f89f5563d1a249adcee4de8afa722ae229eb694de8c04",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5222,
+      "line": 5237,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -11791,10 +11791,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "28ae9e3c56405cd8bbb569b9d68d2e37069598f70798342bab476821452e6281",
+      "id": "f8362e1ee724ffcd37757b1d1cde741795d0f436e2f2c90d412d67471d909bc7",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3484,
+      "line": 3504,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -12148,10 +12148,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54\u201359. Platform account/recovery object; no tenant column or tenant business data."
     },
     {
-      "id": "8851d24ac85a1eb3d9a8d59306ecb1d175aff0b61ed26c3cd19de5dcb3ce5269",
+      "id": "80142348d596633124d871156922b3151bafc01ea2330ec62b1eef50c698db64",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 5934,
+      "line": 5948,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
