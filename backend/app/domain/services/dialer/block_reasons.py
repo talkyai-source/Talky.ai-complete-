@@ -66,6 +66,7 @@ class BlockCode(str, Enum):
     BATCH_CAPACITY = "batch_capacity"
     CALL_GAP = "call_gap"
     TENANT_GAP = "tenant_gap"
+    PLATFORM_GAP = "platform_gap"
     DESTINATION_BUSY = "destination_busy"
 
     # Safety
@@ -110,6 +111,7 @@ SELF_CLEARING_CODES: frozenset[BlockCode] = frozenset({
     BlockCode.BATCH_CAPACITY,
     BlockCode.CALL_GAP,
     BlockCode.TENANT_GAP,
+    BlockCode.PLATFORM_GAP,
     BlockCode.CALL_GUARD_THROTTLED,
     BlockCode.CALL_GUARD_QUEUED,
     BlockCode.DESTINATION_BUSY,
@@ -614,6 +616,14 @@ def classify(
             BlockCode.TENANT_GAP,
             "Another campaign on this account just placed a call; campaigns take "
             "turns so only one call originates at a time — no action needed.",
+            severity="info", stage="pacing",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
+        )
+    if "platform_gap" in low:
+        return BlockReason(
+            BlockCode.PLATFORM_GAP,
+            "Waiting a few seconds so calls do not all start at once.",
             severity="info", stage="pacing",
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,

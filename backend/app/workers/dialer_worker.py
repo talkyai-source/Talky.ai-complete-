@@ -395,6 +395,7 @@ class DialerWorker:
         self._last_bridge_body = None
         call_intent: Optional[DialerCallIntent] = None
         tenant_pacing_claimed = False
+        platform_pacing_claimed = False
         # Set only when the opt-in TESTING schedule override let this job past
         # the calling-window gate; read by `_create_call_record` so the call
         # is stamped as placed-under-override and stays auditable afterwards.
@@ -885,7 +886,9 @@ class DialerWorker:
             # (measured: 12-23s replies, audio gaps). Atomic Redis claim —
             # whoever wins dials; everyone else waits out the window.
             from app.domain.services.dialer.global_pacing import (
+                claim_platform_dial_slot,
                 claim_tenant_dial_slot,
+                release_platform_dial_slot,
                 release_tenant_dial_slot,
             )
 
@@ -908,6 +911,31 @@ class DialerWorker:
                 )
                 return
             tenant_pacing_claimed = True
+
+            # 4.92. PLATFORM-wide pacing: the voice process is shared by every
+            # tenant, so the per-tenant gap above still lets three tenants
+            # start three calls in the same second. If the platform slot is
+            # taken, give the tenant slot back (this call did not start, so it
+            # must not burn the tenant's window) and wait out the short gap.
+            _platform_wait = await claim_platform_dial_slot(self._redis)
+            if _platform_wait > 0:
+                logger.debug(
+                    "platform_gap: platform dialed recently — deferring job %s by %ds",
+                    job.job_id,
+                    _platform_wait,
+                )
+                await release_tenant_dial_slot(self._redis, job.tenant_id)
+                await self._publish_block(
+                    job,
+                    "platform_gap",
+                    rules=rules,
+                    retry_after_seconds=_platform_wait,
+                )
+                await self._redefer_before_intent_resolution(
+                    job, reason="platform_gap", delay_seconds=_platform_wait,
+                )
+                return
+            platform_pacing_claimed = True
 
             # 4.95. Run Call Guard validation. Moved here (2026-07-13) from
             # BEFORE the batch/call_gap/tenant_gap gates above:
@@ -934,6 +962,7 @@ class DialerWorker:
             if guard_decision != "allow":
                 logger.warning(f"Call guard decision for job {job.job_id}: {guard_decision}")
                 await release_tenant_dial_slot(self._redis, job.tenant_id)
+                await release_platform_dial_slot(self._redis)
 
                 if guard_decision == "metering_unavailable":
                     await self._publish_block(job, "metering_unavailable", rules=rules)
@@ -1043,6 +1072,7 @@ class DialerWorker:
                     reason = ("metering_unavailable" if provider_call_id == self._METERING_UNAVAILABLE
                               else "telephony_selection_unavailable")
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await release_platform_dial_slot(self._redis)
                     await self._publish_block(job, reason, rules=rules)
                     await self._redefer_before_intent_resolution(job, reason=reason)
                     return
@@ -1058,6 +1088,7 @@ class DialerWorker:
                             # fails the lead). Release the never-sent intent and
                             # wait for the line on the SAME attempt.
                             await release_tenant_dial_slot(self._redis, job.tenant_id)
+                            await release_platform_dial_slot(self._redis)
                             await self._defer_refused_line(job, call_intent, rules)
                             return
                         # Too old to keep holding: the classifier (which saw the
@@ -1071,6 +1102,7 @@ class DialerWorker:
                         job.job_id, job.attempt_number, defer_reason, defer_delay,
                     )
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await release_platform_dial_slot(self._redis)
                     block_reason, job_reason = self._bridge_defer_labels(defer_reason)
                     await self._publish_block(
                         job, block_reason, rules=rules, retry_after_seconds=defer_delay,
@@ -1107,6 +1139,7 @@ class DialerWorker:
                     # Nothing dialed — give the tenant slot back so the other
                     # campaign isn't paced against a failed attempt.
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                    await release_platform_dial_slot(self._redis)
                     return
 
                 if provider_call_id:
@@ -1260,6 +1293,7 @@ class DialerWorker:
                 job.job_id, job.attempt_number, job.campaign_id, exc.call_id,
             )
             await release_tenant_dial_slot(self._redis, job.tenant_id)
+            await release_platform_dial_slot(self._redis)
             await self._publish_block(
                 job, "destination_busy", rules=rules,
                 retry_after_seconds=self.DESTINATION_BUSY_REDEFER_SECONDS,
@@ -1327,11 +1361,14 @@ class DialerWorker:
             # so a failed originate doesn't burn the whole gap window.
             try:
                 from app.domain.services.dialer.global_pacing import (
+                    release_platform_dial_slot,
                     release_tenant_dial_slot,
                 )
 
                 if tenant_pacing_claimed:
                     await release_tenant_dial_slot(self._redis, job.tenant_id)
+                if platform_pacing_claimed:
+                    await release_platform_dial_slot(self._redis)
             except Exception:
                 pass
             self._jobs_failed += 1

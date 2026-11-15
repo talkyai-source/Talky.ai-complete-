@@ -306,6 +306,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Another campaign of this account just placed a call; campaigns take turns so only one call originates at a time — no action needed.",
         "info", "pacing",
     )),
+    ("platform_gap", IssueAdvice(
+        "Spacing out call starts",
+        "Calls start a few seconds apart so they do not all begin at once. This number dials automatically when its turn comes — no action needed.",
+        "info", "pacing",
+    )),
     ("destination_busy", IssueAdvice(
         "Number already on a call",
         "This number is on another call from this account (another campaign or attempt). It dials automatically as soon as that call ends — no action needed.",
