@@ -13,6 +13,7 @@ from html import escape
 
 from app.core import config
 from app.domain.services import email_service as account_mail
+from app.infrastructure.metrics import email_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -186,6 +187,7 @@ class NotificationService:
         """Send email via SMTP."""
         if not self.smtp_host or not self.smtp_user or not self.smtp_password:
             logger.warning("SMTP not fully configured")
+            await email_delivery.record_email_outcome("failed", "unconfigured")
             return {"status": "error", "reason": "smtp_not_configured"}
 
         try:
@@ -213,9 +215,11 @@ class NotificationService:
                 server.send_message(msg)
 
             logger.info(f"Email sent via SMTP to {to_email}")
+            await email_delivery.record_email_outcome("ok")
             return {"status": "success", "message_id": f"smtp_{int(datetime.now().timestamp())}"}
         except Exception as e:
             logger.error(f"SMTP send failed: {e}")
+            await email_delivery.record_send_failure(e)
             return {"status": "error", "reason": str(e)}
 
     async def _send_via_ses(
