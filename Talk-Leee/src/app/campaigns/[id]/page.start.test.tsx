@@ -130,10 +130,10 @@ function noticeText(): string | null {
     return screen.queryByTestId("campaign-control-notice")?.textContent ?? null;
 }
 
-test("the action reads Start for draft and stopped, Resume for paused, and is offered for exactly those", async () => {
+test("the action reads Start for draft, stopped and completed, Resume for paused, and is offered for exactly those", async () => {
     const expected: Array<[string, string | null]> = [
-        ["draft", "Start"], ["stopped", "Start"], ["paused", "Resume"],
-        ["running", null], ["completed", null], ["scheduled", null], ["cancelled", null],
+        ["draft", "Start"], ["stopped", "Start"], ["completed", "Start"], ["paused", "Resume"],
+        ["running", null], ["scheduled", null], ["cancelled", null],
     ];
     for (const [status, label] of expected) {
         wire(status);
@@ -145,6 +145,20 @@ test("the action reads Start for draft and stopped, Resume for paused, and is of
         cleanup();
         mock.restoreAll();
     }
+});
+
+test("a completed campaign offers Start: the dialog opens and the start request is sent", async () => {
+    const state = wire("completed");
+    await mount();
+    assert.equal(pill(), "Completed");
+    assert.equal(button("Pause") === null && button("Stop") === null && button("Resume") === null, true);
+    fireEvent.click(await readyButton("Start"));
+    const dialog = startDialog()!;
+    assert.equal(state.starts.length, 0, "opening the dialog starts nothing");
+    await waitFor(() => assert.equal((dialog.getByRole("button", { name: "Start campaign" }) as HTMLButtonElement).disabled, false), { timeout: SLOW });
+    fireEvent.click(dialog.getByRole("button", { name: "Start campaign" }));
+    await waitFor(() => assert.equal(state.starts.length, 1), { timeout: SLOW });
+    assert.equal(state.starts[0]!.id, CAMPAIGN_ID);
 });
 
 test("the status pill shows the shared label, never the raw value", async () => {

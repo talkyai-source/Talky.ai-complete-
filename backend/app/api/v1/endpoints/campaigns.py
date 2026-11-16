@@ -53,6 +53,7 @@ from app.api.v1.dependencies import (
 )
 from app.api.v1.schemas.campaigns import (
     ApplyTtsConfigRequest,
+    CallingRulesResponse,
     CampaignCreateRequest,
     CampaignPromptPreviewRequest,
     CampaignPromptPreviewResponse,
@@ -491,10 +492,55 @@ async def list_campaigns(
         query = query.neq("status", "deleted")
         query = query.order("created_at", desc=True)
         response = query.execute()
-        return {"campaigns": response.data}
+        rows = response.data
     except Exception as e:
         logger.error(f"Error listing campaigns: {e}")
         raise HTTPException(status_code=500, detail="Failed to list campaigns")
+
+    # D5-25: the same `progress` object GET /campaigns/{id} returns, for every
+    # row, from one grouped statement. Best-effort like the detail: a failed
+    # read leaves `progress` null and the rows themselves unchanged.
+    from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+    from app.domain.services.campaign_service import list_campaign_progress
+    try:
+        progress = await list_campaign_progress(
+            db_client.pool, str(current_user.tenant_id), rows, CAMPAIGN_LIVE_CALL_STATUSES)
+    except Exception as exc:
+        logger.warning("campaign_list_progress_unavailable error=%s", type(exc).__name__)
+        progress = {}
+    return {"campaigns": [
+        {**row, "progress": progress.get(str(row.get("id")))} for row in rows]}
+
+
+@router.get("/calling-rules", response_model=CallingRulesResponse,
+            dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
+async def get_calling_rules(
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_read_client),
+):
+    """The calling hours the server will enforce for a NEW campaign of this account (D5-29).
+
+    ``effective_schedule`` is exactly what GET /campaigns/{id} returns for a
+    campaign with no schedule of its own (same ``describe_schedule``): account
+    rules, else the platform default; ``ignore_schedule_allowed`` says whether
+    "call anytime" is available. ``legal_floor`` is the callee-local floor that
+    no setting widens. Declared before ``/{campaign_id}`` so the path is not
+    read as a campaign id.
+    """
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
+    from app.domain.services.campaign_service import describe_legal_floor
+    from app.domain.services.dialer.campaign_schedule import describe_schedule
+    tenant_id = str(current_user.tenant_id)
+    try:
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            account_rules = await conn.fetchval(
+                "SELECT calling_rules FROM tenants WHERE id = $1::uuid", tenant_id)
+    except Exception as exc:
+        logger.warning("calling_rules_unavailable error=%s", type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Calling rules are temporarily unavailable. Retry later.") from exc
+    return {"effective_schedule": describe_schedule(account_rules, None, {}),
+            "legal_floor": describe_legal_floor()}
 
 
 @router.post(
@@ -665,6 +711,18 @@ def _merge_calling_config_schedule(existing, schedule_cfg: dict) -> dict:
     return kept
 
 
+def _with_first_speaker(existing, first_speaker) -> dict:
+    """``calling_config`` with the first-speaker choice set (D3-13); every other key kept."""
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except ValueError:
+            existing = None
+    config = dict(existing) if isinstance(existing, dict) else {}
+    config["first_speaker"] = first_speaker
+    return config
+
+
 def _pinned_tts_provider(requested, ai_config, script_config, voice_id, *, tenant_id, campaign_ref):
     """TTS provider to store with a campaign's voice_id (aiopt-2).
 
@@ -741,6 +799,8 @@ async def create_campaign(
             "direction": campaign_data.direction,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
+        if campaign_data.first_speaker is not None:
+            _sched = _with_first_speaker(_sched, campaign_data.first_speaker)
         if _sched is not None:
             insert_payload["calling_config"] = _sched
 
@@ -855,7 +915,7 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
     failing the campaign page. The dialer stays the enforcement point.
     """
     from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
-    from app.domain.services.campaign_service import campaign_phase
+    from app.domain.services.campaign_service import campaign_progress
     from app.domain.services.dialer.campaign_schedule import describe_schedule
     try:
         async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
@@ -881,8 +941,7 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
         return None, None
     schedule = describe_schedule(account_rules, campaign.get("calling_config"),
                                  {row["timezone"]: row["contacts"] for row in zones})
-    return schedule, {"live_calls": live_calls, "jobs_awaiting_dispatch": awaiting,
-                      "phase": campaign_phase(campaign.get("status"), live_calls, awaiting)}
+    return schedule, campaign_progress(campaign.get("status"), live_calls, awaiting)
 
 
 @router.get("/{campaign_id}")
@@ -990,7 +1049,7 @@ async def update_campaign(
             "updated_at": version_time,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
-        if _sched is not None:
+        if _sched is not None or campaign_data.first_speaker is not None:
             # Re-read just before the write: build_campaign_voice_config can
             # await a provider check over the network, and a line pin assigned
             # meanwhile must not be overwritten with the earlier snapshot.
@@ -1000,9 +1059,13 @@ async def update_campaign(
             )
             if fresh.data:
                 existing_calling_config = fresh.data[0].get("calling_config")
-            update_payload["calling_config"] = _merge_calling_config_schedule(
-                existing_calling_config, _sched,
+            merged = (
+                _merge_calling_config_schedule(existing_calling_config, _sched)
+                if _sched is not None else existing_calling_config
             )
+            if campaign_data.first_speaker is not None:
+                merged = _with_first_speaker(merged, campaign_data.first_speaker)
+            update_payload["calling_config"] = merged
 
         updated_campaign = _update_owned_outbound_campaign(
             db_client,

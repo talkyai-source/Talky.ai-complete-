@@ -130,6 +130,11 @@ opentelemetry-instrumentation-redis>=0.45b0
 opentelemetry-exporter-otlp-proto-grpc>=1.24.0
 
 # --- Monitoring & Utilities ---
+# Error tracking (app/core/sentry_init.py). It was imported but listed nowhere,
+# so backend error tracking silently switched itself off. It still does
+# nothing until SENTRY_DSN is set. Pinned to the version the scrubber
+# (app/core/sentry_scrub.py) is tested against.
+sentry-sdk==2.75.0
 prometheus-client==0.19.0
 psutil>=5.9.0
 pytz==2025.2

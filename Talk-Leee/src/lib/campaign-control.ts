@@ -25,13 +25,13 @@ import {
 
 // ---------------------------------------------------------------- eligibility
 
-/** A campaign can be started from exactly these backend statuses. */
+/** A campaign can be started from exactly these backend statuses (the server treats completed like stopped). */
 export function canStartCampaign(status: string | null | undefined): boolean {
     const s = String(status ?? "").toLowerCase();
-    return s === "draft" || s === "paused" || s === "stopped";
+    return s === "draft" || s === "paused" || s === "stopped" || s === "completed";
 }
 
-/** "Resume" for a paused campaign, "Start" for a draft or stopped one. */
+/** "Resume" for a paused campaign, "Start" for a draft, stopped or completed one. */
 export function campaignStartLabel(status: string | null | undefined): "Start" | "Resume" {
     return String(status ?? "").toLowerCase() === "paused" ? "Resume" : "Start";
 }

@@ -56,8 +56,13 @@ def test_csv_and_paste_preflight_reports_the_missing_country_per_row():
     with pytest.raises(HTTPException) as refused:
         _preflight_phones([SimpleNamespace(phone_raw="07400 123456", source_row=2)], None)
     assert refused.value.status_code == 422
-    assert refused.value.detail == [{"row": 2, "field": "phone_number",
-                                     "message": phone_number_error("07400 123456", None)}]
+    assert refused.value.detail == [{
+        "row": 2, "field": "phone_number", "code": "phone_country_required",
+        "message": (
+            "This phone number has no country code. Add the country code "
+            "(for example +44) or choose a country for the import."
+        ),
+    }]
 
 
 async def test_dnc_writes_keep_the_us_fallback_that_matches_the_call_guard():

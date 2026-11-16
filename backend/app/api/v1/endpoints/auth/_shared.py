@@ -111,10 +111,10 @@ def create_jwt(
             session_id=session_id,
         )
     except Exception as exc:
-        logger.error("JWT creation failed: %s", exc)
+        logger.error("JWT creation failed (token signing is not configured): %s", exc)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Server authentication is not configured.",
+            detail="Sign-in is not available right now. Try again in a few minutes.",
         ) from exc
 
 

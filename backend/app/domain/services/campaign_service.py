@@ -111,6 +111,129 @@ def campaign_phase(
     return status
 
 
+def campaign_progress(
+    status: Optional[str], live_calls: Optional[int], awaiting_dispatch: Optional[int],
+) -> Dict[str, Any]:
+    """The ``progress`` object of GET /campaigns/{id} and of every GET /campaigns row (D5-25).
+
+    One builder for both, so the list and the detail can never disagree.
+    """
+    return {"live_calls": live_calls, "jobs_awaiting_dispatch": awaiting_dispatch,
+            "phase": campaign_phase(status, live_calls, awaiting_dispatch)}
+
+
+# Two statements for a whole page of campaigns (never one per campaign), each
+# grouped by campaign: the detail's two counts (live calls, jobs a Start has not
+# queued) for every id. calls: idx_calls_campaign_id / idx_calls_tenant_id;
+# dialer_jobs: idx_dialer_jobs_queue (tenant_id, status, ...) serves the
+# tenant+status prefix.
+_LIST_LIVE_CALLS_SQL = """
+    SELECT campaign_id, count(*) AS n FROM calls
+     WHERE tenant_id = $1::uuid AND campaign_id = ANY($2::uuid[]) AND status = ANY($3::text[])
+     GROUP BY campaign_id
+"""
+_LIST_AWAITING_JOBS_SQL = """
+    SELECT campaign_id, count(*) AS n FROM dialer_jobs
+     WHERE tenant_id = $1::uuid AND campaign_id = ANY($2::uuid[]) AND status = 'pending'
+     GROUP BY campaign_id
+"""
+
+
+async def list_campaign_progress(
+    pool, tenant_id: str, campaigns: Sequence[Dict[str, Any]], live_statuses: Sequence[str],
+) -> Dict[str, Dict[str, Any]]:
+    """``campaign_progress`` for every campaign of a list page, in two tenant-scoped statements.
+
+    ``live_statuses`` is the stop sweep's own call-status set (the endpoint passes
+    ``CAMPAIGN_LIVE_CALL_STATUSES``; a service does not import from the API layer).
+    Raises on a failed read; the caller decides what the list shows then.
+    """
+    ids = [str(row["id"]) for row in campaigns if row.get("id")]
+    if not ids:
+        return {}
+    async with acquire_with_tenant(pool, tenant_id) as conn:
+        live_rows = await conn.fetch(_LIST_LIVE_CALLS_SQL, tenant_id, ids, list(live_statuses))
+        awaiting_rows = await conn.fetch(_LIST_AWAITING_JOBS_SQL, tenant_id, ids)
+    live = {str(r["campaign_id"]): int(r["n"] or 0) for r in live_rows}
+    awaiting = {str(r["campaign_id"]): int(r["n"] or 0) for r in awaiting_rows}
+    return {
+        str(row["id"]): campaign_progress(
+            row.get("status"), live.get(str(row["id"]), 0), awaiting.get(str(row["id"]), 0))
+        for row in campaigns if row.get("id")
+    }
+
+
+# D5-26: nothing left means no job in the pipeline (this includes jobs deferred
+# for the calling window and scheduled retries), no live call, no contact still
+# pending/calling (new and permission-withheld contacts stay pending), and no
+# voice callback still waiting to be released: a due callback is an
+# assistant_actions row until the drain writes its dialer job. The status guard
+# makes it a compare-and-set, so a pause or stop that landed first is kept.
+_COMPLETE_IF_FINISHED_SQL = """
+    UPDATE campaigns SET status = 'completed', completed_at = NOW(), updated_at = NOW()
+     WHERE id = $1::uuid AND tenant_id = $2::uuid AND status = 'running' AND direction = 'outbound'
+       AND NOT EXISTS (SELECT 1 FROM dialer_jobs
+             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status = ANY($3::text[]))
+       AND NOT EXISTS (SELECT 1 FROM calls
+             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status = ANY($4::text[]))
+       AND NOT EXISTS (SELECT 1 FROM leads
+             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status IN ('pending', 'calling'))
+       AND NOT EXISTS (SELECT 1 FROM assistant_actions
+             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND type = 'schedule_callback'
+               AND triggered_by = 'voice' AND status = 'scheduled')
+    RETURNING id
+"""
+
+# The stop sweep's own call-status set (telephony_bridge.CAMPAIGN_LIVE_CALL_STATUSES).
+# Kept here because a service does not import from the API layer;
+# tests/unit/test_day5_campaigns.py pins the two together.
+_COMPLETION_LIVE_CALL_STATUSES = (
+    "queued", "dialing", "ringing", "answered", "in_call", "initiated",
+    "in_progress", "termination_pending",
+)
+
+
+async def complete_campaign_if_finished(conn, campaign_id: str, tenant_id: str) -> bool:
+    """Move a running outbound campaign to ``completed`` when nothing is left (D5-26).
+
+    One conditional UPDATE on the caller's connection. Call it inside the
+    settlement transaction right after the campaign counters UPDATE: that
+    statement row-locks the campaign, so two last calls ending together run it
+    one after the other and exactly one changes the row. Returns True only when
+    this call changed the row.
+    """
+    from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+    changed = await conn.fetchval(
+        _COMPLETE_IF_FINISHED_SQL, str(campaign_id), str(tenant_id),
+        list(ACTIVE_STATUSES), list(_COMPLETION_LIVE_CALL_STATUSES),
+    )
+    if changed is None:
+        return False
+    logger.info("campaign_completed campaign=%s", str(campaign_id)[:8])
+    return True
+
+
+def describe_legal_floor() -> Dict[str, Any]:
+    """The legal calling-hours floor, read from the constants the dialer's gate uses (D5-29)."""
+    from app.domain.services.dialer import legal_hours
+
+    def clock(value) -> str:
+        return value.strftime("%H:%M")
+
+    start, end = legal_hours._EVERY_DAY[0]
+    au_start, au_end = legal_hours._AUSTRALIA[0]
+    return {
+        "start": clock(start), "end": clock(end), "days": sorted(legal_hours._EVERY_DAY),
+        "clock": "callee_local", "applies_with_call_anytime": True,
+        "australia": {
+            "start": clock(au_start), "end": clock(au_end), "days": sorted(
+                day for day in legal_hours._AUSTRALIA if day != 5),
+            "saturday_end": clock(legal_hours._AUSTRALIA[5][1]), "sunday": False,
+        },
+    }
+
+
 class CampaignReadinessError(CampaignError):
     """The current outbound telephony route cannot safely start."""
 

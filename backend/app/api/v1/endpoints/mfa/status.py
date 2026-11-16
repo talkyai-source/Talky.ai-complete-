@@ -103,7 +103,7 @@ async def disable_mfa(
         if not mfa_row or not mfa_row["enabled"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is not currently enabled.",
+                detail="Two-factor authentication is not turned on.",
             )
 
         # Disable MFA and clean up
@@ -148,5 +148,5 @@ async def disable_mfa(
     )
 
     return {
-        "detail": "MFA disabled successfully. All recovery codes have been deleted."
+        "detail": "Two-factor authentication is turned off. All recovery codes have been deleted."
     }

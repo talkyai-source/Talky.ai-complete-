@@ -81,7 +81,7 @@ def test_benchmark_refuses_cerebras_without_a_key(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         _select_benchmark_llm(config)
     assert exc.value.status_code == 503
-    assert "Cerebras" in str(exc.value.detail)
+    assert exc.value.detail == {"code": "ai_option_unavailable", "message": "This option is not switched on for this account yet."}
 
 
 @pytest.mark.asyncio

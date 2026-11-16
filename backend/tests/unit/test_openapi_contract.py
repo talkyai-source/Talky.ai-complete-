@@ -75,7 +75,8 @@ def test_global_security_matches_real_user_credentials_and_uses_or_not_and(contr
     ("post", "/api/v1/auth/signup/start"), ("post", "/api/v1/auth/signup/verify-code"),
     ("post", "/api/v1/auth/signup/complete"), ("post", "/api/v1/auth/passkey-check"),
     ("post", "/api/v1/auth/forgot-password"), ("post", "/api/v1/auth/reset-password"),
-    ("get", "/api/v1/auth/verify-email"), ("post", "/api/v1/auth/mfa/verify"),
+    ("get", "/api/v1/auth/verify-email"), ("post", "/api/v1/auth/verify-email/resend"),
+    ("post", "/api/v1/auth/mfa/verify"),
     ("post", "/api/v1/auth/passkeys/login/begin"), ("post", "/api/v1/auth/passkeys/login/complete"),
     ("post", "/api/v1/auth/invites/preview"), ("post", "/api/v1/auth/invites/accept"),
 ])

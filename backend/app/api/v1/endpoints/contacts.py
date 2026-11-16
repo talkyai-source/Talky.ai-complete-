@@ -32,6 +32,13 @@ from app.domain.services.campaign_direction_guard import (
     raise_for_outbound_direction_guard,
 )
 from app.core.security.rbac import Permission, require_permission
+from app.domain.services.dialer.bulk_ingest import (
+    IMPORT_FIELD_ERRORS_CAP,
+    ROW_ERROR_TEXT,
+    cap_errors,
+    log_import_row_errors,
+    phone_failure_code,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +58,10 @@ class ImportError(BaseModel):
     phone: Optional[str] = None
     field: Optional[str] = None
     value: Optional[str] = None
+    # Stable snake_case identifier of the kind of problem (``phone_missing``,
+    # ``phone_invalid``, ``email_invalid`` ...). ``error`` is always one plain
+    # sentence; the website may map ``code`` to its own text.
+    code: Optional[str] = None
 
 
 class BulkImportResponse(BaseModel):
@@ -72,6 +83,13 @@ class BulkImportResponse(BaseModel):
     # would be worse than the bad cell. Every entry names the row and the
     # field, and the value was not written.
     field_errors: List[ImportError] = []
+    # ``errors`` is capped (IMPORT_ERRORS_CAP). ``errors_total`` is how many row
+    # errors there were in all (it equals ``failed``) and ``errors_truncated``
+    # is true when ``errors`` is shorter than that. Same pair for field_errors.
+    errors_total: int = 0
+    errors_truncated: bool = False
+    field_errors_total: int = 0
+    field_errors_truncated: bool = False
     list_id: Optional[str] = None
     list_name: Optional[str] = None
     list_contact_count: Optional[int] = None
@@ -99,17 +117,36 @@ def _normalize_for_user(phone: str, user, default_country: str = "US") -> str:
     return normalize_phone_number(phone, default_country=default_country)
 
 
+def _phone_failure(raw, country):
+    """(code, plain sentence) for a dial number the normaliser refused."""
+    code = phone_failure_code(raw or "", country_known=bool(country))
+    return code, ROW_ERROR_TEXT[code]
+
+
 def _preflight_phones(records, default_country):
-    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+    from app.domain.services.phone_number_normalizer import normalize_phone_number
     errors = []
     for record in records:
         try:
             normalize_phone_number(record.phone_raw, default_country)
         except ValueError:
+            code, message = _phone_failure(record.phone_raw, default_country)
             errors.append({"row": record.source_row, "field": "phone_number",
-                           "message": phone_number_error(record.phone_raw, default_country)})
+                           "code": code, "message": message})
     if errors:
-        raise HTTPException(status_code=422, detail=errors[:100])
+        shown, total, truncated = cap_errors(errors)
+        log_import_row_errors("Contact", None, [
+            (e["row"], e["code"], "phone refused before import", None) for e in errors
+        ])
+        if truncated:
+            shown.append({
+                "row": None, "field": None, "code": "more_errors",
+                "message": (
+                    f"{total - len(shown)} more rows have phone numbers that are not valid "
+                    "and are not listed. Fix the rows shown and upload again."
+                ),
+            })
+        raise HTTPException(status_code=422, detail=shown)
 
 
 def _check_optional_numbers(values: dict, row_num: int, country) -> list["ImportError"]:
@@ -120,7 +157,7 @@ def _check_optional_numbers(values: dict, row_num: int, country) -> list["Import
     A mobile column that IS the dial number (no phone_number column) is left
     to the stricter dial-number check, which rejects the import.
     """
-    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+    from app.domain.services.phone_number_normalizer import normalize_phone_number
 
     errors = []
     for field in ("mobile_number", "business_number"):
@@ -131,8 +168,21 @@ def _check_optional_numbers(values: dict, row_num: int, country) -> list["Import
             values[field] = normalize_phone_number(raw, default_country=country)
         except ValueError:
             values.pop(field, None)
+            label = "mobile" if field == "mobile_number" else "business"
+            code, _ = _phone_failure(raw, country)
+            if code == "phone_country_required":
+                sentence = (
+                    f"The {label} number has no country code, so it was left out. "
+                    "Add the country code (for example +44) or choose a country for the import."
+                )
+            else:
+                sentence = (
+                    f"The {label} number is not valid for the country chosen, so it was left out. "
+                    "Use the international format, for example +442071234567."
+                )
+                code = f"{field}_invalid"
             errors.append(ImportError(row=row_num, field=field, value=raw[:40],
-                                      error=phone_number_error(raw, country)))
+                                      error=sentence, code=code))
     return errors
 
 
@@ -141,13 +191,54 @@ def _resolve_country(db_client, tenant_id, campaign=None, requested=None):
     try:
         return resolve_default_country(db_client, tenant_id, campaign, requested)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=[{"row": 1, "field": "default_country",
-                            "message": "Use a supported ISO alpha-2 country"}]) from exc
+        raise HTTPException(status_code=422, detail=[{
+            "row": 1, "field": "default_country", "code": "country_invalid",
+            "message": "Choose a country from the list.",
+        }]) from exc
 
 
 # =============================================================================
 # The import template (goals.md §11 "Update CSV import template")
 # =============================================================================
+
+_FIELD_ISSUE_TEXT = {
+    "email": ("email_invalid", "The email address is not valid, so it was left out."),
+    "timezone": (
+        "timezone_invalid",
+        "The time zone is not recognised, so it was left out. Use a name such as Europe/London.",
+    ),
+    "preferred_contact_method": (
+        "contact_method_invalid",
+        "The preferred contact method must be phone, email, sms or whatsapp, so it was left out.",
+    ),
+    "mobile_number": (
+        "mobile_number_invalid",
+        "The mobile number is not valid for the country chosen, so it was left out. "
+        "Use the international format, for example +442071234567.",
+    ),
+    "business_number": (
+        "business_number_invalid",
+        "The business number is not valid for the country chosen, so it was left out. "
+        "Use the international format, for example +442071234567.",
+    ),
+    "do_not_call": (
+        "do_not_call_invalid",
+        "The do-not-call answer must be yes or no, so it was left out.",
+    ),
+}
+
+
+def _field_issue(issue, label: str) -> ImportError:
+    """One rejected cell as a plain sentence with a code."""
+    if str(issue.reason).startswith("longer than"):
+        code = "value_too_long"
+        sentence = f"The {label.lower()} is too long, so it was left out."
+    else:
+        code, sentence = _FIELD_ISSUE_TEXT.get(issue.field, (
+            "value_invalid", f"The {label.lower()} is not valid, so it was left out."))
+    return ImportError(row=issue.row, field=issue.field, value=issue.value,
+                       error=sentence, code=code)
+
 
 def _ingest_error_field(err) -> Optional[str]:
     """Which column a shared-ingest error belongs to.
@@ -156,8 +247,7 @@ def _ingest_error_field(err) -> Optional[str]:
     everything it reports per row is about the dial number. The exceptions are
     the batch database failures, which belong to no column at all.
     """
-    text = (getattr(err, "error", "") or "").lower()
-    if text.startswith("database insert failed") or text.startswith("revive failed"):
+    if getattr(err, "code", "") in ("save_failed", "update_failed"):
         return None
     return "phone_number"
 
@@ -319,7 +409,8 @@ async def upload_campaign_contacts(
                 # files the overflow under the None key as a list; report the row
                 # and carry on rather than aborting the whole import.
                 ragged_rows.append(ImportError(
-                    row=row_num, error="Row has more cells than headers",
+                    row=row_num, error=ROW_ERROR_TEXT["row_too_many_cells"],
+                    code="row_too_many_cells",
                 ))
                 continue
             values: dict[str, str] = {}
@@ -352,11 +443,7 @@ async def upload_campaign_contacts(
                     # count one bad number twice.
                     continue
                 values.pop(issue.field, None)
-                label = BY_KEY[issue.field].label
-                field_errors.append(ImportError(
-                    row=issue.row, field=issue.field, value=issue.value,
-                    error=f"{label}: {issue.reason}",
-                ))
+                field_errors.append(_field_issue(issue, BY_KEY[issue.field].label))
             field_errors.extend(_check_optional_numbers(values, row_num, default_country))
 
             first_name = values.get("first_name")
@@ -437,17 +524,28 @@ async def upload_campaign_contacts(
             except Exception:  # noqa: BLE001
                 list_count = None
 
+        all_errors = ragged_rows + [
+            ImportError(row=e.row, error=e.error, phone=e.phone,
+                        field=_ingest_error_field(e), code=e.code)
+            for e in result.errors
+        ]
+        shown, errors_total, errors_truncated = cap_errors(all_errors)
+        shown_fields, fields_total, fields_truncated = cap_errors(
+            field_errors, IMPORT_FIELD_ERRORS_CAP)
+        log_import_row_errors("CSV", campaign_id, [
+            (r.row, "row_too_many_cells", "row has extra cells", None) for r in ragged_rows
+        ] + [(e.row, e.code, e.detail, e.phone) for e in result.errors])
         return BulkImportResponse(
             total_rows=result.total + len(ragged_rows),
             imported=result.imported,
             failed=len(result.errors) + len(ragged_rows),
             duplicates_skipped=result.duplicates_skipped,
-            errors=(ragged_rows + [
-                ImportError(row=e.row, error=e.error, phone=e.phone,
-                            field=_ingest_error_field(e))
-                for e in result.errors
-            ])[:100],
-            field_errors=field_errors[:200],
+            errors=shown,
+            errors_total=errors_total,
+            errors_truncated=errors_truncated,
+            field_errors=shown_fields,
+            field_errors_total=fields_total,
+            field_errors_truncated=fields_truncated,
             list_id=list_id,
             list_name=(
                 list_display_name(
@@ -581,16 +679,21 @@ async def paste_campaign_contacts(
         except Exception:  # noqa: BLE001
             list_count = None
 
+    shown, errors_total, errors_truncated = cap_errors([
+        ImportError(row=e.row, error=e.error, phone=e.phone,
+                    field=_ingest_error_field(e), code=e.code)
+        for e in result.errors
+    ])
+    log_import_row_errors(
+        "Paste", campaign_id, [(e.row, e.code, e.detail, e.phone) for e in result.errors])
     return BulkImportResponse(
         total_rows=result.total,
         imported=result.imported,
         failed=len(result.errors),
         duplicates_skipped=result.duplicates_skipped,
-        errors=[
-            ImportError(row=e.row, error=e.error, phone=e.phone,
-                        field=_ingest_error_field(e))
-            for e in result.errors[:100]
-        ],
+        errors=shown,
+        errors_total=errors_total,
+        errors_truncated=errors_truncated,
         list_id=list_id,
         list_name=(
             list_display_name(
@@ -707,6 +810,7 @@ async def bulk_import_contacts(
         total_rows = 0
         imported = 0
         errors = []
+        log_entries = []
         
         for row_num, row in enumerate(csv_rows, start=2):  # Start at 2 (header is row 1)
             total_rows += 1
@@ -715,7 +819,10 @@ async def bulk_import_contacts(
                 # Validate required field
                 phone = row.get('phone_number', '').strip()
                 if not phone:
-                    errors.append(ImportError(row=row_num, error="Missing phone_number"))
+                    errors.append(ImportError(
+                        row=row_num, error=ROW_ERROR_TEXT["phone_missing"],
+                        field="phone_number", code="phone_missing"))
+                    log_entries.append((row_num, "phone_missing", "no phone number", None))
                     continue
                 
                 # Use the single domain normalizer shared by manual add, paste,
@@ -724,13 +831,16 @@ async def bulk_import_contacts(
                 try:
                     phone = _normalize_for_user(phone, current_user, default_country)
                 except ValueError as exc:
+                    code, sentence = _phone_failure(phone, default_country)
                     errors.append(
                         ImportError(
                             row=row_num,
-                            error=f"Invalid phone number: {exc}",
+                            error=sentence,
                             field="phone_number",
+                            code=code,
                         )
                     )
+                    log_entries.append((row_num, code, str(exc), phone))
                     continue
                 
                 # Prepare data
@@ -782,14 +892,20 @@ async def bulk_import_contacts(
             except OutboundCampaignDirectionConflict:
                 raise
             except Exception as e:
-                errors.append(ImportError(row=row_num, error=str(e)))
+                errors.append(ImportError(
+                    row=row_num, error=ROW_ERROR_TEXT["save_failed"], code="save_failed"))
+                log_entries.append((row_num, "save_failed", str(e), phone))
         
+        log_import_row_errors("Legacy bulk", campaign_id, log_entries)
+        shown, errors_total, errors_truncated = cap_errors(errors)
         return BulkImportResponse(
             total_rows=total_rows,
             imported=imported,
             failed=len(errors),
             duplicates_skipped=0,
-            errors=errors[:50]  # Limit errors returned
+            errors=shown,
+            errors_total=errors_total,
+            errors_truncated=errors_truncated,
         )
     
     except OutboundCampaignDirectionConflict as exc:

@@ -49,6 +49,8 @@ class DashboardSummary(BaseModel):
     timezone: str = "UTC"
     answered_calls: int
     failed_calls: int
+    # Calls this month in neither list (no outcome yet, or an unlisted outcome).
+    other_calls: int = 0
     minutes_used: Optional[int] = None
     minutes_remaining: Optional[int] = None
     minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
@@ -176,6 +178,7 @@ async def get_dashboard_summary(
             for row in performance_month_rows
             if (row.get("outcome") or "") in _FAILED_OUTCOMES
         )
+        other_calls = len(performance_month_rows) - answered_calls - failed_calls
         from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
         meter = await compute_tenant_minutes_status(getattr(db_client, "pool", None), current_user.tenant_id)
         minutes_used = meter.used_minutes
@@ -247,6 +250,7 @@ async def get_dashboard_summary(
             timezone=str(zone),
             answered_calls=answered_calls,
             failed_calls=failed_calls,
+            other_calls=other_calls,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
             minutes_state=meter.state,

@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime
 from typing import Optional
 
 from app.core.db_utils import acquire_with_tenant
@@ -593,11 +594,14 @@ class TopupService:
     async def reconciliation(
         self,
         *,
-        since: Optional[str] = None,
-        until: Optional[str] = None,
+        since: Optional[datetime] = None,
+        until: Optional[datetime] = None,
         limit: int = 5000,
     ) -> list[dict]:
         """Cross-tenant ledger for admin reconciliation (goals.md §9).
+
+        ``since`` / ``until`` are datetimes: the driver refuses text for a
+        timestamptz parameter.
 
         Deliberately reads the LEDGER and not ``topup_orders``: the ledger is
         what actually moved, and an order can sit in a state that never became
