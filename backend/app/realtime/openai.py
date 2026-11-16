@@ -694,12 +694,13 @@ class OpenAIRealtimeSession:
             logger.debug("realtime response.create send failed call=%s err=%s",
                          self._call_id, exc)
 
-    async def repair_unspoken_response(self, response: dict, *, required_text=None, repair_id=None) -> None:
+    async def repair_unspoken_response(self, response: dict, *, required_text=None, repair_id=None,
+                                       required_reason="The do-not-call write is not acknowledged.") -> None:
         epoch = self._response_epoch
         config = {"instructions": self._instructions + "\nREPAIR THIS TURN: Your previous reply was withheld and was not heard. Give one short honest reply. Keep required contact readbacks and source qualifications. Reuse completed tool results; do not repeat actions. Do not claim an email, booking, submission or transfer succeeded unless a matching successful tool result permits confirmation."}
         if required_text is not None:
             config["instructions"] += (
-                "\nThe do-not-call write is not acknowledged. Say exactly the following text, "
+                "\n" + required_reason + " Say exactly the following text, "
                 "with no additions and no tool calls: " + required_text)
         if repair_id is not None:
             if not self.supports_response_metadata or required_text is None:

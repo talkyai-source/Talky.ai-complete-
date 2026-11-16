@@ -242,7 +242,12 @@ const PAGE_MOCKS: ApiMock[] = [
     // /campaigns/camp-001 (src/app/campaigns/[id]/page.tsx loadData :272). getCampaign returns the {campaign}
     // wrapper (dashboard-api.ts:510); a bare object would throw. Direction must be outbound, otherwise the page
     // looks up inbound campaigns and router.replace()s (campaign-direction.ts:12). Status "completed" keeps the
-    // readiness poll (10 s) and the running-campaign refresh (7 s) off.
+    // running-campaign refresh (7 s) off. A completed campaign can be started again, so the page offers Start
+    // and asks whether calling is ready (useCampaignReadiness, every 10 s): that read is answered below.
+    {
+        path: "/campaigns/camp-001/readiness",
+        body: { campaign_id: "camp-001", ready: true, reason_code: "ready", reason: null, caller_id: "+15551230000", trunk_id: "trunk-e2e" },
+    },
     {
         path: "/campaigns/camp-001",
         body: {

@@ -83,7 +83,7 @@ export function useCampaignStartDialog(options: {
     // Admin "Suspend": the server refuses every campaign Start (403 tenant_suspended), so Start is not offered.
     const accountSuspended = isSubscriptionSuspended(useSignedInUser());
 
-    // Only a draft, paused or stopped campaign can start; the others in a set
+    // Only a draft, paused, stopped or completed campaign can start; the others in a set
     // are listed with their status and never checked or sent.
     const eligible = targets.filter((target) => canStartCampaign(target.status));
     const readiness = useCampaignReadiness(eligible.map((target) => target.id), isOpen);

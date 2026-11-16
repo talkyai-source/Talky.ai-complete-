@@ -88,6 +88,8 @@ async def test_offered_profiles_save_reload_and_assign_to_campaign(monkeypatch, 
     # save validation, serialization, reload, campaign assignment and builder.
     monkeypatch.setenv("GEMINI_API_KEY", "synthetic")
     monkeypatch.setenv("CARTESIA_API_KEY", "synthetic")
+    # D5-1: save refuses Google TTS when the server has no Google credential.
+    monkeypatch.setenv("GOOGLE_TTS_API_KEY", "synthetic")
     monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="synthetic")))
     monkeypatch.setattr(voice_clone_service, "owned_voice_ids", AsyncMock(return_value=set()))
     monkeypatch.setattr(voice_clone_service, "all_platform_voice_ids", AsyncMock(return_value=set()))

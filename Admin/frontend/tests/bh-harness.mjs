@@ -37,6 +37,12 @@ const bundle = await build({
             export { CallsPage } from './src/pages/CallsPage';
             export { CampaignsPage } from './src/pages/CampaignsPage';
             export { CampaignsTable } from './src/components/CampaignsTable';
+            export { TrunksPage } from './src/pages/TrunksPage';
+            export { TrunksTable } from './src/components/TrunksTable';
+            export { PaymentsPage } from './src/pages/PaymentsPage';
+            export { PaymentsTable } from './src/components/PaymentsTable';
+            export { AppErrorBoundary } from './src/components/AppErrorBoundary';
+            export { createErrorReporter, registerGlobalErrorListeners, scrubText, currentRoutePath } from './src/lib/error-report';
             export { ActionsPage } from './src/pages/ActionsPage';
             export { ConnectorDetailDrawer } from './src/components/ConnectorDetailDrawer';
             export { ConnectorsTable } from './src/components/ConnectorsTable';

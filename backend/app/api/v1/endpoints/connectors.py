@@ -365,6 +365,50 @@ class ConnectorTypeStatus(BaseModel):
     # Whether this server can run the card's OAuth sign-in at all (D3-1).
     available: bool = True
     unavailable_reason: Optional[str] = None
+    # D5-14: the provider's customer-facing name, and for an expired/error
+    # state a fixed customer sentence plus a stable code. error_message stays.
+    display_name: Optional[str] = None
+    message: Optional[str] = None
+    code: Optional[str] = None
+
+
+# Stable codes for the connector problems the status route can report. The
+# text is fixed here, so nothing a provider or the database said can reach it.
+_CONNECTOR_PROBLEMS = {
+    "check_unavailable": "The connection could not be checked right now. Try again in a moment.",
+    "credential_missing": "The connection is missing its saved sign-in. Connect it again.",
+    "authorization_cannot_refresh": "The connection cannot be renewed automatically. Connect it again.",
+    "permissions_missing": "The connection is missing required permissions. Connect it again and allow all access.",
+    "refresh_unresolved": "The connection is being renewed. If this stays, connect it again.",
+    "authorization_expired": "The connection has expired. Connect it again.",
+    "connector_error": "The connection has a problem. Connect it again.",
+}
+# (fragment of the existing local status sentence, code), first match wins.
+_CONNECTOR_PROBLEM_FRAGMENTS = (
+    ("could not be checked", "check_unavailable"),
+    ("refresh is unresolved", "refresh_unresolved"),
+    ("missing required permissions", "permissions_missing"),
+    ("expired and cannot be refreshed", "authorization_expired"),
+    ("cannot be refreshed", "authorization_cannot_refresh"),
+    ("no usable active credential", "credential_missing"),
+    ("no active credential record", "credential_missing"),
+    ("no saved access credential", "credential_missing"),
+    ("cannot be used", "credential_missing"),
+    ("expiry is invalid", "credential_missing"),
+)
+
+
+def _connector_error_code_and_message(status: str, error_message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Stable code and fixed customer sentence for an expired/error card."""
+    if status not in ("expired", "error"):
+        return None, None
+    code = "authorization_expired" if status == "expired" else "connector_error"
+    lowered = (error_message or "").lower()
+    for fragment, fragment_code in _CONNECTOR_PROBLEM_FRAGMENTS:
+        if fragment in lowered:
+            code = fragment_code
+            break
+    return code, _CONNECTOR_PROBLEMS[code]
 
 
 # The OAuth app settings each provider reads when a sign-in starts (the
@@ -519,6 +563,7 @@ async def list_connector_statuses(
         if chosen is not None:
             conn, status, error_message, last_sync = chosen
 
+        problem_code, problem_message = _connector_error_code_and_message(status, error_message)
         items.append(ConnectorTypeStatus(
             type=type_name,
             status=status,
@@ -527,6 +572,9 @@ async def list_connector_statuses(
             error_message=error_message,
             available=available,
             unavailable_reason=unavailable_reason,
+            display_name=PROVIDER_METADATA.get(conn.get("provider") or "", {}).get("name"),
+            message=problem_message,
+            code=problem_code,
         ))
 
     return ConnectorStatusListResponse(items=items)

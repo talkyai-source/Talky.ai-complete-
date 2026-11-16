@@ -29,7 +29,7 @@ CAMPAIGN_STATUS_WRITERS = {
     "scheduled": "Allowed by the check; no writer today.",
     "running": "Start (outbound), and activating an inbound campaign.",
     "paused": "Pause (outbound, from running), and pausing an inbound campaign.",
-    "completed": "Allowed by the check; no writer today (a finished campaign stays running).",
+    "completed": "Call settlement, when the last call of a running outbound campaign ends and nothing is left (no job, live call, pending contact or due callback); Start moves it back to running.",
     "cancelled": "Archiving an inbound campaign.",
     "stopped": "Stop (outbound, from running or paused).",
     "deleted": "Delete (soft delete; hidden from lists).",

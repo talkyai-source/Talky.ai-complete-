@@ -9,8 +9,20 @@ from fastapi import Request, Response
 # MFA challenge token lifetime (5 minutes — short window for step-2 login)
 MFA_CHALLENGE_TTL_MINUTES: int = 5
 
-# Generic error message — never reveal which factor was wrong (OWASP)
-GENERIC_MFA_ERROR = "MFA verification failed."
+# Generic wrong-code answer — never reveal which factor was wrong (OWASP).
+# The stable code lets the website branch without reading the sentence.
+GENERIC_MFA_ERROR = {
+    "code": "two_factor_failed",
+    "message": "Two-factor authentication failed. Check the code and try again.",
+}
+
+# The caller's own challenge token is missing, expired, used or burned. This
+# is about the token in the request, not about any account, so it can be told
+# apart from a wrong code: the customer must sign in again.
+MFA_SESSION_EXPIRED_ERROR = {
+    "code": "two_factor_session_expired",
+    "message": "Your two-factor authentication session has expired. Sign in again.",
+}
 
 
 def _sha256(value: str) -> str:

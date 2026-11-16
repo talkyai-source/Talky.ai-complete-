@@ -19,6 +19,7 @@ from app.domain.services.call_outcomes import (
     ANSWERED_OUTCOMES,
     FAILED_OUTCOMES,
     GOAL_OUTCOMES,
+    classify_outcome,
 )
 from app.domain.services.reporting_time import (
     ReportingTimeUnavailable, calendar_range, resolve_reporting_zone,
@@ -43,7 +44,29 @@ class CallSeriesItem(BaseModel):
     total_calls: int
     answered: int
     failed: int
+    # Calls in neither list (no outcome yet, or an unlisted outcome), so that
+    # answered + failed + other == total_calls on every row.
+    other: int = 0
     goal_achieved: int = 0
+
+
+class CallSummary(BaseModel):
+    """Totals for the whole answer; answered + failed + other == total_calls."""
+    total_calls: int = 0
+    answered: int = 0
+    failed: int = 0
+    other: int = 0
+    goal_achieved: int = 0
+
+
+class WindowBucket(BaseModel):
+    """One fixed-length slice of a short window (``window_hours``)."""
+    start: str
+    end: str
+    total_calls: int
+    answered: int
+    failed: int
+    other: int
 
 
 class CampaignSeries(BaseModel):
@@ -57,6 +80,11 @@ class CallAnalyticsResponse(BaseModel):
     timezone: str = "UTC"
     direction: Literal["outbound", "inbound", "all"] = "outbound"
     include_tests: bool = False
+    summary: Optional[CallSummary] = None
+    # Only with ?window_hours=: `series` is then empty and `buckets` is filled.
+    window_hours: Optional[int] = None
+    bucket_minutes: Optional[int] = None
+    buckets: Optional[List[WindowBucket]] = None
 
 
 class CampaignAnalyticsResponse(BaseModel):
@@ -94,10 +122,8 @@ def _bucket_key(dt: datetime, group_by: str) -> str:
 def _classify(outcome: Optional[str], bucket: dict) -> None:
     bucket["total"] += 1
     o = (outcome or "").lower()
-    if o in _ANSWERED_OUTCOMES:
-        bucket["answered"] += 1
-    elif o in _FAILED_OUTCOMES:
-        bucket["failed"] += 1
+    label = classify_outcome(o)
+    bucket[label] = bucket.get(label, 0) + 1
     if o in _GOAL_OUTCOMES:
         bucket["goal"] += 1
 
@@ -113,10 +139,54 @@ def _to_series(buckets: Dict[str, dict]) -> List[CallSeriesItem]:
             total_calls=g["total"],
             answered=g["answered"],
             failed=g["failed"],
+            other=g.get("other", 0),
             goal_achieved=g["goal"],
         )
         for k, g in sorted(buckets.items())
     ]
+
+
+def _summarise(groups) -> CallSummary:
+    return CallSummary(
+        total_calls=sum(g["total"] for g in groups),
+        answered=sum(g["answered"] for g in groups),
+        failed=sum(g["failed"] for g in groups),
+        other=sum(g.get("other", 0) for g in groups),
+        goal_achieved=sum(g["goal"] for g in groups),
+    )
+
+
+# window_hours -> bucket length in minutes (1h/4h: 15 min, 8h: 30 min, 24h: 60 min).
+_WINDOW_BUCKET_MINUTES = {1: 15, 4: 15, 8: 30, 24: 60}
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _window_buckets(rows, now: datetime, hours: int, zone):
+    """Fixed-length buckets over [now - hours, now), counted by ``created_at``
+    (the same instant the daily view uses). Bounds are absolute instants, so a
+    daylight-saving change only shows as a different offset in the labels."""
+    minutes = _WINDOW_BUCKET_MINUTES[hours]
+    step = timedelta(minutes=minutes)
+    start = now - timedelta(hours=hours)
+    counts = [{"total": 0, "answered": 0, "failed": 0, "other": 0, "goal": 0}
+              for _ in range(hours * 60 // minutes)]
+    for call in rows:
+        dt = _parse_dt(call.get("created_at"))
+        if dt is None or dt < start or dt >= now:
+            continue
+        _classify(call.get("outcome"), counts[int((dt - start) / step)])
+    out = [
+        WindowBucket(
+            start=(start + i * step).astimezone(zone).isoformat(),
+            end=(start + (i + 1) * step).astimezone(zone).isoformat(),
+            total_calls=g["total"], answered=g["answered"], failed=g["failed"], other=g["other"],
+        )
+        for i, g in enumerate(counts)
+    ]
+    return out, counts, minutes
 
 
 def _apply_call_population(
@@ -329,6 +399,11 @@ async def get_call_analytics(
         "outbound", description="Call direction population"
     ),
     include_tests: bool = Query(False, description="Include browser/test calls"),
+    window_hours: Optional[str] = Query(
+        None,
+        description="Last N hours ending now: 1, 4, 8 or 24. Replaces from/to; "
+        "returned in `buckets` of 15 (1h, 4h), 30 (8h) or 60 (24h) minutes.",
+    ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -339,9 +414,20 @@ async def get_call_analytics(
             status_code=400,
             detail=f"Invalid group_by. Must be one of: {', '.join(sorted(_VALID_GROUP_BY))}",
         )
+    window = None
+    if window_hours is not None:
+        if window_hours.strip() not in {str(h) for h in _WINDOW_BUCKET_MINUTES}:
+            raise HTTPException(status_code=422, detail="window_hours must be one of 1, 4, 8 or 24.")
+        if from_date is not None or to_date is not None:
+            raise HTTPException(status_code=422, detail="window_hours cannot be combined with from or to.")
+        window = int(window_hours)
     try:
         zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
-        start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
+        if window is not None:
+            now = _utc_now()
+            start_dt, end_dt_excl = now - timedelta(hours=window), now
+        else:
+            start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
         query = db_client.table("calls").select("created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
         query = _apply_call_population(
@@ -351,6 +437,19 @@ async def get_call_analytics(
         response = query.order("created_at").execute()
         if getattr(response, "error", None):
             raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+
+        if window is not None:
+            buckets, counts, minutes = _window_buckets(response.data or [], now, window, zone)
+            return CallAnalyticsResponse(
+                series=[],
+                timezone=str(zone),
+                direction=direction,
+                include_tests=include_tests,
+                summary=_summarise(counts),
+                window_hours=window,
+                bucket_minutes=minutes,
+                buckets=buckets,
+            )
 
         groups: Dict[str, dict] = {}
         for call in response.data or []:
@@ -368,6 +467,7 @@ async def get_call_analytics(
             timezone=str(zone),
             direction=direction,
             include_tests=include_tests,
+            summary=_summarise(groups.values()),
         )
     except HTTPException:
         raise

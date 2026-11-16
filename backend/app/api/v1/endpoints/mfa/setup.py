@@ -71,8 +71,8 @@ async def setup_mfa(
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=(
-                    "MFA is already enabled for this account. "
-                    "Disable it first via POST /auth/mfa/disable, then re-run setup."
+                    "Two-factor authentication is already turned on for this account. "
+                    "Turn it off first, then set it up again."
                 ),
             )
 
@@ -104,7 +104,7 @@ async def setup_mfa(
         if stored != "INSERT 0 1":
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="MFA is already enabled. Disable it before starting setup again.",
+                detail="Two-factor authentication is already turned on. Turn it off before setting it up again.",
             )
 
         # Also mark user_profiles.mfa_enabled = FALSE (pending confirmation)
@@ -162,13 +162,13 @@ async def confirm_mfa(
         if not row:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA setup not initiated. Call POST /auth/mfa/setup first.",
+                detail="Two-factor setup has not been started. Start setup first.",
             )
 
         if row["enabled"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is already active. Disable it first to re-setup.",
+                detail="Two-factor authentication is already active. Turn it off before setting it up again.",
             )
 
         # Decrypt and verify the TOTP code
@@ -177,7 +177,7 @@ async def confirm_mfa(
         except RuntimeError:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="MFA configuration error. Please contact support.",
+                detail="Two-factor authentication is not available right now. Contact support.",
             )
 
         last_used_at = row["last_used_at"]
@@ -229,7 +229,7 @@ async def confirm_mfa(
         recovery_codes=formatted_codes,
         recovery_codes_count=len(formatted_codes),
         message=(
-            "MFA activated successfully. "
+            "Two-factor authentication is turned on. "
             "Save these recovery codes in a safe place — "
             "they will not be shown again."
         ),
