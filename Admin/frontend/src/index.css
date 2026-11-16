@@ -3053,6 +3053,20 @@ body {
   background: #f7fafc;
 }
 
+/* Campaigns table: from 1280 up it fits its box with no sideways scroll.
+   Long campaign and tenant names wrap onto more lines; nothing is cut. */
+@media (min-width: 1280px) {
+  .data-table.campaigns-table th,
+  .data-table.campaigns-table td {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .data-table.campaigns-table td.campaigns-table-wrap {
+    overflow-wrap: anywhere;
+  }
+}
+
 /* Action Status Badges - Pill Style */
 .action-status-badge {
   display: inline-flex;

@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { computeDonutSegmentTextLayout } from "@/lib/donut-label-layout.mjs";
+import { browserTimeZoneName, formatZoneDateLabel } from "@/lib/utc-date-label";
 
 export type TimeSeriesPoint = {
   label: string;
@@ -1717,6 +1718,20 @@ function formatHhMm(ms: number, timeZone?: string) {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
 }
 
+/** A bucket that covers a whole day (23 hours on the day a zone's clocks go forward). */
+const DAY_BUCKET_MIN_MS = 23 * 60 * 60 * 1000;
+
+/**
+ * The pointer's x in the chart's own drawing units. The drawing (w by h units)
+ * is fitted inside the element at one scale and centred ("xMidYMid meet"), so
+ * a pixel offset is the drawing offset only when the element is exactly w wide.
+ */
+function pointerDrawingX(clientX: number, rect: { left: number; width: number; height: number }, w: number, h: number) {
+  const scale = Math.min(rect.width / w, rect.height / h);
+  if (!(scale > 0) || !Number.isFinite(scale)) return clientX - rect.left;
+  return (clientX - rect.left - (rect.width - w * scale) / 2) / scale;
+}
+
 function formatMmSs(seconds: number) {
   const s = Math.max(0, Math.round(seconds));
   const mm = Math.floor(s / 60);
@@ -1906,7 +1921,9 @@ export function LiveCallsTimeSeriesChart({
     const content = (
       <div className="space-y-2">
         <div className="text-sm font-black text-gray-900">
-          {formatHhMm(b.startMs, timeZone)}–{formatHhMm(b.endMs, timeZone)}
+          {b.endMs - b.startMs >= DAY_BUCKET_MIN_MS
+            ? formatZoneDateLabel(b.startMs, timeZone ?? browserTimeZoneName())
+            : `${formatHhMm(b.startMs, timeZone)}–${formatHhMm(b.endMs, timeZone)}`}
         </div>
         {total === null ? (
           <div className="text-xs font-semibold text-gray-600">Data gap</div>
@@ -1943,7 +1960,7 @@ export function LiveCallsTimeSeriesChart({
     const svg = svgRef.current;
     if (!svg || visible.items.length === 0) return;
     const rect = svg.getBoundingClientRect();
-    const x = clientX - rect.left;
+    const x = pointerDrawingX(clientX, rect, chart.w, chart.h);
     const clamped = clamp(x, chart.left, chart.left + chart.plotW);
     const t = (clamped - chart.left) / Math.max(1, chart.plotW);
     const idx = clamp(Math.round(t * Math.max(0, visible.items.length - 1)), 0, Math.max(0, visible.items.length - 1));

@@ -5,6 +5,7 @@ import {
     Building2,
     Phone,
     PhoneIncoming,
+    Megaphone,
     FileText,
     Link2,
     DollarSign,
@@ -20,7 +21,7 @@ import { ADMIN_ROUTES, canAccessAdminRoute } from '../lib/admin-routes';
 import { revealCurrentNavEntry, revealNavEntry } from '../lib/nav-strip';
 
 const icons = { 'command-center': <LayoutDashboard />, tenants: <Building2 />, enquiries: <Inbox />,
-    users: <Users />, calls: <Phone />, inbound: <PhoneIncoming />, actions: <FileText />,
+    users: <Users />, calls: <Phone />, campaigns: <Megaphone />, inbound: <PhoneIncoming />, actions: <FileText />,
     connectors: <Link2 />, 'usage-cost': <DollarSign />, plans: <CreditCard />, incidents: <AlertTriangle />, 'system-health': <Activity />,
     support: <LifeBuoy /> };
 

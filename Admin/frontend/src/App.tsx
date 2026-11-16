@@ -6,6 +6,7 @@ import { LoginPage } from './pages/LoginPage';
 import { CommandCenterPage } from './pages/CommandCenterPage';
 import { TenantsPage } from './pages/TenantsPage';
 import { CallsPage } from './pages/CallsPage';
+import { CampaignsPage } from './pages/CampaignsPage';
 import { ActionsPage } from './pages/ActionsPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
 import { UsersPage } from './pages/UsersPage';
@@ -69,6 +70,14 @@ function App() {
             element={
               <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CallsPage />
+              </AdminRouteGuard>
+            }
+          />
+          <Route
+            path="/campaigns"
+            element={
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+                <CampaignsPage />
               </AdminRouteGuard>
             }
           />
