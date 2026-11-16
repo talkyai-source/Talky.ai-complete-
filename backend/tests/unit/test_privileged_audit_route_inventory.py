@@ -233,6 +233,9 @@ EXCEPTIONS = {
     ("POST", "/telephony/sip/runtime/compile/preview"): (
         "app.api.v1.endpoints.telephony_runtime.preview.preview_runtime_policy",
         "Loads tenant snapshot and compiles a returned preview; no stored policy or runtime apply."),
+    ("POST", "/admin/client-errors"): (
+        "app.api.v1.endpoints.admin.client_errors.report_client_error",
+        "Non-mutating telemetry intake: scrubbed admin-panel crash report written to one log line; no database write, no state change, rate limited 30/min per user."),
     ("POST", "/admin/secrets/validate-api-key"): (
         "app.api.v1.endpoints.secrets.validate_api_key",
         "Public authentication verifier despite admin URL; not a privileged configuration mutation. Access accounting belongs to the verifier."),
