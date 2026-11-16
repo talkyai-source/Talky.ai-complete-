@@ -4187,6 +4187,29 @@ class DialerWorker:
                         f"dialer job ownership update affected {len(rows)} "
                         f"rows for {job.job_id}"
                     )
+                # D5-26: a job the dialer ends with NO call (failed before dialing,
+                # skipped, blocked) never reaches call settlement, so the last such
+                # ending runs the completion check. A call_id means a call exists
+                # (settlement checks); scheduled_at or an active status is a
+                # deferral. A savepoint and never fatal: the job update stands.
+                from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+                if call_id is None and scheduled_at is None and status_val not in ACTIVE_STATUSES:
+                    try:
+                        from app.domain.services import campaign_service
+                        async with conn.transaction():
+                            # Row-lock the campaign first (settlement's counters UPDATE
+                            # does the same) so two last endings run one after the other.
+                            await conn.execute(
+                                "SELECT id FROM campaigns WHERE id = $1::uuid"
+                                " AND tenant_id = $2::uuid FOR UPDATE",
+                                str(job.campaign_id), str(job.tenant_id))
+                            await campaign_service.complete_campaign_if_finished(
+                                conn, str(job.campaign_id), str(job.tenant_id))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "campaign_completion_check_failed campaign=%s error=%s",
+                            str(job.campaign_id)[:8], type(exc).__name__)
         except Exception as exc:
             logger.error("Failed to update job status: %s", exc)
             raise
