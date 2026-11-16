@@ -59,7 +59,7 @@ SOLD_PLANS = {"basic", "business", "payg", "payment_test"}
 
 # The tenant SQL inventory only lists statements it can parse as SQL text and only for
 # tables of the tenant-scoped set, so these names are added by hand: the cost ledger is
-# written with COPY (provider_cost_ledger.py copy_records_to_table), and the rest are
+# written through executemany (provider_cost_ledger.py), which the inventory does not read, and the rest are
 # read by the sign-up, RBAC and billing code without a tenant predicate.
 EXTRA_TABLES = {
     "tenant_provider_cost_events", "tenants", "plans", "roles", "permissions",
@@ -322,13 +322,16 @@ async def test_e3_a_tenant_cannot_insert_into_or_update_another_tenant(clean_db)
         "leads": ("INSERT INTO leads (id, tenant_id, campaign_id, phone_number) VALUES ($1, $2, $3, '+14155552673')",
                   (uuid.uuid4(), ids.b, ids.campaign_b)),
         "calls": ("INSERT INTO calls (id, tenant_id, campaign_id, lead_id, phone_number, status, direction) "
-                  "VALUES ($1, $2, $3, $4, '+14155552672', 'in_progress', 'outbound')",
+                  "VALUES ($1, $2, $3, $4, '+14155552674', 'in_progress', 'outbound')",
                   (uuid.uuid4(), ids.b, ids.campaign_b, ids.lead_b)),
         "tenant_recording_policy": ("INSERT INTO tenant_recording_policy (tenant_id) VALUES ($1)", (ids.c,)),
     }
     async with runtime_pool(clean_db) as pool:
         for table, (sql, args) in inserts.items():
-            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+            # Refused by row security, or by a guard trigger that runs first and
+            # cannot see the other tenant's parent row. Either way nothing is
+            # written, which the counts below assert.
+            with pytest.raises((asyncpg.InsufficientPrivilegeError, asyncpg.ForeignKeyViolationError)):
                 async with acquire_with_tenant(pool, str(ids.a)) as conn:
                     await conn.execute(sql, *args)
         for table in TENANT_TABLES:
@@ -345,6 +348,7 @@ async def test_e3_a_tenant_cannot_insert_into_or_update_another_tenant(clean_db)
         await owner.execute("SET app.bypass_rls = 'on'")
         assert await owner.fetchval("SELECT count(*) FROM campaigns WHERE name = 'planted'") == 0
         assert await owner.fetchval("SELECT count(*) FROM leads WHERE phone_number = '+14155552673'") == 0
+        assert await owner.fetchval("SELECT count(*) FROM calls WHERE phone_number = '+14155552674'") == 0
         assert await owner.fetchval("SELECT count(*) FROM tenant_recording_policy WHERE tenant_id = $1", ids.c) == 0
         assert await owner.fetchval(
             "SELECT default_consent_mode FROM tenant_recording_policy WHERE tenant_id = $1", ids.b) == "two_party"
