@@ -563,6 +563,13 @@ async def get_tenant(
         raise HTTPException(status_code=503, detail="Tenant data is temporarily unavailable.")
 
 
+def audit_reference_short(audit_event_id):
+    """A reference a person can read out: first 8 characters, upper case, ``AUD-1A2B3C4D``."""
+    if not audit_event_id:
+        return None
+    return "AUD-" + str(audit_event_id).replace("-", "")[:8].upper()
+
+
 def _mutation_receipt(row, *, detail, changed, audit_event_id=None):
     return {
         "id": str(row["id"]), "detail": detail, "changed": changed,
@@ -571,6 +578,7 @@ def _mutation_receipt(row, *, detail, changed, audit_event_id=None):
         "minutes_allocated": row["minutes_allocated"],
         "max_concurrent_calls": _max_concurrent(_calling_rules(row["calling_rules"])),
         "audit_event_id": str(audit_event_id) if audit_event_id else None,
+        "audit_reference_short": audit_reference_short(audit_event_id),
     }
 
 
