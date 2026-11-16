@@ -108,7 +108,7 @@ async def test_save_requires_assemblyai_key_for_authenticated_tenant(monkeypatch
     with pytest.raises(HTTPException) as caught:
         await endpoint.save_config(AIProviderConfig(stt_engine=engine), SimpleNamespace(tenant_id="A"), SimpleNamespace(pool=None))
     assert caught.value.status_code == 503
-    assert "AssemblyAI API key" in caught.value.detail
+    assert caught.value.detail == {"code": "ai_option_unavailable", "message": "This option is not switched on for this account yet."}
     resolve.assert_awaited_once_with("assemblyai", tenant_id="A")
     persisted.assert_not_awaited()
 

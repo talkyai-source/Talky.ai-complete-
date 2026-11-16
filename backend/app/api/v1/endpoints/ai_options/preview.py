@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.domain.services.ai_option_availability import unavailable_detail
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.security.api_security import rate_limit_dependency
 from app.core.security.rbac import Permission, require_permission
@@ -189,7 +190,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             if not os.getenv("CARTESIA_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Cartesia API key not configured",
+                    detail=unavailable_detail("cartesia key missing"),
                 )
             tts = CartesiaTTSProvider()
             await tts.initialize(
@@ -206,7 +207,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             if not creds_path or not os.path.exists(creds_path):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Google service account credentials not configured. Set GOOGLE_APPLICATION_CREDENTIALS in .env",
+                    detail=unavailable_detail("google credentials missing"),
                 )
             tts = GoogleTTSStreamingProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
@@ -215,7 +216,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             if not os.getenv("DEEPGRAM_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Deepgram API key not configured",
+                    detail=unavailable_detail("deepgram key missing"),
                 )
             tts = DeepgramTTSProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
@@ -224,7 +225,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
             if not os.getenv("ELEVENLABS_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="ElevenLabs API key not configured",
+                    detail=unavailable_detail("elevenlabs key missing"),
                 )
             tts = ElevenLabsTTSProvider()
             await tts.initialize(
