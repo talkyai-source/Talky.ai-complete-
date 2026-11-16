@@ -183,7 +183,9 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [name, setName] = useState(() => (typeof restoredDraft?.name === "string" ? restoredDraft.name : ""));
     const [companyName, setCompanyName] = useState(() => (typeof restoredDraft?.companyName === "string" ? restoredDraft.companyName : ""));
-    const [personaType, setPersonaType] = useState<PersonaType>(() => restoredDraft?.personaType ?? "lead_gen");
+    // A new inbound campaign starts on an inbound persona: "Lead Generation" is
+    // the outbound one, and was pre-selected on the inbound page too.
+    const [personaType, setPersonaType] = useState<PersonaType>(() => restoredDraft?.personaType ?? (direction === "inbound" ? "receptionist" : "lead_gen"));
     const [agentNamesRaw, setAgentNamesRaw] = useState(() => (typeof restoredDraft?.agentNamesRaw === "string" ? restoredDraft.agentNamesRaw : ""));
     const [agentGenders, setAgentGenders] = useState<Record<string, string>>(() => (
         restoredDraft?.agentGenders && typeof restoredDraft.agentGenders === "object" ? restoredDraft.agentGenders : {}
@@ -525,6 +527,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                                     <button
                                         type="button"
                                         key={p.value}
+                                        aria-pressed={personaType === p.value}
                                         onClick={() => setPersonaType(p.value)}
                                         className={`rounded-xl border p-3 text-left transition ${
                                             personaType === p.value

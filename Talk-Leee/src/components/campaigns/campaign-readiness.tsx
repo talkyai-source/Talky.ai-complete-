@@ -45,27 +45,36 @@ export function useCampaignReadiness(campaignIds: string[], enabled = true) {
     return { ready, checking, reason, error: Boolean(failed), byId, retry: () => Promise.all(queries.map((query) => query.refetch())) };
 }
 
-export function CampaignReadinessNotice({ readiness }: { readiness: ReturnType<typeof useCampaignReadiness> }) {
+export function CampaignReadinessNotice({ readiness, wide = false }: {
+    readiness: ReturnType<typeof useCampaignReadiness>;
+    /** Full width, for a notice on its own line under a row of buttons. */
+    wide?: boolean;
+}) {
     if (readiness.ready) return null;
     // A refusal is something the user has to act on: make it a visible warning.
     // The in-progress "Checking…" line stays quiet helper text.
     const tone = readiness.checking
         ? "text-xs text-muted-foreground"
         : "rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-sm font-medium text-amber-800 dark:text-amber-300";
-    return <div className={`mt-1 max-w-sm ${tone}`} role="status">
+    return <div className={`${wide ? "" : "mt-1 max-w-sm "}${tone}`} role="status">
         {readiness.reason}{" "}
         {!readiness.checking && <button type="button" className="font-semibold underline" onClick={() => void readiness.retry()}>{readiness.error ? "Retry" : "Check again"}</button>}
     </div>;
 }
 
 /** A launch surface only: backend remains authoritative and rechecks at POST. */
-export function CampaignStartControl({ campaignIds, onStart, label, menu = false, disabled = false }: {
+export function CampaignStartControl({ campaignIds, onStart, label, menu = false, disabled = false, showNotice = true }: {
     campaignIds: string[];
     onStart: () => Promise<void>;
     label: string;
     menu?: boolean;
     /** An extra reason to hold the button, e.g. a start already in flight. */
     disabled?: boolean;
+    /**
+     * False when the caller shows the readiness notice itself, e.g. under a
+     * row of buttons, where a notice inside the row pushes the buttons apart.
+     */
+    showNotice?: boolean;
 }) {
     const readiness = useCampaignReadiness(campaignIds);
     const [pending, setPending] = useState(false);
@@ -84,7 +93,7 @@ export function CampaignStartControl({ campaignIds, onStart, label, menu = false
         <Button type="button" role={menu ? "menuitem" : undefined} size="sm" variant={menu ? "ghost" : "outline"} onClick={() => void start()} disabled={!readiness.ready || pending || disabled}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}{label}
         </Button>
-        <CampaignReadinessNotice readiness={readiness} />
+        {showNotice && <CampaignReadinessNotice readiness={readiness} />}
         {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>;
 }
