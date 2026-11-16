@@ -15,13 +15,15 @@ import {
     Users,
     Inbox,
     LifeBuoy,
+    PhoneForwarded,
+    Wallet,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { ADMIN_ROUTES, canAccessAdminRoute } from '../lib/admin-routes';
 import { revealCurrentNavEntry, revealNavEntry } from '../lib/nav-strip';
 
 const icons = { 'command-center': <LayoutDashboard />, tenants: <Building2 />, enquiries: <Inbox />,
-    users: <Users />, calls: <Phone />, campaigns: <Megaphone />, inbound: <PhoneIncoming />, actions: <FileText />,
+    users: <Users />, calls: <Phone />, campaigns: <Megaphone />, trunks: <PhoneForwarded />, payments: <Wallet />, inbound: <PhoneIncoming />, actions: <FileText />,
     connectors: <Link2 />, 'usage-cost': <DollarSign />, plans: <CreditCard />, incidents: <AlertTriangle />, 'system-health': <Activity />,
     support: <LifeBuoy /> };
 
