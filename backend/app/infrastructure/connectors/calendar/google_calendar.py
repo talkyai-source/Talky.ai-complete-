@@ -114,7 +114,7 @@ class GoogleCalendarConnector(CalendarProvider):
             
             if response.status_code != 200:
                 logger.error(f"Token exchange failed: {response.text}")
-                raise ValueError(f"Token exchange failed: {response.text}")
+                raise ValueError("The calendar could not be connected. Try again.")
             
             token_data = response.json()
             
@@ -252,7 +252,7 @@ class GoogleCalendarConnector(CalendarProvider):
             
             if response.status_code not in (200, 201):
                 logger.error(f"Create event failed: {response.text}")
-                raise ValueError(f"Create event failed: {response.text}")
+                raise ValueError("The meeting could not be added to the calendar.")
             
             data = response.json()
             
@@ -343,7 +343,8 @@ class GoogleCalendarConnector(CalendarProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"Update event failed: {response.text}")
+                logger.warning(f"Update event failed: {response.text}")
+                raise ValueError("The meeting could not be updated in the calendar.")
             
             data = response.json()
             
