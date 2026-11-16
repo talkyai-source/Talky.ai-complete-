@@ -31,7 +31,8 @@ TRIGGERS = "0092_drop_broken_touch_triggers"
 ABUSE = "0093_abuse_event_columns"
 HARDEN = "0094_harden_legacy_db_objects"
 RECEIPT_DISMISSED = "0095_webhook_receipt_dismissed"
-HEAD = "0096_contact_list_permission"
+CONTACT_LIST_PERMISSION = "0096_contact_list_permission"
+HEAD = "0097_remove_wizard_plan_line"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -44,7 +45,8 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
     # (pay as you go), on 0082 (support system), which sits on the payment
     # merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == RECEIPT_DISMISSED
+    assert SCRIPTS.get_revision(HEAD).down_revision == CONTACT_LIST_PERMISSION
+    assert SCRIPTS.get_revision(CONTACT_LIST_PERMISSION).down_revision == RECEIPT_DISMISSED
     assert SCRIPTS.get_revision(RECEIPT_DISMISSED).down_revision == HARDEN
     assert SCRIPTS.get_revision(HARDEN).down_revision == ABUSE
     assert SCRIPTS.get_revision(ABUSE).down_revision == TRIGGERS
@@ -196,4 +198,4 @@ def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_th
     revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", PAYMENT_MERGE)]
     assert revisions == [SUPPORT, PAYG, CALL_SIGNALS, LEGAL, WORKFLOWS,
                          PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, ABUSE, HARDEN,
-                         RECEIPT_DISMISSED, HEAD]
+                         RECEIPT_DISMISSED, CONTACT_LIST_PERMISSION, HEAD]
