@@ -229,15 +229,6 @@ export default function TravelIndustryIndustryPage() {
 
   const integrations = [
     {
-      title: "Property Management Systems",
-      description:
-        "Sync guest profiles, room availability, reservations, and booking updates automatically with your existing PMS.",
-    },
-    {
-      title: "Booking Platforms",
-      description: "Keep reservations, availability, and confirmations synchronized across your preferred booking systems.",
-    },
-    {
       title: "Calendar & Scheduling",
       description:
         "Coordinate spa appointments, restaurant reservations, airport transfers, and other guest services with real-time availability.",
@@ -294,11 +285,6 @@ export default function TravelIndustryIndustryPage() {
       question: "Can AI act as a virtual receptionist for hotels?",
       answer:
         "AI can use approved hotel information and collect guest requests for review. Live human transfer is not currently available.",
-    },
-    {
-      question: "Does it integrate with our hotel management software?",
-      answer:
-        "Not directly in this release. It connects to HubSpot, Salesforce and Google Calendar. A direct connection to property management or booking systems is not available yet.",
     },
     {
       question: "How quickly can we get started?",
@@ -503,8 +489,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>Integrations</p>
           <h2 className={`mt-3 ${headingClassName}`}>Connect With the Hospitality Tools You Already Use</h2>
           <p className={bodyClassName}>
-            Keep the systems you trust while connecting reservations, guest information, calendars, and daily operations into one
-            connected workflow.
+            Keep the systems you trust while connecting calendars and daily operations into one connected workflow.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {integrations.map((item) => (
