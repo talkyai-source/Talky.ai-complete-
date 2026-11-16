@@ -204,7 +204,7 @@ test("the details modal offers the same actions and wording as the detail page",
         ["Stopped one", "stopped", ["Start"]],
         ["Paused one", "paused", ["Resume"]],
         ["Running one", "running", ["Pause", "Stop"]],
-        ["Completed one", "completed", []],
+        ["Completed one", "completed", ["Start"]],
         ["Scheduled one", "scheduled", []],
         ["Cancelled one", "cancelled", []],
     ];
@@ -339,7 +339,7 @@ test("Resume Selected uses one choice for every selected campaign, skips those t
 
 test("Resume Selected lists every selected campaign that is not draft, paused or stopped with its status label", async () => {
     const state = wire([
-        camp("a", "Alpha", "paused"), camp("r", "Summer Promo", "running"), camp("c", "Charlie", "completed"), camp("s", "Sierra", "scheduled"),
+        camp("a", "Alpha", "paused"), camp("r", "Summer Promo", "running"), camp("c", "Charlie", "cancelled"), camp("s", "Sierra", "scheduled"),
     ], { start: async () => ({ message: "ok", jobs_enqueued: 7 }) });
     await mountPage("Alpha");
     select("Alpha", "Summer Promo", "Charlie", "Sierra");
@@ -347,7 +347,7 @@ test("Resume Selected lists every selected campaign that is not draft, paused or
     await waitFor(() => assert.equal(startDialog() !== null, true), { timeout: SLOW });
     assert.deepEqual(lines("campaign-start-skipped", startDialog()!), [
         "Summer Promo: not started — Running",
-        "Charlie: not started — Completed",
+        "Charlie: not started — Cancelled",
         "Sierra: not started — Scheduled",
     ]);
     assert.equal(state.starts.length, 0);
@@ -356,7 +356,7 @@ test("Resume Selected lists every selected campaign that is not draft, paused or
     await waitFor(() => assert.deepEqual(lines("campaign-list-notice"), [
         "7 contacts queued for calling.",
         "Summer Promo: not started — Running",
-        "Charlie: not started — Completed",
+        "Charlie: not started — Cancelled",
         "Sierra: not started — Scheduled",
     ]), { timeout: SLOW });
     assert.deepEqual(state.starts, [{ id: "a", options: { first_speaker: "agent" } }], "only the paused campaign was sent");

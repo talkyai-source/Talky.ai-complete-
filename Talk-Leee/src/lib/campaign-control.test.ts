@@ -30,16 +30,17 @@ function control(summary: Record<string, unknown>): CampaignControlResponse {
     return { message: "Campaign 11111111-2222-3333-4444-555555555555 stopped", campaign: {}, termination_summary: summary } as unknown as CampaignControlResponse;
 }
 
-test("Start / Resume is available for exactly draft, paused and stopped", () => {
+test("Start / Resume is available for exactly draft, paused, stopped and completed", () => {
     assert.deepEqual(
-        ["draft", "paused", "stopped", "running", "completed", "scheduled", "cancelled", "failed", ""].map((s) => canStartCampaign(s)),
-        [true, true, true, false, false, false, false, false, false],
+        ["draft", "paused", "stopped", "completed", "running", "scheduled", "cancelled", "failed", ""].map((s) => canStartCampaign(s)),
+        [true, true, true, true, false, false, false, false, false],
     );
 });
 
-test("the button reads Start for draft and stopped, Resume for paused", () => {
+test("the button reads Start for draft, stopped and completed, Resume for paused", () => {
     assert.equal(campaignStartLabel("draft"), "Start");
     assert.equal(campaignStartLabel("stopped"), "Start");
+    assert.equal(campaignStartLabel("completed"), "Start");
     assert.equal(campaignStartLabel("paused"), "Resume");
 });
 
