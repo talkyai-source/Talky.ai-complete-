@@ -144,6 +144,14 @@ class CampaignPromptLayerResponse(BaseModel):
     content: str
 
 
+class CallingRulesResponse(BaseModel):
+    """GET /campaigns/calling-rules: what a new campaign of this account is held to."""
+    effective_schedule: Dict[str, Any] = Field(
+        description="The same object GET /campaigns/{id} returns as effective_schedule for a campaign with no schedule of its own.")
+    legal_floor: Dict[str, Any] = Field(
+        description="The callee-local calling hours that no setting widens.")
+
+
 class CampaignStartRequest(BaseModel):
     """Request body for starting a campaign."""
 

@@ -148,6 +148,19 @@ class CheckoutOut(BaseModel):
     message: Optional[str] = None
 
 
+class TopupOrderOut(BaseModel):
+    """One top-up order as stored (GET /billing/topups/{order_id})."""
+    id: str
+    package_code: str
+    minutes: int
+    price_cents: int
+    currency: str
+    currency_exponent: Optional[int] = None
+    status: str
+    created_at: Optional[str] = None
+    paid_at: Optional[str] = None
+
+
 class BalanceOut(BaseModel):
     allocated: int
     used_minutes: int
@@ -409,6 +422,7 @@ async def list_ledger(
 
 @router.get(
     "/{order_id}",
+    response_model=TopupOrderOut,
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def get_topup_order(

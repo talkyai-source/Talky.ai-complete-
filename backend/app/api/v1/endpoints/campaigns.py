@@ -53,6 +53,7 @@ from app.api.v1.dependencies import (
 )
 from app.api.v1.schemas.campaigns import (
     ApplyTtsConfigRequest,
+    CallingRulesResponse,
     CampaignCreateRequest,
     CampaignPromptPreviewRequest,
     CampaignPromptPreviewResponse,
@@ -511,7 +512,8 @@ async def list_campaigns(
         {**row, "progress": progress.get(str(row.get("id")))} for row in rows]}
 
 
-@router.get("/calling-rules", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
+@router.get("/calling-rules", response_model=CallingRulesResponse,
+            dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def get_calling_rules(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_read_client),
