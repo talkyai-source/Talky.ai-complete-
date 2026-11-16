@@ -19,6 +19,7 @@ import { Select } from "@/components/ui/select";
 import type { CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { callingHoursInverted, checkCallingWindow, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import {
+    CALL_ANYTIME_LABEL,
     CALLING_HOURS_RULE_TEXT,
     DAY_LABELS,
     FIELD_NOT_SET_TEXT,
@@ -173,7 +174,7 @@ export function CallingScheduleEditor({
                     className="mt-0.5 h-4 w-4 accent-emerald-600"
                 />
                 <span>
-                    <span className="font-medium">Call anytime (ignore these hours)</span>
+                    <span className="font-medium">{CALL_ANYTIME_LABEL}</span>
                     <span className="block text-xs text-muted-foreground">{OUTSIDE_HOURS_TEXT}</span>
                 </span>
             </label>

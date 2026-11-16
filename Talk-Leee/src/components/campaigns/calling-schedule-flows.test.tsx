@@ -280,9 +280,9 @@ test("AC-TZ wiring: the edit page feeds calling_config to both editors and the d
     // it with its campaign, and the dialog mounts the notice from that
     // campaign's calling_config.
     const startDialog = readFileSync(path.join(process.cwd(), "src/components/campaigns/campaign-start-dialog.tsx"), "utf8");
-    assert.match(detail, /startDialog\.open\(\[campaign\]\);/);
+    assert.match(detail, /startDialog\.open\(\[\{ \.\.\.campaign, effective_schedule: effectiveSchedule \}\]\);/);
     assert.match(detail, /<CampaignStartDialog dialog=\{startDialog\} \/>/);
-    assert.match(startDialog, /<CallingScheduleStartNotice callingConfig=\{dialog\.targets\[0\]\?\.calling_config\} \/>/);
+    assert.match(startDialog, /<CallingScheduleStartNotice\s+callingConfig=\{dialog\.targets\[0\]\?\.calling_config\}/);
 });
 
 // ── FX3a Task 2.2–2.4: one name per field across the wizard and the form ─────

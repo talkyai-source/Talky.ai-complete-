@@ -45,6 +45,9 @@ interface MeResponse {
     suspended_scope?: string;
     suspension_reason?: string;
     suspended_at?: string;
+    // "active" | "suspended_subscription" | "suspended_hold"; missing means active.
+    account_state?: string;
+    account_state_reason?: string;
 }
 
 // Authentication status — derived from accessToken + user + loading flags.
@@ -701,6 +704,11 @@ const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
         throw new Error("useAuth used outside AuthProvider on client");
     },
 };
+
+/** The signed-in user, or null: also null outside an AuthProvider (never throws). */
+export function useSignedInUser(): MeResponse | null {
+    return useContext(AuthContext)?.user ?? null;
+}
 
 export function useAuth() {
     const context = useContext(AuthContext);

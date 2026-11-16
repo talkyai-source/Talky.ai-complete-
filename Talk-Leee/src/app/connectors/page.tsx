@@ -248,11 +248,14 @@ export default function ConnectorsPage() {
                         ) : null}
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                            {PROVIDERS.map((p) => {
+                            {/* The server returns the Salesforce row only when it can run
+                                that sign-in or the account already has one: once it has
+                                answered without the row there is nothing to offer, so the
+                                card is not shown. */}
+                            {PROVIDERS.filter((p) => p.type !== "salesforce" || !statusAnswered || byType.has("salesforce")).map((p) => {
                                 const data = byType.get(p.type);
                                 const Icon = p.icon;
                                 const status = statusAnswered ? (data?.status ?? null) : null;
-                                const salesforceNotAdvertised = statusAnswered && p.type === "salesforce" && !data;
 
                                 return (
                                     <ConnectorCard
@@ -272,12 +275,10 @@ export default function ConnectorsPage() {
                                         provider={data?.provider}
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
-                                        available={!salesforceNotAdvertised}
+                                        available={data?.available !== false}
                                         mayConnect={mayConnect}
                                         mayDisconnect={mayDisconnect}
-                                        unavailableReason={salesforceNotAdvertised
-                                            ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
-                                            : undefined}
+                                        unavailableReason={data?.unavailable_reason ?? undefined}
                                     />
                                 );
                             })}

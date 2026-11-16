@@ -1,9 +1,12 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Purchase refusals the backend only reports AFTER a click (no pre-click
- * signal exists; see BACKEND GAP G7). Once the backend has refused a purchase
- * for this session, every button that refusal applies to is disabled and the
+ * Purchase refusals the backend reports AFTER a click. The backend also says
+ * before a click whether a purchase would be refused: `checkout_available` on
+ * each plan option (GET /billing/plans) and `topups_open` (GET
+ * /billing/config, read by the top-up card). This store covers a refusal that
+ * still arrives after a click. Once the backend has refused a purchase for
+ * this session, every button that refusal applies to is disabled and the
  * backend's own message is shown, instead of offering the same purchase again.
  *
  * Scope rules (from backend/app/api/v1/endpoints/billing.py and
@@ -60,6 +63,12 @@ export function useBillingRefusal(scope: Exclude<BillingRefusalScope, "all">): B
   return value.scope === "all" || value.scope === scope ? value : null;
 }
 
+/** The same reason, whether or not the backend ended it with a full stop. */
+export function sameBillingReason(a: string, b: string): boolean {
+  const plain = (text: string) => text.trim().replace(/\.$/, "");
+  return plain(a) === plain(b);
+}
+
 /**
  * Map a backend refusal to its scope, or null when the error is not one of
  * the known pre-purchase refusals (those are shown but do not disable).
@@ -71,7 +80,8 @@ export function classifyBillingRefusal(status: number | undefined, code: string 
   if (status === 503 && code === "billing_unavailable") {
     return { code, message: message || "", scope: "plan" };
   }
-  if (status === 503 && message === "Minute top-ups are not available yet") {
+  // The 503 says it without a full stop, GET /billing/config with one.
+  if (status === 503 && message !== undefined && sameBillingReason(message, "Minute top-ups are not available yet")) {
     return { code: "topups_unavailable", message, scope: "topup" };
   }
   return null;
