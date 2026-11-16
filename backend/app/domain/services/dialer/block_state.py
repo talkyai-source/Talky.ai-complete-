@@ -89,6 +89,8 @@ _TITLES: dict[BlockCode, str] = {
     BlockCode.BATCH_CAPACITY: "Waiting for the current batch",
     BlockCode.CALL_GAP: "Pacing between calls",
     BlockCode.TENANT_GAP: "Taking turns with another campaign",
+    BlockCode.PLATFORM_GAP: "Spacing out call starts",
+    BlockCode.PLATFORM_AT_CAPACITY: "All lines are busy",
     BlockCode.CALL_GUARD_THROTTLED: "Call rate limit reached",
     BlockCode.CALL_GUARD_QUEUED: "Queued behind the rate limiter",
     BlockCode.DESTINATION_BUSY: "Number already on a call",

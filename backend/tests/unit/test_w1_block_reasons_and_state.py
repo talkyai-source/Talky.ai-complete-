@@ -30,7 +30,6 @@ _TELEPHONY_503_CODES = [
     "telephony_not_active_on_node",
     "telephony_disabled_on_node",
     "pod_draining",
-    "pod_at_capacity",
     "telephony_adapter_unavailable",
 ]
 
@@ -334,12 +333,26 @@ def test_raw_route_refusal_codes_are_named_as_a_phone_line_problem(raw, needle):
 @pytest.mark.parametrize(
     "raw",
     ["telephony_not_active_on_node", "telephony_disabled_on_node",
-     "telephony_adapter_unavailable", "pod_draining", "pod_at_capacity"],
+     "telephony_adapter_unavailable", "pod_draining"],
 )
 def test_raw_telephony_down_codes_blame_the_phone_system(raw):
     from app.domain.services.dialer.block_reasons import BlockCode, classify
 
     assert classify(raw).code is BlockCode.TELEPHONY_UNAVAILABLE
+
+
+@pytest.mark.parametrize("raw", ["pod_at_capacity", "provider_at_capacity"])
+def test_raw_capacity_codes_read_as_all_lines_busy_not_as_an_outage(raw):
+    from app.domain.services.dialer.block_reasons import (
+        SELF_CLEARING_CODES,
+        BlockCode,
+        classify,
+    )
+
+    reason = classify(raw)
+    assert reason.code is BlockCode.PLATFORM_AT_CAPACITY
+    assert reason.code in SELF_CLEARING_CODES
+    assert reason.severity == "info"
 
 
 def test_caller_id_message_never_asks_for_a_campaign_caller_id():

@@ -30,6 +30,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import threading
 from contextlib import asynccontextmanager
@@ -349,9 +350,17 @@ def ensure_session_management_started() -> None:
     # readiness gate can drain a saturated pod without touching internals.
     from app.core import readiness as _readiness
 
+    def _committed_calls() -> int:
+        from app.domain.services.telephony.lifecycle import committed_call_load
+
+        return committed_call_load()
+
     _readiness.set_capacity_providers(
         active_count=lambda: get_state_backend().voice_session_count(),
         max_capacity=lambda: _MAX_TELEPHONY_SESSIONS,
+        # Ringing and pre-answer calls too: a drain before a restart must wait
+        # for them, not only for calls that are already answered.
+        committed_count=_committed_calls,
     )
 
 
@@ -1772,6 +1781,67 @@ async def _load_agent_lead_context(lead_id, tenant_id) -> Optional[dict]:
         return None
 
 
+def _outbound_capacity_refusal(destination: object) -> Optional[dict]:
+    """503 detail when this pod cannot take another outbound call, else None.
+
+    Counts ringing outbound calls (``committed_call_load``) as well as answered
+    sessions, so a call that would be hung up on at answer is refused before
+    it is dialled.
+    """
+    from app.core import readiness as _readiness
+    from app.domain.services.telephony.lifecycle import committed_call_load
+
+    committed = committed_call_load()
+    if not (_readiness.is_pod_at_capacity() or committed >= _MAX_TELEPHONY_SESSIONS):
+        return None
+    active = get_state_backend().voice_session_count()
+    logger.warning(
+        "make_call_pod_at_capacity active=%d committed_calls=%d cap=%d dest=%s",
+        active,
+        committed,
+        _MAX_TELEPHONY_SESSIONS,
+        destination,
+    )
+    return {
+        "error": "pod_at_capacity",
+        "active_sessions": active,
+        "committed_calls": committed,
+        "max_sessions": _MAX_TELEPHONY_SESSIONS,
+    }
+
+
+def _provider_capacity_refusal(failure_reason: Optional[str]) -> Optional[dict]:
+    """503 detail when the warmup failed only because a speech provider's
+    simultaneous-use limit is full, else None. Two signals: the guard's own
+    timeout text, or the warmup timeout while some guard is full."""
+    from app.infrastructure.providers.provider_concurrency import all_guards
+
+    text = failure_reason or ""
+    low = text.lower()
+    named = re.search(r"([a-z0-9_]+) concurrency guard exhausted", low)
+    if "concurrency guard exhausted" in low:
+        name = named.group(1) if named else "unknown"
+        guards = {g.provider_name: g for g in all_guards()}
+        guard = guards.get(name)
+        return {
+            "error": "provider_at_capacity",
+            "provider": name,
+            "in_flight": guard.in_flight if guard else None,
+            "max_concurrent": guard.max_concurrent if guard else None,
+        }
+    if "pre_originate_warmup_timeout" in low:
+        full = [g for g in all_guards() if g.in_flight >= g.max_concurrent]
+        if full:
+            top = max(full, key=lambda g: g.in_flight / g.max_concurrent)
+            return {
+                "error": "provider_at_capacity",
+                "provider": top.provider_name,
+                "in_flight": top.in_flight,
+                "max_concurrent": top.max_concurrent,
+            }
+    return None
+
+
 @router.post("/call")
 async def make_call(request: Request, body: MakeCallRequest):
     """
@@ -1889,22 +1959,12 @@ async def make_call(request: Request, body: MakeCallRequest):
             headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
             detail={"error": "pod_draining"},
         )
-    if _readiness.is_pod_at_capacity():
-        _active_session_count = get_state_backend().voice_session_count()
-        logger.warning(
-            "make_call_pod_at_capacity active=%d cap=%d dest=%s",
-            _active_session_count,
-            _MAX_TELEPHONY_SESSIONS,
-            destination,
-        )
+    _capacity_refusal = _outbound_capacity_refusal(destination)
+    if _capacity_refusal is not None:
         raise HTTPException(
             status_code=503,
             headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
-            detail={
-                "error": "pod_at_capacity",
-                "active_sessions": _active_session_count,
-                "max_sessions": _MAX_TELEPHONY_SESSIONS,
-            },
+            detail=_capacity_refusal,
         )
 
     # effective_tenant_id was resolved up-front by resolve_call_tenant (the
@@ -2171,6 +2231,20 @@ async def make_call(request: Request, body: MakeCallRequest):
     # Agent-first mode: greeting buffered. User-first mode: STT + TTS WS open
     # so Flux is ready to listen the instant the callee picks up.
     if pre_warm_session is None:
+        # A full speech-provider limit is capacity, not a fault: no critical
+        # event, and the dialer holds the same attempt (see dialer_worker).
+        _provider_full = _provider_capacity_refusal(prewarm.failure_reason)
+        if _provider_full is not None:
+            logger.warning(
+                "make_call_provider_at_capacity provider=%s in_flight=%s max=%s dest=%s",
+                _provider_full["provider"], _provider_full["in_flight"],
+                _provider_full["max_concurrent"], destination,
+            )
+            raise HTTPException(
+                status_code=503,
+                headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+                detail=_provider_full,
+            )
         # Surface WHY the call couldn't start in the live activity feed so the
         # operator sees it in the dashboard (e.g. "TTS out of credits") instead
         # of only a server log. Best-effort — never blocks the 503.
@@ -2435,6 +2509,20 @@ async def make_call(request: Request, body: MakeCallRequest):
                 getattr(container, "db_pool", None),
                 tenant_id=str(effective_tenant_id),
                 campaign_id=str(campaign_id),
+            )
+
+        # Capacity again, after the awaits above (call guard, warmup, campaign
+        # lock) and before this attempt is claimed: an inbound call admitted in
+        # those seconds may have taken the last slot. The check near the top is
+        # the cheap early refusal; this one is the one that counts. A short
+        # window remains, because the claim below awaits before the ringing
+        # call is stored; the answer-time check stays as the last defence.
+        _capacity_refusal = _outbound_capacity_refusal(destination)
+        if _capacity_refusal is not None:
+            raise HTTPException(
+                status_code=503,
+                headers={"Retry-After": str(_readiness.retry_after_seconds_for_capacity())},
+                detail=_capacity_refusal,
             )
 
         if internal_dialer_intent is not None:

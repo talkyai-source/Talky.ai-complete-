@@ -2706,6 +2706,41 @@ async def _reject_overcap_call(call_id: str) -> None:
 _inbound_admissions_in_flight: Dict[str, Dict[str, Any]] = {}
 _inbound_admissions_finalized: set[tuple[str, str]] = set()
 _inbound_admissions_pending: set[str] = set()
+
+
+def committed_call_load() -> int:
+    """Calls this process is already committed to, for capacity checks.
+
+    Ringing outbound calls count: they hold a slot the moment they are dialled,
+    and the person who answers is hung up on if the pod is full by then. A call
+    that already has a voice session is counted once, as a session.
+    """
+    state_backend = _state()
+    get_voice_session = getattr(state_backend, "get_voice_session", None)
+
+    def _no_session(call_id: str) -> bool:
+        return not callable(get_voice_session) or get_voice_session(call_id) is None
+
+    iter_ringing = getattr(state_backend, "iter_ringing_warmup_keys", None)
+    ringing_outbound = sum(
+        1
+        for call_id in (iter_ringing() if callable(iter_ringing) else ())
+        if _no_session(call_id)
+        # An inbound call is counted below; never count one call twice.
+        and call_id not in _inbound_admissions_in_flight
+        and call_id not in _inbound_admissions_pending
+    )
+    pre_session_admissions = sum(
+        1 for live_id in _inbound_admissions_in_flight if _no_session(live_id)
+    )
+    return (
+        state_backend.voice_session_count()
+        + ringing_outbound
+        + pre_session_admissions
+        + len(_inbound_admissions_pending)
+    )
+
+
 _inbound_heartbeat_tasks: Dict[str, asyncio.Task] = {}
 _inbound_deadline_tasks: Dict[str, asyncio.Task] = {}
 
@@ -2770,17 +2805,14 @@ async def _admit_inbound_call(
     # Capacity is evaluated while the Asterisk channel is still unanswered.
     # Count already-admitted/pre-media calls as well as live sessions so a
     # burst cannot queue beyond this pod's memory budget.
-    get_voice_session = getattr(state_backend, "get_voice_session", None)
-    pre_session_admissions = sum(
-        1
-        for live_id in _inbound_admissions_in_flight
-        if not callable(get_voice_session) or get_voice_session(live_id) is None
-    )
-    local_load = (
-        state_backend.voice_session_count()
-        + pre_session_admissions
-        + len(_inbound_admissions_pending)
-    )
+    # A drain before a restart stops NEW calls in both directions; otherwise
+    # inbound calls keep arriving and the drain never ends. Refused unanswered,
+    # so the caller is never cut off mid-call by the restart.
+    from app.core import readiness as _readiness
+
+    if _readiness.is_draining():
+        raise RuntimeError("pod draining before inbound answer")
+    local_load = committed_call_load()
     if local_load >= _MAX_TELEPHONY_SESSIONS:
         raise RuntimeError("pod capacity reached before inbound answer")
     _inbound_admissions_pending.add(pbx_call_id)

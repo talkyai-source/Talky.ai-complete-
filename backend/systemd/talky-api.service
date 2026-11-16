@@ -25,6 +25,13 @@ EnvironmentFile=/opt/talky/backend/.env
 # not raise this without completing Phase 2 (multi-pod) of the telephony
 # state migration. Scale calls vertically + via provider plan limits.
 ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --ws websockets --ws-ping-interval 30 --ws-ping-timeout 5
+# Drain live calls BEFORE the stop signal. uvicorn closes its listener before
+# the app's shutdown hook runs, so an in-app drain leaves every live call deaf
+# (the gateway's audio POSTs are refused); and systemd would kill the process
+# after its default 90 s, well before DRAIN_TIMEOUT_S (300 s) ends.
+# TimeoutStopSec must stay larger than DRAIN_TIMEOUT_S.
+ExecStop=/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/drain_calls.py
+TimeoutStopSec=360
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
