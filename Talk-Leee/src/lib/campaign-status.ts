@@ -3,8 +3,9 @@
  * campaign list badge, its details modal, status filter and exports, the
  * campaign detail page and the dashboard.
  *
- * The backend writes draft, running, paused and stopped, and reads completed
- * (backend/app/api/v1/endpoints/campaigns.py). Any other value it sends is
+ * The backend writes draft, running, paused, stopped and completed (a campaign
+ * with nothing left to do becomes completed; Start accepts it like stopped,
+ * backend/app/api/v1/endpoints/campaigns.py). Any other value it sends is
  * shown under its own name: a status is never renamed to one the backend did
  * not send.
  */
