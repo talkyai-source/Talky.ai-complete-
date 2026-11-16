@@ -25,8 +25,9 @@ def _plans():
     }
 
 
-def test_single_head_is_0097_on_top_of_0096():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0097_sits_on_top_of_0096_under_one_head():
+    assert SCRIPTS.get_heads() == ["0098_calls_changed_since_index"]
+    assert SCRIPTS.get_revision("0098_calls_changed_since_index").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0096_contact_list_permission"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 
