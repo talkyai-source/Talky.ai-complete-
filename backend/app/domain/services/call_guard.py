@@ -753,6 +753,44 @@ class CallGuard:
             reason="feature_default_allowed",
         )
 
+    async def check_transfer_destination(
+        self, tenant_id: str, phone_number: str
+    ) -> CheckResult:
+        """Destination rules for a number a call is transferred to.
+
+        Runs the same number-validity (E.164, premium-rate refused) and
+        geographic (blocked prefixes / countries, allow-list) checks a normal
+        outbound call passes, with the tenant's own limits. No DNC, rate,
+        velocity or concurrency checks: the number is the customer's own
+        staff line. Fails CLOSED when the limits cannot be read.
+        """
+        try:
+            tenant_limits = await self._get_tenant_limits(str(tenant_id))
+        except Exception as exc:  # noqa: BLE001 - uncertain policy refuses
+            logger.warning("transfer destination limits unreadable: %s", type(exc).__name__)
+            tenant_limits = None
+        if tenant_limits is None:
+            return CheckResult(
+                check=GuardCheck.GEOGRAPHIC_ALLOWED, passed=False, reason="limits_unavailable"
+            )
+        number = self._normalize_phone_number(phone_number)
+        for check in (self._check_number_valid, self._check_geographic):
+            result = await check(phone_number=number, tenant_limits=tenant_limits)
+            if not result.passed:
+                return result
+        return result
+
+    async def check_transfer_minutes(
+        self, tenant_id: str, call_id: Optional[str] = None
+    ) -> CheckResult:
+        """The tenant still has minutes for the second phone leg (fails closed)."""
+        try:
+            return await self._check_minutes_quota(str(tenant_id), call_id=call_id)
+        except Exception:  # noqa: BLE001 - uncertain metering refuses
+            return CheckResult(
+                check=GuardCheck.MINUTES_QUOTA, passed=False, reason="metering_unavailable"
+            )
+
     async def _check_number_valid(self, phone_number: str, **kwargs) -> CheckResult:
         """Check if phone number is valid E.164 format."""
         if not phone_number:
@@ -875,7 +913,14 @@ class CallGuard:
                     reason=f"blocked_prefix: {prefix}",
                 )
 
-        # If no country code extracted, allow but log
+        # Country still unknown: an allow-list cannot be satisfied, so refuse;
+        # with no allow-list nothing is restricted and the call passes as before.
+        if not country_code and tenant_limits.allowed_country_codes:
+            return CheckResult(
+                check=GuardCheck.GEOGRAPHIC_ALLOWED,
+                passed=False,
+                reason="country_not_allowed: unknown",
+            )
         if not country_code:
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
@@ -1357,7 +1402,11 @@ class CallGuard:
             if phone_number.startswith(prefix):
                 return country_mappings[prefix]
 
-        return None
+        # Not in the table: ask the phonenumbers library rather than treating
+        # the country as unknown (which let any other country through).
+        from app.domain.services.phone_number_normalizer import region_of_e164
+
+        return region_of_e164(phone_number)
 
     async def _plan_concurrent_calls(self, tenant_id: str) -> Optional[int]:
         """Simultaneous calls sold with the tenant's plan.

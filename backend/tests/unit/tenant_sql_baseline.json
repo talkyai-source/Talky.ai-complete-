@@ -5045,7 +5045,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a7020367c84b7cfa65dcd817e9c8cba283690038016f247d3b12c1bb903991d6",
+      "id": "a603194fa384e73ae10c59a951d9587a5d8948b5b1f655b500073abc26a874e1",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "tenant_inbound_allowance",
       "line": 513,
@@ -8176,10 +8176,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "34cb0b7c014013dc350a2c715ebbcdad390cf3fbd93b43ec5ed4a2201d542238",
+      "id": "025746d9e89ce5606f10e299127707af8bceb53e572b018d6673bbfd6a731282",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4129,
+      "line": 4155,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8723,10 +8723,10 @@
       "category": "platform_catalog"
     },
     {
-      "id": "8dbb8fcc3d274e3c3ab429d1be156ac2959c97db44e97c446624983398bf82fe",
+      "id": "1ad660906e43b2236b3b88cfae49df6ca5e44bb8b8ee5a17ca719074e0cf678b",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5030,
+      "line": 5073,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8941,10 +8941,10 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "2128115a41434c569043d3c5186066fbe7b771e839df055caadd04832c3ca9e2",
+      "id": "12dcea9f578970b63440c72a188b49aed6cda7271e43747a6e8a059bfd966cb4",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3120,
+      "line": 3163,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -10896,10 +10896,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "c95488704f86e92a894f422d20ed6d53e8631e56a60851bbecf93c6bb04c444e",
+      "id": "4d4f5b6b40e6f832b96508272dcc930b528fa501d33126df5f2130760ebb444d",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5222,
+      "line": 5246,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -11791,10 +11791,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "28ae9e3c56405cd8bbb569b9d68d2e37069598f70798342bab476821452e6281",
+      "id": "2b4304dbd9b9a2c337a4770d181188f90805b8fd2c68f450cc85e9407caf02c3",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3484,
+      "line": 3513,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -12148,10 +12148,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54\u201359. Platform account/recovery object; no tenant column or tenant business data."
     },
     {
-      "id": "8851d24ac85a1eb3d9a8d59306ecb1d175aff0b61ed26c3cd19de5dcb3ce5269",
+      "id": "7080846e5c9b68403cd3967d396ff7defd6da6160a7c1cd7713419e0639bd3a7",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 5934,
+      "line": 5957,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -12584,6 +12584,41 @@
       "category": "operator_billing_reconciliation",
       "count": 1,
       "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:275."
+    },
+    {
+      "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_audit_outbound_transfer_event",
+      "line": 3517,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1,$2,$3,$4,'outbound_transfer',$5::jsonb,$6,NOW())",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3517.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_prepare_outbound_transfer",
+      "line": 3597,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT l.metadata, l.from_number FROM call_legs l JOIN calls c ON c.id = l.call_id WHERE l.call_id = $1::uuid AND c.tenant_id = $2::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' ORDER BY l.created_at LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3597.",
+      "category": "reviewed_tenant_scoped"
     }
   ]
 }

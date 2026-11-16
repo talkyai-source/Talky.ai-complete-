@@ -9,13 +9,18 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 from app.domain.services.voice_action_config import normalize_action_config
 
 MAX_BRIEF_IDENTITY_CHARS = 120
 MAX_DECISION_MAKER_ROLE_CHARS = 160
 MAX_OPENING_OBJECTIVE_CHARS = 500
 MAX_TRANSFER_DESTINATION_CHARS = 255
+MAX_TRANSFER_DESTINATIONS = 5
+MAX_TRANSFER_NAME_CHARS = 40
+MAX_TRANSFER_WHEN_CHARS = 200
 MAX_LEAD_FIELD_KEY_CHARS = 64
 MAX_LEAD_FIELD_LABEL_CHARS = 255
 MAX_REQUIRED_LEAD_FIELDS = 20
@@ -134,6 +139,153 @@ def _render_clean(value: object, *, max_len: int) -> str:
     except ValueError:
         return ""
 
+_WEEKDAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+_WEEKDAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+_CLOCK_RE = re.compile(r"^([01][0-9]|2[0-3]):[0-5][0-9]$")
+
+
+_PREMIUM_TRANSFER_MESSAGE = "A premium-rate number cannot be a transfer destination."
+
+
+def _refuse_premium_rate_transfer(number: str) -> None:
+    """Raise when ``number`` is a premium-rate phone number (extensions pass).
+
+    Same rule the call guard applies to every outbound call; the guard checks
+    it again when the transfer happens.
+    """
+    from app.domain.services.call_guard import _is_premium_rate
+    from app.domain.services.telephony.transfer_validation import (
+        validate_any_transfer_destination,
+    )
+
+    try:
+        canonical = validate_any_transfer_destination(str(number or "").strip())
+    except ValueError:
+        return  # free text or an extension: not a phone number
+    if canonical.startswith("+") and _is_premium_rate(canonical):
+        raise ValueError(_PREMIUM_TRANSFER_MESSAGE)
+
+
+def normalize_transfer_destinations(value: object) -> list[dict[str, str]]:
+    """Validate the named transfer destinations (1-5); numbers are checked on save."""
+    from app.domain.services.telephony.transfer_validation import (
+        validate_any_transfer_destination,
+    )
+
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise ValueError("transfer_destinations must be a list")
+    if not 1 <= len(value) <= MAX_TRANSFER_DESTINATIONS:
+        raise ValueError(
+            f"transfer_destinations supports 1 to {MAX_TRANSFER_DESTINATIONS} destinations "
+            f"(at most {MAX_TRANSFER_DESTINATIONS})"
+        )
+    result: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in value:
+        if not isinstance(item, Mapping):
+            raise ValueError("transfer_destinations entries must contain name, number and when")
+        name = _clean(item.get("name"), field="transfer_destinations.name",
+                      max_len=MAX_TRANSFER_NAME_CHARS)
+        if not name:
+            raise ValueError("transfer_destinations.name is required")
+        if name.casefold() in seen:
+            raise ValueError("transfer_destinations names must be unique, ignoring case")
+        seen.add(name.casefold())
+        try:
+            number = validate_any_transfer_destination(str(item.get("number") or "").strip())
+        except ValueError:
+            raise ValueError(
+                f"transfer_destinations.number for {name!r} is not a valid transfer number"
+            ) from None
+        _refuse_premium_rate_transfer(number)
+        when = _clean(item.get("when"), field="transfer_destinations.when",
+                      max_len=MAX_TRANSFER_WHEN_CHARS)
+        result.append({"name": name, "number": number, "when": when})
+    if len(result) > 1 and not all(entry["when"] for entry in result):
+        raise ValueError(
+            "transfer_destinations.when is required when there are two or more destinations"
+        )
+    return result
+
+
+def normalize_transfer_hours(value: object) -> dict[str, Any]:
+    """Validate business hours; overnight windows are not supported."""
+    if not isinstance(value, Mapping):
+        raise ValueError("transfer_hours must be an object")
+    unknown = set(value) - {"timezone", "days", "start", "end"}
+    if unknown:
+        raise ValueError(f"transfer_hours has unsupported fields: {sorted(unknown)}")
+    zone = str(value.get("timezone") or "").strip()
+    try:
+        ZoneInfo(zone)
+    except (KeyError, ValueError, OSError):
+        raise ValueError("transfer_hours.timezone must be a valid IANA timezone") from None
+    days = value.get("days")
+    if isinstance(days, (str, bytes)) or not isinstance(days, Sequence) or not days:
+        raise ValueError("transfer_hours.days must be a non-empty list of mon..sun")
+    cleaned = [str(day).strip().lower() for day in days]
+    if any(day not in _WEEKDAYS for day in cleaned) or len(set(cleaned)) != len(cleaned):
+        raise ValueError(
+            "transfer_hours.days must be unique values from mon tue wed thu fri sat sun"
+        )
+    start = str(value.get("start") or "").strip()
+    end = str(value.get("end") or "").strip()
+    if not _CLOCK_RE.fullmatch(start):
+        raise ValueError("transfer_hours.start must be 24-hour HH:MM")
+    if not _CLOCK_RE.fullmatch(end):
+        raise ValueError("transfer_hours.end must be 24-hour HH:MM")
+    if start >= end:
+        raise ValueError(
+            "transfer_hours.end must be later than start on the same day; "
+            "overnight windows are not supported"
+        )
+    return {
+        "timezone": zone,
+        "days": [day for day in _WEEKDAYS if day in cleaned],
+        "start": start,
+        "end": end,
+    }
+
+
+def normalize_transfer_ring_seconds(value: object) -> int:
+    """How long the human's phone rings: a whole number from 10 to 60."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 10 <= value <= 60:
+        raise ValueError("transfer_ring_seconds must be a whole number from 10 to 60")
+    return value
+
+
+def normalize_transfer_if_no_answer(value: object) -> str:
+    if value not in ("return_to_agent", "end_call"):
+        raise ValueError("transfer_if_no_answer must be 'return_to_agent' or 'end_call'")
+    return str(value)
+
+
+def _as_utc(now: datetime | None) -> datetime:
+    if now is None:
+        return datetime.now(timezone.utc)
+    return now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+
+
+def transfer_open_now(brief: Mapping[str, Any] | None, now: datetime | None = None) -> bool:
+    """True when no hours are set, or ``now`` falls inside them (brief timezone)."""
+    hours = (brief or {}).get("transfer_hours")
+    if not hours:
+        return True
+    try:
+        local = _as_utc(now).astimezone(ZoneInfo(hours["timezone"]))
+        if _WEEKDAYS[local.weekday()] not in hours["days"]:
+            return False
+        return hours["start"] <= local.strftime("%H:%M") < hours["end"]
+    except (KeyError, TypeError, ValueError, OSError):
+        return False  # unreadable stored hours: do not offer a transfer
+
+
+def _day_span(days: Sequence[str]) -> str:
+    indexes = [_WEEKDAYS.index(day) for day in days]
+    if len(indexes) > 2 and indexes == list(range(indexes[0], indexes[-1] + 1)):
+        return f"{_WEEKDAY_NAMES[indexes[0]]} to {_WEEKDAY_NAMES[indexes[-1]]}"
+    return ", ".join(_WEEKDAY_NAMES[i] for i in indexes)
+
 
 def normalize_campaign_brief(
     value: Mapping[str, Any] | None,
@@ -185,6 +337,20 @@ def normalize_campaign_brief(
         field="transfer_destination",
         max_len=MAX_TRANSFER_DESTINATION_CHARS,
     )
+    if transfer_destination:
+        _refuse_premium_rate_transfer(transfer_destination)
+    transfer_destinations = None
+    if raw.get("transfer_destinations"):
+        transfer_destinations = normalize_transfer_destinations(raw["transfer_destinations"])
+        if transfer_destination and transfer_destination not in {
+            entry["number"] for entry in transfer_destinations
+        }:
+            raise ValueError(
+                "campaign_brief.transfer_destination must be one of the "
+                "transfer_destinations numbers"
+            )
+        # Every existing reader of the single field keeps working.
+        transfer_destination = transfer_destinations[0]["number"]
     if "transfer" in actions and not transfer_destination:
         raise ValueError(
             "campaign_brief.transfer_destination is required when transfer is approved"
@@ -192,6 +358,29 @@ def normalize_campaign_brief(
     if transfer_destination and "transfer" not in actions:
         raise ValueError(
             "campaign_brief.transfer_destination requires transfer in approved_next_actions"
+        )
+    optional_transfer: dict[str, Any] = {}
+    if transfer_destinations is not None:
+        optional_transfer["transfer_destinations"] = transfer_destinations
+    if raw.get("transfer_hours") is not None:
+        if "transfer" not in actions:
+            raise ValueError(
+                "campaign_brief.transfer_hours requires transfer in approved_next_actions"
+            )
+        optional_transfer["transfer_hours"] = normalize_transfer_hours(raw["transfer_hours"])
+    for field in ("transfer_ring_seconds", "transfer_if_no_answer"):
+        if raw.get(field) is not None:
+            if "transfer" not in actions:
+                raise ValueError(
+                    f"campaign_brief.{field} requires transfer in approved_next_actions"
+                )
+    if raw.get("transfer_ring_seconds") is not None:
+        optional_transfer["transfer_ring_seconds"] = normalize_transfer_ring_seconds(
+            raw["transfer_ring_seconds"]
+        )
+    if raw.get("transfer_if_no_answer") is not None:
+        optional_transfer["transfer_if_no_answer"] = normalize_transfer_if_no_answer(
+            raw["transfer_if_no_answer"]
         )
 
     try:
@@ -211,6 +400,7 @@ def normalize_campaign_brief(
         ),
         "approved_next_actions": actions,
         "transfer_destination": transfer_destination,
+        **optional_transfer,
         "required_lead_fields": _normalise_lead_fields(
             raw.get("required_lead_fields")
         ),
@@ -224,11 +414,45 @@ def normalize_campaign_brief(
     }
 
 
+def _render_transfer_lines(
+    brief: Mapping[str, Any], destination: str, now: datetime | None
+) -> list[str]:
+    """Transfer facts for the prompt; numbers stay out, hours are stated truthfully."""
+    named = []
+    for item in brief.get("transfer_destinations") or []:
+        if not isinstance(item, Mapping):
+            continue
+        name = _render_clean(item.get("name"), max_len=MAX_TRANSFER_NAME_CHARS)
+        when = _render_clean(item.get("when"), max_len=MAX_TRANSFER_WHEN_CHARS)
+        if name:
+            named.append(f"{name}: {when}" if when else name)
+    hours = brief.get("transfer_hours")
+    if hours and not transfer_open_now(brief, now):
+        try:
+            available = (
+                f"{_day_span(hours['days'])}, {hours['start']} to {hours['end']} "
+                f"({hours['timezone']})"
+            )
+        except (KeyError, TypeError, ValueError):
+            available = "during business hours"
+        return [
+            "- Transfers to a person: the team is not available right now. They are "
+            f"available {available}. Do not promise a transfer on this call; you may "
+            "offer to take a message instead."
+        ]
+    if named:
+        return ["- Approved transfer destinations (use the transfer tool with the name):"] + [
+            f"  - {entry}" for entry in named
+        ]
+    return [f"- Approved transfer destination: {destination}"]
+
+
 def render_campaign_brief(
     brief: Mapping[str, Any] | None,
     *,
     representative_name: str | None = None,
     brand: str | None = None,
+    now: datetime | None = None,
 ) -> str:
     """Render only configured facts; never invent an action or destination."""
     if not brief:
@@ -268,7 +492,7 @@ def render_campaign_brief(
         brief.get("transfer_destination"), max_len=MAX_TRANSFER_DESTINATION_CHARS
     )
     if destination:
-        lines.append(f"- Approved transfer destination: {destination}")
+        lines.extend(_render_transfer_lines(brief, destination, now))
 
     required_fields = brief.get("required_lead_fields") or []
     rendered_fields = []
