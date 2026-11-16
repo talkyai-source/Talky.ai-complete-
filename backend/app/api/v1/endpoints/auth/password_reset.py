@@ -158,10 +158,10 @@ async def _claim_reset_attempt(redis, email: str, original, pending: dict) -> bo
             original, _RESET_MAX_ATTEMPTS, _RESET_CODE_TTL_SECONDS * 1000,
         )
     except Exception as exc:
-        logger.warning("password_reset_attempt_claim_unavailable err=%s", type(exc).__name__)
+        logger.error("password_reset_attempt_claim_unavailable (Redis) err=%s", type(exc).__name__)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Redis is unavailable; cannot reset password right now.",
+            detail="Password reset is not available right now. Try again in a few minutes.",
         ) from exc
     return int(claimed) > 0
 
@@ -250,9 +250,11 @@ def _get_redis_or_503():
     from app.core.container import get_container
     container = get_container()
     if not container.is_initialized or not container.redis_enabled:
+        logger.error("password_reset_unavailable: Redis is not available (container initialized=%s)",
+                     container.is_initialized)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Redis is unavailable; cannot reset password right now.",
+            detail="Password reset is not available right now. Try again in a few minutes.",
         )
     return container.redis
 

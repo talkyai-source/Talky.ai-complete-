@@ -233,6 +233,8 @@ const PUBLIC_AUTH_PATHS = new Set([
     "/auth/passkey-check", "/auth/passkeys/login/begin", "/auth/passkeys/login/complete", "/auth/mfa/verify",
     // QA F1-15 / D4-2: an invited person is signed out when they join.
     "/auth/invites/preview", "/auth/invites/accept",
+    // The "verify your email" link opens a page that has no session yet.
+    "/auth/verify-email", "/auth/verify-email/resend",
 ]);
 function managesSession(path: string) {
     return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);

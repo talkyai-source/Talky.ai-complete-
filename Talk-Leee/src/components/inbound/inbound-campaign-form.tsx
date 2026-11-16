@@ -21,6 +21,7 @@ import {
     verifiedTransferConfigurationAvailable,
     type InboundFormErrors,
 } from "@/lib/inbound-validation";
+import { inboundSetupNeeds } from "@/lib/inbound-setup-needs";
 import { useVoicesQuery } from "@/lib/queries/ai-options-queries";
 import { useInboundPhoneNumbers, useInboundRuntimeCapabilities } from "@/lib/queries/inbound-queries";
 import { useSipTrunks } from "@/lib/telephony-api";
@@ -191,6 +192,15 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
     const voiceSelectUnavailable = voicesQuery.isError || (voicesQuery.isSuccess && voiceOptions.length === 0);
     const dependenciesLoading = campaignsQuery.isLoading || trunksQuery.isLoading || (canAssignNumber && numbersQuery.isLoading);
     const dependencyError = campaignsQuery.isError || trunksQuery.isError || (canAssignNumber && numbersQuery.isError);
+    // Why the save button is switched off, in plain words. The button sits at
+    // the end of a long form, far from the notes that explain each gap.
+    const createBlockers = dependenciesLoading ? [] : dependencyError
+        ? ["the verified numbers and trunks, which could not be loaded (see the message above)"]
+        : inboundSetupNeeds({
+            needsCampaign: !lockCampaign && eligibleCampaigns.length === 0,
+            numbers: availableNumbers.length,
+            trunks: eligibleInboundTrunks.length,
+        });
     const transferConfigurationAvailable = verifiedTransferConfigurationAvailable(runtimeCapabilitiesQuery);
 
     function update<K extends keyof InboundCampaignInput>(key: K, next: InboundCampaignInput[K]) {
@@ -453,10 +463,15 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
 
             <div className="flex flex-col-reverse gap-3 rounded-xl border border-border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-start gap-2 text-sm text-muted-foreground"><ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden /><span>Saving never activates the number. The server evaluates readiness again during confirmed activation.</span></div>
-                <Button type="submit" disabled={pending || dependenciesLoading || dependencyError || (!lockCampaign && eligibleCampaigns.length === 0) || eligibleInboundTrunks.length === 0 || availableNumbers.length === 0}>
+                <Button type="submit" aria-describedby={createBlockers.length > 0 ? "inbound-create-blockers" : undefined} disabled={pending || dependenciesLoading || dependencyError || (!lockCampaign && eligibleCampaigns.length === 0) || eligibleInboundTrunks.length === 0 || availableNumbers.length === 0}>
                     {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}{pending ? "Saving…" : mode === "create" ? "Create inactive campaign" : "Save changes"}
                 </Button>
             </div>
+            {createBlockers.length > 0 ? (
+                <p id="inbound-create-blockers" role="status" className="text-sm text-muted-foreground">
+                    {mode === "create" ? "This campaign cannot be created yet." : "These changes cannot be saved yet."} Still needed: {createBlockers.join("; ")}.
+                </p>
+            ) : null}
         </form>
     );
 }

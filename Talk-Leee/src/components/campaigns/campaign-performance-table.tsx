@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Download, Loader2, Pause, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
-import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
+import { CampaignReadinessNotice, CampaignStartControl, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 import type { CampaignActions } from "@/lib/permissions";
 import { CampaignDuplicateStatus, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
 import type { CampaignDuplicateResult } from "@/lib/campaign-duplicate";
@@ -668,13 +668,19 @@ export function CampaignPerformanceTable({
 
     const detailsCampaign = useMemo(() => campaigns.find((c) => c.id === detailsId) || null, [campaigns, detailsId]);
     // Same rules as the campaign detail page: Pause / Stop while running;
-    // Start / Resume for exactly draft, paused and stopped.
+    // Start / Resume for exactly draft, paused, stopped and completed.
     const detailsCanPause = (detailsCampaign?.status || "").toLowerCase() === "running";
     const detailsCanResume = canStartCampaign(detailsCampaign?.status);
     const detailsStarting = detailsId !== null && inFlight.starting.has(detailsId);
     const detailsStopping = detailsId !== null && inFlight.stopping.has(detailsId);
     const detailsPausing = detailsId !== null && inFlight.pausing.has(detailsId);
     const detailsBusy = detailsStarting || detailsStopping || detailsPausing;
+    // The quick view shows why Resume is switched off on its own line under the
+    // buttons: inside the row it pushed Duplicate and Edit aside and left
+    // Resume floating above it (live, 14 Nov 2026). Same query as the Resume
+    // button's own, so it is read once.
+    const detailsShowsReadiness = Boolean(detailsCampaign) && allowed.update && detailsCanResume;
+    const detailsReadiness = useCampaignReadiness(detailsShowsReadiness && detailsCampaign ? [detailsCampaign.id] : [], detailsShowsReadiness);
     const statusOptions = useMemo(() => campaignStatusFilterOptions(campaigns.map((c) => c.status)), [campaigns]);
     // The in-row partial edit modal (name / description / voice_id /
     // max_concurrent_calls only) was removed: it could not satisfy the
@@ -1472,6 +1478,7 @@ export function CampaignPerformanceTable({
                                     onStart={async () => onResume([detailsCampaign.id], detailsCampaign.id)}
                                     label={campaignStartLabel(detailsCampaign.status)}
                                     disabled={detailsBusy}
+                                    showNotice={false}
                                 />
                             ) : detailsCanPause ? (
                                 <>
@@ -1529,6 +1536,7 @@ export function CampaignPerformanceTable({
                                 </Button>
                             ) : null}
                         </div>
+                        {detailsShowsReadiness ? <CampaignReadinessNotice readiness={detailsReadiness} wide /> : null}
                         <CampaignDuplicateStatus duplicate={duplicate} />
                         {notice && notice.campaignId === detailsCampaign.id ? <CampaignControlNoticeBox notice={notice.notice} /> : null}
                     </div>

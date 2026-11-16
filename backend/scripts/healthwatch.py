@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.api.v1.endpoints.health import _WORKER_HEARTBEAT_KEYS, read_worker_heartbeats
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
+from app.infrastructure.metrics.email_delivery import ERRORS as EMAIL_ERRORS, read_email_outcome
 from app.infrastructure.metrics.provider_observations import read_recent
 
 IO_TIMEOUT_SECONDS = 0.5
@@ -167,6 +168,41 @@ async def check_provider_observations(redis):
                        "observed_scopes": len(records)}
     return {"provider_observations": observation,
             "provider_error_rate": {"status": "unavailable", "reason": "no_request_denominator"}}
+
+
+# A refused login or missing mailbox settings fail every send, so one is
+# enough. A time-out or network fault can pass by itself, so it must happen
+# twice in a row before it counts.
+_EMAIL_FAILS_AT_ONCE = frozenset({"authentication", "unconfigured"})
+EMAIL_ALERT_AFTER_FAILURES = 2
+
+
+async def check_email(redis, *, now):
+    """The platform mailbox, judged by its last real send (sign-up codes,
+    resets, invites, notifications). It failed unseen for 11 days in Nov 2026
+    because the alerts used the same mailbox. Nothing is sent from here."""
+    try:
+        record = await read_email_outcome(redis)
+    except Exception:
+        return dict(_UNAVAILABLE)
+    if not record:
+        return {"status": "no_recent_evidence"}
+    try:
+        at = float(record["at"])
+        if not math.isfinite(at):
+            raise ValueError("Invalid send time")
+        if record["outcome"] == "ok":
+            return {"status": "ok", "last_send_minutes_ago": max(0, round((now.timestamp() - at) / 60))}
+        if record["outcome"] != "failed":
+            raise ValueError("Invalid outcome")
+        error, count, since = record["error"], int(record["consecutive_failures"]), float(record["failing_since"])
+        if error not in EMAIL_ERRORS or count < 1 or not math.isfinite(since):
+            raise ValueError("Invalid failure record")
+    except (KeyError, TypeError, ValueError):
+        return {"status": "unavailable", "reason": "email_outcome_invalid"}
+    alert = error in _EMAIL_FAILS_AT_ONCE or count >= EMAIL_ALERT_AFTER_FAILURES
+    return {"status": "alert" if alert else "pending", "error": error, "consecutive_failures": count,
+            "failing_for_minutes": max(0, round((now.timestamp() - since) / 60))}
 
 
 async def check_trunks(rows, redis, *, now):
@@ -312,6 +348,7 @@ async def run():
             result["redis"] = await check_redis_capacity(redis)
             result["workers"] = await check_workers(redis, now=now)
             result.update(await check_provider_observations(redis))
+            result["email"] = await check_email(redis, now=now)
             try:
                 dsn = os.environ.get("DATABASE_URL")
                 if dsn:

@@ -299,7 +299,9 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         goal: typeof restoredDraft?.goal === "string" ? restoredDraft.goal : seed.goal,
     });
 
-    const [personaType, setPersonaType] = useState<PersonaType>(restoredDraft?.personaType ?? seed.persona_type);
+    // A new inbound campaign starts on an inbound persona: "Lead Generation"
+    // is the outbound one, and was pre-selected on the inbound page too.
+    const [personaType, setPersonaType] = useState<PersonaType>(restoredDraft?.personaType ?? (!initialData && direction === "inbound" ? "receptionist" : seed.persona_type));
     const [companyName, setCompanyName] = useState<string>(typeof restoredDraft?.companyName === "string" ? restoredDraft.companyName : seed.company_name);
     const [agentNamesRaw, setAgentNamesRaw] = useState<string>(typeof restoredDraft?.agentNamesRaw === "string" ? restoredDraft.agentNamesRaw : seed.agent_names.join(", "));
     // This form has no gender-toggle UI (that lives in the wizard / basics

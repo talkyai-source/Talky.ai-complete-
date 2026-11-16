@@ -10,6 +10,7 @@ import logging
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.domain.services.ai_option_availability import pool_available, unavailable_detail
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user, get_db_client
@@ -137,7 +138,7 @@ async def save_config(
             raise HTTPException(400, str(exc)) from exc
         provider = str((config.realtime_settings or {}).get("provider") or "openai").lower()
         if not await get_credential_resolver().resolve(provider, tenant_id=tenant_id):
-            raise HTTPException(400, f"{provider} is not configured for Realtime")
+            raise HTTPException(400, unavailable_detail(f"{provider} key missing for Realtime"))
         async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
             await _upsert_tenant_config(conn, tenant_id, config)
         return AIProviderConfigWithWarnings(config=config, latency_warnings=[])
@@ -164,7 +165,7 @@ async def save_config(
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AssemblyAI API key not configured. Add a tenant AssemblyAI credential or set ASSEMBLYAI_API_KEY on the backend.",
+                detail=unavailable_detail("assemblyai key missing"),
             )
 
     # Refuse to save a Gemini config if the API key isn't present — caught
@@ -173,11 +174,11 @@ async def save_config(
         from app.domain.services.credential_resolver import get_credential_resolver
         key = await get_credential_resolver().resolve("openai", tenant_id=str(current_user.tenant_id))
         if not key:
-            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+            raise HTTPException(status_code=503, detail=unavailable_detail("openai key missing"))
     if config.llm_provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
+            detail=unavailable_detail("gemini key missing"),
         )
     # Every other offered LLM must resolve a key too (tenant BYOK, the platform
     # key or a *_KEYS pool). Otherwise the save succeeds and every later call
@@ -185,17 +186,27 @@ async def save_config(
     if config.llm_provider in {"groq", "cerebras", "deepseek"}:
         from app.domain.services.credential_resolver import get_credential_resolver
         key = await get_credential_resolver().resolve(config.llm_provider, tenant_id=str(tenant_id))
-        if not key:
+        if not key and not pool_available(config.llm_provider):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail=f"{config.llm_provider.capitalize()} API key not configured. Add a tenant credential or set the key on the backend.",
+                detail=unavailable_detail(f"{config.llm_provider} key missing"),
             )
 
+    # D5-1: the providers that had no key check above (Deepgram for STT and
+    # TTS, Google TTS) are refused here too. 422 with one plain sentence.
+    from app.domain.services.ai_option_availability import UNAVAILABLE_REASON, google_tts_available
+    if config.tts_provider == "google" and not google_tts_available():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, UNAVAILABLE_REASON)
+    if config.tts_provider == "deepgram" or config.stt_engine.startswith("deepgram"):
+        from app.domain.services.credential_resolver import get_credential_resolver
+        if not await get_credential_resolver().resolve("deepgram", tenant_id=str(tenant_id)) and not pool_available("deepgram"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, UNAVAILABLE_REASON)
+
     if config.tts_provider == "cartesia":
-        if not os.getenv("CARTESIA_API_KEY"):
+        if not os.getenv("CARTESIA_API_KEY") and not pool_available("cartesia"):
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Cartesia API key not configured. Set CARTESIA_API_KEY in .env.",
+                detail=unavailable_detail("cartesia key missing"),
             )
         valid_tts_models = [m.id for m in CARTESIA_MODELS]
         live_cartesia = await _get_live_cartesia_voices()

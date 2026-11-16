@@ -118,6 +118,9 @@ class MeResponse(BaseModel):
     account_state: Literal["active", "suspended_subscription", "suspended_hold"] = "active"
     # Stable code: subscription_suspended | tenant_hold | partner_hold | null.
     account_state_reason: Optional[str] = None
+    # D5-27: stable codes for what this account is refused right now; empty
+    # when in good standing. See backend/docs/account-states.md.
+    account_restrictions: list[str] = Field(default_factory=list)
 
     # Two-factor state (G2): enabled on the profile, and completed by THIS
     # session (server-recorded). mfa_verified is null when unknown.

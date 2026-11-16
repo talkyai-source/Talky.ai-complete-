@@ -29,7 +29,9 @@ import csv
 import io
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Annotated, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
@@ -144,6 +146,19 @@ class CheckoutOut(BaseModel):
     currency: str
     mock_mode: bool = False
     message: Optional[str] = None
+
+
+class TopupOrderOut(BaseModel):
+    """One top-up order as stored (GET /billing/topups/{order_id})."""
+    id: str
+    package_code: str
+    minutes: int
+    price_cents: int
+    currency: str
+    currency_exponent: Optional[int] = None
+    status: str
+    created_at: Optional[str] = None
+    paid_at: Optional[str] = None
 
 
 class BalanceOut(BaseModel):
@@ -405,6 +420,42 @@ async def list_ledger(
     return {"entries": [public_ledger_entry(row) for row in rows]}
 
 
+@router.get(
+    "/{order_id}",
+    response_model=TopupOrderOut,
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
+async def get_topup_order(
+    order_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """One order's stored state (pending / paid / failed / cancelled / ...).
+
+    Read from our own row only: no call to the payment provider. Another
+    tenant's id is indistinguishable from an unknown one (404).
+    """
+    tenant_id = _tenant(current_user)
+    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT id, package_code, minutes, price_cents, currency, status, created_at, paid_at "
+            "FROM topup_orders WHERE id = $1::uuid AND tenant_id = $2::uuid",
+            str(order_id), tenant_id,
+        )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
+    return {
+        "id": str(row["id"]),
+        "package_code": row["package_code"],
+        "minutes": row["minutes"],
+        "price_cents": row["price_cents"],
+        "currency": row["currency"],
+        "currency_exponent": _EXPONENTS.get(str(row["currency"]).lower()),
+        "status": row["status"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "paid_at": row["paid_at"].isoformat() if row["paid_at"] else None,
+    }
+
+
 # ── admin reconciliation (§9) ───────────────────────────────────────────────
 #
 # require_platform_admin, not a tenant permission: this reads across every
@@ -414,6 +465,25 @@ async def list_ledger(
 # exactly how a set of books stops matching the payment provider's.
 
 admin_router = APIRouter(prefix="/admin/billing", tags=["billing", "admin"])
+
+
+def _date_bound(value: Optional[str], name: str) -> Optional[datetime]:
+    """An ISO date or date-time as a datetime; no zone means UTC.
+
+    The statement binds the bounds as timestamptz and the database driver
+    refuses a string for that, so text is never passed down.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} must be a date (2026-11-01) or a date and time.",
+        )
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 @admin_router.get("/reconciliation")
@@ -431,7 +501,8 @@ async def reconciliation(
     """
     bounded_limit = min(max(limit, 1), 50_000)
     rows = await _service().reconciliation(
-        since=since, until=until, limit=bounded_limit + 1,
+        since=_date_bound(since, "since"), until=_date_bound(until, "until"),
+        limit=bounded_limit + 1,
     )
     truncated = len(rows) > bounded_limit
     rows = rows[:bounded_limit]

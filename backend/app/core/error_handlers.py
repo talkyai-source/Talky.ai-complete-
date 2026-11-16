@@ -180,8 +180,11 @@ async def rate_limit_exception_handler(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content=_envelope(
             code="rate_limited",
-            message="Too many requests. Slow down and retry after the indicated delay.",
-            details={"limit": str(exc.detail) if exc.detail else None},
+            message="Too many requests. Wait a moment and try again.",
+            details={
+                "limit": str(exc.detail) if exc.detail else None,
+                "retry_after_seconds": retry_after,
+            },
         ),
         headers={"Retry-After": str(retry_after)},
     )

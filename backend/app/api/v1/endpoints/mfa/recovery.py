@@ -59,7 +59,7 @@ async def regenerate_recovery_codes(
         if not mfa_row or not mfa_row["enabled"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="MFA is not currently enabled.",
+                detail="Two-factor authentication is not turned on.",
             )
 
         # Require a valid current TOTP code (reauthentication)
@@ -68,7 +68,7 @@ async def regenerate_recovery_codes(
         except RuntimeError:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="MFA configuration error.",
+                detail="Two-factor authentication is not available right now. Contact support.",
             )
 
         matched_step = verify_totp_step(

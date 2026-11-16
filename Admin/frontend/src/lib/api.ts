@@ -289,6 +289,97 @@ export interface AdminCampaignListParams {
     page_size?: number;
 }
 
+// GET /admin/sip-trunks (platform admin, read-only). Mirrors AdminSipTrunkItem; the
+// server never sends a username or password, only whether a password is stored.
+export interface AdminSipTrunkItem {
+    id: string;
+    tenant_id: string;
+    tenant_name: string | null;
+    trunk_name: string;
+    sip_domain: string;
+    port: number;
+    transport: string;
+    direction: string;
+    is_active: boolean;
+    auth_configured: boolean;
+    role: string | null;
+    live_registration_status: string | null;
+    live_status_detail: string | null;
+    live_status_checked_at: string | null;
+    last_tested_at: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+}
+
+export interface AdminSipTrunkListResponse {
+    items: AdminSipTrunkItem[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+export interface AdminSipTrunkListParams {
+    tenant_id?: string;
+    is_active?: boolean;
+    registration?: string;
+    page?: number;
+    page_size?: number;
+}
+
+// GET /admin/billing/reconciliation (platform admin, read-only): the minute ledger.
+export interface BillingReconciliationEntry {
+    created_at: string;
+    tenant_id: string;
+    business_name: string;
+    kind: string;
+    minutes_delta: number;
+    amount_cents: number;
+    currency: string;
+    package_code: string;
+    provider_event_id: string;
+    provider_payment_id: string;
+    order_status: string;
+    note: string;
+}
+
+export interface BillingReconciliationCurrency {
+    currency: string | null;
+    currency_exponent: number | null;
+    gross_cents: number;
+    reversed_cents: number;
+    net_cents: number;
+}
+
+export interface BillingReconciliation {
+    entries: BillingReconciliationEntry[];
+    truncated: boolean;
+    limit: number;
+    totals: {
+        scope: string;
+        rows: number;
+        minutes_sold: number;
+        minutes_reversed: number;
+        minutes_used: number;
+        by_currency: BillingReconciliationCurrency[];
+    };
+}
+
+// GET /billing/config: only the payment mode is read by the panel.
+export interface BillingConfig {
+    billing_mode: string;
+}
+
+// POST /admin/client-errors: the fixed body the panel reports its own errors with.
+export interface ClientErrorReport {
+    kind: 'render' | 'error' | 'unhandledrejection';
+    name: string;
+    message: string;
+    stack: string[];
+    route: string;
+    app_version: string | null;
+    occurred_at: string;
+}
+
 export interface TimelineEvent {
     event: string;
     timestamp: string;
@@ -2271,6 +2362,53 @@ class ApiClient {
         if (params?.direction) searchParams.append('direction', params.direction);
         const query = searchParams.toString() ? '?' + searchParams.toString() : '';
         return this.request<AdminCampaignListResponse>(`/admin/campaigns${query}`);
+    }
+
+    // Phone line (SIP trunk) directory across tenants (read-only); newest first.
+    async getAdminSipTrunks(params?: AdminSipTrunkListParams) {
+        const searchParams = new URLSearchParams();
+        if (params?.page) searchParams.append('page', params.page.toString());
+        if (params?.page_size) searchParams.append('page_size', params.page_size.toString());
+        if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
+        if (params?.is_active !== undefined) searchParams.append('is_active', String(params.is_active));
+        if (params?.registration) searchParams.append('registration', params.registration);
+        const query = searchParams.toString() ? '?' + searchParams.toString() : '';
+        return this.request<AdminSipTrunkListResponse>(`/admin/sip-trunks${query}`);
+    }
+
+    // Minute ledger across tenants (read-only). since is inclusive, until is exclusive.
+    async getAdminBillingReconciliation(params?: { since?: string; until?: string }) {
+        const searchParams = new URLSearchParams();
+        if (params?.since) searchParams.append('since', params.since);
+        if (params?.until) searchParams.append('until', params.until);
+        const query = searchParams.toString() ? '?' + searchParams.toString() : '';
+        return this.request<BillingReconciliation>(`/admin/billing/reconciliation${query}`, { timeoutMs: 30_000 });
+    }
+
+    async getBillingConfig() {
+        return this.request<BillingConfig>('/billing/config', { timeoutMs: 15_000 });
+    }
+
+    /**
+     * Report one panel error. Deliberately NOT routed through request(): a 401 here must
+     * not start the refresh-and-retry, sign the person out or raise any global signal, and
+     * a failure must never be reported again. Every outcome except 2xx is just `false`.
+     */
+    async reportClientError(body: ClientErrorReport): Promise<boolean> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 5000);
+        try {
+            const headers: Record<string, string> = { 'Content-Type': 'application/json', ...this.identityHeaders() };
+            if (this.token) headers['Authorization'] = `Bearer ${this.token}`;
+            const response = await fetch(`${this.baseUrl}/admin/client-errors`, {
+                method: 'POST', headers, body: JSON.stringify(body), signal: controller.signal, credentials: 'include',
+            });
+            return response.ok;
+        } catch {
+            return false;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     async getAdminCallDetail(callId: string) {

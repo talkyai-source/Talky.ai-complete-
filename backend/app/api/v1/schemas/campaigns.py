@@ -144,6 +144,14 @@ class CampaignPromptLayerResponse(BaseModel):
     content: str
 
 
+class CallingRulesResponse(BaseModel):
+    """GET /campaigns/calling-rules: what a new campaign of this account is held to."""
+    effective_schedule: Dict[str, Any] = Field(
+        description="The same object GET /campaigns/{id} returns as effective_schedule for a campaign with no schedule of its own.")
+    legal_floor: Dict[str, Any] = Field(
+        description="The callee-local calling hours that no setting widens.")
+
+
 class CampaignStartRequest(BaseModel):
     """Request body for starting a campaign."""
 
@@ -295,6 +303,13 @@ class CampaignCreateRequest(CampaignVoiceSelection):
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
     )
+    first_speaker: Optional[Literal["agent", "user"]] = Field(
+        default=None,
+        description=(
+            "Who speaks first (D3-13): the same value Start accepts, stored in "
+            "calling_config.first_speaker. Omitted keeps the saved choice."
+        ),
+    )
     direction: Literal["outbound", "inbound"] = Field(
         default="outbound",
         description=(
@@ -386,6 +401,13 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
     calling_schedule: Optional[CampaignCallingSchedule] = Field(
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
+    )
+    first_speaker: Optional[Literal["agent", "user"]] = Field(
+        default=None,
+        description=(
+            "Who speaks first (D3-13): the same value Start accepts, stored in "
+            "calling_config.first_speaker. Omitted keeps the saved choice."
+        ),
     )
 
     @field_validator("agent_names")
