@@ -189,6 +189,21 @@ test("the first-speaker choice goes back to agent every time the dialog opens", 
     assert.equal((startDialog()!.getByRole("radio", { name: /AI agent speaks first/ }) as HTMLInputElement).checked, true);
 });
 
+for (const [status, label] of [["paused", "Resume"], ["draft", "Start"]] as const) {
+    test(`${label} on the detail page opens on the campaign's saved first speaker and sends it`, async () => {
+        const state = wire(status, { callingConfig: { first_speaker: "user", batch_size: 8 } });
+        await mount();
+        fireEvent.click(await readyButton(label));
+        const dialog = startDialog()!;
+        assert.equal((dialog.getByRole("radio", { name: /Callee speaks first/ }) as HTMLInputElement).checked, true, "opens on the saved choice");
+        assert.equal((dialog.getByRole("radio", { name: /AI agent speaks first/ }) as HTMLInputElement).checked, false);
+        await waitFor(() => assert.equal((dialog.getByRole("button", { name: "Start campaign" }) as HTMLButtonElement).disabled, false), { timeout: SLOW });
+        fireEvent.click(dialog.getByRole("button", { name: "Start campaign" }));
+        await waitFor(() => assert.equal(state.starts.length, 1), { timeout: SLOW });
+        assert.equal(state.starts[0]!.options.first_speaker, "user");
+    });
+}
+
 test("the dialog carries the readiness gate, the calling-schedule notice and the pacing controls", async () => {
     wire("draft");
     await mount();

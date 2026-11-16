@@ -16,6 +16,19 @@ from app.api.v1.endpoints import contacts as contacts_ep
 from app.api.v1.schemas.campaigns import ContactCreate, ContactUpdate
 from app.core.security.rbac import Permission
 
+PERMISSION = {
+    "basis": "express_consent",
+    "source": "Customer sign-up form, March 2026",
+    "permission_date": "2026-03-14",
+    "statement_version": "2026-11-v1",
+}
+FORM_PERMISSION = dict(
+    permission_basis=PERMISSION["basis"],
+    permission_source=PERMISSION["source"],
+    permission_date=PERMISSION["permission_date"],
+    permission_statement_version=PERMISSION["statement_version"],
+)
+
 
 class _Response:
     def __init__(self, data, *, count=None, error=None):
@@ -179,7 +192,7 @@ def _upload(contents: str = "phone_number\n020 7946 0958\n") -> UploadFile:
 async def _invoke_contact_mutation(name: str, db: _DB):
     if name == "add":
         return await campaigns_ep.add_contact_to_campaign(
-            "c1", ContactCreate(phone_number="020 7946 0958"), USER, db
+            "c1", ContactCreate(phone_number="020 7946 0958", permission=PERMISSION), USER, db
         )
     if name == "edit":
         return await campaigns_ep.update_contact_in_campaign(
@@ -194,17 +207,19 @@ async def _invoke_contact_mutation(name: str, db: _DB):
             skip_duplicates=True,
             current_user=USER,
             db_client=db,
+            **FORM_PERMISSION,
         )
     if name == "paste":
         return await contacts_ep.paste_campaign_contacts(
             campaign_id="c1",
-            body=contacts_ep.BulkPasteRequest(text="020 7946 0958"),
+            body=contacts_ep.BulkPasteRequest(text="020 7946 0958", permission=PERMISSION),
             current_user=USER,
             db_client=db,
         )
     if name == "bulk":
         return await contacts_ep.bulk_import_contacts(
-            file=_upload(), campaign_id="c1", current_user=USER, db_client=db
+            file=_upload(), campaign_id="c1", current_user=USER, db_client=db,
+            **FORM_PERMISSION,
         )
     raise AssertionError(name)
 
@@ -262,7 +277,7 @@ async def test_contact_campaign_guard_rejects_missing_tenant_before_any_read_or_
     with pytest.raises(HTTPException) as exc:
         await campaigns_ep.add_contact_to_campaign(
             "c1",
-            ContactCreate(phone_number="020 7946 0958"),
+            ContactCreate(phone_number="020 7946 0958", permission=PERMISSION),
             tenantless_user,
             db,
         )
@@ -291,7 +306,8 @@ async def test_legacy_bulk_uses_campaign_country_and_canonical_phone_normalizer(
     db.tables["leads"] = []
 
     result = await contacts_ep.bulk_import_contacts(
-        file=_upload(), campaign_id="c1", current_user=USER, db_client=db
+        file=_upload(), campaign_id="c1", current_user=USER, db_client=db,
+        **FORM_PERMISSION,
     )
 
     assert result.imported == 1
@@ -300,7 +316,11 @@ async def test_legacy_bulk_uses_campaign_country_and_canonical_phone_normalizer(
 
 
 @pytest.mark.asyncio
-async def test_legacy_bulk_never_counts_failed_write_as_imported():
+async def test_legacy_bulk_never_counts_failed_write_as_imported(monkeypatch):
+    # The injected write error also hits the contact-list insert, which with a
+    # confirmation (correctly) fails the whole import; this test is about the
+    # lead write, so it runs with the requirement off and no confirmation.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = _DB(direction="outbound", write_error="direction guard rejected insert")
     db.tables["leads"] = []
 

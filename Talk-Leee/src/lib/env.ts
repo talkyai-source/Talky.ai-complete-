@@ -3,6 +3,13 @@ import { z } from "zod";
 const AppEnvironmentSchema = z.enum(["development", "staging", "production"]);
 const VercelEnvironmentSchema = z.enum(["development", "preview", "production"]);
 
+// "false" and "0" (any letter case, spaces trimmed) switch Sentry off. Every
+// other value is coerced as before ("" is off, any other text is on).
+const SentryEnabledSchema = z.preprocess(
+    (value) => (typeof value === "string" && ["false", "0"].includes(value.trim().toLowerCase()) ? false : value),
+    z.coerce.boolean().optional(),
+);
+
 const EnvSchema = z.object({
     NODE_ENV: z.string().optional(),
     NEXT_PUBLIC_APP_ENV: AppEnvironmentSchema.optional(),
@@ -14,7 +21,7 @@ const EnvSchema = z.object({
     NEXT_PUBLIC_SENTRY_DSN: z.string().url().optional(),
     NEXT_PUBLIC_SENTRY_TRACES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
     NEXT_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE: z.coerce.number().min(0).max(1).optional(),
-    NEXT_PUBLIC_SENTRY_ENABLED: z.coerce.boolean().optional(),
+    NEXT_PUBLIC_SENTRY_ENABLED: SentryEnabledSchema,
     // AH-Phase-F: opt-out of the localStorage Bearer fallback. Default
     // is ON (current behaviour preserved); set to the literal string
     // "false" to disable. Disabling eliminates the XSS attack surface

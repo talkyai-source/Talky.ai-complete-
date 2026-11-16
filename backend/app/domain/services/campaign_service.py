@@ -52,6 +52,9 @@ class StartCampaignResult:
     error: Optional[str] = None
     # D3-14: jobs a large start is still queueing in the background.
     jobs_dispatching: int = 0
+    # CONTACT_PERMISSION_DIAL_GATE: contacts left out because their list has no
+    # confirmed permission to call (0 whenever the switch is off).
+    jobs_withheld: int = 0
 
 
 class CampaignError(Exception):
@@ -406,11 +409,16 @@ class CampaignService:
                     raise CampaignDirectionError("Campaign changed; outbound start was refused")
 
             # 3. Get pending leads (optionally scoped to a single contact list)
+            withheld_out: List[int] = []
             leads = await self._get_pending_leads(
-                campaign_id, list_id=list_id, tenant_id=scoping_tenant_id
+                campaign_id, list_id=list_id, tenant_id=scoping_tenant_id,
+                withheld_out=withheld_out,
             )
 
-            if not leads and list_id is None:
+            # Contacts the permission check withheld ARE pending work: do not
+            # mistake "nothing selected" for "nothing pending" and reset old
+            # failed/skipped contacts below.
+            if not leads and list_id is None and not sum(withheld_out):
                 # No pending/calling leads — reset failed/skipped leads so
                 # a campaign restart actually retries them. Skipped for a
                 # single-list dial: we never want a "call this list" to revive
@@ -423,9 +431,13 @@ class CampaignService:
                         f"Campaign {campaign_id}: reset {reset_count} "
                         f"failed/skipped leads to pending for restart"
                     )
+                    withheld_out = []
                     leads = await self._get_pending_leads(
-                        campaign_id, tenant_id=scoping_tenant_id
+                        campaign_id, tenant_id=scoping_tenant_id,
+                        withheld_out=withheld_out,
                     )
+
+            withheld_note = self._withheld_note(sum(withheld_out))
 
             if not leads:
                 if campaign_was_running and not allow_running:
@@ -436,9 +448,10 @@ class CampaignService:
                 )
                 return StartCampaignResult(
                     success=True,
-                    message=f"Campaign {campaign_id} started (no pending leads)",
+                    message=f"Campaign {campaign_id} started (no pending leads)" + withheld_note,
                     jobs_enqueued=0,
-                    campaign_id=campaign_id
+                    campaign_id=campaign_id,
+                    jobs_withheld=sum(withheld_out),
                 )
 
             # 4. Build the exact durable job set. PostgreSQL is the dispatch
@@ -624,10 +637,12 @@ class CampaignService:
                     message=(
                         f"Campaign {campaign_id} started; "
                         f"{len(jobs_to_dispatch)} calls are being queued"
+                        + withheld_note
                     ),
                     jobs_enqueued=0,
                     campaign_id=campaign_id,
                     jobs_dispatching=len(jobs_to_dispatch),
+                    jobs_withheld=sum(withheld_out),
                 )
 
             # 7. Dispatch the durable outbox. A false enqueue result is a real
@@ -649,10 +664,11 @@ class CampaignService:
 
             return StartCampaignResult(
                 success=True,
-                message=f"Campaign {campaign_id} started",
+                message=f"Campaign {campaign_id} started" + withheld_note,
                 jobs_enqueued=jobs_created,
                 campaign_id=campaign_id,
-                queue_stats=stats
+                queue_stats=stats,
+                jobs_withheld=sum(withheld_out),
             )
 
         except CampaignError:
@@ -660,6 +676,18 @@ class CampaignService:
         except Exception as e:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
             raise CampaignError(f"Failed to start campaign: {str(e)}")
+
+    @staticmethod
+    def _withheld_note(count: int) -> str:
+        """Plain-words suffix for the Start message; empty when nothing was withheld."""
+        if count <= 0:
+            return ""
+        who = "1 contact was" if count == 1 else f"{count} contacts were"
+        its = "its" if count == 1 else "their"
+        return (
+            f" {who} not queued because {its} list has no confirmed permission to "
+            "call. Open the contact list and confirm it, then start the campaign again."
+        )
 
     @staticmethod
     async def _reset_gap_clock(queue_service, campaign_id: str) -> None:
@@ -1034,8 +1062,13 @@ class CampaignService:
         campaign_id: str,
         list_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
+        withheld_out: Optional[List[int]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all pending leads for a campaign, ordered by priority.
+
+        ``withheld_out``: optional list that receives ONE int, the number of
+        leads CONTACT_PERMISSION_DIAL_GATE withheld (nothing is appended when
+        the switch is off). The return value is the same either way.
         Also includes leads stuck at 'calling' from a previous crashed run.
 
         Leads belonging to an INACTIVE contact list are excluded (the core of
@@ -1117,7 +1150,76 @@ class CampaignService:
                     l for l in leads
                     if str(l.get("list_id")) not in inactive or l.get("list_id") is None
                 ]
-        return leads
+
+        # CONTACT_PERMISSION_DIAL_GATE (off by default): only contacts of a
+        # confirmed list are selected. Applies to a single-list dial too.
+        return self._only_confirmed_list_leads(
+            leads, campaign_id, scoped_tenant, withheld_out
+        )
+
+    def _only_confirmed_list_leads(
+        self,
+        leads: List[Dict[str, Any]],
+        campaign_id: str,
+        scoped_tenant: Optional[str],
+        withheld_out: Optional[List[int]] = None,
+    ) -> List[Dict[str, Any]]:
+        """With ``CONTACT_PERMISSION_DIAL_GATE`` on, keep only leads whose list
+        has ``consent_confirmed_at`` set; a lead with no list is not confirmed.
+
+        Skipped leads are not queued and not written: they stay pending and are
+        picked up once the list is confirmed and the campaign is started again.
+        Unlike the inactive-list lookup this FAILS CLOSED: if the confirmation
+        cannot be read, nothing is selected ("not sure -> do not call"). The
+        match is on (list id, tenant) so another tenant's list with the same id
+        never confirms this tenant's contact.
+        """
+        from app.domain.services.dialer.block_reasons import (
+            contact_permission_dial_gate_enabled,
+        )
+
+        if not contact_permission_dial_gate_enabled():
+            return leads
+        list_ids = sorted({str(l["list_id"]) for l in leads if l.get("list_id")})
+        confirmed: set = set()
+        if list_ids:
+            try:
+                query = (
+                    self.db_client.table("contact_lists")
+                    .select("id, tenant_id, consent_confirmed_at")
+                    .in_("id", list_ids)
+                )
+                if scoped_tenant:
+                    query = query.eq("tenant_id", scoped_tenant)
+                resp = query.execute()
+                confirmed = {
+                    (str(r["id"]), str(r.get("tenant_id") or scoped_tenant))
+                    for r in (getattr(resp, "data", None) or [])
+                    if r.get("consent_confirmed_at")
+                }
+            except Exception as exc:  # noqa: BLE001 — fail closed, see docstring
+                logger.warning(
+                    "permission-confirmation lookup failed for campaign %s "
+                    "(selecting no leads as fail-safe): %s",
+                    campaign_id, exc,
+                )
+                if withheld_out is not None:
+                    withheld_out.append(len(leads))
+                return []
+        kept = [
+            l for l in leads
+            if l.get("list_id")
+            and (str(l["list_id"]), str(l.get("tenant_id") or scoped_tenant)) in confirmed
+        ]
+        if withheld_out is not None:
+            withheld_out.append(len(leads) - len(kept))
+        if len(kept) != len(leads):
+            logger.info(
+                "campaign %s: skipped %d lead(s) whose list has no calling-permission "
+                "confirmation (not enqueued, still pending)",
+                campaign_id, len(leads) - len(kept),
+            )
+        return kept
 
     async def _reset_leads_for_restart(
         self, campaign_id: str, tenant_id: Optional[str] = None

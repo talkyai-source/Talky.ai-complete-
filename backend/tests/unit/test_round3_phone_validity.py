@@ -81,6 +81,10 @@ async def test_import_invalid_phone_returns_422_before_any_write():
             "c1", file=UploadFile(filename="contacts.csv", file=BytesIO(b"phone_number\n+14155552671\n12345\n")),
             current_user=SimpleNamespace(id="u1", tenant_id="t1", email="test@example.invalid"),
             db_client=db,
+            permission_basis="express_consent",
+            permission_source="Customer sign-up form, March 2026",
+            permission_date="2026-03-14",
+            permission_statement_version="2026-11-v1",
         )
     assert caught.value.status_code == 422
     assert caught.value.detail[0]["row"] == 3
@@ -99,9 +103,13 @@ async def test_manual_contact_uses_account_country_and_explicit_import_override(
     db = FakeDB()
     db.tables["tenants"] = [{"id": "t1", "calling_rules": {"default_country": "GB"}}]
     user = SimpleNamespace(id="u1", tenant_id="t1", email="test@example.invalid")
-    await add_contact_to_campaign("c1", ContactCreate(phone_number="020 7946 0958"), user, db)
+    permission = {
+        "basis": "express_consent", "source": "Customer sign-up form, March 2026",
+        "permission_date": "2026-03-14", "statement_version": "2026-11-v1",
+    }
+    await add_contact_to_campaign("c1", ContactCreate(phone_number="020 7946 0958", permission=permission), user, db)
     assert db.tables["leads"][0]["phone_number"] == "+442079460958"
-    await add_contact_to_campaign("c1", ContactCreate(phone_number="4155552671", default_country="US"), user, db)
+    await add_contact_to_campaign("c1", ContactCreate(phone_number="4155552671", default_country="US", permission=permission), user, db)
     assert db.tables["leads"][1]["phone_number"] == "+14155552671"
 
 

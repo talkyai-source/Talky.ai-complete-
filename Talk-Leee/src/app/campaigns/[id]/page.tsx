@@ -10,11 +10,13 @@ import { Label } from "@/components/ui/label";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
-import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
+import type { CampaignActivity, CampaignBlockingReason, CampaignEffectiveSchedule, CampaignProgress, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
 import { PhoneStatusLine } from "@/components/contacts/phone-status-line";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -37,7 +39,7 @@ import {
     useCampaignsInFlight,
     type CampaignControlNotice,
 } from "@/lib/campaign-control";
-import { campaignDisplayStatus } from "@/lib/campaign-status";
+import { campaignDisplayStatus, isCampaignTransientPhase } from "@/lib/campaign-status";
 import { CampaignDuplicateStatus, duplicateResultNotice, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
 import { stashDuplicateNotice } from "@/lib/campaign-duplicate";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
@@ -174,6 +176,12 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     );
 
     const [campaign, setCampaign] = useState<Campaign | null>(null);
+    // From the same GET /campaigns/{id} answer as the campaign: the hours the
+    // server enforces and what the campaign is doing now. Null when the server
+    // sent none; the page then reads exactly as it did before these existed.
+    const [effectiveSchedule, setEffectiveSchedule] = useState<CampaignEffectiveSchedule | null>(null);
+    const [progress, setProgress] = useState<CampaignProgress | null>(null);
+    const phase = progress?.phase ?? null;
     const [contacts, setContacts] = useState<Contact[]>([]);
     const [stats, setStats] = useState<{
         total_leads: number;
@@ -259,6 +267,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     // A failed add / edit, shown in the form it came from.
     const [contactFormError, setContactFormError] = useState("");
+    // Permission to call, asked again for every contact that is added.
+    const addPermission = useContactPermissionForm();
     // The contact the Remove contact dialog is asking about.
     const [removeTarget, setRemoveTarget] = useState<{ id: string; phone: string } | null>(null);
     // A failed delete, shown in the row it came from.
@@ -304,6 +314,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             if (superseded()) return;
             setError("");
             setCampaign(campaignData.campaign);
+            setEffectiveSchedule(campaignData.effective_schedule ?? null);
+            setProgress(campaignData.progress ?? null);
             setContacts(contactsData.items);
             setStats(statsData);
             setMinutes(minutesData);
@@ -337,7 +349,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // lifecycle has changed. The poll remains lightweight (row + stats only).
     useEffect(() => {
         const status = campaign?.status;
-        if (status !== "running" && status !== "active" && status !== "draft") return;
+        // Also while the server says the campaign is still preparing, stopping
+        // or pausing, until that phase ends.
+        if (status !== "running" && status !== "active" && status !== "draft" && !isCampaignTransientPhase(phase)) return;
         let cancelled = false;
         const tick = async () => {
             try {
@@ -352,6 +366,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 const s = await dashboardApi.getCampaignStats(campaignId).catch(() => null);
                 if (cancelled) return;
                 setCampaign(c.campaign);
+                setEffectiveSchedule(c.effective_schedule ?? null);
+                setProgress(c.progress ?? null);
                 if (s) setStats(s);
                 // A successful tick proves the backend is reachable again.
                 setError("");
@@ -364,7 +380,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [campaign?.status, campaignId, router]);
+    }, [campaign?.status, phase, campaignId, router]);
 
     // The ONE Start / Resume confirmation, shared with the campaign list
     // (components/campaigns/campaign-start-dialog). It closes once the start
@@ -397,7 +413,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         }
         setStartError("");
         setControlNotice(null);
-        startDialog.open([campaign]);
+        startDialog.open([{ ...campaign, effective_schedule: effectiveSchedule }]);
     }
 
     async function handlePause() {
@@ -428,6 +444,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         // An invalid number never becomes a contact: the button is disabled
         // and the submit is refused here too (the payload builders would throw).
         if (!contactFormValid) return;
+        // Adding (not editing) needs the permission-to-call confirmation.
+        const confirmation = editingContact ? null : addPermission.require();
+        if (!editingContact && !confirmation) return;
         try {
             setAddingContact(true);
             setContactFormError("");
@@ -437,14 +456,16 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             if (editingContact) {
                 await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(campaignId, payload);
+                await dashboardApi.addContact(campaignId, payload, confirmation!);
             }
+            addPermission.reset();
             setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
             setExtraContactFields([]);
             setShowAddContact(false);
             setEditingContact(null);
             await loadData();
         } catch (err) {
+            if (addPermission.showServerError(err)) return;
             setContactFormError(
                 err instanceof Error
                     ? err.message
@@ -530,9 +551,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 <h2 className="break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>
                                 <span
                                     data-testid="campaign-status"
-                                    className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(starting || stopping ? "" : campaign.status)}`}
+                                    className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(starting || stopping || phase === "preparing" || phase === "stopping" ? "" : campaign.status)}`}
                                 >
-                                    {campaignDisplayStatus(campaign.status, { starting, stopping })}
+                                    {campaignDisplayStatus(campaign.status, { starting, stopping }, phase)}
                                 </span>
                             </div>
                             {campaign.description && (
@@ -540,6 +561,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             )}
                             <CallingScheduleLine
                                 callingConfig={campaign.calling_config}
+                                effectiveSchedule={effectiveSchedule}
                                 testId="campaign-calling-schedule"
                                 className="mt-2 text-sm text-muted-foreground"
                             />
@@ -798,7 +820,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Upload className="w-4 h-4" />
                                     Import CSV
                                 </Button>
-                                <Button size="sm" onClick={() => { setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
+                                <Button size="sm" onClick={() => { addPermission.reset(); setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
                                     <Plus className="w-4 h-4" />
                                     Add contact
                                 </Button>
@@ -949,6 +971,11 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                         </div>
                                     ) : null}
                                 </div>
+                                {!editingContact ? (
+                                    <div className="mb-4">
+                                        <ContactPermissionFields idPrefix="contact-add" disabled={addingContact} {...addPermission.fieldProps} />
+                                    </div>
+                                ) : null}
                                 {contactFormError ? (
                                     <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
                                 ) : null}
@@ -956,7 +983,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Button type="submit" size="sm" disabled={addingContact || !contactFormValid}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); setContactFormError(""); }}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { addPermission.reset(); setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); setContactFormError(""); }}>
                                         Cancel
                                     </Button>
                                 </div>

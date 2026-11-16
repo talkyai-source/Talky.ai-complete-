@@ -25,6 +25,7 @@ breaks. This is an ADDITIVE layer on top.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -60,12 +61,18 @@ class BlockCode(str, Enum):
     DAILY_LEAD_CAP = "daily_lead_cap"
     # The stored number is not a dialable phone number (D2-7); terminal.
     INVALID_PHONE_NUMBER = "invalid_phone_number"
+    # CONTACT_PERMISSION_DIAL_GATE is on and the contact's list carries no
+    # calling-permission confirmation (or the contact has no list). NOT
+    # self-clearing: only a person confirming the list clears it.
+    CONTACT_PERMISSION_MISSING = "contact_permission_missing"
 
     # Capacity / pacing (self-clearing, benign)
     MAX_CONCURRENT_CALLS = "max_concurrent_calls"
     BATCH_CAPACITY = "batch_capacity"
     CALL_GAP = "call_gap"
     TENANT_GAP = "tenant_gap"
+    PLATFORM_GAP = "platform_gap"
+    PLATFORM_AT_CAPACITY = "platform_at_capacity"
     DESTINATION_BUSY = "destination_busy"
 
     # Safety
@@ -95,6 +102,14 @@ class BlockCode(str, Enum):
     TESTING_MODE_SCHEDULE_BYPASSED = "testing_mode_schedule_bypassed"
 
 
+def contact_permission_dial_gate_enabled() -> bool:
+    """CONTACT_PERMISSION_DIAL_GATE, read at call time. Only 1/true/yes/on (any
+    case) turn it on; unset or anything else is off."""
+    return os.getenv("CONTACT_PERMISSION_DIAL_GATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 #: The codes that mean "this campaign is WAITING for its calling window", not
 #: "this campaign has finished its work". Anything that reports campaign
 #: progress must treat these as *deferred*, never as completed.
@@ -110,6 +125,8 @@ SELF_CLEARING_CODES: frozenset[BlockCode] = frozenset({
     BlockCode.BATCH_CAPACITY,
     BlockCode.CALL_GAP,
     BlockCode.TENANT_GAP,
+    BlockCode.PLATFORM_GAP,
+    BlockCode.PLATFORM_AT_CAPACITY,
     BlockCode.CALL_GUARD_THROTTLED,
     BlockCode.CALL_GUARD_QUEUED,
     BlockCode.DESTINATION_BUSY,
@@ -356,7 +373,6 @@ _TELEPHONY_DOWN_TOKENS = (
     "telephony_not_active_on_node",
     "telephony_disabled_on_node",
     "pod_draining",
-    "pod_at_capacity",
 )
 
 
@@ -618,6 +634,27 @@ def classify(
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,
         )
+    if "platform_gap" in low:
+        return BlockReason(
+            BlockCode.PLATFORM_GAP,
+            "Waiting a few seconds so calls do not all start at once.",
+            severity="info", stage="pacing",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
+        )
+    # The call service's own refusal codes mean the same thing: a full platform
+    # is waiting, never "not connected".
+    if any(
+        token in low
+        for token in ("platform_at_capacity", "pod_at_capacity", "provider_at_capacity")
+    ):
+        return BlockReason(
+            BlockCode.PLATFORM_AT_CAPACITY,
+            "All call lines are in use. Calls start as lines free up.",
+            severity="info", stage="pacing",
+            next_eligible_at=_fallback_next(),
+            retry_after_seconds=retry_after_seconds, details=extra,
+        )
     if "call_gap" in low:
         return BlockReason(
             BlockCode.CALL_GAP,
@@ -636,6 +673,16 @@ def classify(
             "be dialled. Fix the number (with its country code) or remove the "
             "contact.",
             severity="error", stage="contact", details=extra,
+        )
+
+    if "contact_permission_missing" in low:
+        return BlockReason(
+            BlockCode.CONTACT_PERMISSION_MISSING,
+            "This contact's list has no confirmation that you have permission to "
+            "call these contacts, so the call was not placed. Open the contact "
+            "list, confirm you have permission to call these contacts, then "
+            "start the campaign again.",
+            severity="warning", stage="contact", details=extra,
         )
 
     # ---- safety ---------------------------------------------------------

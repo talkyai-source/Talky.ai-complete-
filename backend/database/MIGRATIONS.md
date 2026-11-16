@@ -67,11 +67,18 @@ changes nothing there.
 `abuse_events` columns the abuse code inserts and resolves with, so abuse
 events can be recorded at all; fresh installs already have them.
 
-The current sole head is `0094_harden_legacy_db_objects`. It drops the broken
+The previous head, `0094_harden_legacy_db_objects`, drops the broken
 SECURITY DEFINER `log_audit_event(...)` (unpinned search_path, nothing calls
 it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
 and `open_security_events` run with the reader's rights (`security_invoker`),
 so the row-level security of the tables beneath them applies.
+
+The current sole head is `0096_contact_list_permission`. It adds six nullable
+consent columns and the check `contact_lists_consent_complete` to
+`contact_lists` (one row per import), so a customer's confirmation that a
+list may be called is stored with its basis, source, permission date and
+statement version. Existing lists keep every consent column NULL, and a
+downgrade refuses while any confirmation exists.
 
 A fresh install and the production lineage still differ elsewhere (QA F14-02,
 see the CI schema-parity step).

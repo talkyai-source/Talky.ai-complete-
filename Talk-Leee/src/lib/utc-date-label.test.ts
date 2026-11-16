@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { browserTimeZoneName, formatUtcDateLabel, timezoneLabel, UTC_TIMEZONE_LABEL } from "./utc-date-label";
+import { browserTimeZoneName, formatUtcDateLabel, formatZoneDateLabel, timezoneLabel, UTC_TIMEZONE_LABEL } from "./utc-date-label";
 
 // Plan 3.7 Z3: a UTC day bucket prints its UTC date whatever the browser zone.
 
@@ -42,4 +42,18 @@ test("labels use the exact wording and an unreadable date prints nothing", () =>
     assert.equal(UTC_TIMEZONE_LABEL, "Timezone: UTC");
     assert.equal(timezoneLabel("Europe/London"), "Timezone: Europe/London");
     assert.equal(formatUtcDateLabel("not a date"), "");
+});
+
+test("a bucket instant prints its date in the zone it was cut in, whatever the browser zone", () => {
+    // Midnight of 1 March in Asia/Karachi (UTC+5) is 19:00 UTC on 28 February.
+    const karachiMidnight = Date.parse("2026-02-28T19:00:00Z");
+    for (const browserZone of ["America/Los_Angeles", "Asia/Tokyo", "UTC"]) {
+        withTimeZone(browserZone, () => {
+            assert.equal(formatUtcDateLabel(karachiMidnight), "2/28/2026");
+            assert.equal(formatZoneDateLabel(karachiMidnight, "Asia/Karachi"), "3/1/2026");
+            assert.equal(formatZoneDateLabel(new Date(karachiMidnight), "UTC"), "2/28/2026");
+        });
+    }
+    assert.equal(formatZoneDateLabel(Number.NaN, "Asia/Karachi"), "");
+    assert.equal(formatZoneDateLabel(karachiMidnight, "Not/A_Zone"), "");
 });

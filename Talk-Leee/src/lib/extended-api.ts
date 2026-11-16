@@ -1,5 +1,6 @@
 import { sharedHttpClient } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
+import { contactPermissionFormFields, type ContactPermission } from "@/lib/contact-permission";
 import { FEEDBACK_MAX_SECONDS, feedbackFileName } from "@/lib/audio-recording";
 
 /** A structured review of how the agent handled a call (goals.md §3). */
@@ -142,9 +143,18 @@ class ExtendedApi {
     private get client() { return sharedHttpClient(); }
 
     // CSV Upload
-    async uploadCSV(campaignId: string, file: File, skipDuplicates: boolean = true): Promise<BulkImportResponse> {
+    // The confirmation is required: the backend refuses an upload without it.
+    async uploadCSV(
+        campaignId: string,
+        file: File,
+        permission: ContactPermission,
+        skipDuplicates: boolean = true,
+    ): Promise<BulkImportResponse> {
         const formData = new FormData();
         formData.append("file", file);
+        for (const [name, value] of Object.entries(contactPermissionFormFields(permission))) {
+            formData.append(name, value);
+        }
 
         const response = await this.client.requestRaw({
             path: `/contacts/campaigns/${campaignId}/upload`,
@@ -159,11 +169,11 @@ class ExtendedApi {
     // Paste-a-blob bulk import (Phase 3a). Same normalize/dedup/insert
     // pipeline as the CSV upload, but the input is free-form pasted text
     // (one number per line or comma/semicolon separated).
-    async pasteContacts(campaignId: string, text: string): Promise<BulkImportResponse> {
+    async pasteContacts(campaignId: string, text: string, permission: ContactPermission): Promise<BulkImportResponse> {
         return this.client.request({
             path: `/contacts/campaigns/${campaignId}/paste`,
             method: "POST",
-            body: { text },
+            body: { text, permission },
         });
     }
 

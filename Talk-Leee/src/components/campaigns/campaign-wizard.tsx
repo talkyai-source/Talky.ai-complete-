@@ -558,6 +558,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             onChange={setBriefDraft}
                             requiredLeadFields={requiredLeadFields}
                             disabled={submitting}
+                            direction={direction}
                         />
 
                         <div>

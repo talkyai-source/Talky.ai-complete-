@@ -19,6 +19,8 @@ import { AlertCircle, CheckCircle2, FileUp, Loader2, Upload } from "lucide-react
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
@@ -61,6 +63,8 @@ export function SmartCsvImport({
     // applies only to numbers without "+", never stored between visits.
     const [country, setCountry] = useState<CountrySelection>("");
     const fileRef = useRef<HTMLInputElement>(null);
+    // Permission to call: asked again for every import (a new dialog starts empty).
+    const permission = useContactPermissionForm();
 
     const reset = () => {
         setRows([]); setFileName(""); setParseError(null); setResult(null);
@@ -80,6 +84,8 @@ export function SmartCsvImport({
 
     const doPasteImport = async () => {
         if (pasteValid.length === 0) return;
+        const confirmation = permission.require();
+        if (!confirmation) return;
         setImporting(true);
         setParseError(null);
         try {
@@ -90,12 +96,12 @@ export function SmartCsvImport({
                 rowMap.set(i + PASTE_FIRST_ROW, p.row);
                 return (p.check as { ok: true; e164: string }).e164;
             });
-            const res = await extendedApi.pasteContacts(campaignId, lines.join("\n"));
+            const res = await extendedApi.pasteContacts(campaignId, lines.join("\n"), confirmation);
             setSentRowMap(rowMap);
             setResult(res);
             onImported?.();
         } catch (err) {
-            setParseError(err instanceof Error ? err.message : "Import failed");
+            if (!permission.showServerError(err)) setParseError(err instanceof Error ? err.message : "Import failed");
         } finally {
             setImporting(false);
         }
@@ -142,6 +148,8 @@ export function SmartCsvImport({
         setRows((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
 
     const doImport = async () => {
+        const confirmation = permission.require();
+        if (!confirmation) return;
         setImporting(true);
         setParseError(null);
         try {
@@ -149,16 +157,20 @@ export function SmartCsvImport({
                 .filter((a): a is typeof a & { check: { ok: true; numbers: RowNumbers } } => a.check.ok && !a.dup)
                 .map((a) => ({ numbers: a.check.numbers, row: a.row }));
             const { csv, rowMap } = buildContactsUpload(ready);
-            const res = await extendedApi.uploadCSV(campaignId, uploadFileFromCsv(csv), true);
+            const res = await extendedApi.uploadCSV(campaignId, uploadFileFromCsv(csv), confirmation, true);
             setSentRowMap(rowMap);
             setResult(res);
             onImported?.();
         } catch (err) {
-            setParseError(err instanceof Error ? err.message : "Import failed");
+            if (!permission.showServerError(err)) setParseError(err instanceof Error ? err.message : "Import failed");
         } finally {
             setImporting(false);
         }
     };
+
+    const permissionBlock = (
+        <ContactPermissionFields idPrefix="campaign-import" disabled={importing} {...permission.fieldProps} />
+    );
 
     const footer = (
         <div className="flex items-center justify-between gap-2">
@@ -168,7 +180,7 @@ export function SmartCsvImport({
                     : ""}
             </span>
             <div className="flex gap-2">
-                <Button variant="ghost" onClick={() => { reset(); onClose(); }} disabled={importing}>
+                <Button variant="ghost" onClick={() => { reset(); permission.reset(); onClose(); }} disabled={importing}>
                     {result ? "Close" : "Cancel"}
                 </Button>
                 {!result && rows.length > 0 && (
@@ -196,7 +208,7 @@ export function SmartCsvImport({
     return (
         <Modal
             open={open}
-            onOpenChange={(o) => { if (!o) { reset(); onClose(); } }}
+            onOpenChange={(o) => { if (!o) { reset(); permission.reset(); onClose(); } }}
             title="Import contacts"
             description="Upload a CSV or paste a list of numbers. We check every phone number, flag the bad ones, and dedupe before importing."
             size="xl"
@@ -296,6 +308,7 @@ export function SmartCsvImport({
                                     </table>
                                 </div>
                             )}
+                            {permissionBlock}
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span className="text-xs text-muted-foreground">
                                     {pasted.length > 0
@@ -313,6 +326,7 @@ export function SmartCsvImport({
             ) : (
                 <div className="overflow-x-auto">
                     {countrySelect}
+                    <div className="mb-3">{permissionBlock}</div>
                     <div className="mb-2 text-xs text-muted-foreground">
                         {fileName} — <span className="text-emerald-600 dark:text-emerald-400">{readyCount} ready</span>
                         {problemCount > 0 && <>, <span className="text-red-600 dark:text-red-400">{problemCount} need fixing</span></>}

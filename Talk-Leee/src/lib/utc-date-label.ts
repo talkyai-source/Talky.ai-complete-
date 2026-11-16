@@ -1,11 +1,13 @@
 /**
  * 3.7 Z3: the timezone a date-sensitive figure really uses, and the date it
- * prints for a UTC day bucket.
+ * prints for a day bucket.
  *
- * The backend groups analytics days by UTC date and the Dashboard month range
- * is built in UTC, so those figures say "Timezone: UTC" and print the UTC
- * date. The Dashboard live chart (and its Custom range) uses the browser's
- * zone, so it says "Timezone: {zone name}".
+ * The Dashboard reads its summary and its analytics (daily, hourly and
+ * per-campaign) in the account's reporting zone, which the summary reports,
+ * so its figures say "Timezone: {zone name}" with that zone (the browser's
+ * until the summary has said which). A server day label ("2026-03-01") is
+ * printed as that same calendar date, and a bucket instant as its date in the
+ * reporting zone. The Analytics page still says "Timezone: UTC".
  */
 
 export const UTC_TIMEZONE_LABEL = "Timezone: UTC";
@@ -32,4 +34,19 @@ export function formatUtcDateLabel(value: string | number | Date): string {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return "";
     return date.toLocaleDateString(undefined, { timeZone: "UTC" });
+}
+
+/**
+ * The date of an instant (a bucket's start, in ms) in a named zone. A bucket
+ * that starts at a zone's midnight is the previous UTC day in a zone ahead of
+ * UTC, so it is printed in the zone it was cut in.
+ */
+export function formatZoneDateLabel(value: number | Date, zone: string): string {
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    try {
+        return date.toLocaleDateString(undefined, { timeZone: zone });
+    } catch {
+        return "";
+    }
 }

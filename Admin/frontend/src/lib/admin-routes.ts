@@ -5,6 +5,7 @@ export const ADMIN_ROUTES = [
     { id: 'enquiries', label: 'Website Enquiries', path: '/enquiries', platformOnly: true },
     { id: 'users', label: 'Users & Roles', path: '/users', platformOnly: true },
     { id: 'calls', label: 'Calls', path: '/calls', platformOnly: true },
+    { id: 'campaigns', label: 'Campaigns', path: '/campaigns', platformOnly: true },
     { id: 'inbound', label: 'Inbound Control', path: '/inbound', platformOnly: true },
     { id: 'actions', label: 'Actions', path: '/actions', platformOnly: false },
     { id: 'connectors', label: 'Connectors', path: '/connectors', platformOnly: true },

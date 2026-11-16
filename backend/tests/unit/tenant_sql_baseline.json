@@ -400,6 +400,504 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
+      "id": "1cac81cdf6170d1ed1a8118181ed6e10420ee81617fe3ed2c20a5a07d6b6f12d",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 1101,
+      "method": "execute",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "INSERT INTO call_legs ( id, call_id, talklee_call_id, leg_type, direction, provider, provider_leg_id, to_number, status, started_at, billing_status, reserved_seconds, cost, currency, metadata, created_at, updated_at ) VALUES ( $1,$2,$3,'transfer','outbound',$4,$5,$6,'initiated',NOW(), 'reserved',$7,NULL,NULL,$8::jsonb,NOW(),NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "2ead5fb66b8e4b61ee0d0207eefe1f8b2ca8b332e8b04203adac95baa91aa6ed",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_proven_inbound_transfer_cleanup",
+      "line": 1953,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1,$2,$3,'transfer_failed','inbound_transfer', $4::jsonb,'in_call',NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "36105efc7fae6277b3247a8bff5985b1c9c06ec5f0bb8087404a0a158a5393ac",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1350,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET provider_leg_id=COALESCE(NULLIF($3,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $4::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status IN ('initiated','ringing','answered') AND billing_status='reserved' RETURNING id, status",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "389bd7722360313fcf99876ded0402cbd2ab9a4cbca10c20009c136a1e9f4d1f",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1367,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_cleanup_pending', 'inbound_transfer',$4::jsonb,'transferring',NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "433c4a2a74562983a824f572e1a79becb31fecedf019262e5c27ba50fc9352b1",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 936,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT COUNT(*) AS attempt_count, COUNT(*) FILTER (WHERE status='completed') AS completed_hop_count, COALESCE( BOOL_OR(status IN ('initiated','ringing','answered')), FALSE ) AS transfer_active FROM call_legs WHERE call_id=$1 AND leg_type='transfer'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "46003396d3bbd89630edc539c991450677dd1adfabfe080bfc195f7d3b896f22",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 755,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT id, tenant_id, talklee_call_id, direction, provider, route_snapshot, status, admission_status, processing_status, billing_status, reserved_seconds, started_at, answered_at, GREATEST( 0, FLOOR( COALESCE(reserved_seconds,0) - GREATEST( 0, EXTRACT(EPOCH FROM ( NOW()-COALESCE(answered_at,started_at,NOW()) )) ) )::int ) AS transfer_reservation_seconds FROM calls WHERE external_call_uuid=$1 OR provider_call_id=$1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "51ea3c77c597e5a6eaf1697881501f0ac52c3e2be01b178c86aec2b8cbdcc837",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_proven_inbound_transfer_cleanup",
+      "line": 1887,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT l.id, l.call_id, l.status, l.metadata, l.provider_leg_id, l.billing_status, l.reserved_seconds, l.started_at, l.answered_at, l.duration_seconds, CASE WHEN l.answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM ( NOW()-l.answered_at )))::int ) ELSE 0 END AS actual_duration_seconds, c.tenant_id, c.talklee_call_id FROM call_legs l JOIN calls c ON c.id=l.call_id WHERE (c.provider_call_id=$1 OR c.external_call_uuid=$1) AND l.leg_type='transfer' AND l.provider_leg_id=$2 AND l.status IN ('initiated','ringing','answered') ORDER BY l.created_at DESC LIMIT 1 FOR UPDATE OF c,l",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "5b8a29b265a5b532657ce5e65f8d1a9de72cc7ac4744a36d4f884041de0c19e9",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "_load_idempotent_transfer_attempt",
+      "line": 205,
+      "method": "fetchrow",
+      "tables": [
+        "inbound_operation_idempotency"
+      ],
+      "sql": "SELECT id, request_hash, response_body, status_code, resource_type, resource_id, actor_id FROM inbound_operation_idempotency WHERE scope_key=$1 AND operation=$2 AND idempotency_key=$3 AND expires_at > NOW() FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "64496598e159512efbb79ffe1dc20b621aae81c19d79871cbd93d3dcdbc0ad5d",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1297,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id, status, metadata, provider_leg_id, billing_status, reserved_seconds, started_at, answered_at, duration_seconds, CASE WHEN answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM (NOW()-answered_at)))::int ) ELSE 0 END AS actual_duration_seconds FROM call_legs WHERE id=$1::uuid AND call_id=$2::uuid AND leg_type='transfer' FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "6ea17be2e71537c1a36fc1065ea8606b43dbb25ab7495d534de8ffb048ae4e53",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "_load_idempotent_transfer_attempt",
+      "line": 230,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id, provider_leg_id, to_number, status, metadata, reserved_seconds FROM call_legs WHERE id=$1::uuid AND call_id=$2::uuid AND leg_type='transfer' FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "7d0a9604962d8df3f5eafcefb89b48abf174c59effcab695d0c687a0bf67da9e",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1409,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET status='answered', answered_at=COALESCE(answered_at,NOW()), provider_leg_id=COALESCE(NULLIF($3,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $4::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status='answered' AND billing_status='reserved' AND COALESCE(metadata->>'handoff_persisted','false') <> 'true' RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "7e1dfd5f1e4237de04fdba93b5018aa82b131d10afa25b808ee4ac018ad4ea71",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1285,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT tenant_id, talklee_call_id, status, processing_status, ended_at FROM calls WHERE id=$1::uuid FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "855b5fc0f46a3dcf7e3d189e32cc9c49aebb2904ad4c660c1444de4566c4112d",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 977,
+      "method": "execute",
+      "tables": [
+        "inbound_operation_idempotency"
+      ],
+      "sql": "DELETE FROM inbound_operation_idempotency WHERE scope_key=$1 AND operation=$2 AND idempotency_key=$3 AND expires_at <= NOW()",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "8ddfe15cd810b0b97c657fe865b6afd8cf6977b22fa96d4908ded22f683ddd38",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1626,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_billing_held', 'inbound_transfer',$4::jsonb, 'reconciliation_required',NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "91d16ec16b836619df8acd328100104877a92fc3305cbb77a4442c69acb5ec5d",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "_settle_transfer_usage",
+      "line": 645,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET status=$3, answered_at=CASE WHEN $10 THEN COALESCE(answered_at,NOW()) ELSE answered_at END, ended_at=COALESCE(ended_at,NOW()), duration_seconds=$4, billing_status=$5, cost=NULL, currency=NULL, provider_leg_id=COALESCE(NULLIF($6,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $7::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status=$8 AND billing_status=$9 RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "a0b16697404e24bc1b78966377a21229b95d5e68d425d185c7e12dda818d5680",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 1221,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1,$2,$3,'transfer_requested',$4,$5::jsonb,'transferring',NOW())",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "a11a835f3545794b1e44ed77cdfb72152dcbaf22c18186bd5606eb49b1ebf62a",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "_settle_transfer_usage",
+      "line": 578,
+      "method": "fetchrow",
+      "tables": [
+        "inbound_usage_transactions"
+      ],
+      "sql": "SELECT id, quantity_seconds FROM inbound_usage_transactions WHERE call_id=$1::uuid AND call_leg_id=$2::uuid AND transaction_type='reserve'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "a603194fa384e73ae10c59a951d9587a5d8948b5b1f655b500073abc26a874e1",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "tenant_inbound_allowance",
+      "line": 513,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT {ALLOWANCE_ROW_COLUMNS} FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id WHERE t.id=$1 FOR UPDATE OF t",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "a73d1ec17f67b9ba8da47505b952ff04c8427b919ac929b4597d6dc0405499df",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "get_inbound_transfer_attempt",
+      "line": 2013,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs",
+        "calls",
+        "inbound_operation_idempotency"
+      ],
+      "sql": "SELECT l.id, l.call_id, l.talklee_call_id, l.provider_leg_id, l.to_number, l.status, l.billing_status, l.reserved_seconds, l.duration_seconds, l.cost, l.currency, l.started_at, l.answered_at, l.ended_at, l.metadata, c.tenant_id, idem.idempotency_key, idem.response_body, idem.status_code FROM call_legs l JOIN calls c ON c.id=l.call_id LEFT JOIN LATERAL ( SELECT idempotency_key, response_body, status_code FROM inbound_operation_idempotency WHERE resource_type='call_leg' AND resource_id=l.id AND operation=$3 ORDER BY created_at DESC LIMIT 1 ) idem ON TRUE WHERE l.id=$1::uuid AND l.leg_type='transfer' AND ($2::uuid IS NULL OR c.tenant_id=$2::uuid) LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "ac017cf78f4a99156cfd8006bb6a93b259493bab054e9755b90c9e2589ab49c6",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1495,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1::uuid,$2,$3::uuid,$4,'inbound_transfer',$5::jsonb,$6,NOW())",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "b0a92459b98044ec60358d3e18ece7b951d2144450910682e503d43444b0b087",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1554,
+      "method": "fetch",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id, status, metadata, provider_leg_id, billing_status, reserved_seconds, started_at, answered_at, duration_seconds, CASE WHEN answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM (NOW()-answered_at)))::int ) ELSE 0 END AS actual_duration_seconds FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND status IN ('initiated','ringing','answered') ORDER BY created_at, id FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "b5d18716cfba3001f3c128ad4c376acd6d2186c84b8a9fe95c73bb5bd92b270a",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "mark_inbound_transfer_answered",
+      "line": 1840,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, previous_state, new_state, created_at ) VALUES ( $1,$2,$3,'transfer_target_answered','asterisk', $4::jsonb,$5,'answered',NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "bb0b94c42afeb770e3cf2c1a4c5371b38c28d95175782c0f62e434fef6190186",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 988,
+      "method": "fetchrow",
+      "tables": [
+        "inbound_operation_idempotency"
+      ],
+      "sql": "INSERT INTO inbound_operation_idempotency ( id, tenant_id, scope_key, operation, idempotency_key, request_hash, actor_id, expires_at ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()+INTERVAL '24 hours') ON CONFLICT (scope_key, operation, idempotency_key) DO NOTHING RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "bbbae09e1430300c113d1bc0ec49b2cf58c5525346816fca2735b0f8fd88905a",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1606,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET status='reconciliation_required', billing_status='held', ended_at=COALESCE(ended_at,NOW()), cost=NULL, currency=NULL, metadata=COALESCE(metadata,'{}'::jsonb) || $3::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status=$4 AND billing_status='reserved' RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "bd770bc0bd3c19cb25523e17464362e59209109d3894dd7c1afa350ea4807d08",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1716,
+      "method": "fetchval",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT COUNT(*) FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND ( status IN ('initiated','ringing','answered') OR billing_status NOT IN ( 'finalized','released','reversed' ) ) AND NOT ( status='reconciliation_required' AND billing_status='held' AND LOWER(COALESCE( metadata->>'restart_answer_state_ambiguous','' ))='true' )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "bde0937ecd2cace9f9e1e1786df23183e7e69c44232a22a19060a291ed1ac511",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "complete_inbound_transfer",
+      "line": 1434,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_connected', 'inbound_transfer',$4::jsonb,'transferred',NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "c45e64c90dae1a0ee34f4982ca0e1b54f22cc211c4596f7c0ee6a1dd85e25d36",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "authorize_inbound_transfer",
+      "line": 1162,
+      "method": "execute",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET metadata=metadata || $2::jsonb, updated_at=NOW() WHERE id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "c8a3000ebc39b3bbcdc85853016f68f50d6c77ae711639ca17d3406f907f9ea6",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1680,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,$4,'inbound_transfer', $5::jsonb,$6,NOW() )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "cf77a46d263127266d63c842f67549c853549f16f72a1c60a848569e607a3b05",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "mark_inbound_transfer_answered",
+      "line": 1822,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "UPDATE call_legs SET status='answered', answered_at=COALESCE(answered_at,NOW()), metadata=COALESCE(metadata,'{}'::jsonb) || $3::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status IN ('initiated','ringing') AND billing_status='reserved' AND reserved_seconds > 0 RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "df0c188209c8d1275bf92f92b37cb91428c3f62413849834c71639ee303e4c13",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "fetch_tenant_accounted_usage_seconds",
+      "line": 423,
+      "method": "fetchval",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT COALESCE(( SELECT SUM( CASE WHEN c.billing_status='reversed' THEN 0 WHEN c.direction='inbound' AND c.billing_status='reserved' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) WHEN c.direction='inbound' AND c.billing_status='held' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) ELSE COALESCE(c.duration_seconds,0) END ) FROM calls c WHERE c.tenant_id=$1 AND c.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR c.id <> $2::uuid) AND NOT c.is_test ),0) + COALESCE(( SELECT SUM( CASE WHEN leg.billing_status='reversed' THEN 0 WHEN leg.billing_status='reserved' THEN COALESCE(leg.reserved_seconds,0) WHEN leg.billing_status='held' THEN GREATEST( COALESCE(leg.reserved_seconds,0), COALESCE(leg.duration_seconds,0) ) WHEN leg.billing_status='finalized' THEN COALESCE(leg.duration_seconds,0) ELSE 0 END ) FROM call_legs leg JOIN calls parent ON parent.id=leg.call_id WHERE parent.tenant_id=$1 AND parent.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR parent.id <> $2::uuid) AND NOT parent.is_test AND leg.leg_type='transfer' ),0)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "f16b0d01dc0110cae2a9152131a23aeab6bc4b9445700cf9e221960bf5043a53",
+      "file": "app/domain/services/telephony/inbound_transfer.py",
+      "function": "finalize_connected_inbound_transfers",
+      "line": 1547,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT tenant_id, talklee_call_id FROM calls WHERE id=$1::uuid FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
       "id": "0c2b9e50916651ab25c6e3c6ace414672bf4688024f5d7d2c7775203f515fce1",
       "file": "app/domain/services/secrets_manager.py",
       "function": "SecretsManager.get",
@@ -548,16 +1046,16 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "16d53828a43592973dee037e6a09b434122162747f444580cdf36657571380d7",
+      "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2417,
+      "line": 2515,
       "method": "fetchval",
       "tables": [
         "calls",
         "leads"
       ],
-      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable'))",
+      "sql": "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number AND c.created_at >= now() - interval '24 hours' AND NOT c.is_test AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') IN ('line_not_ready', 'telephony_unavailable', 'platform_at_capacity', 'stale_payload:contact_permission_missing'))",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -701,22 +1199,6 @@
         "audit_logs"
       ],
       "sql": "SELECT EXISTS( SELECT 1 FROM webauthn_challenges challenge WHERE challenge.id=$2::uuid AND ( EXISTS ( SELECT 1 FROM suspension_events hold WHERE hold.target_type='user' AND hold.target_id=$1::uuid AND GREATEST(hold.suspended_at, COALESCE(hold.restored_at,hold.suspended_at)) >= challenge.created_at ) OR EXISTS ( SELECT 1 FROM audit_logs cutoff WHERE cutoff.resource_type='user' AND cutoff.resource_id=$1::uuid AND cutoff.action='user_primary_membership_configured' AND cutoff.metadata->'primary_membership_version'='1'::jsonb AND (cutoff.metadata->>'credential_cutoff_at')::timestamptz >= challenge.created_at ) ))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1cac81cdf6170d1ed1a8118181ed6e10420ee81617fe3ed2c20a5a07d6b6f12d",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 1101,
-      "method": "execute",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "INSERT INTO call_legs ( id, call_id, talklee_call_id, leg_type, direction, provider, provider_leg_id, to_number, status, started_at, billing_status, reserved_seconds, cost, currency, metadata, created_at, updated_at ) VALUES ( $1,$2,$3,'transfer','outbound',$4,$5,$6,'initiated',NOW(), 'reserved',$7,NULL,NULL,$8::jsonb,NOW(),NOW() )",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1141,22 +1623,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2ead5fb66b8e4b61ee0d0207eefe1f8b2ca8b332e8b04203adac95baa91aa6ed",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_proven_inbound_transfer_cleanup",
-      "line": 1953,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1,$2,$3,'transfer_failed','inbound_transfer', $4::jsonb,'in_call',NOW() )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2f2dff66f17d90169a9e12c7bcae5b7cf7af9245aa2ce4dcfac18690daa367bf",
       "file": "app/domain/services/telephony/termination.py",
       "function": "mark_termination_pending_and_load_context",
@@ -1305,22 +1771,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "36105efc7fae6277b3247a8bff5985b1c9c06ec5f0bb8087404a0a158a5393ac",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1350,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET provider_leg_id=COALESCE(NULLIF($3,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $4::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status IN ('initiated','ringing','answered') AND billing_status='reserved' RETURNING id, status",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "3703ed4d5cef73e13a0043ab6270e6c5415d7574280d93aa94b425943bb3964b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
@@ -1346,22 +1796,6 @@
         "calls"
       ],
       "sql": "SELECT id, tenant_id, provider, provider_call_id, external_call_uuid, status, route_snapshot FROM calls WHERE id=$1::uuid FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "389bd7722360313fcf99876ded0402cbd2ab9a4cbca10c20009c136a1e9f4d1f",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1367,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_cleanup_pending', 'inbound_transfer',$4::jsonb,'transferring',NOW() )",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
@@ -1640,17 +2074,17 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2ca2c97ee438cd21bd54bf7b5cb1884ec5f1b473bbfd1d1c141281707e9cac53",
+      "id": "a1322a91dca74f5679947d6b8b3453fc2a243b7476ca5feed861dc6ae4851cbc",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1180,
+      "line": 1181,
       "method": "fetch",
       "tables": [
         "calls",
         "campaigns",
         "dialer_jobs"
       ],
-      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'call_guard_throttled', 'call_guard_queued', 'destination_busy') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
+      "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'platform_gap', 'platform_at_capacity', 'call_guard_throttled', 'call_guard_queued', 'destination_busy', 'contact_permission_missing') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -1733,22 +2167,6 @@
         "user_profiles"
       ],
       "sql": "SELECT p.name FROM user_permissions up JOIN user_profiles profile ON profile.id=up.user_id AND profile.is_active AND profile.is_verified JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = $1 AND (up.tenant_id IS NULL OR up.tenant_id = $2) AND (up.expires_at IS NULL OR up.expires_at > clock_timestamp()) AND ($2::uuid IS NULL OR EXISTS ( SELECT 1 FROM tenant_users member WHERE member.user_id=up.user_id AND member.tenant_id=$2::uuid AND member.status='active' ))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "433c4a2a74562983a824f572e1a79becb31fecedf019262e5c27ba50fc9352b1",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 936,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT COUNT(*) AS attempt_count, COUNT(*) FILTER (WHERE status='completed') AS completed_hop_count, COALESCE( BOOL_OR(status IN ('initiated','ringing','answered')), FALSE ) AS transfer_active FROM call_legs WHERE call_id=$1 AND leg_type='transfer'",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1869,22 +2287,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "46003396d3bbd89630edc539c991450677dd1adfabfe080bfc195f7d3b896f22",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 755,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT id, tenant_id, talklee_call_id, direction, provider, route_snapshot, status, admission_status, processing_status, billing_status, reserved_seconds, started_at, answered_at, GREATEST( 0, FLOOR( COALESCE(reserved_seconds,0) - GREATEST( 0, EXTRACT(EPOCH FROM ( NOW()-COALESCE(answered_at,started_at,NOW()) )) ) )::int ) AS transfer_reservation_seconds FROM calls WHERE external_call_uuid=$1 OR provider_call_id=$1 ORDER BY created_at DESC LIMIT 1 FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "462dc63e79fdaca11b08b6985b1b06ca974f87c372ae6e3707ed9a498f9230fa",
       "file": "app/domain/services/telephony/call_authority.py",
       "function": "read_call_authority_rows",
@@ -1991,23 +2393,6 @@
         "leads"
       ],
       "sql": "SELECT last_called_at FROM leads WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "48b4c9c9551ce71e525630b7bc5477899f1b5e6876570d1acd6c8a55cf5b1c95",
-      "file": "app/workers/dialer_worker.py",
-      "function": "DialerWorker._stale_payload_reason",
-      "line": 2081,
-      "method": "fetchrow",
-      "tables": [
-        "dialer_jobs",
-        "leads"
-      ],
-      "sql": "SELECT j.status AS job_status, l.id AS lead_row_id, l.status AS lead_status, l.do_not_call AS lead_do_not_call FROM (SELECT 1) AS base LEFT JOIN dialer_jobs AS j ON j.id = $1::uuid AND j.tenant_id = $2::uuid LEFT JOIN leads AS l ON l.id = $3::uuid AND l.tenant_id = $2::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2288,23 +2673,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "51ea3c77c597e5a6eaf1697881501f0ac52c3e2be01b178c86aec2b8cbdcc837",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_proven_inbound_transfer_cleanup",
-      "line": 1887,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "SELECT l.id, l.call_id, l.status, l.metadata, l.provider_leg_id, l.billing_status, l.reserved_seconds, l.started_at, l.answered_at, l.duration_seconds, CASE WHEN l.answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM ( NOW()-l.answered_at )))::int ) ELSE 0 END AS actual_duration_seconds, c.tenant_id, c.talklee_call_id FROM call_legs l JOIN calls c ON c.id=l.call_id WHERE (c.provider_call_id=$1 OR c.external_call_uuid=$1) AND l.leg_type='transfer' AND l.provider_leg_id=$2 AND l.status IN ('initiated','ringing','answered') ORDER BY l.created_at DESC LIMIT 1 FOR UPDATE OF c,l",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "52f529f0c2f9675aa347bce91627659912f4537b2a09c46fd47cae1ef1499032",
       "file": "app/services/scripts/seed_platform_sip_trunk.py",
       "function": "seed_for_tenant",
@@ -2525,22 +2893,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5b8a29b265a5b532657ce5e65f8d1a9de72cc7ac4744a36d4f884041de0c19e9",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "_load_idempotent_transfer_attempt",
-      "line": 205,
-      "method": "fetchrow",
-      "tables": [
-        "inbound_operation_idempotency"
-      ],
-      "sql": "SELECT id, request_hash, response_body, status_code, resource_type, resource_id, actor_id FROM inbound_operation_idempotency WHERE scope_key=$1 AND operation=$2 AND idempotency_key=$3 AND expires_at > NOW() FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "5cf4e75f69035e7650ba72ac3873d46f278bcc30cddb0beabce159561b6eed0b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
@@ -2743,22 +3095,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "64496598e159512efbb79ffe1dc20b621aae81c19d79871cbd93d3dcdbc0ad5d",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1297,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id, status, metadata, provider_leg_id, billing_status, reserved_seconds, started_at, answered_at, duration_seconds, CASE WHEN answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM (NOW()-answered_at)))::int ) ELSE 0 END AS actual_duration_seconds FROM call_legs WHERE id=$1::uuid AND call_id=$2::uuid AND leg_type='transfer' FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -3190,22 +3526,6 @@
         "assistant_actions"
       ],
       "sql": "INSERT INTO assistant_actions ( id, tenant_id, type, status, triggered_by, conversation_id, call_id, lead_id, input_data, started_at, created_at ) VALUES ($1, $2, 'send_email', 'pending', $3, $4, $5, $6, $7, NOW(), NOW())",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "6ea17be2e71537c1a36fc1065ea8606b43dbb25ab7495d534de8ffb048ae4e53",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "_load_idempotent_transfer_attempt",
-      "line": 230,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id, provider_leg_id, to_number, status, metadata, reserved_seconds FROM call_legs WHERE id=$1::uuid AND call_id=$2::uuid AND leg_type='transfer' FOR UPDATE",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -3677,22 +3997,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "7d0a9604962d8df3f5eafcefb89b48abf174c59effcab695d0c687a0bf67da9e",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1409,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET status='answered', answered_at=COALESCE(answered_at,NOW()), provider_leg_id=COALESCE(NULLIF($3,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $4::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status='answered' AND billing_status='reserved' AND COALESCE(metadata->>'handoff_persisted','false') <> 'true' RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "7d2d73e8ca4a64a60a87b9efb3e5aa8e02cf866e1bedc0ab4d0f3dd66abc29a2",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
@@ -3709,10 +4013,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a296d298f760a17d1e74e25a50306126bd7b8ad7fb7919c187a1d202c1d2a926",
+      "id": "6fc3a4e92db1afb56b54caed9ed57517125a8d64964dbc65d452121d83ff14bc",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 3858,
+      "line": 3950,
       "method": "execute",
       "tables": [
         "leads"
@@ -3753,22 +4057,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "7e1dfd5f1e4237de04fdba93b5018aa82b131d10afa25b808ee4ac018ad4ea71",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1285,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT tenant_id, talklee_call_id, status, processing_status, ended_at FROM calls WHERE id=$1::uuid FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -3960,22 +4248,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "855b5fc0f46a3dcf7e3d189e32cc9c49aebb2904ad4c660c1444de4566c4112d",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 977,
-      "method": "execute",
-      "tables": [
-        "inbound_operation_idempotency"
-      ],
-      "sql": "DELETE FROM inbound_operation_idempotency WHERE scope_key=$1 AND operation=$2 AND idempotency_key=$3 AND expires_at <= NOW()",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_from_number",
@@ -4116,22 +4388,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "8ddfe15cd810b0b97c657fe865b6afd8cf6977b22fa96d4908ded22f683ddd38",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1626,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_billing_held', 'inbound_transfer',$4::jsonb, 'reconciliation_required',NOW() )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4307,22 +4563,6 @@
       "sql": "SELECT to_char(m, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='m')], keywords=[])} AS precise_key, m AS start, NOW() AS end FROM (SELECT date_trunc('month', NOW()) AS m) w",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "91d16ec16b836619df8acd328100104877a92fc3305cbb77a4442c69acb5ec5d",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "_settle_transfer_usage",
-      "line": 645,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET status=$3, answered_at=CASE WHEN $10 THEN COALESCE(answered_at,NOW()) ELSE answered_at END, ended_at=COALESCE(ended_at,NOW()), duration_seconds=$4, billing_status=$5, cost=NULL, currency=NULL, provider_leg_id=COALESCE(NULLIF($6,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $7::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status=$8 AND billing_status=$9 RETURNING id",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -4505,10 +4745,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "98a3391cfbd31eaeb3052a9aed626e06bf48ab151f9ce9cc6acbb7fdd2ef7eb9",
+      "id": "5acb792a57cfc6c959c7fd358508ec2a6a1f4d09f2de5efdc81de6190db26c97",
       "file": "app/domain/services/minutes_quota.py",
-      "function": "_compute_minutes_status",
-      "line": 156,
+      "function": "_allowance_row",
+      "line": 181,
       "method": "fetchrow",
       "tables": [
         "billing_ledger"
@@ -4777,22 +5017,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a0b16697404e24bc1b78966377a21229b95d5e68d425d185c7e12dda818d5680",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 1221,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1,$2,$3,'transfer_requested',$4,$5::jsonb,'transferring',NOW())",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "a0bc24b252c2d0707050849f12fc4f2b171ebab2410f4af9e80c7b4381771167",
       "file": "app/domain/services/billing_topup_events.py",
       "function": "apply_topup_event",
@@ -4818,22 +5042,6 @@
         "refresh_tokens"
       ],
       "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = 'expired_with_subsequent_use' WHERE family_id = $1 AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a11a835f3545794b1e44ed77cdfb72152dcbaf22c18186bd5606eb49b1ebf62a",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "_settle_transfer_usage",
-      "line": 578,
-      "method": "fetchrow",
-      "tables": [
-        "inbound_usage_transactions"
-      ],
-      "sql": "SELECT id, quantity_seconds FROM inbound_usage_transactions WHERE call_id=$1::uuid AND call_leg_id=$2::uuid AND transaction_type='reserve'",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -5045,38 +5253,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a7020367c84b7cfa65dcd817e9c8cba283690038016f247d3b12c1bb903991d6",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "tenant_inbound_allowance",
-      "line": 513,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT {ALLOWANCE_ROW_COLUMNS} FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id WHERE t.id=$1 FOR UPDATE OF t",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a73d1ec17f67b9ba8da47505b952ff04c8427b919ac929b4597d6dc0405499df",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "get_inbound_transfer_attempt",
-      "line": 2013,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs",
-        "calls",
-        "inbound_operation_idempotency"
-      ],
-      "sql": "SELECT l.id, l.call_id, l.talklee_call_id, l.provider_leg_id, l.to_number, l.status, l.billing_status, l.reserved_seconds, l.duration_seconds, l.cost, l.currency, l.started_at, l.answered_at, l.ended_at, l.metadata, c.tenant_id, idem.idempotency_key, idem.response_body, idem.status_code FROM call_legs l JOIN calls c ON c.id=l.call_id LEFT JOIN LATERAL ( SELECT idempotency_key, response_body, status_code FROM inbound_operation_idempotency WHERE resource_type='call_leg' AND resource_id=l.id AND operation=$3 ORDER BY created_at DESC LIMIT 1 ) idem ON TRUE WHERE l.id=$1::uuid AND l.leg_type='transfer' AND ($2::uuid IS NULL OR c.tenant_id=$2::uuid) LIMIT 1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "a7992640df1383255e3420c24a2a11526c16d19ef40f347c5a7887e67ad9b0b3",
       "file": "app/domain/services/support/ticket_store.py",
       "function": "tenant_owns",
@@ -5181,22 +5357,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ac017cf78f4a99156cfd8006bb6a93b259493bab054e9755b90c9e2589ab49c6",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1495,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1::uuid,$2,$3::uuid,$4,'inbound_transfer',$5::jsonb,$6,NOW())",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -5358,22 +5518,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b0a92459b98044ec60358d3e18ece7b951d2144450910682e503d43444b0b087",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1554,
-      "method": "fetch",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id, status, metadata, provider_leg_id, billing_status, reserved_seconds, started_at, answered_at, duration_seconds, CASE WHEN answered_at IS NOT NULL THEN GREATEST( 0, FLOOR(EXTRACT(EPOCH FROM (NOW()-answered_at)))::int ) ELSE 0 END AS actual_duration_seconds FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND status IN ('initiated','ringing','answered') ORDER BY created_at, id FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "b11c3773e33a6b7a4d90d4e245248f9b209e8bb54b3be90e704d227ebd6bf900",
       "file": "app/domain/services/secrets_manager.py",
       "function": "SecretsManager.get",
@@ -5502,22 +5646,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b5d18716cfba3001f3c128ad4c376acd6d2186c84b8a9fe95c73bb5bd92b270a",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "mark_inbound_transfer_answered",
-      "line": 1840,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, previous_state, new_state, created_at ) VALUES ( $1,$2,$3,'transfer_target_answered','asterisk', $4::jsonb,$5,'answered',NOW() )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "337d0ab9e7a8aa83d7ee6ca1a52f8d0e54a04b0ee2b6964e6593cef109166cf3",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_subscription",
@@ -5598,38 +5726,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bb0b94c42afeb770e3cf2c1a4c5371b38c28d95175782c0f62e434fef6190186",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 988,
-      "method": "fetchrow",
-      "tables": [
-        "inbound_operation_idempotency"
-      ],
-      "sql": "INSERT INTO inbound_operation_idempotency ( id, tenant_id, scope_key, operation, idempotency_key, request_hash, actor_id, expires_at ) VALUES ($1,$2,$3,$4,$5,$6,$7,NOW()+INTERVAL '24 hours') ON CONFLICT (scope_key, operation, idempotency_key) DO NOTHING RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "bbbae09e1430300c113d1bc0ec49b2cf58c5525346816fca2735b0f8fd88905a",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1606,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET status='reconciliation_required', billing_status='held', ended_at=COALESCE(ended_at,NOW()), cost=NULL, currency=NULL, metadata=COALESCE(metadata,'{}'::jsonb) || $3::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status=$4 AND billing_status='reserved' RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "bc43ac734b7110dc475337c617476beddd32f739ea5880a6f4a3a7a74359a7e5",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.bulk_import",
@@ -5677,22 +5773,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bd770bc0bd3c19cb25523e17464362e59209109d3894dd7c1afa350ea4807d08",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1716,
-      "method": "fetchval",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT COUNT(*) FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND ( status IN ('initiated','ringing','answered') OR billing_status NOT IN ( 'finalized','released','reversed' ) ) AND NOT ( status='reconciliation_required' AND billing_status='held' AND LOWER(COALESCE( metadata->>'restart_answer_state_ambiguous','' ))='true' )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "bda7aa8d6982b7b364d9a76a5e6024dde4a81d3c6beef820d7a92b0f96ee14a8",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reverse_finalized_usage",
@@ -5719,22 +5799,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "bde0937ecd2cace9f9e1e1786df23183e7e69c44232a22a19060a291ed1ac511",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "complete_inbound_transfer",
-      "line": 1434,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,'transfer_connected', 'inbound_transfer',$4::jsonb,'transferred',NOW() )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -5916,7 +5980,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8c1546804b59ddaad795360930888c69415d3ae0e238e387eb415b958f812b1c",
+      "id": "72f0a6a9472450327bd09d51615f32d979668fe4508978b66a464edd9e7b0c07",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
       "line": 1053,
@@ -5994,22 +6058,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c45e64c90dae1a0ee34f4982ca0e1b54f22cc211c4596f7c0ee6a1dd85e25d36",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "authorize_inbound_transfer",
-      "line": 1162,
-      "method": "execute",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET metadata=metadata || $2::jsonb, updated_at=NOW() WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -6227,22 +6275,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c8a3000ebc39b3bbcdc85853016f68f50d6c77ae711639ca17d3406f907f9ea6",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1680,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ( $1::uuid,$2,$3::uuid,$4,'inbound_transfer', $5::jsonb,$6,NOW() )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -6525,22 +6557,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cf77a46d263127266d63c842f67549c853549f16f72a1c60a848569e607a3b05",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "mark_inbound_transfer_answered",
-      "line": 1822,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "UPDATE call_legs SET status='answered', answered_at=COALESCE(answered_at,NOW()), metadata=COALESCE(metadata,'{}'::jsonb) || $3::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status IN ('initiated','ringing') AND billing_status='reserved' AND reserved_seconds > 0 RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "d12cdda081a6a96db6a044283dc9c60765ae88034c32ccefb38b0fd34e575f5b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
@@ -6670,15 +6686,15 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6d5b03a4ded02e79250c2f8781c453975edd1c6166edb960f912b8bf7177ec43",
+      "id": "012ac33a839b02b762898189fa06a210abf3a0c61a77940d08c161744fd98f0d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3544,
+      "line": 3636,
       "method": "execute",
       "tables": [
         "calls"
       ],
-      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[Eq()], comparators=[Constant(value='telephony_unavailable')]), body=Constant(value='telephony_unavailable'), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
+      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='telephony_unavailable'), Constant(value='platform_at_capacity')], ctx=Load())]), body=Name(id='reason', ctx=Load()), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -6909,23 +6925,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "df0c188209c8d1275bf92f92b37cb91428c3f62413849834c71639ee303e4c13",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "fetch_tenant_accounted_usage_seconds",
-      "line": 423,
-      "method": "fetchval",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "SELECT COALESCE(( SELECT SUM( CASE WHEN c.billing_status='reversed' THEN 0 WHEN c.direction='inbound' AND c.billing_status='reserved' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) WHEN c.direction='inbound' AND c.billing_status='held' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) ELSE COALESCE(c.duration_seconds,0) END ) FROM calls c WHERE c.tenant_id=$1 AND c.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR c.id <> $2::uuid) AND NOT c.is_test ),0) + COALESCE(( SELECT SUM( CASE WHEN leg.billing_status='reversed' THEN 0 WHEN leg.billing_status='reserved' THEN COALESCE(leg.reserved_seconds,0) WHEN leg.billing_status='held' THEN GREATEST( COALESCE(leg.reserved_seconds,0), COALESCE(leg.duration_seconds,0) ) WHEN leg.billing_status='finalized' THEN COALESCE(leg.duration_seconds,0) ELSE 0 END ) FROM call_legs leg JOIN calls parent ON parent.id=leg.call_id WHERE parent.tenant_id=$1 AND parent.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR parent.id <> $2::uuid) AND NOT parent.is_test AND leg.leg_type='transfer' ),0)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "df31a0cd985962c76e550958ab4556d929ff1a1234a6768397337e1b9bc31b26",
       "file": "app/api/v1/endpoints/billing.py",
       "function": "get_daily_usage",
@@ -7056,7 +7055,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "68100d2724717246930dbc9c497fba8e017c4226c359dec886bd64cbdedf85e3",
+      "id": "40aa7486f733084e2626ce7575ee942582d3d924d67356406cf644c896491ba7",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
       "line": 448,
@@ -7349,22 +7348,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "f16b0d01dc0110cae2a9152131a23aeab6bc4b9445700cf9e221960bf5043a53",
-      "file": "app/domain/services/telephony/inbound_transfer.py",
-      "function": "finalize_connected_inbound_transfers",
-      "line": 1547,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT tenant_id, talklee_call_id FROM calls WHERE id=$1::uuid FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -7744,7 +7727,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e41294c8f02f3b99a90f6c0792e20e2899a326ab7680a4a865083471de2f62e8",
+      "id": "a8165016cf3ea55c5b5869a88f0ca11950bcb0add2bd808dd40c74f1264dbb3a",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
       "line": 908,
@@ -8176,10 +8159,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "34cb0b7c014013dc350a2c715ebbcdad390cf3fbd93b43ec5ed4a2201d542238",
+      "id": "025746d9e89ce5606f10e299127707af8bceb53e572b018d6673bbfd6a731282",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4129,
+      "line": 4155,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8188,6 +8171,81 @@
       "bypass": null,
       "count": 2,
       "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:4109.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "1ad660906e43b2236b3b88cfae49df6ca5e44bb8b8ee5a17ca719074e0cf678b",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter._cleanup_pending_outbound",
+      "line": 5073,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5027.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "12dcea9f578970b63440c72a188b49aed6cda7271e43747a6e8a059bfd966cb4",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter._on_outbound_stasis_start",
+      "line": 3163,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:3120.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "4d4f5b6b40e6f832b96508272dcc930b528fa501d33126df5f2130760ebb444d",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter._on_stasis_end",
+      "line": 5246,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 3,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5200.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "2b4304dbd9b9a2c337a4770d181188f90805b8fd2c68f450cc85e9407caf02c3",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
+      "line": 3513,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 2,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:3470.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "7080846e5c9b68403cd3967d396ff7defd6da6160a7c1cd7713419e0639bd3a7",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
+      "line": 5957,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 2,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5911.",
       "category": "not_database_sql"
     },
     {
@@ -8327,6 +8385,41 @@
       "bypass": true,
       "count": 1,
       "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3075.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_audit_outbound_transfer_event",
+      "line": 3517,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events ( call_id, talklee_call_id, leg_id, event_type, source, event_data, new_state, created_at ) VALUES ($1,$2,$3,$4,'outbound_transfer',$5::jsonb,$6,NOW())",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3517.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_prepare_outbound_transfer",
+      "line": 3597,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT l.metadata, l.from_number FROM call_legs l JOIN calls c ON c.id = l.call_id WHERE l.call_id = $1::uuid AND c.tenant_id = $2::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' ORDER BY l.created_at LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3597.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -8723,21 +8816,6 @@
       "category": "platform_catalog"
     },
     {
-      "id": "8dbb8fcc3d274e3c3ab429d1be156ac2959c97db44e97c446624983398bf82fe",
-      "file": "app/infrastructure/telephony/asterisk_adapter.py",
-      "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5030,
-      "method": "_ari",
-      "tables": [],
-      "sql": "DELETE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5027.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "2dfe2f0f949d2c936bd14da6d6bcc47deb459f322008ec6c9ab3d6c3b9321a02",
       "file": "app/core/legacy_campaign_audit.py",
       "function": "audit_legacy_campaigns",
@@ -8941,21 +9019,6 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "2128115a41434c569043d3c5186066fbe7b771e839df055caadd04832c3ca9e2",
-      "file": "app/infrastructure/telephony/asterisk_adapter.py",
-      "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3120,
-      "method": "_ari",
-      "tables": [],
-      "sql": "DELETE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:3120.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "a091c7092580069c8c7b04abb790c34ca2287481e60a8a20133e808f6fe72a9e",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "list_users",
@@ -9087,7 +9150,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "5919059c2a11cce931d27f03dfca6246239cf7fdc372b77b8b3c64c90e7b2690",
+      "id": "881171e51263ebd21f78fc7d16790bb038dd2b3b8d117969c13436b20d68f5e0",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1180,
@@ -9253,7 +9316,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "9f3101206aaffa4e373fa7f0f92d5d517bcfbe098450c13bbe81bb49a7eda6d2",
+      "id": "4f04014a5740fe168f711b47f859dedfbf5bdfe206da8b3988cbdc65db7f5d5d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 735,
@@ -9821,7 +9884,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "7573450bb3cf4b13ce21102637f74c00a606e1dd5604c7e4114c6aff9b725e2f",
+      "id": "36a4feb5dc6e4572a7c93a26ead8aec753a1576010a2dacd25a34f591f3f7f8e",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1549,
@@ -10131,10 +10194,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "ea0556393fd6e5ac38221489e7babc9db172fac17fc0800104de84586ffa9b0b",
+      "id": "6952dfc36397af20727ea3c24913eb1b995c9f116d231f9aeec3f689c26a63f6",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2237,
+      "line": 2269,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10302,7 +10365,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "bafd5e31f0409ff85cf8c0210c5b3d0dadf8206557e289cc62c70ac40428eeee",
+      "id": "572d68159bdcaa29e8865a64264056c6542c6d8be93351eacd560df5f9d87b15",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1007,
@@ -10400,10 +10463,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "6dd49d5d3d6f95a45d46e4e1a1006cd41e6cd96313a974303a116d35d4a542dd",
+      "id": "f252ed48304507d8cab79db4cb5f9dd963c6b6bb114f86f5afb8719cc4cdcd55",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2100,
+      "line": 2132,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -10896,21 +10959,6 @@
       "category": "platform_admin"
     },
     {
-      "id": "c95488704f86e92a894f422d20ed6d53e8631e56a60851bbecf93c6bb04c444e",
-      "file": "app/infrastructure/telephony/asterisk_adapter.py",
-      "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5222,
-      "method": "_ari",
-      "tables": [],
-      "sql": "DELETE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 3,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5200.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "9bae92901fb7eda0f1bc4965ed75707dccf8671eb4dad2d42f55cba4fbafcdd5",
       "file": "app/domain/services/support/access.py",
       "function": "record_exists_anywhere",
@@ -11026,10 +11074,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "5dcf6278cfc6554ed32e4de6ce3bab94ab2e63c7e3ef394ce2f8a64dbcd58756",
+      "id": "a55abc1e4684c365caf25cc0578d5ec4dd45c4298f631bc7ceb74709aee348fa",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1482,
+      "line": 1483,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11791,21 +11839,6 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "28ae9e3c56405cd8bbb569b9d68d2e37069598f70798342bab476821452e6281",
-      "file": "app/infrastructure/telephony/asterisk_adapter.py",
-      "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3484,
-      "method": "_ari",
-      "tables": [],
-      "sql": "DELETE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 2,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:3470.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "d43c7ffa5ac3628022483188a8b51aaf592511042da0d83179c31d62437c18e6",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
@@ -11890,10 +11923,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "31a7ecbac1167930c31988d20e9ec7d19836ef6b2a29d4952381e386df5bc9bf",
+      "id": "c622ec99c1363788744ffd0132cbf2c79465c682c45a514a2bfa9138319973e1",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1438,
+      "line": 1439,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -12146,21 +12179,6 @@
       "bypass": null,
       "count": 1,
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54\u201359. Platform account/recovery object; no tenant column or tenant business data."
-    },
-    {
-      "id": "8851d24ac85a1eb3d9a8d59306ecb1d175aff0b61ed26c3cd19de5dcb3ce5269",
-      "file": "app/infrastructure/telephony/asterisk_adapter.py",
-      "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 5934,
-      "method": "_ari",
-      "tables": [],
-      "sql": "DELETE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 2,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:5911.",
-      "category": "not_database_sql"
     },
     {
       "id": "ee00fe265e734353d5b5f33f0090f9625d2cbe739e17aa59b9cb375fa259b944",
@@ -12584,6 +12602,25 @@
       "category": "operator_billing_reconciliation",
       "count": 1,
       "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:275."
+    },
+    {
+      "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
+      "file": "app/workers/dialer_worker.py",
+      "function": "DialerWorker._stale_payload_reason",
+      "line": 2162,
+      "method": "fetchrow",
+      "tables": [
+        "contact_lists",
+        "dialer_jobs",
+        "leads"
+      ],
+      "sql": "SELECT j.status AS job_status, l.id AS lead_row_id, l.status AS lead_status, l.do_not_call AS lead_do_not_call, l.list_id AS lead_list_id, cl.consent_confirmed_at AS list_confirmed_at FROM (SELECT 1) AS base LEFT JOIN dialer_jobs AS j ON j.id = $1::uuid AND j.tenant_id = $2::uuid LEFT JOIN leads AS l ON l.id = $3::uuid AND l.tenant_id = $2::uuid LEFT JOIN contact_lists AS cl ON cl.id = l.list_id AND cl.tenant_id = $2::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2162.",
+      "category": "reviewed_tenant_scoped"
     }
   ]
 }

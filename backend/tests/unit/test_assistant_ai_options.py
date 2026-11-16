@@ -289,7 +289,10 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["add", "remove", "update"])
-async def test_manage_lead_never_claims_success_for_zero_row_write(action):
+async def test_manage_lead_never_claims_success_for_zero_row_write(action, monkeypatch):
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = _campaign_db()
     kwargs = {
         "tenant_id": "t1",

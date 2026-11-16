@@ -21,9 +21,9 @@ const SOURCE: Campaign = {
 const COPY: Campaign = { ...SOURCE, id: "abcdefff-1234-4abc-8def-0123456789ab",
     name: "Server-created copy", status: "draft", total_leads: 0,
     calls_completed: 0, calls_failed: 0, created_at: "2026-11-06T12:00:00Z" };
-const COPY_RESULT: CampaignDuplicateResult = { campaign: COPY, leadFieldsCopied: true, message: "Duplicated as “Server-created copy”." };
+const COPY_RESULT: CampaignDuplicateResult = { campaign: COPY, message: "Duplicated as “Server-created copy”." };
 let cache: Campaign[] = [];
-// What the old page-level route (dashboardApi.duplicateCampaign) received: the page must never call it.
+// What the page itself sent to dashboardApi.duplicateCampaign: the table makes the copy, the page must never call it.
 let calls: string[] = [];
 // The campaigns the table's copy routine ran for, and what the table was told when it was refused.
 let copies: string[] = [];

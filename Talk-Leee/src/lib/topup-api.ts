@@ -41,6 +41,7 @@ export const topupKeys = {
   balance: () => ["billing", "topups", "balance"] as const,
   orders: () => ["billing", "topups", "orders"] as const,
   ledger: () => ["billing", "topups", "ledger"] as const,
+  config: () => ["billing", "config"] as const,
 };
 
 export function useTopupPackages() {
@@ -48,6 +49,37 @@ export function useTopupPackages() {
     queryKey: topupKeys.packages(),
     queryFn: async () => z.array(topupPackageSchema).parse(await api.request({ path: "/billing/topups/packages" })),
     // The catalogue changes about as often as the pricing page does.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// GET /billing/config: whether the top-up checkout would refuse this caller,
+// and the server's reason, known before a click.
+export const billingConfigSchema = z.object({
+  topups_open: z.boolean(),
+  topups_unavailable_reason: z.string().nullable().optional(),
+});
+export type BillingConfig = z.infer<typeof billingConfigSchema>;
+
+/** The server's reason when it says top-ups are closed; null when open, not known, or given no reason. */
+export function topupsClosedReason(config: BillingConfig | null | undefined): string | null {
+  if (!config || config.topups_open !== false) return null;
+  return config.topups_unavailable_reason?.trim() || null;
+}
+
+export function useBillingConfig() {
+  return useQuery({
+    queryKey: topupKeys.config(),
+    // A read that fails or does not have this shape answers null ("not
+    // known"): the card then behaves as it did before this read existed, and
+    // an optional read raises no error toast.
+    queryFn: async (): Promise<BillingConfig | null> => {
+      try {
+        return billingConfigSchema.parse(await api.request({ path: "/billing/config", timeoutMs: 8_000 }));
+      } catch {
+        return null;
+      }
+    },
     staleTime: 5 * 60 * 1000,
   });
 }

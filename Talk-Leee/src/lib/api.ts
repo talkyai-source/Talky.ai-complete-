@@ -91,6 +91,9 @@ export const MeResponseSchema = z
         suspended_scope: z.string().optional().nullable(),
         suspension_reason: z.string().optional().nullable(),
         suspended_at: z.string().optional().nullable(),
+        // One account state for the banner (3.6); a missing value means active.
+        account_state: z.string().nullable().transform(value => value ?? undefined).optional(),
+        account_state_reason: z.string().nullable().transform(value => value ?? undefined).optional(),
     })
     .passthrough()
     .transform((v) => ({
@@ -108,6 +111,15 @@ export const MeResponseSchema = z
     }));
 
 export type MeResponse = z.infer<typeof MeResponseSchema>;
+
+export const AccountTimezoneResponseSchema = z
+    .object({
+        reporting_timezone: z.string().nullable().optional(),
+        account_timezone: z.string().nullable().optional(),
+    })
+    .passthrough();
+
+export type AccountTimezoneResponse = z.infer<typeof AccountTimezoneResponseSchema>;
 
 export const ChangePasswordResponseSchema = z
     .object({
@@ -509,6 +521,19 @@ class ApiClient {
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
+    }
+
+    /** Sets the account's reporting timezone (report dates only, never calling hours). Tenant admins only. */
+    async updateAccountTimezone(timezone: string): Promise<AccountTimezoneResponse> {
+        const path = "/auth/account/timezone";
+        const method = "PUT" as const;
+        const data = await this.client().request({
+            path,
+            method,
+            body: { timezone },
+            timeoutMs: 12_000,
+        });
+        return this.parseOrThrow(AccountTimezoneResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
     async changePassword(oldPassword: string, newPassword: string): Promise<ChangePasswordResponse> {

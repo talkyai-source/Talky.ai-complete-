@@ -81,13 +81,16 @@ for (const [route, Page, planHeading, hadPricingLink] of pages) {
 test("integrations that stay are still named", (context) => {
     context.mock.method(globalThis, "fetch", async () => { throw new Error("no network in this test"); });
     renderPublic("/industries/financial-services/", <FinancialServicesPage />);
-    for (const name of ["Salesforce", "HubSpot", "Google Calendar", "Outlook"]) assert.equal(mainText().includes(name), true, name);
+    for (const name of ["Salesforce", "HubSpot", "Google Calendar"]) assert.equal(mainText().includes(name), true, name);
+    assert.equal(mainText().includes("Outlook"), false, "Outlook cannot be connected");
     cleanup();
     renderPublic("/industries/recruitment/", <RecruitmentPage />);
-    for (const name of ["Outlook", "Google Calendar"]) assert.equal(mainText().includes(name), true, name);
+    assert.equal(mainText().includes("Google Calendar"), true);
+    assert.equal(mainText().includes("Outlook"), false, "Outlook cannot be connected");
     cleanup();
     renderPublic("/industries/travel-industry/", <TravelIndustryPage />);
-    for (const name of ["Outlook", "Google Calendar"]) assert.equal(mainText().includes(name), true, name);
+    assert.equal(mainText().includes("Google Calendar"), true);
+    assert.equal(mainText().includes("Outlook"), false, "Outlook cannot be connected");
 });
 
 // The section's scroll animation cannot mount in jsdom ("controls.start() should only be

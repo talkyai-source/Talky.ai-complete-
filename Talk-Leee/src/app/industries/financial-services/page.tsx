@@ -235,7 +235,6 @@ export default function FinancialServicesIndustryPage() {
     "Salesforce",
     "HubSpot",
     "Google Calendar",
-    "Outlook",
   ];
 
   const howItWorks = [
@@ -280,7 +279,7 @@ export default function FinancialServicesIndustryPage() {
     {
       question: "Does it integrate with our existing systems?",
       answer:
-        "Yes. The platform integrates with leading CRM platforms, scheduling tools, and business applications, helping financial teams automate workflows without disrupting existing operations.",
+        "Yes. It connects to HubSpot, Salesforce and Google Calendar, and to your phone system through a SIP trunk, so call outcomes and bookings reach the tools your team already uses.",
     },
     {
       question: "Can it support high call volumes?",

@@ -80,6 +80,10 @@ export const ConnectorProviderStatusSchema = z.object({
     last_sync: z.string().nullable().optional(),
     error_message: z.string().nullable().optional(),
     provider: z.string().nullable().optional(),
+    // Whether the server can run this card's sign-in at all, and its own
+    // reason when it cannot. Absent on an older server: treated as available.
+    available: z.boolean().optional(),
+    unavailable_reason: z.string().nullable().optional(),
 });
 
 export type ConnectorProviderStatus = z.infer<typeof ConnectorProviderStatusSchema>;

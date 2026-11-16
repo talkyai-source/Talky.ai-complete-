@@ -624,7 +624,9 @@ export function Sidebar({ className }: { className?: string }) {
                 margin={10}
                 hideScrollbar
                 ariaLabel="Sidebar"
-                className="lg:hidden"
+                // P6: the open menu and its backdrop sit above the floating Help
+                // (z-40) and Assistant (z-50) buttons; only this drawer is raised.
+                className="lg:hidden z-[60]"
                 panelClassName={cn(isDark ? "dark" : undefined, "group/sidebar border-sidebar-border/60 bg-(image:--home-card-gradient) bg-cover bg-no-repeat overflow-hidden")}
             >
                 {NavContent}

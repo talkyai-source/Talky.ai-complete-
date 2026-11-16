@@ -8,10 +8,12 @@ import { act, cleanup, render } from "@testing-library/react";
 
 // Real Navbar; only routing, theme and auth are stubbed so the test exercises
 // the drawer's own close/focus behaviour.
+// The route the stubbed usePathname reports; "/pricing" for the drawer tests below.
+let pathname = "/pricing";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { usePathname: () => "/pricing", useRouter: () => ({ push() {}, prefetch() {} }) };
+    if (id === "next/navigation") return { usePathname: () => pathname, useRouter: () => ({ push() {}, prefetch() {} }) };
     if (id.includes("providers/theme-provider")) return { useTheme: () => ({ theme: "light", setTheme() {}, toggleTheme() {} }) };
     if (id.includes("lib/auth-context")) return { useAuth: () => ({ accessToken: null, setToken() {}, status: "anonymous", user: null }) };
     return originalLoad.call(this, id, ...args);
@@ -85,4 +87,17 @@ test("the open drawer's toggle does not intercept pointer hits (guard on globals
         /details\[open\]\s*>\s*summary\.home-menu-toggle\s*\{[^}]*pointer-events:\s*none/,
         "details[open] > summary.home-menu-toggle must set pointer-events: none so the drawer's own Talk-Lee link is hit-testable",
     );
+});
+
+test("/accessibility carries the standard page navbar, exactly like /terms", () => {
+    for (const route of ["/terms", "/accessibility", "/accessibility/"]) {
+        pathname = route;
+        const { container, unmount } = render(<Navbar />);
+        const nav = container.querySelector<HTMLElement>('nav[aria-label="Primary"]');
+        assert.ok(nav, `${route}: navbar rendered`);
+        assert.ok(nav.classList.contains("home-navbar-scrolled"), `${route}: navbar must carry home-navbar-scrolled`);
+        assert.ok(nav.classList.contains("home-navbar-page"), `${route}: navbar must carry home-navbar-page`);
+        unmount();
+    }
+    pathname = "/pricing";
 });

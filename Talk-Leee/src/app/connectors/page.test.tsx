@@ -43,6 +43,8 @@ const absent = (node: unknown, message?: string) => assert.equal(node === null, 
 // Generous: the full suite runs many files in parallel on a loaded machine.
 const SLOW = 20_000;
 const CARDS = ["calendar", "email", "crm", "drive", "salesforce"] as const;
+// After an answer without a Salesforce row the Salesforce card is not shown (FX6a).
+const ANSWERED_CARDS = ["calendar", "email", "crm", "drive"] as const;
 const CHECKING = "Checking status…";
 const ACCESS_DENIED = "Access wasn't granted. Try again and allow access.";
 
@@ -90,8 +92,8 @@ test("until the status call answers, every card shows 'Checking status…' with 
     assert.ok(card("drive").getByLabelText("Status: Expired"));
     assert.ok(card("drive").getByText("Credentials have expired. Reconnect to refresh access."));
     assert.ok(card("calendar").getByRole("button", { name: "Disconnect" }));
-    // The backend did not advertise Salesforce: unchanged behaviour, from a real answer.
-    assert.ok(card("salesforce").getByLabelText("Status: Unavailable"));
+    // The backend did not return the Salesforce row: from a real answer, the card is not shown.
+    absent(screen.queryByTestId("connector-card-salesforce"), "the Salesforce card is shown without its row");
 });
 
 test("a failed status call leaves the error box as the only message: no status and no buttons on any card", async () => {
@@ -138,9 +140,10 @@ test("a return message is heard only from this origin, shows on the matching car
 
     await postFromOrigin(window.location.origin, failure);
     assert.ok(card("email").getByText(ACCESS_DENIED));
-    for (const type of CARDS) {
+    for (const type of ANSWERED_CARDS) {
         if (type !== "email") absent(card(type).queryByText(ACCESS_DENIED), `${type} is not the matching card`);
     }
+    assert.equal(screen.getAllByText(ACCESS_DENIED).length, 1, "the message is on one card only");
     await waitFor(() => assert.equal(status.mock.callCount() > before, true, "status is refetched"), { timeout: SLOW });
 
     // A message claiming success changes nothing by itself: the backend still says disconnected.
@@ -169,9 +172,10 @@ test("a failure return that names no connector shows only on the card that opene
         await pause(100);
         await postFromOrigin(window.location.origin, { ...unnamed, eventId: "evt-b" });
         assert.ok(card("email").getByText(ACCESS_DENIED));
-        for (const type of CARDS) {
+        for (const type of ANSWERED_CARDS) {
             if (type !== "email") absent(card(type).queryByText(ACCESS_DENIED), `${type} did not open the window`);
         }
+        assert.equal(screen.getAllByText(ACCESS_DENIED).length, 1, "the message is on one card only");
         assert.ok(card("email").getByLabelText("Status: Disconnected"));
     } finally {
         window.open = prevOpen;

@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { extendedApi, type BulkImportResponse } from "@/lib/extended-api";
 import { CONTACT_UPLOAD_COLUMNS } from "@/lib/contact-upload-csv";
 import { INVALID_PHONE_ERROR, PHONE_HELP_TEXT, SELECT_COUNTRY_ERROR } from "@/lib/phone-number";
+import { EXPECTED_PERMISSION, fillContactPermission } from "@/test-utils/contact-permission";
 import { BAD_NUMBER, UK_E164, UK_NATIONAL, chooseUnitedKingdom, csvFile } from "@/test-utils/phone-fixtures";
 
 // The portal Modal is stubbed so the body and footer render inline.
@@ -73,6 +74,7 @@ test("EP3 CSV tab: Saves as column, original row numbers, UK sends +447400123456
     assert.equal(within(badRow).getAllByRole("cell")[3].textContent, INVALID_PHONE_ERROR, "Saves as shows the row's error");
     assert.ok(screen.getAllByText(/1 ready/).length >= 1);
 
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Import 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     assert.equal(sent[0], EXPECTED_CSV);
@@ -86,6 +88,7 @@ test("EP3 CSV tab result lists backend errors by the original file row", async (
     await screen.findAllByTestId("campaign-import-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("campaign-import-country");
     await waitFor(() => assert.ok(screen.getByRole("button", { name: /Import 1 contact$/ })), { timeout: SLOW });
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Import 1 contact$/ }));
     await screen.findByText(/row 4 \(\+447400123456\): duplicate/, undefined, { timeout: SLOW });
 });
@@ -110,9 +113,10 @@ test("EP3 Paste tab: every number is parsed first, invalid ones are row errors, 
         ["1", BAD_NUMBER, INVALID_PHONE_ERROR],
         ["2", UK_NATIONAL, UK_E164],
     ]);
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Import 1 contact$/ }));
     await waitFor(() => assert.equal(paste.mock.callCount(), 1), { timeout: SLOW });
-    assert.deepEqual(paste.mock.calls[0].arguments, ["camp-1", UK_E164]);
+    assert.deepEqual(paste.mock.calls[0].arguments, ["camp-1", UK_E164, EXPECTED_PERMISSION]);
     // Backend row 1 (the first value sent) is the user's second pasted row.
     await screen.findByText(/row 2 \(\+447400123456\): duplicate/, undefined, { timeout: SLOW });
     assert.equal(document.body.textContent?.includes("normalized"), false);
@@ -140,6 +144,7 @@ test("EP3 CSV tab: an invalid mobile_number cell is a column-named row error and
     const [okRow, badRow] = screen.getAllByTestId("campaign-import-row");
     assert.equal(within(okRow).getAllByRole("cell")[3].textContent, UK_E164);
     assert.equal(within(badRow).getAllByRole("cell")[1].textContent, "3", "original row number");
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Import 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     const lines = sent[0].split("\n");

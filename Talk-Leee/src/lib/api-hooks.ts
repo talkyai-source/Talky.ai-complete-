@@ -13,6 +13,7 @@ import { emailAuditStore } from "@/lib/email-audit";
 import { notificationsStore } from "@/lib/notifications";
 import { useNotificationMutation } from "@/lib/notification-mutations";
 import { captureException } from "@/lib/monitoring";
+import type { ContactPermission } from "@/lib/contact-permission";
 import { useAuth } from "@/lib/auth-context";
 import { ApiClientError, getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 
@@ -834,8 +835,8 @@ export function useRecordings(page: number, pageSize: number) {
 
 export function useUploadContactsCsv() {
     return useNotificationMutation({
-        mutationFn: (payload: { campaignId: string; file: File; skipDuplicates?: boolean }) =>
-            extendedApi.uploadCSV(payload.campaignId, payload.file, payload.skipDuplicates ?? true),
+        mutationFn: (payload: { campaignId: string; file: File; permission: ContactPermission; skipDuplicates?: boolean }) =>
+            extendedApi.uploadCSV(payload.campaignId, payload.file, payload.permission, payload.skipDuplicates ?? true),
         onError: () => {
             notificationsStore.create({ type: "error", title: "Upload failed", message: "Could not upload CSV." });
         },

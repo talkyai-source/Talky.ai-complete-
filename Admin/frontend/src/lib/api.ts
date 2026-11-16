@@ -256,6 +256,39 @@ export interface CallHistoryResponse {
     total: number;
 }
 
+// GET /admin/campaigns (platform admin, read-only). Shapes mirror the backend's
+// AdminCampaignItem / AdminCampaignListResponse exactly.
+export interface AdminCampaignItem {
+    id: string;
+    tenant_id: string;
+    tenant_name: string | null;
+    name: string;
+    status: string;
+    direction: string;
+    created_at: string | null;
+    updated_at: string | null;
+    started_at: string | null;
+    contacts: number;
+    calls: number;
+    live_calls: number;
+}
+
+export interface AdminCampaignListResponse {
+    items: AdminCampaignItem[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+export interface AdminCampaignListParams {
+    tenant_id?: string;
+    status?: string;
+    direction?: 'outbound' | 'inbound';
+    search?: string;
+    page?: number;
+    page_size?: number;
+}
+
 export interface TimelineEvent {
     event: string;
     timestamp: string;
@@ -2225,6 +2258,19 @@ class ApiClient {
         if (params?.direction) searchParams.append('direction', params.direction);
         const query = searchParams.toString() ? '?' + searchParams.toString() : '';
         return this.request<CallHistoryResponse>(`/admin/calls/history${query}`);
+    }
+
+    // Campaign directory across tenants (read-only). The server orders newest first.
+    async getAdminCampaigns(params?: AdminCampaignListParams) {
+        const searchParams = new URLSearchParams();
+        if (params?.page) searchParams.append('page', params.page.toString());
+        if (params?.page_size) searchParams.append('page_size', params.page_size.toString());
+        if (params?.search) searchParams.append('search', params.search);
+        if (params?.status) searchParams.append('status', params.status);
+        if (params?.tenant_id) searchParams.append('tenant_id', params.tenant_id);
+        if (params?.direction) searchParams.append('direction', params.direction);
+        const query = searchParams.toString() ? '?' + searchParams.toString() : '';
+        return this.request<AdminCampaignListResponse>(`/admin/campaigns${query}`);
     }
 
     async getAdminCallDetail(callId: string) {

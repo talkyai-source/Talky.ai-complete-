@@ -171,7 +171,7 @@ export default function RecruitmentIndustryPage() {
     },
     {
       title: "Interview Scheduling",
-      description: "Coordinate interviews with Google Calendar, Outlook, and your preferred scheduling tools.",
+      description: "Coordinate interviews with Google Calendar.",
     },
     {
       title: "HR Software",
@@ -183,7 +183,7 @@ export default function RecruitmentIndustryPage() {
     },
   ];
 
-  const integrations = ["Outlook", "Google Calendar"];
+  const integrations = ["Google Calendar"];
 
   const howItWorks = [
     {
@@ -413,8 +413,8 @@ export default function RecruitmentIndustryPage() {
           <p className={eyebrowClassName}>Integrations</p>
           <h2 className={`mt-3 ${headingClassName}`}>Works Seamlessly With Your Recruitment Stack</h2>
           <p className={bodyClassName}>
-            No need to replace the tools you already use. Connect your ATS, calendars, and HR software to automate recruitment
-            while keeping every workflow connected.
+            No need to replace the tools you already use. Connect Google Calendar, HubSpot or Salesforce to keep interviews
+            and candidate records in step. A direct connection to ATS or HR software is not available in this release.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {integrationCategories.map((category) => (

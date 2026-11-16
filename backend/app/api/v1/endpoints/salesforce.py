@@ -146,6 +146,9 @@ class ImportRequest(BaseModel):
     where: Optional[str] = Field(None, max_length=500, description="Optional SOQL WHERE fragment")
     limit: int = Field(500, ge=1, le=2000)
     list_name: Optional[str] = Field(None, max_length=100)
+    # The customer's confirmation that they may call these people:
+    # {basis, source, permission_date, statement_version}; validated in the route.
+    permission: Optional[Any] = None
 
 
 class ImportResponse(BaseModel):
@@ -487,9 +490,13 @@ async def import_salesforce_people(
     """Seed an outbound campaign with Salesforce Leads or Contacts that have a
     phone number. Every imported lead remembers its Salesforce Id so the
     post-call sync logs the Task against the right record."""
-    from app.api.v1.endpoints.contact_lists import create_contact_list
+    from app.api.v1.endpoints.contact_lists import (
+        create_contact_list, resolve_contact_permission,
+    )
     from app.domain.services.dialer.bulk_ingest import LeadRecord, ingest_lead_records
 
+    # The customer's permission confirmation is checked before Salesforce is called.
+    permission = resolve_contact_permission(body.permission)
     campaign = require_owned_outbound_campaign(
         db_client, body.campaign_id, tenant_id=current_user.tenant_id, extra_columns=("script_config",),
     )
@@ -538,6 +545,7 @@ async def import_salesforce_people(
     list_id = create_contact_list(
         db_client, campaign_id=str(campaign["id"]), tenant_id=current_user.tenant_id,
         name=list_name, source="manual",
+        permission=permission, confirmed_by=current_user.id,
     )
     from app.domain.services.phone_number_normalizer import normalize_phone_number
 
@@ -633,6 +641,9 @@ async def _enqueue_callback(
     payload: CallbackRequest,
 ) -> CallbackResponse:
     from app.api.v1.endpoints.contact_lists import create_contact_list
+    from app.domain.services.contact_permission import (
+        SYSTEM_CALLBACK_STATEMENT_VERSION, ContactPermission,
+    )
     from app.domain.services.dialer.bulk_ingest import LeadRecord, ingest_lead_records
     from app.domain.services.phone_number_normalizer import normalize_phone_number
 
@@ -683,9 +694,18 @@ async def _enqueue_callback(
                 "message": "This number is on the do-not-call list; the callback was not queued.",
             })
 
+    # The person asked for this callback themselves, so the system records the
+    # confirmation (no user is involved).
+    callback_permission = ContactPermission(
+        basis="made_an_enquiry",
+        source="Callback request received through the Salesforce callback endpoint",
+        permission_date=datetime.now(timezone.utc).date(),
+        statement_version=SYSTEM_CALLBACK_STATEMENT_VERSION,
+    )
     list_id = create_contact_list(
         db_client, campaign_id=str(campaign["id"]), tenant_id=tenant_id,
         name=CALLBACK_LIST_NAME, source="manual",
+        permission=callback_permission, confirmed_by=None,
     )
     sf_id = (payload.record_id or "").strip() or None
     custom_fields: Dict[str, Any] = {"source": "salesforce_callback"}

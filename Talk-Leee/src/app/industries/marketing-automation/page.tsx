@@ -151,7 +151,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Calendar Sync",
       description:
-        "Schedule appointments directly into Google Calendar, Outlook, or your clients’ existing scheduling tools.",
+        "Schedule appointments directly into Google Calendar.",
     },
     {
       title: "Marketing Platforms",
@@ -165,7 +165,7 @@ export default function MarketingAutomationIndustryPage() {
     },
   ];
 
-  const integrationLogos = ["HubSpot", "Salesforce", "Google Calendar", "Outlook"];
+  const integrationLogos = ["HubSpot", "Salesforce", "Google Calendar"];
 
   const howItWorks = [
     {

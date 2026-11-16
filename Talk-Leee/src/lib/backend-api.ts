@@ -68,10 +68,13 @@ export type SalesforceImportInput = {
     where?: string;
     limit?: number;
     list_name?: string;
+    /** Required: the backend refuses an import without the permission-to-call confirmation. */
+    permission: ContactPermission;
 };
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { sharedHttpClient } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
+import type { ContactPermission } from "@/lib/contact-permission";
 
 // Inline DTO for the new /alerts endpoint (avoids a circular import with
 // campaign-performance.ts AlertItem; the hook re-maps to AlertItem).

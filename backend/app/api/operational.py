@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import os
 
 from fastapi import APIRouter, FastAPI, Header, HTTPException, Response, status
@@ -11,6 +12,8 @@ from app.core.telephony_observability import (
     refresh_telephony_slo_metrics,
     render_prometheus_metrics,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -60,7 +63,37 @@ async def prometheus_metrics(
     container = get_container()
     if container.is_initialized:
         await refresh_telephony_slo_metrics(container.db_pool)
+    _publish_call_capacity()
     return Response(content=render_prometheus_metrics(), media_type=prometheus_content_type())
+
+
+def _publish_call_capacity() -> None:
+    """Expose live calls, the call limit and provider concurrency.
+
+    A process that does not handle calls reports 0/0 so summing the two API
+    processes does not double the limit. Never breaks the scrape.
+    """
+    try:
+        from app.core.process_role import telephony_enabled
+        from app.core.telephony_observability import set_call_capacity_metrics
+
+        active = 0
+        capacity = 0
+        if telephony_enabled():
+            from app.domain.services.telephony.config import _MAX_TELEPHONY_SESSIONS
+            from app.domain.services.telephony.state_backend import get_state_backend
+
+            active = int(get_state_backend().voice_session_count())
+            capacity = int(_MAX_TELEPHONY_SESSIONS)
+        from app.infrastructure.providers.provider_concurrency import all_guards
+
+        set_call_capacity_metrics(
+            active_calls=active,
+            pod_capacity=capacity,
+            providers=[g.snapshot() for g in all_guards()],
+        )
+    except Exception:
+        logger.debug("call capacity metrics unavailable", exc_info=True)
 
 
 def register_operational_routes(app: FastAPI) -> None:

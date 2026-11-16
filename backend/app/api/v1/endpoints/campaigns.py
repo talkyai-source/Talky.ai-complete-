@@ -1989,6 +1989,13 @@ async def add_contact_to_campaign(
         Created lead object
     """
     db_client = supabase
+    # The customer's permission confirmation is checked before anything is read or written.
+    from app.api.v1.endpoints._outbound_campaign import outbound_campaign_conflict
+    from app.api.v1.endpoints.contact_lists import (
+        create_contact_list, resolve_contact_permission,
+    )
+    from app.domain.services.campaign_direction_guard import OutboundCampaignDirectionConflict
+    permission = resolve_contact_permission(contact.permission)
     try:
         # 1. Validate campaign exists, belongs to the current tenant and is an
         #    outbound campaign before any lead lookup or write.
@@ -2042,6 +2049,28 @@ async def add_contact_to_campaign(
             )
 
         deleted_rows = [r for r in (existing.data or []) if r.get("status") == "deleted"]
+        # With a confirmation the contact joins a list that carries it (reused only
+        # for the identical confirmation); without one (requirement off) no list.
+        list_id = None
+        if permission is not None:
+            try:
+                list_id = create_contact_list(
+                    db_client,
+                    campaign_id=campaign_id,
+                    tenant_id=campaign.get("tenant_id") or current_user.tenant_id,
+                    name="Added one at a time",
+                    source="manual",
+                    permission=permission,
+                    confirmed_by=current_user.id,
+                )
+            except OutboundCampaignDirectionConflict as exc:
+                raise outbound_campaign_conflict(
+                    campaign_id,
+                    message=(
+                        "The campaign changed to inbound before the contact write "
+                        "completed. Use the inbound campaign lifecycle."
+                    ),
+                ) from exc
         first_name, last_name = _resolved_contact_names(contact)
         expanded_values = {
             "first_name": first_name,
@@ -2070,6 +2099,7 @@ async def add_contact_to_campaign(
             revived = db_client.table("leads").update({
                 "status": "pending",
                 **expanded_values,
+                **({"list_id": list_id} if list_id is not None else {}),
             }).eq("id", revive_id).eq(
                 "tenant_id", current_user.tenant_id
             ).eq(
@@ -2095,6 +2125,8 @@ async def add_contact_to_campaign(
             "call_attempts": 0,
             "created_at": datetime.utcnow().isoformat()
         }
+        if list_id is not None:
+            lead_data["list_id"] = list_id
 
         response = db_client.table("leads").insert(lead_data).execute()
         created = _require_contact_write(response, campaign_id, "create")
