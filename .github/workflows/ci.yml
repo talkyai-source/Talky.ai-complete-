@@ -128,7 +128,10 @@ jobs:
   # ──────────────────────────────────────────────────────────────────
   backend:
     name: Backend
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: on 26.04 (from 15 Nov 2026) `pg_config --bindir` gives
+    # PostgreSQL 18 tools, whose pg_dump writes `SET transaction_timeout`, which
+    # the PostgreSQL 16 service below rejects on restore (backup restore test).
+    runs-on: ubuntu-24.04
     needs: [secret-scan, secret-guard]
     defaults:
       run:

@@ -49,17 +49,29 @@ const auditRoutes = [
     "/analytics",
     "/recordings",
     "/ai-options",
-    "/assistant",
     "/assistant/actions",
+    "/settings",
+    "/connectors",
+    "/notifications",
+] as const;
+
+// Hidden on purpose since 9e1b24eb (FX5): the server does not serve these features, so each page calls
+// notFound(). They must answer the not-found page, never the half-working feature.
+const hiddenRoutes = [
+    "/assistant",
     "/assistant/meetings",
     "/assistant/reminders",
     "/email",
     "/meetings",
     "/reminders",
-    "/settings",
-    "/connectors",
-    "/notifications",
 ] as const;
+
+// Chrome reports a 404 document as "Failed to load resource" without naming the page; trackConsoleIssues
+// adds the URL. That one line is the expected answer of a hidden page, not a problem on it.
+function isOwnNotFound(issue: string, route: string) {
+    const match = /^error: Failed to load resource: the server responded with a status of 404 \(Not Found\) \((.+)\)$/.exec(issue);
+    return Boolean(match) && new URL(match![1]).pathname.replace(/\/+$/, "") === route;
+}
 
 // Public, sign-in and OAuth-callback routes. They are not signed-in app pages, so "was not bounced to the
 // sign-in page" is not a property they have to keep (a signed-in visitor may legitimately be sent on).
@@ -161,7 +173,26 @@ for (const route of auditRoutes) {
     });
 }
 
-test("demo path: dashboard, meetings, reminders, email, connectors", async ({ page }) => {
+for (const route of hiddenRoutes) {
+    test(`hidden page answers not found: ${route}`, async ({ page }) => {
+        const issues = trackConsoleIssues(page);
+        await signInAsE2eUser(page);
+        await mockDashboardApi(page);
+        await mockPageApis(page);
+
+        const response = await page.goto(route, { waitUntil: "domcontentloaded", timeout: 60_000 });
+        expect(response?.status(), "the page answers 404").toBe(404);
+        await expect(page.getByRole("heading", { name: "404", exact: true })).toBeVisible({ timeout: 30_000 });
+        await expect(page.getByText("Page not found", { exact: true })).toBeVisible();
+        await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => undefined);
+
+        // Not bounced to sign-in or elsewhere: the address itself is what answers not found.
+        expect(new URL(page.url()).pathname.replace(/\/+$/, ""), "stayed on the requested address").toBe(route);
+        expect(issues.filter((issue) => !isOwnNotFound(issue, route)), "No console warnings/errors or failed requests besides the 404 itself").toEqual([]);
+    });
+}
+
+test("demo path: dashboard, settings, connectors", async ({ page }) => {
     const issues = isProdAudit ? trackConsoleIssues(page) : [];
     await signInAsE2eUser(page);
     await mockDashboardApi(page);
@@ -177,58 +208,12 @@ test("demo path: dashboard, meetings, reminders, email, connectors", async ({ pa
         });
     });
 
-    await page.route(/\/(?:api\/v1\/)?calendar\/events\/?(\?.*)?$/, async (route) => {
-        const req = route.request();
-        if (req.resourceType() === "document") return route.continue();
-        if (req.method() !== "GET") return route.continue();
-        return route.fulfill({
-            status: 200,
-            contentType: "application/json",
-            body: JSON.stringify({ items: [] }),
-        });
-    });
-
-    await page.route(/\/(?:api\/v1\/)?meetings\/?(\?.*)?$/, async (route) => {
-        const req = route.request();
-        if (req.resourceType() === "document") return route.continue();
-        if (req.method() !== "GET") return route.continue();
-        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
-    });
-
-    await page.route(/\/(?:api\/v1\/)?reminders\/?(\?.*)?$/, async (route) => {
-        const req = route.request();
-        if (req.resourceType() === "document") return route.continue();
-        if (req.method() !== "GET") return route.continue();
-        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
-    });
-
-    await page.route(/\/(?:api\/v1\/)?email\/templates\/?(\?.*)?$/, async (route) => {
-        const req = route.request();
-        if (req.resourceType() === "document") return route.continue();
-        if (req.method() !== "GET") return route.continue();
-        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
-    });
-
-    // Headings are the pages' own titles (DashboardLayout `title`). Meetings, Reminders and Email are no
-    // longer sidebar entries (removed in b5351a50), so each is opened by URL; exact names because
-    // getByRole's default name match is a case-insensitive substring ("Save your agent settings" is a link).
+    // Headings are the pages' own titles (DashboardLayout `title`); exact names because getByRole's default
+    // name match is a case-insensitive substring ("Save your agent settings" is a link). Meetings, Reminders
+    // and Email left this path when they were hidden (9e1b24eb): see "hidden page answers not found".
     await page.goto("/dashboard", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/dashboard/);
     await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible({ timeout: 30_000 });
-
-    await page.goto("/meetings", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await expect(page).toHaveURL(/\/meetings/);
-    await expect(page.getByRole("heading", { name: /^Meetings$/ })).toBeVisible({ timeout: 20_000 });
-
-    // Not "networkidle": background polling can keep the network busy after the page has rendered
-    // (CI 12 Nov 2026 timed out with the Reminders heading on screen). The heading check below is the wait.
-    await page.goto("/reminders", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await expect(page).toHaveURL(/\/reminders/);
-    await expect(page.getByRole("heading", { name: /^Reminders$/ })).toBeVisible({ timeout: 20_000 });
-
-    await page.goto("/email", { waitUntil: "domcontentloaded", timeout: 60_000 });
-    await expect(page).toHaveURL(/\/email/);
-    await expect(page.getByRole("heading", { name: "Email", exact: true })).toBeVisible({ timeout: 20_000 });
 
     await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await page.goto("/settings", { waitUntil: "domcontentloaded", timeout: 60_000 });
@@ -259,6 +244,8 @@ test("production headers and SEO baseline", async ({ request }) => {
 
 test("email send works end-to-end in production", async ({ page }) => {
     test.skip(!isProdAudit, "Production audit only");
+    // /email answers not found since 9e1b24eb (FX5), and the server's email routes are not mounted.
+    test.skip(true, "The Email page is hidden; bring this back with the page.");
 
     const issues = trackConsoleIssues(page);
     await page.context().addCookies([{ name: "talklee_auth_token", value: "e2e-token", url: "http://127.0.0.1:3100" }]);
