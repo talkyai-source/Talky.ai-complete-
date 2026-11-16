@@ -67,6 +67,28 @@ def _derive_account_state(
     return "active", None
 
 
+# D5-27: what each account state is refused today. Every code names a refusal
+# the server really enforces (file:line in backend/docs/account-states.md);
+# tests/unit/test_day5_roles_and_account_state.py probes each one per state.
+_RESTRICTED_SUBSCRIPTION = (
+    "start_campaign",         # campaigns.py _require_account_can_call (403 tenant_suspended)
+    "place_calls",            # call_guard._check_tenant_active (dialer, SIP originate)
+    "buy_minutes",            # payg.tenant_purchase_audience (409 on top-up checkout)
+    "receive_inbound_calls",  # inbound_admission read_call_authority
+)
+ACCOUNT_RESTRICTIONS_BY_STATE: dict[str, tuple[str, ...]] = {
+    "active": (),
+    "suspended_subscription": _RESTRICTED_SUBSCRIPTION,
+    # A formal hold also refuses sign-in (principal._require_formal_account_access).
+    "suspended_hold": ("sign_in",) + _RESTRICTED_SUBSCRIPTION,
+}
+
+
+def account_restrictions(account_state: str) -> list[str]:
+    """Stable codes for what an account in ``account_state`` may not do."""
+    return list(ACCOUNT_RESTRICTIONS_BY_STATE.get(account_state, ()))
+
+
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     current_user: CurrentUser = Depends(get_current_user),
@@ -154,6 +176,7 @@ async def get_me(
         subscription_status=subscription_status,
         account_state=account_state,
         account_state_reason=account_state_reason,
+        account_restrictions=account_restrictions(account_state),
         mfa_enabled=bool(row and row.get("mfa_enabled") is True),
         mfa_verified=getattr(getattr(request, "state", None), "session_mfa_verified", None),
     )
