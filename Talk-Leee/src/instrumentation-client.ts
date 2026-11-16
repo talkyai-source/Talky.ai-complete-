@@ -1,5 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
-import { scrubSentryBreadcrumb, scrubSentryEvent, scrubSentryTransaction } from "./lib/sentry-scrub";
+import { SENTRY_SCRUB_OPTIONS } from "./lib/sentry-scrub";
 import { appEnvironment, commitSha, sentryEnabled, sentryProfilesSampleRate, sentryTracesSampleRate } from "./lib/env";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -13,10 +13,7 @@ if (enabled && dsn) {
         release: commitSha(),
         tracesSampleRate: sentryTracesSampleRate(),
         profilesSampleRate: sentryProfilesSampleRate(),
-        sendDefaultPii: false,
-        beforeSend: scrubSentryEvent,
-        beforeSendTransaction: scrubSentryTransaction,
-        beforeBreadcrumb: scrubSentryBreadcrumb,
+        ...SENTRY_SCRUB_OPTIONS,
     });
 }
 
