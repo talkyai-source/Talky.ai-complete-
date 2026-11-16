@@ -29,6 +29,7 @@ import csv
 import io
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Annotated, Optional
 from uuid import UUID
 
@@ -452,6 +453,25 @@ async def get_topup_order(
 admin_router = APIRouter(prefix="/admin/billing", tags=["billing", "admin"])
 
 
+def _date_bound(value: Optional[str], name: str) -> Optional[datetime]:
+    """An ISO date or date-time as a datetime; no zone means UTC.
+
+    The statement binds the bounds as timestamptz and the database driver
+    refuses a string for that, so text is never passed down.
+    """
+    text = (value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"{name} must be a date (2026-11-01) or a date and time.",
+        )
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 @admin_router.get("/reconciliation")
 async def reconciliation(
     since: Optional[str] = None,
@@ -467,7 +487,8 @@ async def reconciliation(
     """
     bounded_limit = min(max(limit, 1), 50_000)
     rows = await _service().reconciliation(
-        since=since, until=until, limit=bounded_limit + 1,
+        since=_date_bound(since, "since"), until=_date_bound(until, "until"),
+        limit=bounded_limit + 1,
     )
     truncated = len(rows) > bounded_limit
     rows = rows[:bounded_limit]
