@@ -295,6 +295,13 @@ class CampaignCreateRequest(CampaignVoiceSelection):
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
     )
+    first_speaker: Optional[Literal["agent", "user"]] = Field(
+        default=None,
+        description=(
+            "Who speaks first (D3-13): the same value Start accepts, stored in "
+            "calling_config.first_speaker. Omitted keeps the saved choice."
+        ),
+    )
     direction: Literal["outbound", "inbound"] = Field(
         default="outbound",
         description=(
@@ -386,6 +393,13 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
     calling_schedule: Optional[CampaignCallingSchedule] = Field(
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
+    )
+    first_speaker: Optional[Literal["agent", "user"]] = Field(
+        default=None,
+        description=(
+            "Who speaks first (D3-13): the same value Start accepts, stored in "
+            "calling_config.first_speaker. Omitted keeps the saved choice."
+        ),
     )
 
     @field_validator("agent_names")
