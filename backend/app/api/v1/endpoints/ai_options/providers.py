@@ -8,13 +8,15 @@ Endpoints:
 from __future__ import annotations
 
 import logging
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 
 from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.domain.services.ai_option_availability import (
+    UNAVAILABLE_REASON, option_status, platform_availability, with_status,
+)
 from app.domain.services.voice_eligibility import (
     VoiceEligibilityError, filter_tenant_voices, require_elevenlabs_voice_eligible,
 )
@@ -45,6 +47,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["AI Options"])
 
+_ELEVENLABS_SAFE_MESSAGE = "Some voices could not be loaded right now. Try again in a moment."
+
 
 @router.get("/providers", response_model=ProviderListResponse)
 async def list_providers(current_user=Depends(get_current_user)):
@@ -55,11 +59,12 @@ async def list_providers(current_user=Depends(get_current_user)):
         ProviderListResponse with LLM, STT, and TTS options
     """
     from app.realtime.credentials import resolve_openai_key
-    from app.domain.services.credential_resolver import get_credential_resolver, resolve_sync_env_only
+    from app.domain.services.credential_resolver import get_credential_resolver
     realtime_available = bool(await resolve_openai_key(getattr(current_user, "tenant_id", None)))
     assemblyai_available = bool(await get_credential_resolver().resolve(
         "assemblyai", tenant_id=getattr(current_user, "tenant_id", None),
     ))
+    platform = platform_availability()
     elevenlabs_models = (
         await get_elevenlabs_tts_models_for_current_key()
         if elevenlabs_enabled()
@@ -82,46 +87,53 @@ async def list_providers(current_user=Depends(get_current_user)):
     if realtime_available:
         llm_providers.append("openai")
         llm_models.extend(model.model_dump() for model in offered["openai"])
-    if os.getenv("CEREBRAS_API_KEY"):
+    if platform["cerebras"]:
         llm_providers.append("cerebras")
         llm_models.extend(model.model_dump() for model in offered["cerebras"])
     # 2026-10-01 (owner decision): Google is offered again, with exactly ONE
     # model -- Gemini 3.8 Flash. Older saved IDs remain readable/runtime-known,
     # while an explicit save must select a currently offered model.
-    if os.getenv("GEMINI_API_KEY"):
+    if platform["gemini"]:
         gemini_offered = offered["gemini"]
         if gemini_offered:
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
     # DeepSeek V4.1 Flash (owner request 2026-10-06), when its key is set.
     # Single key or the DEEPSEEK_API_KEYS pool (2026-10-19) both count.
-    if resolve_sync_env_only("deepseek"):
+    if platform["deepseek"]:
         llm_providers.append("deepseek")
         llm_models.extend(model.model_dump() for model in offered["deepseek"])
+
+    # D5-1: every listed provider and model says whether this server can run it.
+    # Providers that are only listed when their key exists (cerebras, gemini,
+    # deepseek, openai, elevenlabs) are therefore available whenever listed.
+    availability = {**platform, "openai": realtime_available, "assemblyai": assemblyai_available,
+                    "elevenlabs": True}
+    stt_providers = ["deepgram", "assemblyai"]
+    stt_availability = {**availability, "deepgram": platform["deepgram"]}
+
+    def _provider_status(names: list[str]) -> dict:
+        return {name: option_status(availability[name]) for name in names}
 
     return ProviderListResponse(
         llm={
             "providers": llm_providers,
-            "models": llm_models,
+            "models": [with_status(m, availability) for m in llm_models],
+            "provider_status": _provider_status(llm_providers),
         },
         stt={
-            "providers": ["deepgram", "assemblyai"],
-            "models": [model.model_dump() for model in [*DEEPGRAM_MODELS, *ASSEMBLYAI_MODELS]],
+            "providers": stt_providers,
+            "models": [with_status(m.model_dump(), availability) for m in [*DEEPGRAM_MODELS, *ASSEMBLYAI_MODELS]],
+            "provider_status": _provider_status(stt_providers),
             "engines": [
-                {
-                    **engine.model_dump(),
-                    "available": assemblyai_available if engine.id == "assemblyai" else True,
-                    "unavailable_reason": (
-                        "AssemblyAI API key is not configured"
-                        if engine.id == "assemblyai" and not assemblyai_available else None
-                    ),
-                }
+                with_status(engine.model_dump(), stt_availability)
                 for engine in STT_ENGINES
             ],
         },
         tts={
             "providers": tts_providers,
-            "models": tts_models,
+            "models": [with_status(m, availability) for m in tts_models],
+            "provider_status": _provider_status(tts_providers),
         },
         # Realtime (speech-to-speech) pipeline mode — static catalog the
         # frontend renders as a selectable card. Exposed only when the OpenAI
@@ -130,7 +142,7 @@ async def list_providers(current_user=Depends(get_current_user)):
         realtime=(
             {
                 "available": realtime_available,
-                "unavailable_reason": None if realtime_available else "OpenAI is not configured",
+                "unavailable_reason": None if realtime_available else UNAVAILABLE_REASON,
                 "model": REALTIME_MODEL,
                 "voices": [dict(v) for v in REALTIME_VOICES],
                 "turn_detection": list(REALTIME_TURN_DETECTION),
@@ -162,9 +174,13 @@ async def list_voices(
         raise HTTPException(exc.status_code, str(exc)) from exc
 
     el_error = get_elevenlabs_last_error() if elevenlabs_enabled() else None
-    response: dict = {"voices": [v.model_dump() for v in voices]}
+    availability = {**platform_availability(), "elevenlabs": True}
+    response: dict = {"voices": [with_status(v.model_dump(), availability) for v in voices]}
     if el_error:
-        response["elevenlabs_error"] = el_error
+        # D5-16: the provider's own text stays in the server log.
+        logger.warning("ElevenLabs voice catalogue error shown to tenant as a safe message: %s", el_error)
+        response["elevenlabs_error"] = _ELEVENLABS_SAFE_MESSAGE
+        response["elevenlabs_error_code"] = "voice_catalog_unavailable"
     return response
 
 

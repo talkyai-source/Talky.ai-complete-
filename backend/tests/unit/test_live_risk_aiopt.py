@@ -101,7 +101,7 @@ async def test_save_config_503_when_llm_key_missing(monkeypatch, provider, model
     with pytest.raises(HTTPException) as caught:
         await cfg.save_config(body, SimpleNamespace(tenant_id="A"), SimpleNamespace(pool=None))
     assert caught.value.status_code == 503
-    assert provider in caught.value.detail.lower()
+    assert caught.value.detail == {"code": "ai_option_unavailable", "message": "This option is not switched on for this account yet."}
     persisted.assert_not_awaited()
 
 
