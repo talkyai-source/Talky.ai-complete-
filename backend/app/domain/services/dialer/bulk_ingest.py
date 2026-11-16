@@ -91,6 +91,23 @@ def redact_digits(text) -> str:
     return _DIGIT_RUN.sub(lambda m: mask_phone(m.group(0)), str(text or ""))
 
 
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Postgres puts the offending row's values in its message: "Key (email)=(a@b.c)".
+_KEY_VALUES = re.compile(r"\)=\([^)]*\)")
+
+
+def redact_log_detail(text) -> str:
+    """Exception text made safe for a log line: no contact values.
+
+    A database error can quote the row it refused (an email, a name, a number).
+    The column names stay; every quoted value, email address and phone-like
+    digit run is masked.
+    """
+    cleaned = _KEY_VALUES.sub(")=(...)", str(text or ""))
+    cleaned = _EMAIL.sub("[email]", cleaned)
+    return redact_digits(cleaned)
+
+
 def phone_failure_code(raw: str, country_known: Optional[bool] = None,
                        exc_text: str = "") -> str:
     """Which plain sentence a refused dial number gets.
@@ -121,7 +138,7 @@ def log_import_row_errors(source: str, campaign_id, entries: list) -> None:
     if not entries:
         return
     sample = "; ".join(
-        f"row={row} code={code} phone={mask_phone(phone)} detail={redact_digits(detail)[:200]}"
+        f"row={row} code={code} phone={mask_phone(phone)} detail={redact_log_detail(detail)[:200]}"
         for row, code, detail, phone in entries[:IMPORT_LOG_SAMPLE]
     )
     logger.warning(
@@ -369,7 +386,7 @@ def ingest_lead_records(
             raise
         except Exception as e:
             logger.error("bulk_ingest insert chunk %d-%d failed: %s", i, i + len(chunk),
-                         redact_digits(e))
+                         redact_log_detail(e))
             for lead in chunk:
                 result.errors.append(IngestError(
                     None, ROW_ERROR_TEXT["save_failed"], lead.get("phone_number"),
@@ -412,7 +429,7 @@ def ingest_lead_records(
         except OutboundCampaignDirectionConflict:
             raise
         except Exception as e:
-            logger.error("bulk_ingest revive %s failed: %s", rev["id"], redact_digits(e))
+            logger.error("bulk_ingest revive %s failed: %s", rev["id"], redact_log_detail(e))
             result.errors.append(IngestError(
                 None, ROW_ERROR_TEXT["update_failed"], None, "update_failed", str(e),
             ))

@@ -384,3 +384,25 @@ def test_csv_ingest_failure_is_logged_once_masked(caplog):
 def test_masking_keeps_only_the_last_four_digits():
     assert bulk_ingest.mask_phone(PHONE) == "***0123"
     assert bulk_ingest.mask_phone(None) == "-"
+
+
+def test_exception_text_in_logs_carries_no_contact_values():
+    """A database error quotes the row it refused; none of that may be logged."""
+    raw = ('duplicate key value violates unique constraint "leads_campaign_phone_key" '
+           "DETAIL:  Key (campaign_id, email, phone_number)=(c1, jane.doe@example.com, +442071234567) "
+           "already exists. Contact jane.doe@example.com on 020 7123 4567.")
+    safe = bulk_ingest.redact_log_detail(raw)
+    assert "jane.doe" not in safe and "example.com" not in safe
+    assert "442071234567" not in safe and "7123 4567" not in safe
+    assert "Key (campaign_id, email, phone_number)=(...)" in safe
+    assert "leads_campaign_phone_key" in safe  # the constraint name stays: it is what a person needs
+
+
+def test_the_import_warning_uses_the_safe_form(caplog):
+    with caplog.at_level(logging.WARNING):
+        bulk_ingest.log_import_row_errors("CSV", "camp-1", [
+            (3, "save_failed", "Key (email)=(sam@example.org) already exists", "+442071234567"),
+        ])
+    text = " ".join(record.getMessage() for record in caplog.records)
+    assert "row=3" in text and "save_failed" in text
+    assert "sam@example.org" not in text and "442071234567" not in text
