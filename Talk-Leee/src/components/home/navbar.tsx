@@ -43,7 +43,9 @@ export function Navbar() {
     pathname === "/terms" ||
     pathname.startsWith("/terms/") ||
     pathname === "/privacy" ||
-    pathname.startsWith("/privacy/");
+    pathname.startsWith("/privacy/") ||
+    pathname === "/accessibility" ||
+    pathname.startsWith("/accessibility/");
   const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
   // Every standalone marketing page shares one navbar treatment.
   const isStandalonePage =
