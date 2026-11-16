@@ -668,7 +668,7 @@ export function CampaignPerformanceTable({
 
     const detailsCampaign = useMemo(() => campaigns.find((c) => c.id === detailsId) || null, [campaigns, detailsId]);
     // Same rules as the campaign detail page: Pause / Stop while running;
-    // Start / Resume for exactly draft, paused and stopped.
+    // Start / Resume for exactly draft, paused, stopped and completed.
     const detailsCanPause = (detailsCampaign?.status || "").toLowerCase() === "running";
     const detailsCanResume = canStartCampaign(detailsCampaign?.status);
     const detailsStarting = detailsId !== null && inFlight.starting.has(detailsId);
