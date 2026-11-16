@@ -55,6 +55,7 @@ _AUTH_FLOWS = {
     "POST /api/v1/auth/signup/complete": "signup completion, pre-auth",
     "GET /api/v1/auth/legal-versions": "public read of the current Terms/Privacy versions, no data",
     "GET /api/v1/auth/verify-email": "email verification link, magic-token auth",
+    "POST /api/v1/auth/verify-email/resend": "verification-link resend; pre-auth, enumeration-safe (same 200 always) + rate-limited",
     "POST /api/v1/auth/passkeys/login/begin": "passkey login challenge, pre-auth",
     "POST /api/v1/auth/passkeys/login/complete": "passkey login response, pre-auth",
     "POST /api/v1/auth/mfa/verify": "MFA challenge, pre-auth (token in body)",
