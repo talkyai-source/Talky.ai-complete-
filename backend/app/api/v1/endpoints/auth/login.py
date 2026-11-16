@@ -106,10 +106,21 @@ async def login(
                 success=False,
                 failure_reason="account_locked",
             )
-            # OWASP: generic error — do not confirm the account is locked
+            # The lock is keyed on the submitted address and applies equally
+            # to addresses with no account (failed attempts for an unknown
+            # address are recorded too), so this answer says nothing about
+            # whether an account exists. It is decided before any lookup.
+            minutes = max(1, -(-retry_after // 60))
             raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=GENERIC_AUTH_ERROR,
+                detail={
+                    "code": "sign_in_locked",
+                    "message": (
+                        f"Too many attempts. Try again in {minutes} "
+                        f"{'minute' if minutes == 1 else 'minutes'}."
+                    ),
+                    "retry_after_seconds": retry_after,
+                },
                 headers={"Retry-After": str(retry_after)},
             )
 
@@ -177,22 +188,6 @@ async def login(
                 detail=GENERIC_AUTH_ERROR,
             )
 
-        # --- email verification check ------------------------------------------
-        # Day 1: Block login if email not verified
-        if not row.get("is_verified", False):
-            await record_login_attempt(
-                conn,
-                email=normalised_email,
-                user_id=user_id,
-                ip_address=ip,
-                success=False,
-                failure_reason="email_not_verified",  # internal only
-            )
-            raise _LoginRejected(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Please verify your email before logging in.",
-            )
-
         # --- password verification (constant-time via argon2-cffi / bcrypt) ----
         password_ok = verify_password(body.password, row["password_hash"])
 
@@ -219,6 +214,27 @@ async def login(
             raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_AUTH_ERROR,
+            )
+
+        # --- email verification check ------------------------------------------
+        # Only after the password is proven right: the refusal (and its code)
+        # must never be reachable with a wrong password, or it would tell a
+        # stranger that an address has an unverified account.
+        if not row.get("is_verified", False):
+            await record_login_attempt(
+                conn,
+                email=normalised_email,
+                user_id=user_id,
+                ip_address=ip,
+                success=False,
+                failure_reason="email_not_verified",  # internal only
+            )
+            raise _LoginRejected(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "email_not_verified",
+                    "message": "Verify your email before signing in.",
+                },
             )
 
         try:
@@ -302,7 +318,7 @@ async def login(
                 "minutes_state": "unavailable",
                 "mfa_required": True,
                 "mfa_challenge_token": mfa_challenge_token,
-                "message": "MFA verification required. Use mfa_challenge_token with POST /auth/mfa/verify.",
+                "message": "Enter your two-factor authentication code to finish signing in.",
             })
 
         # --- create new server-side session (OWASP: rotate on login) ----------
