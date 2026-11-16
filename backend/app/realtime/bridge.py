@@ -779,6 +779,29 @@ class RealtimeBridge:
         await self._rt.repair_unspoken_response(response, **kwargs)
         return False
 
+    async def _admit_ai_identity(self, event, utterance) -> bool:
+        """Hold a reply that claims to be human or denies being an AI.
+
+        Runs once per utterance, after the opt-out gate and before any audio or
+        transcript event is submitted. Same test and same replacement line as
+        the cascaded path (speech_guard). Never logs the transcript.
+        """
+        from app.domain.services.voice_pipeline.speech_guard import _ai_identity_line, _claims_human
+        if not _claims_human(event.text or ""):
+            return True
+        short = str(self._call_id)[:8]
+        if self._repair_attempted:
+            self._failure_reason = "AI-identity repair budget exhausted"
+            logger.warning("realtime_ai_identity call=%s unrepaired", short)
+            return False
+        self._repair_attempted = True
+        logger.warning("realtime_ai_identity call=%s repaired", short)
+        response = (event.raw or {}).get("response") or {}
+        await self._rt.repair_unspoken_response(
+            response, required_text=_ai_identity_line(self._action_session),
+            required_reason="Your previous reply claimed to be human or denied being an AI, which is not allowed.")
+        return False
+
     async def _cancel_playback(self, raw=None) -> None:
         """Invalidate exactly the old utterance before a replacement can speak."""
         self._action_session._voice_action_delivered_text = ""
@@ -834,6 +857,8 @@ class RealtimeBridge:
             if not await self._admit_opt_out_playback(event, utterance):
                 return
             if not self._owns_unfinished_playback(utterance):
+                return
+            if not await self._admit_ai_identity(event, utterance):
                 return
             self._action_session._voice_action_delivered_text = ""
             await self._send_control_event({"type": "llm_response", "text": event.text})
