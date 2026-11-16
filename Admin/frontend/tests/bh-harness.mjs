@@ -35,6 +35,8 @@ const bundle = await build({
             export { ContactEnquiriesPage } from './src/pages/ContactEnquiriesPage';
             export { ActionDetailDrawer } from './src/components/ActionDetailDrawer';
             export { CallsPage } from './src/pages/CallsPage';
+            export { CampaignsPage } from './src/pages/CampaignsPage';
+            export { CampaignsTable } from './src/components/CampaignsTable';
             export { ActionsPage } from './src/pages/ActionsPage';
             export { ConnectorDetailDrawer } from './src/components/ConnectorDetailDrawer';
             export { ConnectorsTable } from './src/components/ConnectorsTable';

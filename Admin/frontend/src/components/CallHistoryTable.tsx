@@ -101,14 +101,16 @@ function OwnedCallHistoryTable({ onCallSelect, generation }: CallHistoryTablePro
     const request = useRef(0);
     const [loadedQuery, setLoadedQuery] = useState('');
 
-    // Debounce search
+    // Debounce search. The page returns to 1 only when the search really
+    // changed, so the timer that follows the first render moves nothing.
     useEffect(() => {
+        if (search === debouncedSearch) return;
         const timer = setTimeout(() => {
             setDebouncedSearch(search);
             setPage(1);
         }, 300);
         return () => clearTimeout(timer);
-    }, [search]);
+    }, [search, debouncedSearch]);
 
     const fetchCalls = useCallback(async () => {
         const owns = capture();
