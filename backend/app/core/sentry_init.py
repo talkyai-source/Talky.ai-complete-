@@ -34,6 +34,8 @@ import logging
 import os
 from typing import Optional
 
+from app.core.sentry_scrub import scrub_breadcrumb, scrub_event, scrub_transaction
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,6 +100,14 @@ def init_sentry() -> bool:
         traces_sample_rate=traces_rate,
         profiles_sample_rate=profiles_rate,
         send_default_pii=False,
+        # Stack-frame variables are not sent: speech held in an ordinary local
+        # variable carries no marker a pattern could recognise.
+        include_local_variables=False,
+        # Error reports must never carry customer data: strip it in-process
+        # before anything is sent (emails, phones, keys, transcripts, ...).
+        before_send=scrub_event,
+        before_send_transaction=scrub_transaction,
+        before_breadcrumb=scrub_breadcrumb,
         attach_stacktrace=True,
         integrations=[
             StarletteIntegration(transaction_style="endpoint"),

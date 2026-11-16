@@ -11,6 +11,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import { dashboardApi } from "@/lib/dashboard-api";
+import { fillContactPermission } from "@/test-utils/contact-permission";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -131,6 +132,7 @@ test("a failed add shows the server's message inline in the form, with no browse
     fireEvent.change(phone, { target: { value: "+447400123457" } });
     const save = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
     await waitFor(() => assert.equal(save.disabled, false), { timeout: SLOW });
+    fillContactPermission();
     fireEvent.click(save);
 
     const form = within(phone.closest("form")!);

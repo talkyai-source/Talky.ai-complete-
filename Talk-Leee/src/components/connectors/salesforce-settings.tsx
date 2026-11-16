@@ -8,6 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { clampIntText } from "@/lib/number-text";
 import type { SalesforceImportInput, SalesforceSettingsUpdateInput } from "@/lib/backend-api";
 import {
@@ -117,6 +119,8 @@ export function SalesforceSettingsView({
     const [importListName, setImportListName] = useState("");
     const [importResult, setImportResult] = useState<SalesforceImportResult | null>(null);
     const [importError, setImportError] = useState<string | null>(null);
+    // Permission to call the imported people, asked again for every import.
+    const importPermission = useContactPermissionForm();
 
     const dirty = useMemo(() => {
         if (!settings) return false;
@@ -170,6 +174,8 @@ export function SalesforceSettingsView({
             return;
         }
         const limit = Math.max(1, Math.min(2000, Number.parseInt(importLimit, 10) || 500));
+        const permission = importPermission.require();
+        if (!permission) return;
         try {
             const result = await onImport({
                 campaign_id: importCampaignId,
@@ -177,10 +183,12 @@ export function SalesforceSettingsView({
                 limit,
                 where: importWhere.trim() || undefined,
                 list_name: importListName.trim() || undefined,
+                permission,
             });
             setImportResult(result);
+            importPermission.reset();
         } catch (err) {
-            setImportError(formatError(err));
+            if (!importPermission.showServerError(err)) setImportError(formatError(err));
         }
     };
 
@@ -427,6 +435,7 @@ export function SalesforceSettingsView({
                                     <Input id="sf-import-list" placeholder="Salesforce Leads 2026-09-07" value={importListName} onChange={(e) => setImportListName(e.target.value)} />
                                 </div>
                             </div>
+                            <ContactPermissionFields idPrefix="sf-import" disabled={busy?.import} {...importPermission.fieldProps} />
                             <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="text-xs">
                                     {importError ? <span className="text-red-500">{importError}</span> : null}

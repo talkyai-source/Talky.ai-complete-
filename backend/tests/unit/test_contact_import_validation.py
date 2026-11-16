@@ -121,6 +121,15 @@ class FakeDB:
         return _Query(self, name)
 
 
+# The customer's confirmation that they may call these contacts (required on import).
+FORM_PERMISSION = dict(
+    permission_basis="express_consent",
+    permission_source="Customer sign-up form, March 2026",
+    permission_date="2026-03-14",
+    permission_statement_version="2026-11-v1",
+)
+
+
 class _User:
     tenant_id = "t1"
     id = "u1"
@@ -140,6 +149,7 @@ def _run(csv_text: str, db: Optional[FakeDB] = None):
             skip_duplicates=True,
             current_user=_User(),
             db_client=db,
+            **FORM_PERMISSION,
         )
     )
     return resp, db

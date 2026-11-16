@@ -12,6 +12,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { dashboardApi } from "@/lib/dashboard-api";
 import { extendedApi, type BulkImportResponse } from "@/lib/extended-api";
 import { BAD_NUMBER, UK_NATIONAL, chooseUnitedKingdom, csvFile } from "@/test-utils/phone-fixtures";
+import { fillContactPermission } from "@/test-utils/contact-permission";
 import ContactsError from "./error";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
@@ -136,7 +137,9 @@ test("after an import the totals agree with the rows listed: browser-refused plu
     fireEvent.change(document.getElementById("contacts-csv-file") as HTMLInputElement, { target: { files: [csvFile(text)] } });
     await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-import-country");
-    fireEvent.click(await screen.findByRole("button", { name: /Upload 2 contacts/ }, { timeout: SLOW }));
+    const upload = await screen.findByRole("button", { name: /Upload 2 contacts/ }, { timeout: SLOW });
+    fillContactPermission();
+    fireEvent.click(upload);
     const results = await screen.findByTestId("contacts-import-results", undefined, { timeout: SLOW });
     const listed = within(results).getAllByTestId("contacts-import-error-row").length;
     assert.equal(listed, 2, "one row refused in the browser and one refused by the server");

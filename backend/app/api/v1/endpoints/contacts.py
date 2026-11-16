@@ -15,9 +15,9 @@ import csv
 import io
 import logging
 import uuid
-from typing import Annotated, List, Optional
+from typing import Annotated, Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query
 from fastapi.responses import Response
 from pydantic import BaseModel
 from app.core.postgres_adapter import Client
@@ -83,6 +83,9 @@ class BulkPasteRequest(BaseModel):
     paste (use CSV for that); every token is treated as a phone number."""
     text: str
     default_country: Optional[str] = None
+    # The customer's confirmation that they may call these contacts:
+    # {basis, source, permission_date, statement_version}. Validated in the route.
+    permission: Optional[Any] = None
 
 
 def _campaign_default_country(campaign) -> str:
@@ -201,6 +204,10 @@ async def upload_campaign_contacts(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     default_country: Annotated[Optional[str], Query(min_length=2, max_length=2)] = None,
+    permission_basis: Annotated[Optional[str], Form()] = None,
+    permission_source: Annotated[Optional[str], Form()] = None,
+    permission_date: Annotated[Optional[str], Form()] = None,
+    permission_statement_version: Annotated[Optional[str], Form()] = None,
 ):
     """
     Bulk import contacts from CSV to a specific campaign.
@@ -228,7 +235,16 @@ async def upload_campaign_contacts(
             status_code=400,
             detail="Only CSV files are supported"
         )
-    
+
+    # The customer's permission confirmation is checked before the file is read.
+    from app.api.v1.endpoints.contact_lists import (
+        permission_from_form, resolve_contact_permission,
+    )
+    permission = resolve_contact_permission(permission_from_form(
+        permission_basis, permission_source, permission_date,
+        permission_statement_version,
+    ))
+
     try:
         # 1. Validate ownership and outbound direction before reading the file
         # or creating a contact list/lead.
@@ -379,13 +395,17 @@ async def upload_campaign_contacts(
         # 5. Create (or reuse) the contact list for this upload — named after
         #    the uploaded file. Ordinary list failures fall back to Ungrouped;
         #    a direction-trigger rejection aborts with the stable 409 contract.
-        from app.api.v1.endpoints.contact_lists import create_contact_list, _live_count
+        from app.api.v1.endpoints.contact_lists import (
+            create_contact_list, _live_count, list_display_name,
+        )
         list_id = create_contact_list(
             db_client,
             campaign_id=campaign_id,
             tenant_id=campaign_tenant_id or current_user.tenant_id,
             name=file.filename,
             source="csv",
+            permission=permission,
+            confirmed_by=current_user.id,
         )
 
         # 6. Normalize, dedup, revive, chunk-insert via the shared core,
@@ -429,7 +449,12 @@ async def upload_campaign_contacts(
             ])[:100],
             field_errors=field_errors[:200],
             list_id=list_id,
-            list_name=file.filename if list_id is not None else None,
+            list_name=(
+                list_display_name(
+                    db_client, list_id, campaign_tenant_id or current_user.tenant_id,
+                    file.filename,
+                ) if list_id is not None else None
+            ),
             list_contact_count=list_count,
         )
     
@@ -476,6 +501,10 @@ async def paste_campaign_contacts(
     from app.domain.services.dialer.bulk_ingest import (
         LeadRecord, ingest_lead_records, parse_pasted_numbers,
     )
+    from app.api.v1.endpoints.contact_lists import resolve_contact_permission
+
+    # The customer's permission confirmation is checked before anything is parsed.
+    permission = resolve_contact_permission(body.permission)
 
     # 1. Validate ownership and outbound direction before list/lead writes.
     campaign = require_owned_outbound_campaign(
@@ -501,7 +530,7 @@ async def paste_campaign_contacts(
 
     # 3. Create (or reuse) the paste's contact list ("Pasted contacts <date>").
     from app.api.v1.endpoints.contact_lists import (
-        create_contact_list, default_paste_list_name, _live_count,
+        create_contact_list, default_paste_list_name, _live_count, list_display_name,
     )
     list_name = default_paste_list_name()
     try:
@@ -511,6 +540,8 @@ async def paste_campaign_contacts(
             tenant_id=campaign_tenant_id or current_user.tenant_id,
             name=list_name,
             source="paste",
+            permission=permission,
+            confirmed_by=current_user.id,
         )
 
         # 4. Shared ingest core, tagging leads with the list.
@@ -561,7 +592,11 @@ async def paste_campaign_contacts(
             for e in result.errors[:100]
         ],
         list_id=list_id,
-        list_name=list_name if list_id is not None else None,
+        list_name=(
+            list_display_name(
+                db_client, list_id, campaign_tenant_id or current_user.tenant_id, list_name,
+            ) if list_id is not None else None
+        ),
         list_contact_count=list_count,
     )
 
@@ -581,6 +616,10 @@ async def bulk_import_contacts(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     default_country: Annotated[Optional[str], Query(min_length=2, max_length=2)] = None,
+    permission_basis: Annotated[Optional[str], Form()] = None,
+    permission_source: Annotated[Optional[str], Form()] = None,
+    permission_date: Annotated[Optional[str], Form()] = None,
+    permission_statement_version: Annotated[Optional[str], Form()] = None,
 ):
     """
     Bulk import contacts from CSV file.
@@ -601,7 +640,19 @@ async def bulk_import_contacts(
             status_code=400,
             detail="Only CSV files are supported"
         )
-    
+
+    # Leads for a campaign need the customer's permission confirmation; the
+    # no-campaign path writes the clients table (never dialled) and does not.
+    permission = None
+    if campaign_id:
+        from app.api.v1.endpoints.contact_lists import (
+            permission_from_form, resolve_contact_permission,
+        )
+        permission = resolve_contact_permission(permission_from_form(
+            permission_basis, permission_source, permission_date,
+            permission_statement_version,
+        ))
+
     try:
         # The legacy endpoint used to trust any campaign UUID and only discover
         # it after parsing/writing rows. Resolve the same outbound boundary as
@@ -641,6 +692,18 @@ async def bulk_import_contacts(
             LeadRecord(phone_raw=(row.get("phone_number") or "").strip(), source_row=i)
             for i, row in enumerate(csv_rows, start=2)
         ], default_country)
+        list_id = None
+        if permission is not None:
+            from app.api.v1.endpoints.contact_lists import create_contact_list
+            list_id = create_contact_list(
+                db_client,
+                campaign_id=campaign_id,
+                tenant_id=campaign.get("tenant_id") or current_user.tenant_id,
+                name=file.filename,
+                source="csv",
+                permission=permission,
+                confirmed_by=current_user.id,
+            )
         total_rows = 0
         imported = 0
         errors = []
@@ -678,7 +741,7 @@ async def bulk_import_contacts(
                 
                 if campaign_id:
                     # Add as lead to campaign (with tenant_id)
-                    write_response = db_client.table("leads").insert({
+                    lead_row = {
                         "id": str(uuid.uuid4()),
                         "tenant_id": current_user.tenant_id,
                         "campaign_id": campaign_id,
@@ -688,7 +751,10 @@ async def bulk_import_contacts(
                         "email": email,
                         "status": "pending",
                         "last_call_result": "pending"
-                    }).execute()
+                    }
+                    if list_id is not None:
+                        lead_row["list_id"] = list_id
+                    write_response = db_client.table("leads").insert(lead_row).execute()
                 else:
                     # Add as client
                     name = f"{first_name or ''} {last_name or ''}".strip() or "Unknown"

@@ -1,3 +1,4 @@
+import { SENTRY_SCRUB_OPTIONS } from "./lib/sentry-scrub";
 import { appEnvironment, commitSha, sentryEnabled, sentryProfilesSampleRate, sentryTracesSampleRate } from "./lib/env";
 
 export async function register() {
@@ -16,6 +17,7 @@ export async function register() {
             release: commitSha(),
             tracesSampleRate: sentryTracesSampleRate(),
             profilesSampleRate: sentryProfilesSampleRate(),
+            ...SENTRY_SCRUB_OPTIONS,
         });
         return;
     }
@@ -27,6 +29,7 @@ export async function register() {
             environment: appEnvironment(),
             release: commitSha(),
             tracesSampleRate: sentryTracesSampleRate(),
+            ...SENTRY_SCRUB_OPTIONS,
         });
     }
 }

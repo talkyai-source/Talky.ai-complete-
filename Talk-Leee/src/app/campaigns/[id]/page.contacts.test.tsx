@@ -11,6 +11,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 
 import { dashboardApi } from "@/lib/dashboard-api";
 import { INVALID_PHONE_ERROR, PHONE_HELP_TEXT, SELECT_COUNTRY_ERROR } from "@/lib/phone-number";
+import { EXPECTED_PERMISSION, fillContactPermission } from "@/test-utils/contact-permission";
 import { BAD_NUMBER, UK_E164, UK_NATIONAL, chooseUnitedKingdom } from "@/test-utils/phone-fixtures";
 
 // Same boundary stubs as page.test.tsx: layout, routing and the heavy child
@@ -88,11 +89,13 @@ test("EP4: UK selected shows Saves as +447400123456 and sends exactly that; 1234
     fireEvent.change(phone, { target: { value: UK_NATIONAL } });
     await waitFor(() => assert.equal(document.getElementById("phone-status")?.textContent, `Saves as ${UK_E164}`), { timeout: SLOW });
     assert.equal(save.disabled, false);
+    fillContactPermission();
     fireEvent.click(save);
     await waitFor(() => assert.equal(addContact.mock.callCount(), 1), { timeout: SLOW });
-    const [campaignId, payload] = addContact.mock.calls[0].arguments as [string, { phone_number: string }];
+    const [campaignId, payload, permission] = addContact.mock.calls[0].arguments as [string, { phone_number: string }, unknown];
     assert.equal(campaignId, "camp-1");
     assert.equal(payload.phone_number, UK_E164);
+    assert.deepEqual(permission, EXPECTED_PERMISSION);
 });
 
 test("EP4 with no country selected: a national number is the select-country error and Save stays blocked", async () => {
@@ -125,6 +128,7 @@ test("EP4: an invalid mobile number shows its inline error, blocks Save and send
     fireEvent.change(mobile, { target: { value: "07400 123457" } });
     await waitFor(() => assert.equal(document.getElementById("contact-mobile_number-status")?.textContent, "Saves as +447400123457"), { timeout: SLOW });
     assert.equal(save.disabled, false);
+    fillContactPermission();
     fireEvent.click(save);
     await waitFor(() => assert.equal(addContact.mock.callCount(), 1), { timeout: SLOW });
     const payload = addContact.mock.calls[0].arguments[1] as { phone_number: string; mobile_number: string };

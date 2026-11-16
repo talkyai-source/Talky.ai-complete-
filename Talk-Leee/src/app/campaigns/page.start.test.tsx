@@ -286,6 +286,18 @@ test("the details modal's Resume shows Preparing and Starting…, then the queue
     assert.equal(lines("campaign-list-notice"), null);
 });
 
+test("the details modal's Resume opens on the campaign's saved first speaker and sends it", async () => {
+    const state = wire([camp("p1", "Paused one", "paused", { calling_config: { first_speaker: "user" } })]);
+    await mountPage("Paused one");
+    const details = openDetails("Paused one");
+    fireEvent.click(await enabledButton(details, "Resume"));
+    await waitFor(() => assert.equal(startDialog() !== null, true), { timeout: SLOW });
+    assert.equal((startDialog()!.getByRole("radio", { name: /Callee speaks first/ }) as HTMLInputElement).checked, true);
+    fireEvent.click(await confirmButton());
+    await waitFor(() => assert.equal(state.starts.length, 1), { timeout: SLOW });
+    assert.equal(state.starts[0]!.options.first_speaker, "user");
+});
+
 test("Resume Selected uses one choice for every selected campaign, skips those that cannot start and lists them", async () => {
     const state = wire(
         [camp("a", "Alpha", "paused"), camp("b", "Bravo", "draft"), camp("c", "Charlie", "stopped"), camp("d", "Delta", "running"), camp("e", "Echo", "paused")],

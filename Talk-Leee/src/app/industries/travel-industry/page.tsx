@@ -240,7 +240,7 @@ export default function TravelIndustryIndustryPage() {
     },
   ];
 
-  const integrationLogos = ["Google Calendar", "Outlook"];
+  const integrationLogos = ["Google Calendar"];
 
   const howItWorks = [
     {

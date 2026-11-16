@@ -15,6 +15,8 @@ import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPa
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
 import { PhoneStatusLine } from "@/components/contacts/phone-status-line";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -265,6 +267,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     // A failed add / edit, shown in the form it came from.
     const [contactFormError, setContactFormError] = useState("");
+    // Permission to call, asked again for every contact that is added.
+    const addPermission = useContactPermissionForm();
     // The contact the Remove contact dialog is asking about.
     const [removeTarget, setRemoveTarget] = useState<{ id: string; phone: string } | null>(null);
     // A failed delete, shown in the row it came from.
@@ -440,6 +444,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         // An invalid number never becomes a contact: the button is disabled
         // and the submit is refused here too (the payload builders would throw).
         if (!contactFormValid) return;
+        // Adding (not editing) needs the permission-to-call confirmation.
+        const confirmation = editingContact ? null : addPermission.require();
+        if (!editingContact && !confirmation) return;
         try {
             setAddingContact(true);
             setContactFormError("");
@@ -449,14 +456,16 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             if (editingContact) {
                 await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(campaignId, payload);
+                await dashboardApi.addContact(campaignId, payload, confirmation!);
             }
+            addPermission.reset();
             setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
             setExtraContactFields([]);
             setShowAddContact(false);
             setEditingContact(null);
             await loadData();
         } catch (err) {
+            if (addPermission.showServerError(err)) return;
             setContactFormError(
                 err instanceof Error
                     ? err.message
@@ -811,7 +820,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Upload className="w-4 h-4" />
                                     Import CSV
                                 </Button>
-                                <Button size="sm" onClick={() => { setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
+                                <Button size="sm" onClick={() => { addPermission.reset(); setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
                                     <Plus className="w-4 h-4" />
                                     Add contact
                                 </Button>
@@ -962,6 +971,11 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                         </div>
                                     ) : null}
                                 </div>
+                                {!editingContact ? (
+                                    <div className="mb-4">
+                                        <ContactPermissionFields idPrefix="contact-add" disabled={addingContact} {...addPermission.fieldProps} />
+                                    </div>
+                                ) : null}
                                 {contactFormError ? (
                                     <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
                                 ) : null}
@@ -969,7 +983,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Button type="submit" size="sm" disabled={addingContact || !contactFormValid}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); setContactFormError(""); }}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { addPermission.reset(); setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); setContactFormError(""); }}>
                                         Cancel
                                     </Button>
                                 </div>

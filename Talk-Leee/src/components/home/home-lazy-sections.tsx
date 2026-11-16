@@ -55,7 +55,7 @@ function FAQSection() {
     },
     {
       question: "Can Talk-Lee AI integrate with my existing phone system or CRM?",
-      answer: "Yes. Talk-Lee AI connects to your phone system through a SIP trunk, to HubSpot and Salesforce, and to Google Calendar and Outlook Calendar.",
+      answer: "Yes. Talk-Lee AI connects to your phone system through a SIP trunk, to HubSpot and Salesforce, and to Google Calendar.",
     },
     {
       question: "How does Talk-Lee AI learn my company information?",

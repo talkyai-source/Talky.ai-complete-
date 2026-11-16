@@ -7,7 +7,7 @@ import io
 from starlette.datastructures import UploadFile
 
 from app.api.v1.endpoints import contacts as contacts_ep
-from tests.unit.test_contact_import_validation import FakeDB, _User
+from tests.unit.test_contact_import_validation import FORM_PERMISSION, FakeDB, _User
 
 
 def _run_bytes(raw: bytes, db=None):
@@ -19,6 +19,7 @@ def _run_bytes(raw: bytes, db=None):
             skip_duplicates=True,
             current_user=_User(),
             db_client=db,
+            **FORM_PERMISSION,
         )
     )
     return resp, db

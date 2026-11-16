@@ -2,16 +2,14 @@
 
 /**
  * Duplicate state shared by the campaign list's details modal and the
- * campaign detail page (production-readiness 3.1 / 3.2): the knowledge gate,
- * the running flag and the result message. Both surfaces copy through the
- * same `duplicateCampaign` in lib/campaign-duplicate.
+ * campaign detail page (production-readiness 3.1 / 3.2): the running flag and
+ * the result message. Both surfaces copy through the same `duplicateCampaign`
+ * in lib/campaign-duplicate, which asks the backend to make the copy. Nothing
+ * is decided here: a refusal is the backend's own message, shown as the notice.
  */
 import { useEffect, useRef, useState } from "react";
 
 import {
-    CampaignDuplicateBlockedError,
-    DUPLICATE_KNOWLEDGE_BLOCKED_TEXT,
-    campaignDuplicateBlocked,
     clearDuplicateNotice,
     duplicateCampaign,
     peekDuplicateNotice,
@@ -21,15 +19,13 @@ import {
 import { cn } from "@/lib/utils";
 
 export function duplicateResultNotice(result: CampaignDuplicateResult): CampaignDuplicateNotice {
-    return { kind: result.leadFieldsCopied ? "success" : "warning", text: result.message };
+    return { kind: "success", text: result.message };
 }
 
 export type CampaignDuplicateState = {
-    /** Checking knowledge, blocked by knowledge, running, or no campaign. */
+    /** Running, or no campaign. */
     disabled: boolean;
     running: boolean;
-    /** Why Duplicate is unavailable for this campaign; null when it is not blocked. */
-    reason: string | null;
     notice: CampaignDuplicateNotice | null;
     run: () => Promise<void>;
 };
@@ -44,8 +40,6 @@ export function useCampaignDuplicate(
     onCreated?: (result: CampaignDuplicateResult) => void | Promise<void>,
 ): CampaignDuplicateState {
     const [seenId, setSeenId] = useState(campaignId);
-    // null = the knowledge read has not answered yet.
-    const [blocked, setBlocked] = useState<boolean | null>(null);
     const [running, setRunning] = useState(false);
     const [notice, setNotice] = useState<CampaignDuplicateNotice | null>(
         () => (campaignId ? peekDuplicateNotice(campaignId) : null),
@@ -53,29 +47,20 @@ export function useCampaignDuplicate(
     const inFlight = useRef(false);
     const latestId = useRef(campaignId);
 
-    // A different campaign (or a reopened modal) starts from nothing: its own
-    // knowledge answer, and no message left over from another campaign.
+    // A different campaign (or a reopened modal) starts from nothing: no
+    // message left over from another campaign.
     if (seenId !== campaignId) {
         setSeenId(campaignId);
-        setBlocked(null);
         setNotice(campaignId ? peekDuplicateNotice(campaignId) : null);
     }
 
     useEffect(() => {
         latestId.current = campaignId;
-        if (!campaignId) return;
-        clearDuplicateNotice(campaignId);
-        let cancelled = false;
-        void campaignDuplicateBlocked(campaignId).then((next) => {
-            if (!cancelled) setBlocked(next);
-        });
-        return () => {
-            cancelled = true;
-        };
+        if (campaignId) clearDuplicateNotice(campaignId);
     }, [campaignId]);
 
     async function run() {
-        if (!campaignId || blocked !== false || inFlight.current) return;
+        if (!campaignId || inFlight.current) return;
         const id = campaignId;
         inFlight.current = true;
         setRunning(true);
@@ -90,8 +75,7 @@ export function useCampaignDuplicate(
             if (latestId.current === id) setNotice(duplicateResultNotice(result));
         } catch (err) {
             if (latestId.current !== id) return;
-            if (err instanceof CampaignDuplicateBlockedError) setBlocked(true);
-            else setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+            setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
         } finally {
             inFlight.current = false;
             setRunning(false);
@@ -99,9 +83,8 @@ export function useCampaignDuplicate(
     }
 
     return {
-        disabled: !campaignId || blocked !== false || running,
+        disabled: !campaignId || running,
         running,
-        reason: blocked ? DUPLICATE_KNOWLEDGE_BLOCKED_TEXT : null,
         notice,
         run,
     };
@@ -110,30 +93,22 @@ export function useCampaignDuplicate(
 const BOX_CLASS = "min-w-0 break-words rounded-md border px-2.5 py-1.5 text-sm font-medium";
 const TONE_CLASS: Record<CampaignDuplicateNotice["kind"], string> = {
     success: "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
-    warning: "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300",
     error: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300",
 };
 
-/** The disabled reason and the last result message, or nothing. */
+/** The last result message, or nothing. */
 export function CampaignDuplicateStatus({ duplicate, className }: { duplicate: CampaignDuplicateState; className?: string }) {
-    if (!duplicate.reason && !duplicate.notice) return null;
+    if (!duplicate.notice) return null;
     return (
         <div className={cn("min-w-0 space-y-2", className)}>
-            {duplicate.reason ? (
-                <p role="status" data-testid="campaign-duplicate-reason" className={cn(BOX_CLASS, TONE_CLASS.warning)}>
-                    {duplicate.reason}
-                </p>
-            ) : null}
-            {duplicate.notice ? (
-                <p
-                    role={duplicate.notice.kind === "error" ? "alert" : "status"}
-                    data-testid="campaign-duplicate-notice"
-                    data-kind={duplicate.notice.kind}
-                    className={cn(BOX_CLASS, TONE_CLASS[duplicate.notice.kind])}
-                >
-                    {duplicate.notice.text}
-                </p>
-            ) : null}
+            <p
+                role={duplicate.notice.kind === "error" ? "alert" : "status"}
+                data-testid="campaign-duplicate-notice"
+                data-kind={duplicate.notice.kind}
+                className={cn(BOX_CLASS, TONE_CLASS[duplicate.notice.kind])}
+            >
+                {duplicate.notice.text}
+            </p>
         </div>
     );
 }

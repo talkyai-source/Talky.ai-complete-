@@ -25,6 +25,7 @@ breaks. This is an ADDITIVE layer on top.
 """
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -60,6 +61,10 @@ class BlockCode(str, Enum):
     DAILY_LEAD_CAP = "daily_lead_cap"
     # The stored number is not a dialable phone number (D2-7); terminal.
     INVALID_PHONE_NUMBER = "invalid_phone_number"
+    # CONTACT_PERMISSION_DIAL_GATE is on and the contact's list carries no
+    # calling-permission confirmation (or the contact has no list). NOT
+    # self-clearing: only a person confirming the list clears it.
+    CONTACT_PERMISSION_MISSING = "contact_permission_missing"
 
     # Capacity / pacing (self-clearing, benign)
     MAX_CONCURRENT_CALLS = "max_concurrent_calls"
@@ -95,6 +100,14 @@ class BlockCode(str, Enum):
     # can show a loud "TESTING MODE" banner instead of silently dialling
     # outside the configured hours.
     TESTING_MODE_SCHEDULE_BYPASSED = "testing_mode_schedule_bypassed"
+
+
+def contact_permission_dial_gate_enabled() -> bool:
+    """CONTACT_PERMISSION_DIAL_GATE, read at call time. Only 1/true/yes/on (any
+    case) turn it on; unset or anything else is off."""
+    return os.getenv("CONTACT_PERMISSION_DIAL_GATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
 
 
 #: The codes that mean "this campaign is WAITING for its calling window", not
@@ -660,6 +673,16 @@ def classify(
             "be dialled. Fix the number (with its country code) or remove the "
             "contact.",
             severity="error", stage="contact", details=extra,
+        )
+
+    if "contact_permission_missing" in low:
+        return BlockReason(
+            BlockCode.CONTACT_PERMISSION_MISSING,
+            "This contact's list has no confirmation that you have permission to "
+            "call these contacts, so the call was not placed. Open the contact "
+            "list, confirm you have permission to call these contacts, then "
+            "start the campaign again.",
+            severity="warning", stage="contact", details=extra,
         )
 
     # ---- safety ---------------------------------------------------------

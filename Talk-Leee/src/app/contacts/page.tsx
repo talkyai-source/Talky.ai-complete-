@@ -23,6 +23,8 @@ import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
+import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
+import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
 import { PhoneStatusLine } from "@/components/contacts/phone-status-line";
 import {
@@ -283,6 +285,12 @@ export default function ContactsPage() {
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     // A failed add / edit, shown in the form it came from.
     const [contactFormError, setContactFormError] = useState("");
+    // Permission to call: one confirmation for the upload panel, one for adding
+    // a single contact. Each import or add asks again.
+    const uploadPermission = useContactPermissionForm();
+    const addPermission = useContactPermissionForm();
+    const resetUploadPermission = uploadPermission.reset;
+    const resetAddPermission = addPermission.reset;
     // The contact the Remove contact dialog is asking about.
     const [removeTarget, setRemoveTarget] = useState<{ id: string; phone: string } | null>(null);
     // A failed delete, shown in the row it came from.
@@ -355,10 +363,12 @@ export default function ContactsPage() {
         setShowAddContact(false);
         setShowContactDetails(false);
         setEditingContact(null);
+        resetUploadPermission();
+        resetAddPermission();
         setCampaignHasContacts(false);
         setFirstLoadDone(false);
         setContactsError("");
-    }, [selectedCampaign]);
+    }, [selectedCampaign, resetUploadPermission, resetAddPermission]);
 
     // Latest-request-wins: a slow response for a previous campaign/list/search
     // must not overwrite the table (or the has-contacts flag) of the current one.
@@ -407,6 +417,9 @@ export default function ContactsPage() {
         // An invalid number never becomes a contact: the button is disabled
         // and the submit is refused here as well (contactPayload would throw).
         if (!contactFormValid) return;
+        // Adding (not editing) needs the permission-to-call confirmation.
+        const confirmation = editingContact ? null : addPermission.require();
+        if (!editingContact && !confirmation) return;
         try {
             setSavingContact(true);
             setContactFormError("");
@@ -414,8 +427,9 @@ export default function ContactsPage() {
             if (editingContact) {
                 await dashboardApi.updateContact(selectedCampaign, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(selectedCampaign, payload);
+                await dashboardApi.addContact(selectedCampaign, payload, confirmation!);
             }
+            addPermission.reset();
             setContactForm(EMPTY_CONTACT_FORM);
             setShowAddContact(false);
             setShowContactDetails(false);
@@ -424,6 +438,7 @@ export default function ContactsPage() {
             setListsRefreshToken((t) => t + 1);
             await loadContacts();
         } catch (err) {
+            if (addPermission.showServerError(err)) return;
             setContactFormError(err instanceof Error ? err.message : `Failed to ${editingContact ? "update" : "add"} contact`);
         } finally {
             setSavingContact(false);
@@ -431,6 +446,7 @@ export default function ContactsPage() {
     }
 
     function startAddContact() {
+        addPermission.reset();
         setContactFormError("");
         setEditingContact(null);
         setContactForm(EMPTY_CONTACT_FORM);
@@ -439,6 +455,7 @@ export default function ContactsPage() {
     }
 
     function closeContactForm() {
+        addPermission.reset();
         setContactFormError("");
         setShowAddContact(false);
         setShowContactDetails(false);
@@ -622,8 +639,11 @@ export default function ContactsPage() {
             setSentRowMap(new Map());
             return;
         }
+        const confirmation = uploadPermission.require();
+        if (!confirmation) return;
         const { csv, rowMap } = buildContactsUpload(accepted);
-        const response = await extendedApi.uploadCSV(selectedCampaign, uploadFileFromCsv(csv), true);
+        const response = await extendedApi.uploadCSV(selectedCampaign, uploadFileFromCsv(csv), confirmation, true);
+        uploadPermission.reset();
         setResult(response);
         setRejectedRows(rejected);
         setSentRowMap(rowMap);
@@ -638,11 +658,14 @@ export default function ContactsPage() {
 
     async function handleUpload() {
         if (!canUpload || !parsed) return;
+        // Ask for the permission first, so a missing one never flashes "Uploading...".
+        if (!uploadPermission.require()) return;
         try {
             setUploading(true);
             setError("");
             await importParsedRows(parsed);
         } catch (err) {
+            if (uploadPermission.showServerError(err)) return;
             setError(err instanceof Error ? err.message : "Upload failed");
         } finally {
             setUploading(false);
@@ -664,6 +687,7 @@ export default function ContactsPage() {
             }
             await importParsedRows(summary);
         } catch (err) {
+            if (uploadPermission.showServerError(err)) return;
             setError(err instanceof Error ? err.message : "Upload failed");
         } finally {
             setUploading(false);
@@ -671,6 +695,11 @@ export default function ContactsPage() {
     }
 
     const previewRows = parsed?.rows.slice(0, PREVIEW_ROWS) ?? [];
+
+    // Shown before both upload paths (the mapper's Import and the Upload button).
+    const uploadPermissionBlock = (
+        <ContactPermissionFields idPrefix="contacts-upload" disabled={uploading} {...uploadPermission.fieldProps} />
+    );
 
     // The full upload card (drop zone + preview + upload button). Rendered on
     // its own for an empty campaign, or inside a collapsible "Add more" panel.
@@ -1191,6 +1220,11 @@ export default function ContactsPage() {
                 )}
             </div>
 
+            {!editingContact ? (
+                <div className="mb-4">
+                    <ContactPermissionFields idPrefix="contact-add" disabled={savingContact} {...addPermission.fieldProps} />
+                </div>
+            ) : null}
             {contactFormError ? (
                 <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
             ) : null}
@@ -1296,6 +1330,7 @@ export default function ContactsPage() {
                     {/* Collapsible upload panel + last import result */}
                     {showUploadPanel && (
                         <div id="contacts-upload-panel" className="space-y-4">
+                            {uploadPermissionBlock}
                             {/* Look at the file BEFORE it becomes live dials
                                 (goals.md §11): how we read each column, which
                                 rows have problems, and who appears twice.
@@ -1554,6 +1589,7 @@ export default function ContactsPage() {
                         </div>
                         {contactEditor}
                     </motion.div>
+                    {uploadPermissionBlock}
                     {uploadCard}
                     </>)}
                     {resultCard}

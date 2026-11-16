@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+const PERMISSION = {
+    basis: "express_consent" as const,
+    source: "Website sign-up form, March 2026",
+    permission_date: "2026-03-14",
+    statement_version: "2026-11-v1",
+};
+
 const SETTINGS_BODY = {
     server_configured: true,
     connected: true,
@@ -75,10 +82,10 @@ test("backendApi.salesforce.rotateWebhookToken POSTs and importPeople sends the 
         assert.equal(rotated.webhook.token, "tok");
         assert.equal(f.calls[0]!.init?.method, "POST");
 
-        const imported = await backendApi.salesforce.importPeople({ campaign_id: "camp-1", object_type: "Contact", limit: 50 });
+        const imported = await backendApi.salesforce.importPeople({ campaign_id: "camp-1", object_type: "Contact", limit: 50, permission: PERMISSION });
         assert.equal(imported.imported, 4);
         assert.match(f.calls[1]!.url, /\/connectors\/salesforce\/import$/);
-        assert.deepEqual(JSON.parse(String(f.calls[1]!.init?.body)), { campaign_id: "camp-1", object_type: "Contact", limit: 50 });
+        assert.deepEqual(JSON.parse(String(f.calls[1]!.init?.body)), { campaign_id: "camp-1", object_type: "Contact", limit: 50, permission: PERMISSION });
     } finally {
         f.restore();
     }

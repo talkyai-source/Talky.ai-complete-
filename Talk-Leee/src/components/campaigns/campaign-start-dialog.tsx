@@ -7,9 +7,10 @@
  * calling-schedule notice, first-speaker choice and pacing, then the start
  * request itself.
  *
- * `first_speaker` is not saved on the campaign (it is a field of each start
- * request), so it is chosen here every time, starting on "agent". No other
- * code path starts a campaign.
+ * `first_speaker` is saved on the campaign (calling_config.first_speaker, set
+ * by each start request), so the dialog opens on the saved choice and falls
+ * back to "agent" only when nothing is saved. What the dialog shows is what the
+ * request sends. No other code path starts a campaign.
  */
 import { useRef, useState } from "react";
 import { Loader2, Play } from "lucide-react";
@@ -32,6 +33,16 @@ import { dashboardApi, isMinutesExhausted, type Campaign, type CampaignEffective
 export type CampaignStartTarget = Pick<Campaign, "id" | "name" | "status" | "calling_config"> & {
     effective_schedule?: CampaignEffectiveSchedule | null;
 };
+
+/**
+ * The first speaker the dialog opens on: the one the campaign saved, or, for a
+ * set, the one every campaign in it saved; "agent" when nothing (or no single
+ * value) is saved.
+ */
+function savedFirstSpeaker(targets: CampaignStartTarget[]): "agent" | "user" {
+    const saved = targets.map((target) => (target.calling_config as { first_speaker?: unknown } | null | undefined)?.first_speaker);
+    return saved.length > 0 && saved.every((value) => value === "user") ? "user" : "agent";
+}
 
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_CALL_GAP_SECONDS = 0;
@@ -112,9 +123,9 @@ export function useCampaignStartDialog(options: {
         if (next.length === 0 || running) return;
         setTargets(next);
         setListRequested(request.listSkipped === true);
-        // Default back to "agent" every time so a previous choice doesn't
-        // silently carry over into the next Start.
-        setFirstSpeaker("agent");
+        // Open on the campaign's saved choice (agent when none is saved) every
+        // time, so a previous campaign's choice doesn't carry over.
+        setFirstSpeaker(savedFirstSpeaker(next));
         // Seed the pacing controls from the campaign's saved settings if present.
         const cfg = (next.length === 1 ? next[0]!.calling_config : undefined) as
             | { batch_size?: number; call_gap_seconds?: number }

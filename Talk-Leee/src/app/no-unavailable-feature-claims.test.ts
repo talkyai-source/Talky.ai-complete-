@@ -21,7 +21,7 @@ const claims: { file: string; claim: RegExp; why: string }[] = [
     { file: "components/home/home-lazy-sections.tsx", claim: /lead forms/i,
       why: "there is no lead-form connector" },
     { file: "app/industries/healthcare/page.tsx", claim: /connect with most major scheduling and EHR platforms/i,
-      why: "there is no EHR connector; bookings go to Google or Outlook Calendar" },
+      why: "there is no EHR connector; bookings go to Google Calendar" },
     { file: "app/industries/marketing-automation/page.tsx", claim: /GoHighLevel|Zapier/,
       why: "the only CRM connectors are HubSpot and Salesforce" },
     { file: "app/pricing/page.tsx", claim: /Recording retention: 30 days|"Recording retention", "30 days"/,

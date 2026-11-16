@@ -1,4 +1,4 @@
-"""Two narrow, deterministic checks on each sentence before it is spoken.
+"""Three narrow, deterministic checks on each sentence before it is spoken.
 
 Release review 2026-10-08: the conversational-model redesign removed the
 deterministic speech guards, and its own offline contracts then failed:
@@ -21,6 +21,10 @@ already states instead of reinterpreting the conversation:
 2. Once the caller explicitly denies being a customer, a sentence that claims
    an existing relationship is replaced, and the denial reaches the model in
    the live structured state (live_structured_state.py).
+
+3. A first-person claim to be human, or a denial of being an AI ("I'm a real
+   person", "I am not a bot"), is never spoken; "I'm an AI assistant for
+   <company>." replaces it.
 
 Everything else passes through unchanged.
 """
@@ -183,6 +187,66 @@ OPT_OUT_PENDING_LINE = "I've noted your request."
 # lookup rounds mid-navigation.
 _SECTION_ID = re.compile(r"\s*\bk[0-9a-f]{8}_\d+\b")
 
+# The agent, in the first person, claims to be human or denies being an AI
+# ("I'm a real person", "I am not a bot", "This is a real person speaking",
+# "You're talking to a live human"). Words are matched after curly apostrophes
+# are straightened. Only first-person / "this is" / "you're talking to" forms
+# match: "I can connect you to a real person" and "I'm not a real person, I'm an
+# AI assistant" are honest and pass. "human" must not be followed by a word
+# character or hyphen ("human-like" is not a claim).
+_HUMAN_ADJ = r"(?:(?:real|live|actual|genuine|living|breathing)[,\s]+(?:and\s+)?)+"
+_HUMAN_NOUN = r"(?:person|human(?:\s+being)?|agent|representative|rep)(?![\w-])"
+_I_AM = r"\b(?:i'?m|i\s+am)\s+(?:just\s+|definitely\s+|really\s+|actually\s+)?"
+_HUMAN_CLAIM = re.compile(
+    rf"{_I_AM}(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
+    rf"|{_I_AM}(?:an?\s+)?human(?:\s+being)?(?![\w-])"
+    rf"|{_I_AM}(?:a\s+)?flesh\s+and\s+blood\b"
+    rf"|\bthis\s+is\s+(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
+    rf"|\byou(?:'re|\s+are)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?"
+    rf"{_HUMAN_ADJ}{_HUMAN_NOUN}"
+    rf"|^\W*(?:(?:yes|yeah|yep|yup|nope|no)\W+)?(?:an?\s+)?{_HUMAN_ADJ}"
+    rf"(?:person|human(?:\s+being)?)\s+(?:here|speaking)\b",
+    re.IGNORECASE,
+)
+_NOT_AI_THING = (
+    r"(?:ai|a\.i\.|artificial(?:\s+intelligence)?|robot|bot|chatbot|machine|computer|"
+    r"automated|automatic|robocall|virtual\s+assistant)(?!\w)"
+)
+# "this isn't ..." names a narrower set: "It isn't a computer problem" is not a denial.
+_NOT_THIS_THING = r"(?:ai|robot|bot|chatbot|robocall)(?!\w)"
+# "a recording" / "a recorded message" only as a thing the speaker is: "I'm not
+# recording this call" is about the call, not about who is speaking.
+_A_RECORDING = r"a\s+record(?:ing|ed\s+(?:message|voice|call))(?!\w)"
+_AI_DENIAL = re.compile(
+    rf"{_I_AM}not\s+(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING})"
+    rf"|\bthis\s+(?:is\s+not|isn'?t)\s+(?:(?:an?\s+)?{_NOT_THIS_THING}|{_A_RECORDING})"
+    rf"|\byou(?:'re|\s+are)\s+not\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+"
+    rf"(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING})",
+    re.IGNORECASE,
+)
+# A plain statement that the agent is an AI. It excuses a denial of something
+# near it ("You're not talking to a robot voice menu, I'm an AI assistant"),
+# never a positive human claim.
+_AI_SELF_ID = re.compile(r"\b(?:i'?m|i\s+am)\s+an?\s+(?:ai|artificial|virtual)\b", re.IGNORECASE)
+AI_IDENTITY_LINE = "I'm an AI assistant."
+
+
+def _ai_identity_line(session: Any) -> str:
+    try:
+        company = " ".join(str(getattr(getattr(session, "agent_config", None),
+                                       "company_name", "") or "").split())
+    except Exception:
+        company = ""
+    return f"I'm an AI assistant for {company}." if company else AI_IDENTITY_LINE
+
+
+def _claims_human(sentence: str) -> bool:
+    text = sentence.replace("’", "'").replace("‘", "'")
+    if _HUMAN_CLAIM.search(text):
+        return True
+    return bool(_AI_DENIAL.search(text)) and not _AI_SELF_ID.search(text)
+
+
 UNBACKED_ACTION_LINE = "I'm not able to do that from this call."
 UNRESOLVED_ACTION_LINE = "I couldn't confirm the outcome of that request."
 RELATIONSHIP_ACK_LINE = "Thanks for clarifying."
@@ -302,6 +366,10 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
         sentence = _SECTION_ID.sub("", sentence).strip()
         if not any(c.isalnum() for c in sentence):
             return ""
+    # First, whatever else the sentence says: a claim to be human is the most
+    # consequential thing the agent can say, and replaces the whole sentence.
+    if _claims_human(sentence):
+        return _ai_identity_line(session)
     action_line = _action_claim_line(session, sentence)
     if action_line is not None:
         return action_line
