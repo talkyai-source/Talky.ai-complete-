@@ -60,15 +60,16 @@ class ProjectionConnection:
         self.bypass = False
         self.sql.executescript("""
             CREATE TABLE calls (id TEXT PRIMARY KEY, tenant_id TEXT, campaign_id TEXT,
-                                created_at TEXT, status TEXT, direction TEXT, phone_number TEXT);
+                                created_at TEXT, status TEXT, direction TEXT, phone_number TEXT, lead_id TEXT);
             CREATE TABLE campaigns (id TEXT PRIMARY KEY, tenant_id TEXT, name TEXT);
+            CREATE TABLE leads (id TEXT PRIMARY KEY, tenant_id TEXT, best_time_to_call TEXT);
             CREATE TABLE transcripts (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT,
                                       full_text TEXT, created_at TEXT);
             CREATE TABLE recordings_s3 (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT,
                                        status TEXT, created_at TEXT);
             CREATE TABLE call_feedback (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT);
         """)
-        self.sql.execute("INSERT INTO calls VALUES (?, ?, ?, ?, ?, ?, ?)", (
+        self.sql.execute("INSERT INTO calls (id, tenant_id, campaign_id, created_at, status, direction, phone_number) VALUES (?, ?, ?, ?, ?, ?, ?)", (
             CALL, OWNER, CAMPAIGN, "2026-11-06T00:00:00+00:00", "completed", "outbound", "+14155550123",
         ))
 
