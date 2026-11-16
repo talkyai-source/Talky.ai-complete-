@@ -32,6 +32,7 @@ from email.mime.text import MIMEText
 from email.utils import formataddr
 
 from app.core.config import get_settings
+from app.infrastructure.metrics import email_delivery
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ class EmailService:
         """
         if not self.sender_email or not self.sender_password:
             logger.error("Email service not configured with credentials")
+            await email_delivery.record_email_outcome("failed", "unconfigured")
             return False
 
         try:
@@ -162,12 +164,14 @@ class EmailService:
                     await smtp.send_message(msg)
 
             logger.info("Account email accepted by SMTP")
+            await email_delivery.record_email_outcome("ok")
             return True
 
         except Exception as exc:
             logger.error(
                 "Account email outcome unconfirmed error_type=%s", type(exc).__name__,
             )
+            await email_delivery.record_send_failure(exc)
             return False
 
     async def send_verification_email(
