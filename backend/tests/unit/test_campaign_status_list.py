@@ -30,7 +30,8 @@ def test_every_status_has_a_documented_writer_or_says_it_has_none():
     assert set(CAMPAIGN_STATUS_WRITERS) == {status.value for status in CampaignStatus}
     assert all(CAMPAIGN_STATUS_WRITERS[status].strip() for status in CAMPAIGN_STATUS_WRITERS)
     assert "Stop" in CAMPAIGN_STATUS_WRITERS["stopped"]
-    assert "no writer" in CAMPAIGN_STATUS_WRITERS["completed"]
+    assert "settlement" in CAMPAIGN_STATUS_WRITERS["completed"]
+    assert "Start" in CAMPAIGN_STATUS_WRITERS["completed"]
 
 
 def test_display_phases_are_not_statuses():
