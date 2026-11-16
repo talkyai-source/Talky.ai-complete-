@@ -66,6 +66,20 @@ FAILED_OUTCOMES = frozenset({
 # The subset of answered calls that met the campaign's objective.
 GOAL_OUTCOMES = frozenset({_GOAL_ACHIEVED})
 
+def classify_outcome(outcome) -> str:
+    """'answered', 'failed' or 'other'. Exactly one, so the three always sum to the total.
+
+    'other' is every call in neither set: no outcome yet (queued, ringing, in
+    progress) and any value the dialer writes that is not listed above.
+    """
+    o = (outcome or "").lower()
+    if o in ANSWERED_OUTCOMES:
+        return "answered"
+    if o in FAILED_OUTCOMES:
+        return "failed"
+    return "other"
+
+
 # Postgres array literals for `outcome = ANY($n::text[])` predicates.
 ANSWERED_OUTCOME_LIST = sorted(ANSWERED_OUTCOMES)
 FAILED_OUTCOME_LIST = sorted(FAILED_OUTCOMES)
