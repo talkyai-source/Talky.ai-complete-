@@ -103,6 +103,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "This contact can't be dialed right now: it may have been deleted, opted out, or have no valid phone number. Fix the contact or remove it from the campaign.",
         "warning", "campaign",
     )),
+    ("contact_permission_missing", IssueAdvice(
+        "Permission to call not confirmed",
+        "Open the contact list and confirm you have permission to call these contacts, then start the campaign again.",
+        "warning", "contact",
+    )),
     # Phone line / route refusals (trunk_resolver + outbound readiness).
     ("tenant_pbx_required", IssueAdvice(
         "Phone line not ready",
@@ -304,6 +309,16 @@ _RULES: list[tuple[str, IssueAdvice]] = [
     ("tenant_gap", IssueAdvice(
         "Pacing across campaigns",
         "Another campaign of this account just placed a call; campaigns take turns so only one call originates at a time — no action needed.",
+        "info", "pacing",
+    )),
+    ("platform_gap", IssueAdvice(
+        "Spacing out call starts",
+        "Calls start a few seconds apart so they do not all begin at once. This number dials automatically when its turn comes — no action needed.",
+        "info", "pacing",
+    )),
+    ("platform_at_capacity", IssueAdvice(
+        "All lines are busy",
+        "Every call line is in use right now. This number dials automatically when a line frees up — no action needed.",
         "info", "pacing",
     )),
     ("destination_busy", IssueAdvice(

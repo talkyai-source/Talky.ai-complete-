@@ -17,6 +17,7 @@ import { leadDetailsApi } from "@/lib/lead-details-api";
 import { CONTACT_UPLOAD_COLUMNS } from "@/lib/contact-upload-csv";
 import { INVALID_PHONE_ERROR, PHONE_HELP_TEXT, SELECT_COUNTRY_ERROR } from "@/lib/phone-number";
 import { BAD_NUMBER, UK_E164, UK_NATIONAL, chooseUnitedKingdom, csvFile } from "@/test-utils/phone-fixtures";
+import { EXPECTED_PERMISSION, fillContactPermission } from "@/test-utils/contact-permission";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -89,6 +90,7 @@ test("EP1 upload card: UK selected sends 07400 123456 as +447400123456, 12345 is
     assert.equal(within(ukRow).getAllByRole("cell")[5].textContent, UK_E164, "Saves as column shows the E.164");
     assert.equal(within(badRow).getAllByRole("cell")[5].textContent, INVALID_PHONE_ERROR, "Saves as column shows the row's error");
 
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     const lines = sent[0].split("\n");
@@ -112,6 +114,7 @@ test("EP1 result card maps the backend's clean-file row numbers back to the orig
     await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-import-country");
     await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contact$/ })), { timeout: SLOW });
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     const results = await screen.findByTestId("contacts-import-results", undefined, { timeout: SLOW });
     const rows = within(results).getAllByTestId("contacts-import-error-row").map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
@@ -141,6 +144,7 @@ test("EP2 mapper Import button sends the file through the SAME upload path and C
     await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-import-country");
     await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contact$/ })), { timeout: SLOW });
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
 
@@ -152,6 +156,7 @@ test("EP2 mapper Import button sends the file through the SAME upload path and C
     fireEvent.change(mapperInput, { target: { files: [csvFile(FILE_TEXT, "mapper.csv")] } });
     const importButton = await screen.findByRole("button", { name: /Import 2 contacts/ }, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-mapper-country");
+    fillContactPermission();
     fireEvent.click(importButton);
     await waitFor(() => assert.equal(sent.length, 2), { timeout: SLOW });
     assert.equal(sent[1], sent[0], "EP2 and EP1 send byte-identical CSVs");
@@ -182,11 +187,13 @@ test("EP5 add-contact form: Saves as line, inline error blocks Save, and the E.1
     fireEvent.change(phone, { target: { value: UK_NATIONAL } });
     await waitFor(() => assert.equal(document.getElementById("contact-phone-status")?.textContent, `Saves as ${UK_E164}`), { timeout: SLOW });
     assert.equal(save.disabled, false);
+    fillContactPermission();
     fireEvent.click(save);
     await waitFor(() => assert.equal(addContact.mock.callCount(), 1), { timeout: SLOW });
-    const [campaignId, payload] = addContact.mock.calls[0].arguments as [string, { phone_number: string }];
+    const [campaignId, payload, permission] = addContact.mock.calls[0].arguments as [string, { phone_number: string }, unknown];
     assert.equal(campaignId, "camp-1");
     assert.equal(payload.phone_number, UK_E164);
+    assert.deepEqual(permission, EXPECTED_PERMISSION);
 });
 
 test("EP5 with no country selected: a national number shows the select-country error and Save stays blocked", async () => {
@@ -220,6 +227,7 @@ test("EP1: an invalid mobile_number cell is a column-named row error with the or
     const [okRow, badRow] = screen.getAllByTestId("contacts-preview-row");
     assert.equal(within(okRow).getAllByRole("cell")[5].textContent, UK_E164);
     assert.equal(within(badRow).getAllByRole("cell")[0].textContent, "3");
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     const lines = sent[0].split("\n");
@@ -251,6 +259,7 @@ test("EP5: an invalid mobile number shows its inline error, blocks Save and send
     fireEvent.change(mobile, { target: { value: "07400 123457" } });
     await waitFor(() => assert.equal(document.getElementById("contact-mobile-number-status")?.textContent, "Saves as +447400123457"), { timeout: SLOW });
     assert.equal(save.disabled, false);
+    fillContactPermission();
     fireEvent.click(save);
     await waitFor(() => assert.equal(addContact.mock.callCount(), 1), { timeout: SLOW });
     const payload = addContact.mock.calls[0].arguments[1] as { phone_number: string; mobile_number: string };
@@ -267,6 +276,7 @@ test("FX3a: one contact is singular on the upload button and in the result", asy
     await chooseUnitedKingdom("contacts-import-country");
     await waitFor(() => assert.equal(screen.queryByRole("button", { name: "Upload 1 contact" }) !== null, true), { timeout: SLOW });
     assert.equal(screen.queryByRole("button", { name: /Upload 1 contacts/ }) !== null, false);
+    fillContactPermission();
     fireEvent.click(screen.getByRole("button", { name: "Upload 1 contact" }));
     const results = await screen.findByTestId("contacts-import-results", undefined, { timeout: SLOW });
     assert.equal((results.textContent ?? "").includes("Successfully imported 1 contact"), true);

@@ -11,7 +11,9 @@ permissions:
 jobs:
   browser:
     name: Browser smoke and visual (optional)
-    runs-on: ubuntu-latest
+    # Not ubuntu-latest: it moved to 26.04 on 15 Nov 2026, where
+    # `playwright install` stops with "does not support chromium on ubuntu26.04".
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     continue-on-error: true
     defaults:

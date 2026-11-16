@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import pytz
 from datetime import timedelta
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.domain.services.contact_fields import _valid_timezone
@@ -29,6 +29,27 @@ class CampaignBriefLeadField(BaseModel):
     label: str = Field(..., min_length=1, max_length=255)
 
 
+class CampaignTransferDestinationInput(BaseModel):
+    """One named transfer destination; deeper rules live in campaign_brief."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., max_length=40)
+    number: str = Field(..., max_length=255)
+    when: Optional[str] = Field(default=None, max_length=200)
+
+
+class CampaignTransferHoursInput(BaseModel):
+    """When humans are available; validated by normalize_transfer_hours."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    timezone: str = Field(..., max_length=64)
+    days: List[str] = Field(..., max_length=7)
+    start: str = Field(..., max_length=5)
+    end: str = Field(..., max_length=5)
+
+
 class CampaignBriefInput(BaseModel):
     """Typed strategy persisted inside ``campaigns.script_config`` JSONB."""
 
@@ -39,6 +60,12 @@ class CampaignBriefInput(BaseModel):
     decision_maker_role: Optional[str] = Field(default=None, max_length=160)
     approved_next_actions: List[CampaignNextAction] = Field(default_factory=list, max_length=5)
     transfer_destination: Optional[str] = Field(default=None, max_length=255)
+    transfer_destinations: Optional[List[CampaignTransferDestinationInput]] = Field(
+        default=None, max_length=5
+    )
+    transfer_hours: Optional[CampaignTransferHoursInput] = None
+    transfer_ring_seconds: Optional[int] = Field(default=None, strict=True)
+    transfer_if_no_answer: Optional[str] = None
     email_action: Optional[VoiceEmailAction] = None
     form_action: Optional[VoiceFormAction] = None
     required_lead_fields: List[CampaignBriefLeadField] = Field(default_factory=list, max_length=20)
@@ -68,6 +95,36 @@ class CampaignBriefInput(BaseModel):
     def _transfer_is_complete(self) -> "CampaignBriefInput":
         transfer_approved = "transfer" in self.approved_next_actions
         has_destination = bool((self.transfer_destination or "").strip())
+        if self.transfer_destinations:
+            # Same rules as the domain normaliser, so save and persist agree.
+            from app.domain.services.campaign_brief import normalize_transfer_destinations
+
+            listed = normalize_transfer_destinations(
+                [item.model_dump() for item in self.transfer_destinations]
+            )
+            legacy = (self.transfer_destination or "").strip()
+            if legacy and legacy not in {entry["number"] for entry in listed}:
+                raise ValueError(
+                    "transfer_destination must be one of the transfer_destinations numbers"
+                )
+            has_destination = True
+        if self.transfer_hours is not None:
+            from app.domain.services.campaign_brief import normalize_transfer_hours
+
+            normalize_transfer_hours(self.transfer_hours.model_dump())
+            if not transfer_approved:
+                raise ValueError("transfer_hours requires transfer in approved_next_actions")
+        for field in ("transfer_ring_seconds", "transfer_if_no_answer"):
+            if getattr(self, field) is not None and not transfer_approved:
+                raise ValueError(f"{field} requires transfer in approved_next_actions")
+        if self.transfer_ring_seconds is not None:
+            from app.domain.services.campaign_brief import normalize_transfer_ring_seconds
+
+            normalize_transfer_ring_seconds(self.transfer_ring_seconds)
+        if self.transfer_if_no_answer is not None:
+            from app.domain.services.campaign_brief import normalize_transfer_if_no_answer
+
+            normalize_transfer_if_no_answer(self.transfer_if_no_answer)
         if transfer_approved and not has_destination:
             raise ValueError(
                 "transfer_destination is required when transfer is approved"
@@ -478,6 +535,9 @@ class ContactCreate(BaseModel):
     preferred_contact_method: Optional[str] = Field(None, max_length=32)
     do_not_call: bool = False
     custom_fields: Optional[dict] = Field(default_factory=dict)
+    # The customer's confirmation that they may call this contact:
+    # {basis, source, permission_date, statement_version}; validated in the route.
+    permission: Optional[Any] = None
 
     @field_validator("phone_number")
     @classmethod

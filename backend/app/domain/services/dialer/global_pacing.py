@@ -16,6 +16,11 @@ top; this gate only staggers campaigns against each other.
 
 ``DIALER_TENANT_MIN_GAP_S`` (default 90) — 0 disables the gate entirely.
 Fail-open: Redis trouble never blocks a call.
+
+The voice process is shared by ALL tenants, so the tenant gap alone still lets
+three tenants start three calls in the same second. A PLATFORM-wide slot
+(``DIALER_PLATFORM_MIN_GAP_S``, default 10, 0 = off) spaces any two
+originations across every tenant, using the same atomic claim.
 """
 from __future__ import annotations
 
@@ -73,3 +78,43 @@ async def release_tenant_dial_slot(redis, tenant_id: str) -> None:
         await redis.delete(_slot_key(str(tenant_id)))
     except Exception as exc:  # noqa: BLE001
         logger.debug("tenant_gap: release failed tenant=%s err=%s", tenant_id, exc)
+
+
+def platform_min_gap_s() -> int:
+    """Minimum seconds between ANY two originations on the platform (0 = off)."""
+    try:
+        return max(0, int(os.getenv("DIALER_PLATFORM_MIN_GAP_S", "10")))
+    except (TypeError, ValueError):
+        return 10
+
+
+_PLATFORM_SLOT_KEY = "dialer:last_dial:platform"
+
+
+async def claim_platform_dial_slot(redis) -> int:
+    """Try to claim the platform-wide origination slot. Returns 0 when claimed,
+    or the seconds to wait (remaining TTL + 1s cushion). Atomic ``SET NX EX``;
+    fail-open on any Redis problem."""
+    gap = platform_min_gap_s()
+    if gap <= 0 or redis is None:
+        return 0
+    try:
+        claimed = await redis.set(_PLATFORM_SLOT_KEY, "1", ex=gap, nx=True)
+        if claimed:
+            return 0
+        ttl = await redis.ttl(_PLATFORM_SLOT_KEY)
+        wait = (ttl if ttl and ttl > 0 else gap) + 1
+        return int(wait)
+    except Exception as exc:  # noqa: BLE001 — fail-open by design
+        logger.debug("platform_gap: claim failed err=%s", exc)
+        return 0
+
+
+async def release_platform_dial_slot(redis) -> None:
+    """Give the platform slot back when the origination did NOT happen."""
+    if redis is None:
+        return
+    try:
+        await redis.delete(_PLATFORM_SLOT_KEY)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("platform_gap: release failed err=%s", exc)

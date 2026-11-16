@@ -321,9 +321,14 @@ async def _apply_invoice(conn, billing, event_type, data, *, source_reference=No
     if not financially_relevant:
         return result
     if paid:
+        # The first admin's failed-payment key is exactly $1; every other
+        # admin's is $1 + ':' + user id. Appending ':' to both sides matches
+        # those and nothing else (not another invoice whose id merely starts
+        # the same way), as one plain predicate beside the tenant filter.
         await conn.execute(
             """UPDATE billing_webhook_notifications SET status='superseded',updated_at=NOW()
-               WHERE delivery_key=$1 AND tenant_id=$2::uuid
+               WHERE tenant_id=$2::uuid
+                 AND starts_with(delivery_key || ':', $1::text || ':')
                  AND status IN ('pending','failed_before_send','recipient_missing')""",
             f"invoice:{identity}:payment_failed", tenant_id,
         )
@@ -333,29 +338,33 @@ async def _apply_invoice(conn, billing, event_type, data, *, source_reference=No
     else:
         kind = None
     if kind:
-        # Retain the existing owner-only recipient policy. CP06 owns any wider
-        # billing-contact policy; no guessed admin/global recipient is
-        # introduced here. The owner's canonical role is tenant_admin
-        # (rbac.ROLE_ALIASES) and user_profiles.role admits only canonical
-        # names, so 'owner' matched nobody and no payment email was ever
-        # addressed (QA F3-09).
-        recipients = await conn.fetch(
-            """SELECT email FROM user_profiles
+        # Every active tenant admin (canonical owner role, rbac.ROLE_ALIASES)
+        # is addressed, oldest account first, at most 5 (QA F3-09; readiness
+        # plan: payment emails reach the tenant admin).
+        admins = await conn.fetch(
+            """SELECT id,email FROM user_profiles
                 WHERE tenant_id=$1::uuid AND role='tenant_admin' AND is_active IS NOT FALSE
-                LIMIT 2""", tenant_id,
+                ORDER BY created_at ASC NULLS LAST, id
+                LIMIT 5""", tenant_id,
         )
-        recipient = recipients[0]["email"] if len(recipients) == 1 else None
+        recipients = [(None, admin["email"]) for admin in admins[:1]]
+        recipients += [(str(admin["id"]), admin["email"]) for admin in admins[1:]]
+        if not recipients:
+            recipients = [(None, None)]
         suffix = "paid" if paid else "payment_failed"
         subject = "Payment Received" if paid else "Payment Failed"
         body = ("Your invoice payment has been received. You can review the invoice in Billing."
                 if paid else "An invoice payment could not be completed. Please review your payment details in Billing.")
-        result["notifications"] = [{"delivery_key": f"invoice:{identity}:{suffix}", "kind": kind,
-                                    "tenant_id": tenant_id, "recipient": recipient,
+        # A legacy invoice projection proves money state, never that its email
+        # was unsent.
+        prior_unknown = bool(prior_invoice and not prior_invoice["notification_history_known"]
+                             and prior_invoice["status"] == invoice["status"])
+        base_key = f"invoice:{identity}:{suffix}"
+        result["notifications"] = [{"delivery_key": base_key if user_id is None else f"{base_key}:{user_id}",
+                                    "kind": kind, "tenant_id": tenant_id, "recipient": email,
                                     "subject": subject, "body": body,
-                                    # A legacy invoice projection proves money
-                                    # state, never that its email was unsent.
-                                    "prior_delivery_unknown": bool(prior_invoice and not prior_invoice["notification_history_known"]
-                                                                   and prior_invoice["status"] == invoice["status"])}]
+                                    "prior_delivery_unknown": prior_unknown}
+                                   for user_id, email in recipients]
     return result
 
 

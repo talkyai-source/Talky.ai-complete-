@@ -607,8 +607,11 @@ async def test_get_knowledge_tree_campaign_not_found(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_add_preview_no_write():
+async def test_manage_lead_add_preview_no_write(monkeypatch):
     """action=add, confirm=False → preview, no insert."""
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = FakeDbClient()
     # campaign ownership
     db.configure_response("campaigns", "select", data=[{"id": "c1"}])
@@ -633,8 +636,11 @@ async def test_manage_lead_add_preview_no_write():
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_add_confirm_inserts():
+async def test_manage_lead_add_confirm_inserts(monkeypatch):
     """action=add, confirm=True → inserts lead."""
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = FakeDbClient()
     db.configure_response("campaigns", "select", data=[{"id": "c1"}])
     db.configure_response(
@@ -661,7 +667,10 @@ async def test_manage_lead_add_confirm_inserts():
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_add_missing_phone():
+async def test_manage_lead_add_missing_phone(monkeypatch):
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = FakeDbClient()
     db.configure_response("campaigns", "select", data=[{"id": "c1"}])
 
@@ -703,7 +712,10 @@ async def test_manage_lead_refuses_inbound_before_preview_or_apply(confirm):
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_add_uses_canonical_phone_normalizer():
+async def test_manage_lead_add_uses_canonical_phone_normalizer(monkeypatch):
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = FakeDbClient()
     db.configure_response(
         "campaigns", "select",
@@ -724,7 +736,10 @@ async def test_manage_lead_add_uses_canonical_phone_normalizer():
 
 
 @pytest.mark.asyncio
-async def test_manage_lead_rechecks_direction_when_add_proposal_is_applied():
+async def test_manage_lead_rechecks_direction_when_add_proposal_is_applied(monkeypatch):
+    # These tests cover how an add works; the permission requirement is tested
+    # in test_contact_permission_on_import.py.
+    monkeypatch.setenv("CONTACT_PERMISSION_REQUIRED", "off")
     db = FakeDbClient()
     db.configure_response(
         "campaigns", "select",

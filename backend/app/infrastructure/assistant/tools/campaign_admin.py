@@ -589,6 +589,15 @@ async def manage_lead(
 
         # ---- ADD -------------------------------------------------------------
         if action == "add":
+            # The assistant cannot confirm on a person's behalf that they have
+            # permission to call these contacts, so it adds nothing while the
+            # requirement is on.
+            from app.domain.services.contact_permission import contact_permission_required
+            if contact_permission_required():
+                return {
+                    "error": "Add contacts on the Contacts page, where you confirm "
+                             "you have permission to call them."
+                }
             if not phone_number or not phone_number.strip():
                 return {"error": "phone_number is required for action='add'"}
             try:

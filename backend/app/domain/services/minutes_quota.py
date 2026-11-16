@@ -150,16 +150,47 @@ async def allowance_minutes(conn: Any, tenant_id: str, row: Any) -> int | None:
     return base
 
 
-async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
-    # An absent/default tenant allocation cannot prove an unlimited product.
-    # The existing bound plan must explicitly carry the zero-minute sentinel.
-    row = await conn.fetchrow(
+async def outbound_remaining_seconds(conn: Any, tenant_id: str) -> int | None:
+    """Seconds the tenant may still talk this allowance month; None = unlimited.
+
+    Same allowance and usage as inbound admission (``tenant_inbound_allowance``)
+    but read-only and without the tenant row lock, so the live-call watchdog can
+    poll it. A LIVE outbound call is not in the usage total (its
+    ``duration_seconds`` is NULL until teardown); the caller subtracts what live
+    calls have already used. Raises ``MeteringUnavailable`` /
+    database errors when the balance cannot be established.
+    """
+    from app.domain.services.telephony.inbound_transfer import fetch_tenant_accounted_usage_seconds
+
+    row = await _allowance_row(conn, tenant_id)
+    allocated = await allowance_minutes(conn, tenant_id, row)
+    if allocated is None:
+        return None
+    accounted = await fetch_tenant_accounted_usage_seconds(
+        conn, tenant_id=tenant_id, window_start=row["window_start"]
+    )
+    return max(0, allocated * 60 - accounted)
+
+
+async def _allowance_row(conn: Any, tenant_id: str) -> Any:
+    """The tenant's ``ALLOWANCE_ROW_COLUMNS`` row, held to the caller's tenant.
+
+    One statement for every reader in this module (the minutes status and the
+    live-call balance), so they cannot drift apart.
+    """
+    return await conn.fetchrow(
         f"""SELECT {ALLOWANCE_ROW_COLUMNS}
              FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
             WHERE t.id=$1
               AND (COALESCE(NULLIF(current_setting('app.bypass_rls',true),'')::boolean,false)
                    OR t.id=NULLIF(current_setting('app.current_tenant_id',true),'')::uuid)""", tenant_id
     )
+
+
+async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
+    # An absent/default tenant allocation cannot prove an unlimited product.
+    # The existing bound plan must explicitly carry the zero-minute sentinel.
+    row = await _allowance_row(conn, tenant_id)
     try:
         allocated = await allowance_minutes(conn, tenant_id, row)
     except MeteringUnavailable as exc:

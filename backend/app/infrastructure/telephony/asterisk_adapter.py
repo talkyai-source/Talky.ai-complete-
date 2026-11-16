@@ -66,6 +66,31 @@ _RESUME_WINDOW_S = 0.75
 
 logger = logging.getLogger(__name__)
 
+_OUTBOUND_TRANSFER_E164 = re.compile(r"\+[1-9][0-9]{6,14}")
+_OUTBOUND_TRANSFER_TRUNK = re.compile(r"[A-Za-z0-9._-]{1,80}")
+
+
+def _clamped_ring_seconds(value: Any) -> Optional[float]:
+    """A campaign's ring time, held to 5-120 s; None (use the process-wide
+    value) when it is missing or not a number. Never raises: this runs before
+    any PBX side effect, where an exception would lose the result shape."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(max(5, min(120, int(value))))
+    except (TypeError, ValueError):
+        return None
+
+
+def _outbound_supervised_transfer_enabled() -> bool:
+    """Read at call time; OFF unless the env var is an explicit truthy value."""
+    return os.getenv("OUTBOUND_SUPERVISED_TRANSFER_ENABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
 
 def _masked_number(value: Any) -> str:
     """Return a correlation-safe ANI/DID representation for logs."""
@@ -204,6 +229,12 @@ class _AsteriskTransferLeg:
     metrics_started_at: float = 0.0
     metrics_attempt_recorded: bool = False
     metrics_terminal_recorded: bool = False
+    # Outbound supervised legs have no database child row: the three inbound
+    # persistence callbacks (answered / identity rebind / cleanup-confirmed)
+    # are skipped for ``durable=False`` legs.
+    durable: bool = True
+    # Per-leg ring timeout; None keeps the process-wide value (inbound).
+    ring_timeout_s: Optional[float] = None
 
 
 # Q.850 cause code → a snake-case string the outcome resolver recognises
@@ -710,6 +741,15 @@ class AsteriskAdapter(CallControlAdapter):
     @property
     def connected(self) -> bool:
         return self._connected_flag
+
+    @property
+    def outbound_pstn_transfer_available(self) -> bool:
+        """Whether an outbound call can be handed to a phone number with answer proof.
+
+        While the switch is off the policy layer neither offers nor runs such a
+        transfer: the only other route is a redirect nobody can confirm.
+        """
+        return _outbound_supervised_transfer_enabled()
 
     def get_transfer_metrics(self) -> Dict[str, Any]:
         """Expose Asterisk transfer state through the generic dashboard API.
@@ -2158,7 +2198,9 @@ class AsteriskAdapter(CallControlAdapter):
                         self._record_transfer_cleanup("target", "error")
                         raise
                     if cleanup_confirmed:
-                        callback = self._on_transfer_cleanup_confirmed
+                        callback = (
+                            self._on_transfer_cleanup_confirmed if leg.durable else None
+                        )
                         if callback is not None:
                             try:
                                 result = callback(
@@ -2351,12 +2393,13 @@ class AsteriskAdapter(CallControlAdapter):
             # process crash after set_result() can leave the child as
             # ``initiated`` and restart settlement would release a genuinely
             # billable answered leg as zero seconds.
-            answer_callback = self._on_transfer_answered_persist
-            if answer_callback is None:
-                raise RuntimeError("transfer_answer_persistence_unavailable")
-            answer_result = answer_callback(leg.parent_id, leg.target_id)
-            if asyncio.iscoroutine(answer_result):
-                await answer_result
+            if leg.durable:
+                answer_callback = self._on_transfer_answered_persist
+                if answer_callback is None:
+                    raise RuntimeError("transfer_answer_persistence_unavailable")
+                answer_result = answer_callback(leg.parent_id, leg.target_id)
+                if asyncio.iscoroutine(answer_result):
+                    await answer_result
 
             logger.info(
                 "AsteriskAdapter: supervised transfer connected parent=%s target=%s",
@@ -6060,6 +6103,24 @@ class AsteriskAdapter(CallControlAdapter):
         """Delete (hang up) a channel via ARI, preserving legacy fail-soft API."""
         await self.hangup_confirmed(call_id)
 
+    @staticmethod
+    def _log_outbound_transfer_end(
+        leg: _AsteriskTransferLeg,
+        result: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Info line when an outbound (non-durable) supervised transfer ends."""
+        if not leg.durable:
+            logger.info(
+                "AsteriskAdapter: outbound supervised transfer end parent=%s "
+                "target=%s dest=%s outcome=%s error=%s",
+                leg.parent_id[:12],
+                leg.target_id[:12],
+                _masked_number(leg.destination),
+                result.get("status"),
+                result.get("error") or "-",
+            )
+        return result
+
     async def transfer(
         self,
         call_id: str,
@@ -6067,6 +6128,9 @@ class AsteriskAdapter(CallControlAdapter):
         mode: str = "blind",
         *,
         provider_leg_id: Optional[str] = None,
+        trunk_endpoint: Optional[str] = None,
+        ring_seconds: Optional[int] = None,
+        caller_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Run a supervised blind transfer in the parent's mixing bridge.
 
@@ -6081,11 +6145,53 @@ class AsteriskAdapter(CallControlAdapter):
         direction = str((parent or {}).get("direction") or "outbound").lower()
         is_inbound = direction == "inbound" or call_id in self._inbound_admissions
 
+        # Outbound PSTN transfers use the supervised path only behind the
+        # OUTBOUND_SUPERVISED_TRANSFER_ENABLED switch; every other outbound
+        # case keeps the redirect below unchanged.
+        outbound_supervised = False
+        outbound_caller_id = ""
+        if (
+            not is_inbound
+            and _outbound_supervised_transfer_enabled()
+            and _OUTBOUND_TRANSFER_E164.fullmatch(str(destination or ""))
+        ):
+            trunk_endpoint = str(trunk_endpoint or "").strip()
+            if not trunk_endpoint:
+                return {
+                    "status": "failed",
+                    "call_id": call_id,
+                    "destination": destination,
+                    "mode": mode,
+                    "error": "outbound_trunk_unavailable",
+                }
+            if mode == "blind":
+                if not _OUTBOUND_TRANSFER_TRUNK.fullmatch(trunk_endpoint):
+                    return {
+                        "status": "failed",
+                        "call_id": call_id,
+                        "destination": destination,
+                        "mode": mode,
+                        "error": "invalid_trunk_endpoint",
+                    }
+                outbound_caller_id = str(caller_id or "").strip()
+                if outbound_caller_id and not _OUTBOUND_TRANSFER_E164.fullmatch(
+                    outbound_caller_id
+                ):
+                    return {
+                        "status": "failed",
+                        "call_id": call_id,
+                        "destination": destination,
+                        "mode": mode,
+                        "error": "invalid_caller_id",
+                    }
+                outbound_supervised = True
+                provider_leg_id = f"talky-xfer-{uuid.uuid4().hex[:20]}"
+
         # Preserve the pre-existing outbound contract byte-for-byte. Existing
         # callers use internal extensions and all three public mode labels;
         # applying the new inbound PSTN linked-leg machinery here would be an
         # unrelated production regression.
-        if not is_inbound:
+        if not is_inbound and not outbound_supervised:
             try:
                 await self._ari(
                     "POST",
@@ -6194,6 +6300,8 @@ class AsteriskAdapter(CallControlAdapter):
                     "mode": mode,
                     "error": "inbound_trunk_unavailable",
                 }
+        elif outbound_supervised:
+            pass  # trunk_endpoint was validated above
         else:  # Defensive: is_inbound above should make this unreachable.
             return {
                 "status": "failed",
@@ -6229,7 +6337,25 @@ class AsteriskAdapter(CallControlAdapter):
             future=loop.create_future(),
             persisted_target_id=target_id,
             requested_target_id=target_id,
+            durable=not outbound_supervised,
+            ring_timeout_s=(
+                _clamped_ring_seconds(ring_seconds) if outbound_supervised else None
+            ),
         )
+        ring_timeout_s = (
+            leg.ring_timeout_s
+            if leg.ring_timeout_s is not None
+            else self._transfer_answer_timeout_s
+        )
+        if not leg.durable:
+            logger.info(
+                "AsteriskAdapter: outbound supervised transfer start parent=%s "
+                "target=%s dest=%s ring_s=%d",
+                call_id[:12],
+                target_id[:12],
+                _masked_number(destination),
+                int(ring_timeout_s),
+            )
         provider_side_effect_started = False
         try:
             async with self._transfer_setup_lock:
@@ -6250,17 +6376,20 @@ class AsteriskAdapter(CallControlAdapter):
                 # must retain the proof-aware target cleanup path. Rejections
                 # above are purely local and have no PBX leg to clean.
                 provider_side_effect_started = True
+                create_params = {
+                    "endpoint": leg.endpoint,
+                    "app": self._app_name,
+                    "appArgs": f"transfer_target,{call_id}",
+                    "channelId": target_id,
+                    "originator": call_id,
+                    "formats": "ulaw",
+                }
+                if outbound_caller_id:
+                    create_params["callerId"] = outbound_caller_id
                 created = await self._ari(
                     "POST",
                     "/channels/create",
-                    params={
-                        "endpoint": leg.endpoint,
-                        "app": self._app_name,
-                        "appArgs": f"transfer_target,{call_id}",
-                        "channelId": target_id,
-                        "originator": call_id,
-                        "formats": "ulaw",
-                    },
+                    params=create_params,
                     ok=(200, 201),
                 )
                 actual_target_id = str((created or {}).get("id") or target_id)
@@ -6281,7 +6410,11 @@ class AsteriskAdapter(CallControlAdapter):
                     self._transfers_by_target.pop(planned_target_id, None)
                     leg.target_id = actual_target_id
                     self._transfers_by_target[actual_target_id] = leg
-                    identity_callback = self._on_transfer_provider_identity_persist
+                    # A non-durable leg has no DB row to rebind: any mismatch
+                    # fails (the actual channel stays owned for cleanup).
+                    identity_callback = (
+                        self._on_transfer_provider_identity_persist if leg.durable else None
+                    )
                     if identity_callback is None:
                         raise RuntimeError("transfer_provider_leg_id_mismatch")
                     admission = self._inbound_admissions.get(call_id) or {}
@@ -6327,7 +6460,7 @@ class AsteriskAdapter(CallControlAdapter):
                 await self._ari(
                     "POST",
                     f"/channels/{leg.target_id}/dial",
-                    params={"timeout": int(self._transfer_answer_timeout_s)},
+                    params={"timeout": int(ring_timeout_s)},
                     ok=(200, 204),
                 )
             logger.info(
@@ -6337,18 +6470,24 @@ class AsteriskAdapter(CallControlAdapter):
                 trunk_endpoint,
             )
             try:
-                return await asyncio.wait_for(
-                    asyncio.shield(leg.future),
-                    timeout=self._transfer_answer_timeout_s + 2.0,
+                return self._log_outbound_transfer_end(
+                    leg,
+                    await asyncio.wait_for(
+                        asyncio.shield(leg.future),
+                        timeout=ring_timeout_s + 2.0,
+                    ),
                 )
             except asyncio.TimeoutError:
                 self._resolve_transfer_failure(leg, "no_answer")
                 try:
-                    return dict(
-                        await asyncio.wait_for(
-                            asyncio.shield(leg.future),
-                            timeout=self._hangup_confirm_timeout_s + 0.25,
-                        )
+                    return self._log_outbound_transfer_end(
+                        leg,
+                        dict(
+                            await asyncio.wait_for(
+                                asyncio.shield(leg.future),
+                                timeout=self._hangup_confirm_timeout_s + 0.25,
+                            )
+                        ),
                     )
                 except asyncio.TimeoutError:
                     pending_result = {
@@ -6361,7 +6500,7 @@ class AsteriskAdapter(CallControlAdapter):
                         "error": "target_termination_unconfirmed",
                     }
                     pending_result.update(self._transfer_provider_identity_payload(leg))
-                    return pending_result
+                    return self._log_outbound_transfer_end(leg, pending_result)
         except asyncio.CancelledError:
             self._resolve_transfer_failure(leg, "transfer_cancelled")
             raise
@@ -6381,16 +6520,19 @@ class AsteriskAdapter(CallControlAdapter):
                     "provider_leg_id_in_use",
                 }:
                     error = "provider_error"
-                return {
-                    "status": "failed",
-                    "call_id": call_id,
-                    "target_call_id": leg.persisted_target_id or leg.target_id,
-                    "provider_leg_id": leg.persisted_target_id or leg.target_id,
-                    "destination": destination,
-                    "mode": mode,
-                    "error": error,
-                    "message": str(exc),
-                }
+                return self._log_outbound_transfer_end(
+                    leg,
+                    {
+                        "status": "failed",
+                        "call_id": call_id,
+                        "target_call_id": leg.persisted_target_id or leg.target_id,
+                        "provider_leg_id": leg.persisted_target_id or leg.target_id,
+                        "destination": destination,
+                        "mode": mode,
+                        "error": error,
+                        "message": str(exc),
+                    },
+                )
             error_text = str(exc).strip()
             if error_text == "transfer_provider_leg_id_mismatch":
                 public_error = "provider_leg_id_mismatch"
@@ -6406,11 +6548,14 @@ class AsteriskAdapter(CallControlAdapter):
                 detail=error_text,
             )
             try:
-                return dict(
-                    await asyncio.wait_for(
-                        asyncio.shield(leg.future),
-                        timeout=self._hangup_confirm_timeout_s + 0.25,
-                    )
+                return self._log_outbound_transfer_end(
+                    leg,
+                    dict(
+                        await asyncio.wait_for(
+                            asyncio.shield(leg.future),
+                            timeout=self._hangup_confirm_timeout_s + 0.25,
+                        )
+                    ),
                 )
             except asyncio.TimeoutError:
                 pending_result = {
@@ -6423,4 +6568,4 @@ class AsteriskAdapter(CallControlAdapter):
                     "error": "target_termination_unconfirmed",
                 }
                 pending_result.update(self._transfer_provider_identity_payload(leg))
-                return pending_result
+                return self._log_outbound_transfer_end(leg, pending_result)

@@ -3,7 +3,7 @@ caller-facing message — so the dashboard can show WHY a call failed without
 leaking raw logs or stack traces.
 
 Returns (category, human_message). category is one of:
-    tts | llm | stt | telephony | prewarm | other
+    tts | llm | stt | telephony | prewarm | capacity | other
 """
 from __future__ import annotations
 
@@ -15,6 +15,13 @@ def humanize_failure(reason: Optional[str]) -> Tuple[str, str]:
     low = raw.lower()
     if not raw:
         return "prewarm", "The voice pipeline could not start."
+
+    # --- A full provider limit is capacity, not a provider fault ---
+    if "concurrency guard exhausted" in low or "provider_at_capacity" in low:
+        return "capacity", (
+            "All lines for this voice provider are in use. "
+            "The call starts when one is free."
+        )
 
     # --- Text-to-speech ---
     if "quota_exceeded" in low or "credits remaining" in low or "out of credits" in low:

@@ -1,4 +1,5 @@
 import * as Sentry from "@sentry/nextjs";
+import { SENTRY_SCRUB_OPTIONS } from "./lib/sentry-scrub";
 import { appEnvironment, commitSha, sentryEnabled, sentryProfilesSampleRate, sentryTracesSampleRate } from "./lib/env";
 
 const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
@@ -12,6 +13,7 @@ if (enabled && dsn) {
         release: commitSha(),
         tracesSampleRate: sentryTracesSampleRate(),
         profilesSampleRate: sentryProfilesSampleRate(),
+        ...SENTRY_SCRUB_OPTIONS,
     });
 }
 

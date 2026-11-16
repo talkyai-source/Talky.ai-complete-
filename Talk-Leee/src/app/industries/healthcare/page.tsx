@@ -233,7 +233,7 @@ export default function HealthcareIndustryPage() {
     {
       question: "Does it integrate with my existing EHR or scheduling system?",
       answer:
-        "Appointments booked over the phone are added to Google Calendar or Outlook Calendar. A direct connection to EHR systems is not available in this release.",
+        "Appointments booked over the phone are added to Google Calendar. A direct connection to EHR systems is not available in this release.",
     },
     {
       question: "Will it work alongside my current staff?",

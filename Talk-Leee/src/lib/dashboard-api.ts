@@ -3,6 +3,7 @@ import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import type { CampaignBrief } from "@/lib/campaign-brief";
+import type { ContactListPermission, ContactPermission } from "@/lib/contact-permission";
 
 // Dashboard Types
 export interface DashboardSummary {
@@ -117,6 +118,41 @@ export interface CampaignCallingSchedule {
     time_window_end?: string | null;     // "HH:MM"
     allowed_days?: number[] | null;      // 0=Mon … 6=Sun
     ignore_schedule?: boolean;
+}
+
+/** Where one enforced schedule field comes from (GET /campaigns/{id}). */
+export type CampaignScheduleSource = "campaign" | "account" | "platform_default";
+
+/**
+ * The schedule the dialer enforces for one campaign, as GET /campaigns/{id}
+ * sends it (backend describe_schedule). Null when the server's side read failed.
+ */
+export interface CampaignEffectiveSchedule {
+    timezone: string;
+    time_window_start: string;           // "HH:MM"
+    time_window_end: string;             // "HH:MM"
+    allowed_days: number[];              // 0=Mon … 6=Sun
+    sources?: Partial<Record<"timezone" | "time_window_start" | "time_window_end" | "allowed_days", CampaignScheduleSource>>;
+    account_rules?: Record<string, unknown>;
+    ignore_schedule_requested?: boolean;
+    ignore_schedule_allowed?: boolean;
+    /** What the dialer does: true only when "call anytime" was asked for AND is allowed. */
+    ignore_schedule?: boolean;
+    contact_timezones?: Record<string, unknown>;
+}
+
+/** What a campaign is doing now (GET /campaigns/{id} only). Null when the server's side read failed. */
+export interface CampaignProgress {
+    live_calls?: number;
+    jobs_awaiting_dispatch?: number;
+    /** "preparing" | "stopping" | "pausing", otherwise the stored status. */
+    phase?: string | null;
+}
+
+export interface CampaignDetailAnswer {
+    campaign: Campaign;
+    effective_schedule?: CampaignEffectiveSchedule | null;
+    progress?: CampaignProgress | null;
 }
 
 export interface CampaignCreate extends CampaignVoiceSettingsValue {
@@ -296,7 +332,11 @@ export interface Call {
     transfer_legs?: TransferLeg[];
 }
 
-/** Body of POST /campaigns/{id}/start. `first_speaker` is a per-start choice. */
+/**
+ * Body of POST /campaigns/{id}/start. The backend saves `first_speaker` in the
+ * campaign's calling_config; the Start dialog opens on that saved value and
+ * sends what it shows.
+ */
 export interface CampaignStartOptions {
     first_speaker: "agent" | "user";
     batch_size?: number;
@@ -431,6 +471,8 @@ export interface ContactList {
     is_active: boolean;
     contact_count: number;
     created_at: string | null;
+    /** Permission to call this list. Absent until the backend sends it: treat as unknown. */
+    permission?: ContactListPermission;
 }
 
 /** Result of POST /contact-lists/{id}/call — placing REAL outbound calls now. */
@@ -507,7 +549,7 @@ class DashboardApi {
         });
     }
 
-    async getCampaign(id: string): Promise<{ campaign: Campaign }> {
+    async getCampaign(id: string): Promise<CampaignDetailAnswer> {
         return this.client.request({
             path: `/campaigns/${id}`,
             method: "GET",
@@ -603,8 +645,8 @@ class DashboardApi {
         });
     }
 
-    // `first_speaker` has no default here: it is not saved on the campaign, so
-    // every start must carry the choice made in the shared Start dialog.
+    // `first_speaker` has no default here: every start carries the choice shown
+    // in the shared Start dialog, which opens on the campaign's saved value.
     async startCampaign(
         id: string,
         opts: CampaignStartOptions,
@@ -720,14 +762,24 @@ class DashboardApi {
         });
     }
 
+    /** Records the permission-to-call confirmation on a list that has none yet. */
+    async recordContactListPermission(listId: string, permission: ContactPermission): Promise<ContactList> {
+        return this.client.request({
+            path: `/contact-lists/${listId}/permission`,
+            method: "POST",
+            body: permission,
+        });
+    }
+
     async addContact(
         campaignId: string,
         data: ContactMutation,
+        permission: ContactPermission,
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts`,
             method: "POST",
-            body: data,
+            body: { ...data, permission },
         });
     }
 

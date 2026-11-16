@@ -788,7 +788,12 @@ async def authorize_inbound_transfer(
                 # Preserve the legacy outbound API contract exactly: internal
                 # extensions and provider-specific destinations are valid on
                 # that path and must not be subjected to inbound E.164 rules.
-                return InboundTransferAttempt(inbound=False)
+                return InboundTransferAttempt(
+                    inbound=False,
+                    call_id=str(row["id"]),
+                    tenant_id=str(row["tenant_id"]),
+                    talklee_call_id=row["talklee_call_id"],
+                )
 
             from app.domain.services.telephony.transfer_validation import (
                 validate_transfer_idempotency_key,

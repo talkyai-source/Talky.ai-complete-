@@ -31,13 +31,26 @@ export const CAMPAIGN_PREPARING_LABEL = "Preparing";
 /** Shown while a Stop request runs. Not a backend status. */
 export const CAMPAIGN_STOPPING_LABEL = "Stopping";
 
-/** The status a campaign reads as right now: an action in flight, else the backend's value. */
+/** The server phases (GET /campaigns/{id} `progress.phase`) that are not a stored status. */
+export function isCampaignTransientPhase(phase: string | null | undefined): boolean {
+    return phase === "preparing" || phase === "stopping" || phase === "pausing";
+}
+
+/**
+ * The status a campaign reads as right now: an action in flight, then the
+ * server's phase where it sent one ("preparing", "stopping"; "pausing" reads
+ * "Paused"), else the backend's stored status.
+ */
 export function campaignDisplayStatus(
     status: string | null | undefined,
     inFlight?: { starting?: boolean; stopping?: boolean },
+    phase?: string | null,
 ): string {
     if (inFlight?.stopping) return CAMPAIGN_STOPPING_LABEL;
     if (inFlight?.starting) return CAMPAIGN_PREPARING_LABEL;
+    if (phase === "preparing") return CAMPAIGN_PREPARING_LABEL;
+    if (phase === "stopping") return CAMPAIGN_STOPPING_LABEL;
+    if (phase === "pausing") return KNOWN_LABELS.paused;
     return campaignStatusLabel(status);
 }
 
