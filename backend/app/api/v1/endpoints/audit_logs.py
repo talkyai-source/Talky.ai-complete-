@@ -90,6 +90,45 @@ class AuditLogResponse(BaseModel):
     after_state: Optional[dict]
     metadata: Optional[dict]
     compliance_tags: list[str]
+    # Display name of the actor, resolved for the page (never null).
+    actor_name: Optional[str] = None
+
+
+_ACTOR_LABELS = {"system": "System", "service": "Service", "api_key": "API key"}
+
+_TENANT_NAMES_SQL = (
+    "SELECT id, name FROM user_profiles WHERE id = ANY($1::uuid[]) AND tenant_id = $2::uuid"
+)
+_PLATFORM_NAMES_SQL = "SELECT id, name FROM user_profiles WHERE id = ANY($1::uuid[])"
+
+
+async def resolve_actor_names(audit_logger, logs, tenant_id, platform_read):
+    """Display name per audit row, from ONE bounded lookup for the whole page.
+
+    A tenant reader resolves only users of its own tenant (an actor outside it
+    is labelled "Unknown user", never named); a platform reader resolves any.
+    No actor id: System / Service / API key. A user id with no profile:
+    "Deleted user" (platform) or "Unknown user" (tenant reader).
+    """
+    ids = sorted({str(l.actor_id) for l in logs if l.actor_id and l.actor_type == "user"})
+    names: dict[str, str] = {}
+    if ids:
+        async with acquire_with_tenant(
+            audit_logger.db_pool, None if platform_read else str(tenant_id)
+        ) as conn:
+            if platform_read:
+                rows = await conn.fetch(_PLATFORM_NAMES_SQL, ids)
+            else:
+                rows = await conn.fetch(_TENANT_NAMES_SQL, ids, str(tenant_id))
+        names = {str(r["id"]): (r["name"] or "").strip() or "Unnamed user" for r in rows}
+    missing = "Deleted user" if platform_read else "Unknown user"
+    labels = []
+    for log in logs:
+        if log.actor_type != "user" or not log.actor_id:
+            labels.append(_ACTOR_LABELS.get(log.actor_type, "System"))
+        else:
+            labels.append(names.get(str(log.actor_id), missing))
+    return labels
 
 
 class AuditStatsResponse(BaseModel):
@@ -137,6 +176,7 @@ async def query_audit_logs(
                 event_group=event_group, user_query=user_query, partner_id=partner_id,
                 before_time=before_time, before_id=before_id, platform_read=platform_read,
             )
+            labels = await resolve_actor_names(audit_logger, logs, tenant_id, platform_read)
             response = [
                 AuditLogResponse(
                     event_id=log.event_id, event_time=log.event_time,
@@ -150,8 +190,9 @@ async def query_audit_logs(
                     user_agent=log.user_agent, session_id=log.session_id,
                     before_state=log.before_state, after_state=log.after_state,
                     metadata=log.metadata, compliance_tags=log.compliance_tags,
+                    actor_name=label,
                 )
-                for log in logs
+                for log, label in zip(logs, labels)
             ]
             # Preserve existing access logging, but never record an apparently
             # successful read before SQL and response validation have succeeded.
@@ -194,7 +235,10 @@ async def get_audit_log(
     if not log or (scoped_tenant_id and str(log.tenant_id) != scoped_tenant_id):
         raise HTTPException(status_code=404, detail="Audit log not found")
 
+    platform_read = normalize_role(current_user.get("role")) == UserRole.PLATFORM_ADMIN
+    (label,) = await resolve_actor_names(audit_logger, [log], scoped_tenant_id, platform_read)
     return AuditLogResponse(
+        actor_name=label,
         event_id=log.event_id,
         event_time=log.event_time,
         event_type=log.event_type.value if isinstance(log.event_type, AuditEvent) else log.event_type,
