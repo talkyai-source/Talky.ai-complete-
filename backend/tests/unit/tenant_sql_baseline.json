@@ -1463,10 +1463,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "38082038f5d1254461af1fc4681fd8dd5e124e9fd3db50a12ffe7f60aeee4d82",
+      "id": "46761210656bafc32f62690ceea11f2e202aa0599f74676fed756f3645017f68",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_campaign_counters_pooled",
-      "line": 1097,
+      "line": 1109,
       "method": "execute",
       "tables": [
         "campaigns"
@@ -2074,10 +2074,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a1322a91dca74f5679947d6b8b3453fc2a243b7476ca5feed861dc6ae4851cbc",
+      "id": "f88d062d6e1d4e2a0bbac996259cf062d175a1c5dc6dcb7fe054240150fbd183",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1181,
+      "line": 1202,
       "method": "fetch",
       "tables": [
         "calls",
@@ -4013,7 +4013,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6fc3a4e92db1afb56b54caed9ed57517125a8d64964dbc65d452121d83ff14bc",
+      "id": "69b9308029b0fc3cb10b00895449d108d99ca41bd30dde3149edca715e10c50a",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
       "line": 3950,
@@ -5980,10 +5980,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "72f0a6a9472450327bd09d51615f32d979668fe4508978b66a464edd9e7b0c07",
+      "id": "2ac553ce62390f9869d641306805143aaab7e3a0409d1508d5e42cc0418c61d8",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1053,
+      "line": 1074,
       "method": "fetch",
       "tables": [
         "calls",
@@ -6686,7 +6686,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "012ac33a839b02b762898189fa06a210abf3a0c61a77940d08c161744fd98f0d",
+      "id": "945097fffa503e422f9f9ce22e9c2ff2d308682d35c785b6b0ceb6950b108649",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
       "line": 3636,
@@ -7055,10 +7055,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "40aa7486f733084e2626ce7575ee942582d3d924d67356406cf644c896491ba7",
+      "id": "b2d26f8bfa232ac00b674e988b8fb5f3f2d48e75e994ea10a1356a2f48b9d581",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 448,
+      "line": 469,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7727,10 +7727,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a8165016cf3ea55c5b5869a88f0ca11950bcb0add2bd808dd40c74f1264dbb3a",
+      "id": "89ce0826eafebd8f63c91ec17bbc738eb564eff4e78aa037dfeb8bf9408fe139",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 908,
+      "line": 929,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -8440,25 +8440,26 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "1bfe9ae80399ae47faf5403caa4e81824f126d13a2a840429c40fc13b62086c0",
+      "id": "c2756c4af1ca4793abc5b0da52cb3c9129e78b41dcb53b2bab7f59f15cd278cb",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "get_call",
-      "line": 1582,
+      "line": 1741,
       "method": "fetchrow",
       "tables": [
         "call_legs",
         "calls",
         "campaigns",
         "inbound_usage_transactions",
+        "leads",
         "recordings_s3",
         "transcripts"
       ],
-      "sql": "SELECT c.*, camp.name AS campaign_name, (SELECT tr.full_text FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) ORDER BY tr.created_at DESC LIMIT 1) AS persisted_transcript, EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '') AS has_transcript, (SELECT r.id FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int FROM inbound_usage_transactions u WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id AND u.call_leg_id IS NULL AND u.transaction_type IN ('finalize','release','reverse') ORDER BY u.created_at DESC LIMIT 1) AS billed_duration_seconds, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, to_jsonb(c)->'summary_json' AS persisted_summary_json FROM calls c LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id WHERE c.id=$1 AND c.tenant_id=$2",
+      "sql": "SELECT c.*, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT tr.full_text FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) ORDER BY tr.created_at DESC LIMIT 1) AS persisted_transcript, EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '') AS has_transcript, (SELECT r.id FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int FROM inbound_usage_transactions u WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id AND u.call_leg_id IS NULL AND u.transaction_type IN ('finalize','release','reverse') ORDER BY u.created_at DESC LIMIT 1) AS billed_duration_seconds, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, to_jsonb(c)->'summary_json' AS persisted_summary_json FROM calls c LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE c.id=$1 AND c.tenant_id=$2",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetchrow; app/api/v1/endpoints/calls.py:1582.",
+      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetchrow; app/api/v1/endpoints/calls.py:1582. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -8512,7 +8513,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "bda755f3e0b2ff6d47e7652e0ccbcb48bd3fb6685f9c1af332c251a0d23664ee",
+      "id": "0812e2659adb5eee3299a7d3244e9248d7f2123ef76e88ab3c106b68bc3bccfe",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 505,
@@ -9120,10 +9121,10 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "41217beb43b5b287f19b7a723a12b3aefd245baa8e46ca2ac7445b0bfa5e47e6",
+      "id": "88d12bf202f230d7b779b93457b5e48aaf9d1b40ad84f0c2cb98cecda7ebf1be",
       "file": "app/api/v1/endpoints/auth/password_reset.py",
       "function": "reset_password",
-      "line": 414,
+      "line": 416,
       "method": "enforce_budget",
       "tables": [],
       "sql": "reset-ip",
@@ -9150,10 +9151,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "881171e51263ebd21f78fc7d16790bb038dd2b3b8d117969c13436b20d68f5e0",
+      "id": "f8aebc85f05a28dbc38125d2df4c4265abb8c8d2ffcd62ea3196c2c151ce459f",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
-      "line": 1180,
+      "line": 1241,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign pacing",
@@ -9316,10 +9317,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "4f04014a5740fe168f711b47f859dedfbf5bdfe206da8b3988cbdc65db7f5d5d",
+      "id": "c1071a206630c319bdf451b52c2fd62f88817465b520c7d4966dfafd813c6e5c",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
-      "line": 735,
+      "line": 791,
       "method": "_pinned_tts_provider",
       "tables": [],
       "sql": "create",
@@ -9739,17 +9740,17 @@
       "category": "platform_admin"
     },
     {
-      "id": "5a8b822d0c25b238833029e0147e1176f3dfe0b220194342837be6226c7953f1",
+      "id": "0e77d0bcd0f0d4297eb0d9f1b7fcd1a48f6f094c31568f770723bfce09e55d74",
       "file": "app/infrastructure/connectors/calendar/google_calendar.py",
       "function": "GoogleCalendarConnector.create_event",
       "line": 254,
-      "method": "ValueError",
+      "method": "error",
       "tables": [],
       "sql": "Create event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
-      "count": 2,
+      "count": 1,
       "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: error; app/infrastructure/connectors/calendar/google_calendar.py:245.",
       "category": "not_database_sql"
     },
@@ -9884,10 +9885,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "36a4feb5dc6e4572a7c93a26ead8aec753a1576010a2dacd25a34f591f3f7f8e",
+      "id": "d3d56fc4c9f3b6424f71b0301444ef229fb9e7a291564c23e2dc2bb3d543fba1",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1549,
+      "line": 1610,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -10049,7 +10050,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "f80d0ddbc282d3e8181c078e4278759c0d50c284ba3d02274ae61a0c1947f076",
+      "id": "8b1e5f5dc02299f15aac85d73fa707f6ec4b568504e31528fec130162b7b3072",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 495,
@@ -10194,10 +10195,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "6952dfc36397af20727ea3c24913eb1b995c9f116d231f9aeec3f689c26a63f6",
+      "id": "b24158da8852ae120d55ce03e00f87e857978dee9e6328395ce61546e8b5f0e1",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2269,
+      "line": 2330,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10365,10 +10366,10 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "572d68159bdcaa29e8865a64264056c6542c6d8be93351eacd560df5f9d87b15",
+      "id": "e0dad0b37e1401edc13347ba4631bb981d0003d282433f91d942069d26162413",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
-      "line": 1007,
+      "line": 1068,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign",
@@ -10448,25 +10449,25 @@
       "category": "system_discovery"
     },
     {
-      "id": "7f91bc94546b8f2fc68c0b2efb56bf7627f861ce234a54da248694c13b1d8b88",
+      "id": "5be61c47b4850ca4092b2f510427b3f8b0e9482ed682c165f1e0c2f4b26355b8",
       "file": "app/infrastructure/connectors/calendar/outlook_calendar.py",
       "function": "OutlookCalendarConnector.create_event",
-      "line": 250,
-      "method": "ValueError",
+      "line": 249,
+      "method": "error",
       "tables": [],
       "sql": "Create event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
-      "count": 2,
+      "count": 1,
       "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: error; app/infrastructure/connectors/calendar/outlook_calendar.py:249.",
       "category": "not_database_sql"
     },
     {
-      "id": "f252ed48304507d8cab79db4cb5f9dd963c6b6bb114f86f5afb8719cc4cdcd55",
+      "id": "e76fec52f183546befa4e8c930d7591620d7c2b4f9f3f8c81d52778a93d1a2ec",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2132,
+      "line": 2193,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -10891,11 +10892,11 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Appends audit actions to one platform emergency request UUID. No application caller of this service method was found; it is an internal unused audit helper, not an unauthenticated mounted route. Future integration must supply the validated session/request boundary."
     },
     {
-      "id": "96bae69742c063ac5083b6c33a3abd2e6a327906e1766fe4c7f5e6de80391514",
+      "id": "344360fb4fe85cd2b0f09d16231d46a300bd528bf3060d5014fb6e2940834b02",
       "file": "app/infrastructure/connectors/calendar/google_calendar.py",
       "function": "GoogleCalendarConnector.update_event",
       "line": 346,
-      "method": "ValueError",
+      "method": "warning",
       "tables": [],
       "sql": "Update event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
       "scoped": false,
@@ -11074,10 +11075,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "a55abc1e4684c365caf25cc0578d5ec4dd45c4298f631bc7ceb74709aee348fa",
+      "id": "e9511602e15f80a6777ebc2ebb3047e2c6429aaae424d4320f8fd69e42db1a7f",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1483,
+      "line": 1557,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11274,11 +11275,11 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "b1f575ab99355ac1d6773165109003d4b0ca7186313b2e5b0b1a14e5c4ad27e3",
+      "id": "6dbb12a8e5f9b8b9a75e8153d21d6d3bd2219c1e1f179246046a35cad8c1ab22",
       "file": "app/infrastructure/connectors/calendar/outlook_calendar.py",
       "function": "OutlookCalendarConnector.update_event",
       "line": 341,
-      "method": "ValueError",
+      "method": "warning",
       "tables": [],
       "sql": "Update event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
       "scoped": false,
@@ -11923,25 +11924,26 @@
       "category": "platform_admin"
     },
     {
-      "id": "c622ec99c1363788744ffd0132cbf2c79465c682c45a514a2bfa9138319973e1",
+      "id": "4cfe8c47ee5d25ed7a79ff7817300f20528345cf6ce0b13d00571c3e65e960d7",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1439,
+      "line": 1511,
       "method": "fetch",
       "tables": [
         "call_feedback",
         "call_legs",
         "calls",
         "campaigns",
+        "leads",
         "recordings_s3",
         "transcripts"
       ],
-      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} ORDER BY c.created_at DESC NULLS FIRST, c.id DESC {IfExp(test=Name(id='cursor_mode', ctx=Load()), body=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1)]), orelse=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1), Constant(value=' OFFSET $'), FormattedValue(value=BinOp(left=Name(id='idx', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]))}",
+      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} {IfExp(test=Compare(left=Name(id='changed_since', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=Constant(value='ORDER BY c.updated_at DESC NULLS LAST, c.id DESC'), orelse=Constant(value='ORDER BY c.created_at DESC NULLS FIRST, c.id DESC'))} {IfExp(test=Name(id='cursor_mode', ctx=Load()), body=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1)]), orelse=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1), Constant(value=' OFFSET $'), FormattedValue(value=BinOp(left=Name(id='idx', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]))}",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "The conditions builder always starts with c.tenant_id=$1 from authenticated current_user. All tenant-bearing media/campaign/feedback projections bind c.tenant_id; nullable legacy transcripts require the owned call and NULL or matching tenant. _captured_contact_rows_sql binds details to c.tenant_id; tenantless call_legs derives ownership through c.id. The count uses the same mandatory conditions. Parent ran the real-projection route regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1361.",
+      "reason": "The conditions builder always starts with c.tenant_id=$1 from authenticated current_user. All tenant-bearing media/campaign/feedback projections bind c.tenant_id; nullable legacy transcripts require the owned call and NULL or matching tenant. _captured_contact_rows_sql binds details to c.tenant_id; tenantless call_legs derives ownership through c.id. The count uses the same mandatory conditions. Parent ran the real-projection route regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1361. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call. Day 5 (D5-6): the leads/issues filter and the captured-contact search read call_lead_details only through EXISTS subqueries bound by call_id = c.id AND tenant_id = c.tenant_id; every search term is one bound parameter; changed_since adds c.updated_at >= $n to the same conditions list that starts with c.tenant_id = $1.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -12621,6 +12623,57 @@
       "count": 1,
       "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2162.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "3e627d873f037b88bf1eca28fa516f87fac39d1d0e2ee943ebdfa0fdd7e0abf5",
+      "file": "app/api/v1/endpoints/audit_logs.py",
+      "function": "resolve_actor_names",
+      "line": 120,
+      "method": "fetch",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT id, name FROM user_profiles WHERE id = ANY($1::uuid[])",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Audit actor names for a platform-admin reader (D5-19, GET /admin/audit/logs and /admin/audit/logs/{id}): one bounded lookup of user_profiles by the actor ids on the page, across tenants on purpose. It runs only when the caller's CURRENT role is platform_admin (platform_read, decided from the authenticated user, never from a request parameter); every other reader runs the sibling statement that adds AND tenant_id = $2 on a tenant-scoped connection, and an actor outside the reader's tenant is labelled 'Unknown user'. Returns id and name only. Exact reviewed operation: fetch; app/api/v1/endpoints/audit_logs.py:120.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "5f05e0103a81e3e9d906ba2831b5ba493b43604a76de60d62c1b7947937c7774",
+      "file": "app/api/v1/endpoints/auth/verify_email.py",
+      "function": "resend_verification_email",
+      "line": 168,
+      "method": "fetchrow",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT id, email, name, is_verified, is_active FROM user_profiles WHERE LOWER(email) = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Resending a verification email (D5-12, POST /auth/verify-email/resend) must find the account by the address typed on a signed-out page, before any account or tenant is known. The route is limited per IP (5 a minute, 20 a day) and per address (3 an hour) before this read, always answers the same sentence whether or not the address exists, and returns no account data. Source: auth/verify_email.py resend_verification_email. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/verify_email.py:168.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "819fe13a79ff21decd310b8440fec5e314cc5b4a447d0822c2e0b3422c884dce",
+      "file": "app/api/v1/endpoints/auth/verify_email.py",
+      "function": "resend_verification_email",
+      "line": 180,
+      "method": "execute",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "UPDATE user_profiles SET verification_token = $2, verification_token_expires_at = $3 WHERE id = $1 AND is_verified = FALSE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Resend writes a new hashed verification token only on the user id returned by the lookup above, in the same transaction, and only while that account is still unverified (AND is_verified = FALSE). The id never comes from the caller, and the plain token is only ever sent to the account's own address. Source: auth/verify_email.py resend_verification_email. Exact reviewed operation: execute; app/api/v1/endpoints/auth/verify_email.py:180.",
+      "category": "individually_reviewed"
     }
   ]
 }
