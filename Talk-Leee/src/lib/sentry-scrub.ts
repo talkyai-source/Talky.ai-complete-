@@ -305,3 +305,15 @@ export function scrubSentryBreadcrumb(crumb: Breadcrumb): Breadcrumb | null {
         return null;
     }
 }
+
+/**
+ * What every Sentry.init call in this app must carry: personal data off and the
+ * three scrub hooks. One object, spread into each init, so a new init cannot
+ * forget one of them.
+ */
+export const SENTRY_SCRUB_OPTIONS = {
+    sendDefaultPii: false,
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryTransaction,
+    beforeBreadcrumb: scrubSentryBreadcrumb,
+} as const;

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
-import { scrubSentryBreadcrumb, scrubSentryEvent, scrubSentryTransaction } from "@/lib/sentry-scrub";
+import { fileURLToPath } from "node:url";
+import { SENTRY_SCRUB_OPTIONS, scrubSentryBreadcrumb, scrubSentryEvent, scrubSentryTransaction } from "@/lib/sentry-scrub";
 import type { Breadcrumb, Event as SentryEvent } from "@sentry/nextjs";
 
 // TransactionEvent is not exported by @sentry/nextjs; this is its shape.
@@ -350,25 +353,26 @@ test("a transaction that cannot be scrubbed is dropped", () => {
     assert.equal((ok.request as Bag).url, "/a?token=[redacted]");
 });
 
-test("wiring: register() hands Sentry.init the scrub hooks and personal data off", async () => {
-    const prev = { ...process.env };
-    process.env.NEXT_PUBLIC_SENTRY_DSN = "https://public@o0.ingest.sentry.io/0";
-    process.env.NEXT_PUBLIC_SENTRY_ENABLED = "true";
-    process.env.NEXT_RUNTIME = "nodejs";
-    try {
-        const { register } = await import("../instrumentation");
-        await register();
-        // Under Node's CJS interop only `init`-style names are live on the namespace; the full API is on `default`.
-        const Sentry = (await import("@sentry/nextjs") as unknown as { default: typeof import("@sentry/nextjs") }).default;
-        const options = Sentry.getClient()?.getOptions();
-        assert.ok(options, "Sentry client was not created");
-        assert.equal(options.sendDefaultPii, false);
-        assert.equal(options.beforeSend, scrubSentryEvent);
-        assert.equal(options.beforeSendTransaction, scrubSentryTransaction);
-        assert.equal(options.beforeBreadcrumb, scrubSentryBreadcrumb);
-        await Sentry.close(0);
-    } finally {
-        for (const k of Object.keys(process.env)) if (!(k in prev)) delete process.env[k];
-        Object.assign(process.env, prev);
+// The real SDK is not started here: started with a DSN inside a test process it
+// opens network and timer handles that can keep the process alive.
+test("wiring: one object carries personal data off and the three scrub hooks", () => {
+    assert.equal(SENTRY_SCRUB_OPTIONS.sendDefaultPii, false);
+    assert.equal(SENTRY_SCRUB_OPTIONS.beforeSend, scrubSentryEvent);
+    assert.equal(SENTRY_SCRUB_OPTIONS.beforeSendTransaction, scrubSentryTransaction);
+    assert.equal(SENTRY_SCRUB_OPTIONS.beforeBreadcrumb, scrubSentryBreadcrumb);
+});
+
+// A guard over the source, not a behaviour test: every Sentry.init call in the
+// two instrumentation files spreads that object, and none sets a hook by hand.
+test("wiring: every Sentry.init call spreads the scrub options", () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const expected: Record<string, number> = { "instrumentation.ts": 2, "instrumentation-client.ts": 1 };
+    for (const [file, inits] of Object.entries(expected)) {
+        const source = readFileSync(path.join(here, "..", file), "utf8");
+        assert.equal(source.split("Sentry.init({").length - 1, inits, `${file}: number of Sentry.init calls changed`);
+        assert.equal(source.split("...SENTRY_SCRUB_OPTIONS,").length - 1, inits, `${file}: an init does not spread the scrub options`);
+        for (const hook of ["beforeSend:", "beforeSendTransaction:", "beforeBreadcrumb:", "sendDefaultPii:"]) {
+            assert.equal(source.includes(hook), false, `${file}: ${hook} must come from SENTRY_SCRUB_OPTIONS`);
+        }
     }
 });

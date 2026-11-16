@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from datetime import timedelta
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -116,7 +117,8 @@ async def test_every_active_admin_is_addressed_on_payment_emails_oldest_first(st
     receipt, subscription, session, invoice = await _paid(fixture)
     older, newer, inactive = uuid4(), uuid4(), uuid4()
     async with acquire_with_tenant(fixture.pool, None) as conn:
-        for user, age, active in ((older, "2 days", True), (newer, "1 day", True), (inactive, "3 days", False)):
+        for user, age, active in ((older, timedelta(days=2), True), (newer, timedelta(days=1), True),
+                                  (inactive, timedelta(days=3), False)):
             await conn.execute(
                 """INSERT INTO user_profiles (id, email, name, tenant_id, role, is_active, is_verified, email_verified_at, created_at)
                    VALUES ($1, $2, 'Synthetic admin', $3, 'tenant_admin', $4, TRUE, now(), now() - $5::interval)""",
