@@ -186,7 +186,7 @@ def test_both_actual_prompt_engines_describe_the_same_extended_tool_without_scri
     assert PROMPT_VERSION == "realtime@10"
     wire = next(spec for spec in realtime_voice_action_tools() if spec["name"] == "record_contact")
     assert wire["parameters"] == CONTACT_TOOL_SPEC["function"]["parameters"]
-    assert wire["parameters"]["properties"]["kind"]["enum"] == ["email", "phone", "full_name", "company_name"]
+    assert wire["parameters"]["properties"]["kind"]["enum"] == ["email", "phone", "full_name", "company_name", "address"]
 
 
 @pytest.mark.asyncio

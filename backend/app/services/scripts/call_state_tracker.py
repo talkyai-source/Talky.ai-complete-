@@ -34,6 +34,9 @@ class CallState:
     company_name: Optional[str] = None
     company_name_confirmed: bool = False
     company_name_capture: Optional[ContactCaptureState] = None
+    address: Optional[str] = None
+    address_confirmed: bool = False
+    address_capture: Optional[ContactCaptureState] = None
     earlier_email_captures: tuple = ()
     earlier_phone_captures: tuple = ()
     # Historical context fields are retained for existing snapshots/persistence.
