@@ -191,7 +191,7 @@ function OwnedCampaignsTable({ generation }: { generation: number }) {
                         <p>Try adjusting your search or filter criteria.</p>
                     </div>
                 ) : (
-                    <table className="data-table">
+                    <table className="data-table campaigns-table">
                         <thead>
                             <tr>
                                 <th>Campaign</th>
@@ -208,8 +208,8 @@ function OwnedCampaignsTable({ generation }: { generation: number }) {
                         <tbody>
                             {campaigns.map((campaign) => (
                                 <tr key={campaign.id}>
-                                    <td>{campaign.name}</td>
-                                    <td>
+                                    <td className="campaigns-table-wrap">{campaign.name}</td>
+                                    <td className="campaigns-table-wrap">
                                         <div className="tenant-name-cell">
                                             <Building2 size={14} />
                                             <span>{campaign.tenant_name}</span>
