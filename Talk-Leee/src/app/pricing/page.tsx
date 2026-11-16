@@ -93,7 +93,6 @@ export default function PricingPage() {
     ["Contact uploads", "Unlimited", "Unlimited"],
     ["Live support", "Up to 1 hour/month", "Up to 3 hours/month"],
     ["CRM connectors", "—", "HubSpot, Salesforce & supported connectors"],
-    ["Automatic campaign wizard", "—", "Included"],
     ["Google voices", "Included", "Included"],
     ["Cartesia voices", "Included", "Included"],
     ["Deepgram voices", "Included", "Included"],
