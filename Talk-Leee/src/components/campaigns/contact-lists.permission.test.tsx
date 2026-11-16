@@ -115,7 +115,9 @@ test("the dialog does not post until the block is complete, then posts the confi
     await waitFor(() => assert.equal(posted.length, 1));
     assert.deepEqual(posted[0], ["list-1", EXPECTED_PERMISSION]);
     await screen.findByText("Permission confirmed on 16 Nov 2026: They agreed to be called");
-    await waitFor(() => assert.equal(screen.queryByRole("dialog"), null));
+    // Compare a boolean, never the element: a failed assertion on a DOM node makes
+    // node:assert describe the whole node, which costs gigabytes inside a retry loop.
+    await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
     assert.equal(screen.queryByText("Permission to call not confirmed"), null);
 });
 
