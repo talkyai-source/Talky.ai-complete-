@@ -451,7 +451,19 @@ export default function SettingsPage() {
 
                             {/* Telephony Tab */}
                             <TabsContent value="telephony" className="space-y-4">
-                                <TelephonyProvidersSection />
+                                {/* The server refuses every /telephony/sip read unless the role is tenant_admin, partner_admin or platform_admin
+                                    (legacy admin / owner / super_admin included): same list as canEditBusinessName. */}
+                                {!user ? (
+                                    profileLoading ? <LoadingState title="Loading telephony settings…" /> : null
+                                ) : canEditBusinessName ? (
+                                    <TelephonyProvidersSection />
+                                ) : (
+                                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                                        <p className="text-sm text-muted-foreground">
+                                            Phone lines are managed by your account admin. Ask an admin if a line needs to be added or changed.
+                                        </p>
+                                    </div>
+                                )}
                             </TabsContent>
 
                             <TabsContent value="recording" className="space-y-4">
