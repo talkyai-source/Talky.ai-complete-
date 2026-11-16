@@ -106,6 +106,24 @@ def _captured_contact_rows_sql() -> str:
                                  d.updated_at DESC, d.id DESC LIMIT 64) contact)"""
 
 
+# D5-6: the website's Leads / Issues rule (Talk-Leee calls/page.tsx with
+# call-history-workflow.ts classifyCall + callHasCapturedContact), applied
+# before paging. These sets mirror the PAGE, not FAILED_OUTCOMES.
+_LEAD_OUTCOME_PREFIXES = ["qualified%", "callback%"]
+_ISSUE_OUTCOME_PREFIXES = ["no\\_interest%", "disqualified%"]  # "_" is a LIKE wildcard: escaped
+_ISSUE_STATUSES = ["busy", "failed", "no_answer"]
+_ISSUE_OUTCOMES = ["busy", "failed", "no_answer", "rejected", "timeout", "unavailable"]
+_LEAD_OUTCOME_SQL = "LOWER(to_jsonb(c)->'summary_json'->>'outcome')"
+# Same validity test as _captured_contact_rows_sql, minus the transcript
+# projection (which cannot run in SQL).
+_CAPTURED_VALID_SQL = (
+    "(%(a)s.field_type IN ('phone','email') OR %(a)s.field_key IN ('phone','email')) "
+    "AND COALESCE(%(a)s.validation_status,'confirmed') NOT IN ('invalid','cancelled','needs_clarification')"
+)
+# A search shorter than this does not read call_lead_details (bounds the scan).
+_CAPTURED_SEARCH_MIN_CHARS = 3
+
+
 def _display_captured_contacts(call: Any) -> dict:
     from app.domain.services.lead_capture_service import project_contact_evidence
 
@@ -285,6 +303,8 @@ class CallListItem(BaseModel):
     transcript_status: Optional[str] = None
     transcript_save_state: str = "unknown"
     media_state: Optional[str] = None
+    # D5-22: the call's own lead's best time to call (same tenant); null without a lead.
+    best_time_to_call: Optional[str] = None
 
 
 class CallDetail(BaseModel):
@@ -337,6 +357,7 @@ class CallDetail(BaseModel):
     billed_duration_seconds: Optional[int] = None
     cost: Optional[float] = None
     transfer_legs: List[dict] = Field(default_factory=list)
+    best_time_to_call: Optional[str] = None
 
 
 class CallListResponse(BaseModel):
@@ -1306,6 +1327,14 @@ async def list_calls(
                     "voicemail, ...); false: only calls that did or have no outcome yet")] = None,
     since: Annotated[Optional[datetime], Query(
         description="Only calls created after this instant (ISO 8601; no zone means UTC)")] = None,
+    lead_filter: Annotated[Optional[Literal["leads", "issues"]], Query(
+        description="leads: captured a phone/email or lead_outcome qualified*/callback*; "
+                    "issues: failed call or lead_outcome no_interest*/disqualified*. "
+                    "Applied before paging.")] = None,
+    changed_since: Annotated[Optional[datetime], Query(
+        description="Only calls whose row changed at or after this instant (ISO 8601; no zone "
+                    "means UTC), newest change first. Page-number paging only: cannot be "
+                    "combined with a cursor.")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1322,6 +1351,8 @@ async def list_calls(
         - to: End date filter
     """
     cursor_mode = pagination == "cursor" or cursor is not None
+    if changed_since is not None and cursor_mode:
+        raise HTTPException(422, "changed_since cannot be combined with cursor pagination")
     if cursor_mode and page != 1:
         raise HTTPException(422, "Cursor pagination cannot be combined with a page number")
     if search is not None and (len(search) > 200 or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in search)):
@@ -1339,6 +1370,10 @@ async def list_calls(
         scope_filters["failed"] = failed
     if since is not None:
         scope_filters["since"] = since.isoformat()
+    if lead_filter is not None:
+        scope_filters["lead_filter"] = lead_filter
+    if changed_since is not None and changed_since.tzinfo is None:
+        changed_since = changed_since.replace(tzinfo=timezone.utc)
     scope = history_scope(str(current_user.tenant_id), scope_filters)
     try:
         boundary = decode_history_cursor(cursor, scope) if cursor is not None else None
@@ -1406,12 +1441,45 @@ async def list_calls(
             params.append(since)
             idx += 1
 
+        if lead_filter == "leads":
+            conditions.append(
+                "(EXISTS (SELECT 1 FROM call_lead_details d WHERE d.call_id = c.id "
+                "AND d.tenant_id = c.tenant_id AND " + _CAPTURED_VALID_SQL % {"a": "d"}
+                + " AND NULLIF(BTRIM(COALESCE(d.normalized_value,d.value,'')), '') IS NOT NULL) "
+                f"OR {_LEAD_OUTCOME_SQL} LIKE ANY(${idx}::text[]))"
+            )
+            params.append(_LEAD_OUTCOME_PREFIXES)
+            idx += 1
+        elif lead_filter == "issues":
+            conditions.append(
+                f"(LOWER(BTRIM(c.status)) = ANY(${idx}::text[]) "
+                f"OR LOWER(BTRIM(c.outcome)) = ANY(${idx + 1}::text[]) "
+                f"OR {_LEAD_OUTCOME_SQL} LIKE ANY(${idx + 2}::text[]))"
+            )
+            params.extend([_ISSUE_STATUSES, _ISSUE_OUTCOMES, _ISSUE_OUTCOME_PREFIXES])
+            idx += 3
+        if changed_since is not None:
+            conditions.append(f"c.updated_at >= ${idx}")
+            params.append(changed_since)
+            idx += 1
+
         if search:
+            # D5-6: the page also matches the contact the caller gave. Read from
+            # call_lead_details for this call and tenant only, and only for a
+            # search long enough to be selective.
+            captured_search = ""
+            if len(search) >= _CAPTURED_SEARCH_MIN_CHARS:
+                captured_search = (
+                    " OR EXISTS (SELECT 1 FROM call_lead_details sd WHERE sd.call_id = c.id "
+                    "AND sd.tenant_id = c.tenant_id AND " + _CAPTURED_VALID_SQL % {"a": "sd"}
+                    + f" AND (sd.normalized_value ILIKE ${idx} ESCAPE '\\' "
+                    f"OR sd.value ILIKE ${idx} ESCAPE '\\'))"
+                )
             conditions.append(
                 f"(c.phone_number ILIKE ${idx} ESCAPE '\\' OR c.caller_ani ILIKE ${idx} ESCAPE '\\' "
                 f"OR c.called_did ILIKE ${idx} ESCAPE '\\' OR EXISTS (SELECT 1 FROM campaigns searched "
                 f"WHERE searched.id = c.campaign_id AND searched.tenant_id = c.tenant_id "
-                f"AND searched.name ILIKE ${idx} ESCAPE '\\'))"
+                f"AND searched.name ILIKE ${idx} ESCAPE '\\'){captured_search})"
             )
             params.append("%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
             idx += 1
@@ -1430,6 +1498,10 @@ async def list_calls(
                 idx += 2
 
         where = " AND ".join(conditions)
+        order_by = (
+            "ORDER BY c.updated_at DESC NULLS LAST, c.id DESC" if changed_since is not None
+            else "ORDER BY c.created_at DESC NULLS FIRST, c.id DESC"
+        )
 
         window = f"LIMIT ${idx}" if cursor_mode else f"LIMIT ${idx} OFFSET ${idx + 1}"
         window_params = [page_size + 1] if cursor_mode else [page_size, offset]
@@ -1449,6 +1521,7 @@ async def list_calls(
                            c.consent_status, c.processing_status, c.billing_status,
                            c.billing_hold_reason,
                            camp.name AS campaign_name,
+                           ld.best_time_to_call AS best_time_to_call,
                            (SELECT leg.from_number FROM call_legs leg
                              WHERE leg.call_id = c.id
                                AND leg.direction = 'outbound'
@@ -1473,8 +1546,9 @@ async def list_calls(
                            {_captured_contact_rows_sql()} AS captured_contact_rows
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id
+                    LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id
                     WHERE {where}
-                    ORDER BY c.created_at DESC NULLS FIRST, c.id DESC
+                    {order_by}
                     {window}
                     """,
                     *params,
@@ -1545,6 +1619,7 @@ async def list_calls(
                     transcript_status=_transcript_state(row),
                     transcript_save_state=row.get("transcript_save_state") or "unknown",
                     media_state=_media_state(row),
+                    best_time_to_call=row.get("best_time_to_call"),
                 )
             )
 
@@ -1667,6 +1742,7 @@ async def get_call(
                     """
                     SELECT c.*,
                            camp.name AS campaign_name,
+                           ld.best_time_to_call AS best_time_to_call,
                            (SELECT tr.full_text FROM transcripts tr
                              WHERE tr.call_id=c.id
                                AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
@@ -1701,6 +1777,7 @@ async def get_call(
                            to_jsonb(c)->'summary_json' AS persisted_summary_json
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id
+                    LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id
                     WHERE c.id=$1 AND c.tenant_id=$2
                     """,
                     call_uuid,
@@ -1811,6 +1888,7 @@ async def get_call(
             billed_duration_seconds=call.get("billed_duration_seconds"),
             cost=float(call["cost"]) if call.get("cost") is not None else None,
             transfer_legs=transfer_legs,
+            best_time_to_call=call.get("best_time_to_call"),
         )
 
     except (HTTPException, DatabasePoolTimeoutError):
