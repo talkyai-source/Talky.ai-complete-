@@ -122,7 +122,7 @@ class OutlookCalendarConnector(CalendarProvider):
             
             if response.status_code != 200:
                 logger.error(f"Token exchange failed: {response.text}")
-                raise ValueError(f"Token exchange failed: {response.text}")
+                raise ValueError("The calendar could not be connected. Try again.")
             
             token_data = response.json()
             
@@ -160,7 +160,7 @@ class OutlookCalendarConnector(CalendarProvider):
             
             if response.status_code != 200:
                 logger.error(f"Token refresh failed: {response.text}")
-                raise ValueError(f"Token refresh failed: {response.text}")
+                raise ValueError("The calendar connection has expired. Connect it again.")  # provider text stays in the log
             
             token_data = response.json()
             
@@ -247,7 +247,7 @@ class OutlookCalendarConnector(CalendarProvider):
             
             if response.status_code not in (200, 201):
                 logger.error(f"Create event failed: {response.text}")
-                raise ValueError(f"Create event failed: {response.text}")
+                raise ValueError("The meeting could not be added to the calendar.")
             
             data = response.json()
             
@@ -338,7 +338,8 @@ class OutlookCalendarConnector(CalendarProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"Update event failed: {response.text}")
+                logger.warning(f"Update event failed: {response.text}")
+                raise ValueError("The meeting could not be updated in the calendar.")
             
             data = response.json()
             
@@ -384,7 +385,8 @@ class OutlookCalendarConnector(CalendarProvider):
             )
             
             if response.status_code != 200:
-                raise ValueError(f"List events failed: {response.text}")
+                logger.warning(f"List events failed: {response.text}")
+                raise ValueError("The calendar could not be read. Try again.")
             
             data = response.json()
             if max_results >= 1000 and data.get("@odata.nextLink"):

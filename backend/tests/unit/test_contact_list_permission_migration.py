@@ -22,8 +22,9 @@ def _sql(monkeypatch, operation):
     return " ".join(statements)
 
 
-def test_alembic_finds_0096_as_the_single_head_on_top_of_0095():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_alembic_finds_0096_on_top_of_0095_and_one_head_above_it():
+    assert SCRIPTS.get_heads() == ["0100_force_legal_acceptance_rls"]
+    assert SCRIPTS.get_revision("0097_remove_wizard_plan_line").down_revision == REVISION
     revision = SCRIPTS.get_revision(REVISION)
     assert revision.down_revision == "0095_webhook_receipt_dismissed"
     assert len(REVISION) <= 32 and _module().revision == REVISION

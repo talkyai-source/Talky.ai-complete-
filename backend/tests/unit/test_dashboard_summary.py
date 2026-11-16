@@ -203,6 +203,27 @@ async def test_performance_summary_is_current_month_real_outbound_only():
 
 
 @pytest.mark.asyncio
+async def test_summary_counts_calls_in_neither_list_as_other_so_the_three_add_up():
+    rows = [
+        {"id": str(i), "outcome": o, "duration_seconds": 0, "is_test": False,
+         "direction": "outbound", "billing_status": "none"}
+        for i, o in enumerate(["answered", "busy", None, "in_progress", "invalid"])
+    ]
+    builders = {
+        "calls": [_FakeBuilder(count=5, data=[]), _FakeBuilder(data=rows), _FakeBuilder(count=0, data=[])],
+        "call_legs": [_FakeBuilder(data=[])],
+        "campaigns": [_FakeBuilder(count=0, data=[])],
+        "tenants": [_FakeBuilder(data=[{"minutes_allocated": 100}])],
+        "dialer_jobs": [_FakeBuilder(count=0, data=[])],
+    }
+
+    result = await get_dashboard_summary(current_user=_user(), db_client=_FakeClient(builders))
+
+    assert (result.answered_calls, result.failed_calls, result.other_calls) == (1, 1, 3)
+    assert result.answered_calls + result.failed_calls + result.other_calls == result.total_calls
+
+
+@pytest.mark.asyncio
 async def test_summary_computes_avg_duration_from_real_calls():
     """avg_call_duration_seconds = mean of duration_seconds across the
     answered/completed/in_progress rows in the current month, ignoring

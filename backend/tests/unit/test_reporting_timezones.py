@@ -135,7 +135,7 @@ async def test_every_analytics_route_uses_the_requested_local_day(path):
     assert body["timezone"] == "Asia/Karachi"
     assert call_bounds(client) == (instant(start), instant(end))
     if path == "/analytics/calls":
-        assert body["series"] == [{"date": "2026-11-06", "total_calls": 2, "answered": 2, "failed": 0, "goal_achieved": 1}]
+        assert body["series"] == [{"date": "2026-11-06", "total_calls": 2, "answered": 2, "failed": 0, "other": 0, "goal_achieved": 1}]
     elif path == "/analytics/calls/by-campaign":
         assert len(body["campaigns"]) == 1
         assert body["campaigns"][0]["series"][0]["total_calls"] == 2

@@ -25,6 +25,7 @@ _PUBLIC = {
         "/api/v1/auth/login", "/api/v1/auth/register", "/api/v1/auth/signup/start",
         "/api/v1/auth/signup/verify-code", "/api/v1/auth/signup/complete",
         "/api/v1/auth/passkey-check", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
+        "/api/v1/auth/verify-email/resend",
         "/api/v1/auth/mfa/verify", "/api/v1/auth/passkeys/login/begin",
         "/api/v1/auth/passkeys/login/complete", "/api/v1/admin/secrets/validate-api-key",
         "/api/v1/public/contact-enquiries", "/api/v1/auth/invites/preview", "/api/v1/auth/invites/accept",

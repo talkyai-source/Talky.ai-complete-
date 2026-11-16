@@ -29,7 +29,10 @@ class HistoryDatabase:
         self.sql.executescript("""
             CREATE TABLE campaigns(id TEXT,tenant_id TEXT,name TEXT);
             CREATE TABLE calls(id TEXT,tenant_id TEXT,created_at TEXT,phone_number TEXT,
-                caller_ani TEXT,called_did TEXT,talklee_call_id TEXT,status TEXT,direction TEXT,campaign_id TEXT);
+                caller_ani TEXT,called_did TEXT,talklee_call_id TEXT,status TEXT,direction TEXT,campaign_id TEXT,lead_id TEXT);
+            CREATE TABLE leads(id TEXT,tenant_id TEXT,best_time_to_call TEXT);
+            CREATE TABLE call_lead_details(id TEXT,tenant_id TEXT,call_id TEXT,field_key TEXT,field_type TEXT,
+                value TEXT,normalized_value TEXT,validation_status TEXT);
         """)
         self.sql.executemany("INSERT INTO campaigns VALUES(?,?,?)", [
             (CAMPAIGNS[0], TENANT, "Rate100% renewal"), (CAMPAIGNS[1], TENANT, "London"),
@@ -46,7 +49,7 @@ class HistoryDatabase:
         self.pool = self
 
     def insert(self, index, tenant, hour, phone, campaign):
-        self.sql.execute("INSERT INTO calls VALUES(?,?,?,?,?,?,?,?,?,?)", (
+        self.sql.execute("INSERT INTO calls(id,tenant_id,created_at,phone_number,caller_ani,called_did,talklee_call_id,status,direction,campaign_id) VALUES(?,?,?,?,?,?,?,?,?,?)", (
             IDS[index], tenant, f"2026-11-06T{hour}:00:00.000000+00:00", phone,
             None, None, None, "ended", "outbound", campaign,
         ))
@@ -167,7 +170,7 @@ async def test_invalid_cursor_or_search_is_refused_before_storage(database, para
 async def test_cursor_preserves_null_timestamp_rows_and_crosses_the_null_boundary(database, page_size):
     null_ids = [f"55555555-5555-4555-8555-{number:012d}" for number in range(1, 4)]
     foreign_null = "55555555-5555-4555-8555-999999999999"
-    database.sql.executemany("INSERT INTO calls VALUES(?,?,?,?,?,?,?,?,?,?)", [
+    database.sql.executemany("INSERT INTO calls(id,tenant_id,created_at,phone_number,caller_ani,called_did,talklee_call_id,status,direction,campaign_id) VALUES(?,?,?,?,?,?,?,?,?,?)", [
         (call_id, tenant, None, "+14155552670", None, None, None, "ended", "outbound", campaign)
         for call_id, tenant, campaign in [
             *((call_id, TENANT, CAMPAIGNS[0]) for call_id in null_ids),

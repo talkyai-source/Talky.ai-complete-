@@ -29,7 +29,13 @@ from app.core.security.totp import decrypt_totp_secret, verify_totp_step
 
 from app.api.v1.endpoints.auth._shared import issue_cookie_auth
 
-from ._shared import GENERIC_MFA_ERROR, _get_client_ip, _get_user_agent, _set_session_cookie
+from ._shared import (
+    GENERIC_MFA_ERROR,
+    MFA_SESSION_EXPIRED_ERROR,
+    _get_client_ip,
+    _get_user_agent,
+    _set_session_cookie,
+)
 from .challenge import (
     MFA_VERIFY_MAX_ATTEMPTS,
     consume_mfa_challenge,
@@ -100,9 +106,11 @@ async def verify_mfa_challenge(
         challenge = await resolve_mfa_challenge(conn, body.challenge_token, for_update=False)
 
         if not challenge:
+            # Missing, expired, used or burned token: the caller's own pending
+            # sign-in is over. Says nothing about any account.
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=GENERIC_MFA_ERROR,
+                detail=MFA_SESSION_EXPIRED_ERROR,
             )
 
         user_id: str = str(challenge["user_id"])
@@ -162,7 +170,7 @@ async def verify_mfa_challenge(
             except RuntimeError:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="MFA configuration error.",
+                    detail="Two-factor authentication is not available right now. Contact support.",
                 )
 
             matched_step = verify_totp_step(

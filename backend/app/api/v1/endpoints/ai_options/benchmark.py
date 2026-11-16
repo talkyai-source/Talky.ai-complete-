@@ -8,6 +8,7 @@ import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from app.domain.services.ai_option_availability import unavailable_detail
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user
@@ -50,14 +51,14 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
     if provider == "openai" or model in {m.id for m in OPENAI_MODELS}:
         key = openai_key or os.getenv("OPENAI_API_KEY")
         if not key:
-            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+            raise HTTPException(status_code=503, detail=unavailable_detail("openai key missing"))
         return OpenAILLMProvider(), key
     if provider == "gemini" or model in {m.id for m in GEMINI_MODELS}:
         key = os.getenv("GEMINI_API_KEY")
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
+                detail=unavailable_detail("gemini key missing"),
             )
         return GeminiLLMProvider(), key
     if provider == "cerebras" or model in {m.id for m in CEREBRAS_MODELS}:
@@ -65,7 +66,7 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Cerebras API key not configured. Set CEREBRAS_API_KEY in .env.",
+                detail=unavailable_detail("cerebras key missing"),
             )
         return CerebrasLLMProvider(), key
     if provider == "deepseek" or model in {m.id for m in DEEPSEEK_MODELS}:
@@ -76,7 +77,7 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
         if not key:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="DeepSeek API key not configured. Set DEEPSEEK_API_KEY in .env.",
+                detail=unavailable_detail("deepseek key missing"),
             )
         from app.infrastructure.llm.deepseek import DeepSeekLLMProvider
         return DeepSeekLLMProvider(), key
@@ -84,7 +85,7 @@ def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
     if not key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Groq API key not configured",
+            detail=unavailable_detail("groq key missing"),
         )
     return GroqLLMProvider(), key
 
@@ -145,7 +146,7 @@ async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_curre
             if not os.getenv("DEEPGRAM_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Deepgram API key not configured",
+                    detail=unavailable_detail("deepgram key missing"),
                 )
             tts = DeepgramTTSProvider()
             await tts.initialize({"voice_id": voice_id, "sample_rate": sample_rate})
@@ -153,7 +154,7 @@ async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_curre
             if not os.getenv("ELEVENLABS_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="ElevenLabs API key not configured",
+                    detail=unavailable_detail("elevenlabs key missing"),
                 )
             tts = ElevenLabsTTSProvider()
             await tts.initialize(

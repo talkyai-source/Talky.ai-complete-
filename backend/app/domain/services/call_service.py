@@ -729,6 +729,18 @@ class CallService:
                         conn, campaign_id, effective_outcome,
                         scope_tenant_id=call_tenant_id,
                     )
+                    # D5-26: after the counters UPDATE (it row-locks the campaign,
+                    # so two last calls serialise). A savepoint, and never fatal:
+                    # a failed check must not roll back or fail this settlement.
+                    try:
+                        from app.domain.services import campaign_service
+                        async with conn.transaction():
+                            await campaign_service.complete_campaign_if_finished(
+                                conn, campaign_id, call_tenant_id)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "campaign_completion_check_failed campaign=%s error=%s",
+                            campaign_id[:8], type(exc).__name__)
 
                 retry_payload = None
                 if retry_args is not None:
