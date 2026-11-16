@@ -27,8 +27,9 @@ def _sql(monkeypatch, operation):
     return statements
 
 
-def test_single_head_is_0098_on_top_of_0097():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0098_sits_on_top_of_0097_under_the_0099_head():
+    assert SCRIPTS.get_heads() == ["0099_clean_install_tables"]
+    assert SCRIPTS.get_revision("0099_clean_install_tables").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0097_remove_wizard_plan_line"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 
