@@ -158,13 +158,25 @@ async def inbound_did_availability(
 
 @router.get("/controls", response_model=TenantInboundControlsResponse)
 async def get_tenant_inbound_controls(
-    user: CurrentUser = Depends(_require_inbound_permission(Permission.INBOUND_CONTROLS)),
+    user: CurrentUser = Depends(_require_inbound_permission(Permission.INBOUND_READ)),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> dict:
+    """D5-8: any inbound reader sees the switch state; only inbound:controls
+    holders also get the operator's note and the change time. Changing the
+    switch (PATCH below) still needs inbound:controls."""
     try:
-        return await InboundCampaignService(db_pool).get_tenant_controls(tenant_id=_tenant(user))
+        controls = await InboundCampaignService(db_pool).get_tenant_controls(tenant_id=_tenant(user))
     except InboundCampaignError as exc:
         _raise_service(exc)
+    # The dependency cached the caller's effective (database) permissions.
+    if not user.has_permission(Permission.INBOUND_CONTROLS.value):
+        return {
+            "inbound_enabled": controls["inbound_enabled"],
+            "version": controls["version"],
+            "reason": None,
+            "updated_at": None,
+        }
+    return controls
 
 
 @router.patch("/controls", response_model=TenantInboundControlsResponse)
