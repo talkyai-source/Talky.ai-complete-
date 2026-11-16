@@ -83,7 +83,7 @@ async def test_flush_once_with_no_pool_keeps_buffer():
 
 
 @pytest.mark.asyncio
-async def test_flush_once_writes_via_copy_records():
+async def test_flush_once_writes_with_inserts_inside_the_bypass_transaction():
     L.record(_ev())
     L.record(_ev(provider="elevenlabs", provider_role="tts", unit="characters"))
 
@@ -91,7 +91,7 @@ async def test_flush_once_writes_via_copy_records():
         def __init__(self):
             self.calls = []
             # `SET LOCAL` only survives to the next statement inside an explicit
-            # transaction; outside one it is discarded and the COPY would run
+            # transaction; outside one it is discarded and the write would run
             # without the RLS bypass. Recorded so the test proves the scoping.
             self.in_transaction = False
 
@@ -111,8 +111,12 @@ async def test_flush_once_writes_via_copy_records():
 
         async def execute(self, *a, **kw):
             self.calls.append(("execute", a, kw, self.in_transaction))
+        async def executemany(self, *a, **kw):
+            self.calls.append(("insert", a, kw, self.in_transaction))
+
         async def copy_records_to_table(self, *a, **kw):
-            self.calls.append(("copy", a, kw, self.in_transaction))
+            # What PostgreSQL answers for a role that row security applies to.
+            raise RuntimeError("COPY FROM not supported with row-level security")
 
     fake = _FakeConn()
 
@@ -128,14 +132,24 @@ async def test_flush_once_writes_via_copy_records():
     written = await L._flush_once(pool=_FakePool())
     assert written == 2
     assert L.buffer_size() == 0
-    # Both the RLS bypass and the COPY ran.
+    # Both the RLS bypass and the write ran. The write is INSERT statements, not
+    # COPY: PostgreSQL refuses COPY FROM on a table with row security for any role
+    # the policy applies to, so with COPY a runtime role without BYPASSRLS could
+    # never persist a cost event (tests/integration/test_clean_install.py runs the
+    # real statement as such a role).
     assert any(c[0] == "execute" and "bypass_rls" in c[1][0] for c in fake.calls)
-    assert any(c[0] == "copy" for c in fake.calls)
+    inserts = [c for c in fake.calls if c[0] == "insert"]
+    assert len(inserts) == 1, "one batched INSERT for the whole flush"
+    statement, rows = inserts[0][1][0], inserts[0][1][1]
+    assert statement.lstrip().upper().startswith("INSERT INTO TENANT_PROVIDER_COST_EVENTS")
+    assert len(rows) == 2 and all(len(row) == 13 for row in rows)
+    for column in ("tenant_id", "call_id", "provider", "provider_role", "api_key_fp", "unit", "quantity",
+                   "unit_price_usd", "cost_usd", "model", "voice_id", "latency_ms", "status"):
+        assert column in statement
 
     # ...and both ran INSIDE an explicit transaction. Without it the SET LOCAL is
-    # discarded before the COPY, so the bypass silently does nothing — the defect
+    # discarded before the write, so the bypass silently does nothing — the defect
     # fixed under TKT-009 / F-25. See docs/v2/rls-set-audit.md.
     bypass = next(c for c in fake.calls if c[0] == "execute" and "bypass_rls" in c[1][0])
-    copy = next(c for c in fake.calls if c[0] == "copy")
     assert bypass[3] is True, "SET LOCAL app.bypass_rls must run inside a transaction"
-    assert copy[3] is True, "COPY must run inside the same transaction as the bypass"
+    assert inserts[0][3] is True, "the INSERT must run inside the same transaction as the bypass"

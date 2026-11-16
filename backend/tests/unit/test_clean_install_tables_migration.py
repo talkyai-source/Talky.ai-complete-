@@ -35,8 +35,9 @@ def _branches(block):
     return exists, missing
 
 
-def test_single_head_is_0099_on_top_of_0098():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0099_sits_on_top_of_0098_under_one_head():
+    assert SCRIPTS.get_heads() == ["0100_force_legal_acceptance_rls"]
+    assert SCRIPTS.get_revision("0100_force_legal_acceptance_rls").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0098_calls_changed_since_index"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 
@@ -71,14 +72,15 @@ def test_missing_branch_matches_the_columns_the_application_uses(monkeypatch):
                    "created_at", "updated_at"):
         assert column in policy
     assert "retention_days > 0 AND retention_days <= 3650" in policy
-    # provider_cost_ledger.py copies exactly these 13 columns.
-    for column in ("tenant_id", "call_id", "provider", "provider_role", "api_key_fp", "unit", "quantity",
-                   "unit_price_usd", "cost_usd", "model", "voice_id", "latency_ms", "status"):
+    # provider_cost_ledger.py inserts exactly these 13 columns.
+    columns = ("tenant_id", "call_id", "provider", "provider_role", "api_key_fp", "unit", "quantity",
+               "unit_price_usd", "cost_usd", "model", "voice_id", "latency_ms", "status")
+    for column in columns:
         assert re.search(rf"\b{column}\b\s+[A-Z]", cost), column
-    ledger = (BACKEND / "app" / "domain" / "services" / "provider_cost_ledger.py").read_text(encoding="utf-8")
-    for column in ("tenant_id", "call_id", "provider", "provider_role", "api_key_fp", "unit", "quantity",
-                   "unit_price_usd", "cost_usd", "model", "voice_id", "latency_ms", "status"):
-        assert f'"{column}"' in ledger
+    from app.domain.services import provider_cost_ledger
+    statement = " ".join(provider_cost_ledger._INSERT_EVENT_SQL.split())
+    listed = statement[statement.index("(") + 1:statement.index(")")]
+    assert tuple(name.strip() for name in listed.split(",")) == columns
 
 
 def test_exists_branch_only_reports_and_changes_nothing(monkeypatch):

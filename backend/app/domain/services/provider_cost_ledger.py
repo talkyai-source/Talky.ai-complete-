@@ -81,6 +81,15 @@ def record(event: CostEvent) -> None:
     _buffer.append(event)
 
 
+_INSERT_EVENT_SQL = """
+    INSERT INTO tenant_provider_cost_events (
+        tenant_id, call_id, provider, provider_role, api_key_fp,
+        unit, quantity, unit_price_usd, cost_usd, model, voice_id,
+        latency_ms, status
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+"""
+
+
 async def _flush_once(pool: Any) -> int:
     """Flush the buffer once. Returns the number of rows written."""
     async with _buffer_lock:
@@ -112,20 +121,15 @@ async def _flush_once(pool: Any) -> int:
             #
             # SET LOCAL requires an explicit transaction to survive to the next
             # statement; outside one it is discarded as soon as it auto-commits,
-            # so the COPY below would run without the bypass.
+            # so the write below would run without the bypass.
+            #
+            # INSERT, not COPY: PostgreSQL refuses COPY FROM on a table with row
+            # security for every role the policy applies to ("COPY FROM not
+            # supported with row-level security"), so with COPY a runtime role
+            # without BYPASSRLS could never persist a cost event.
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                await conn.copy_records_to_table(
-                    "tenant_provider_cost_events",
-                    records=rows,
-                    columns=[
-                        "tenant_id", "call_id",
-                        "provider", "provider_role", "api_key_fp",
-                        "unit", "quantity", "unit_price_usd", "cost_usd",
-                        "model", "voice_id",
-                        "latency_ms", "status",
-                    ],
-                )
+                await conn.executemany(_INSERT_EVENT_SQL, rows)
         logger.debug("cost_ledger_flushed rows=%d", len(rows))
         return len(rows)
     except Exception as exc:
