@@ -48,6 +48,87 @@ _PASTE_SPLIT = re.compile(r"[\n\r,|\t]+|;(?!ext=)", re.IGNORECASE)
 # Default insert chunk size (mirrors the CSV path).
 DEFAULT_CHUNK_SIZE = 500
 
+# The one cap on row errors every import answer returns (it protects the
+# response size). The answer also carries the true total and a truncated flag
+# so a partial list is never mistaken for the whole list.
+IMPORT_ERRORS_CAP = 100
+# Cells dropped on rows that still imported; kept at its older, larger cap.
+IMPORT_FIELD_ERRORS_CAP = 200
+# How many row errors one import writes to the server log.
+IMPORT_LOG_SAMPLE = 5
+
+# Customer-facing row errors: one plain sentence each, keyed by a stable code.
+ROW_ERROR_TEXT = {
+    "phone_missing": "This row has no phone number.",
+    "phone_invalid": (
+        "This phone number is not valid for the country chosen. "
+        "Use the international format, for example +442071234567."
+    ),
+    "phone_country_required": (
+        "This phone number has no country code. Add the country code "
+        "(for example +44) or choose a country for the import."
+    ),
+    "save_failed": "This contact could not be saved. Please try again.",
+    "update_failed": "This contact already existed and could not be updated. Please try again.",
+    "row_too_many_cells": (
+        "This row has more cells than the sheet has headings. "
+        "Check for a comma that is not inside quotes."
+    ),
+}
+
+
+def mask_phone(phone) -> str:
+    """Last four digits only, for logs."""
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return f"***{digits[-4:]}" if digits else "-"
+
+
+_DIGIT_RUN = re.compile(r"\+?\d[\d\s().-]{5,}\d")
+
+
+def redact_digits(text) -> str:
+    """Mask every phone-like digit run in free text before it is logged."""
+    return _DIGIT_RUN.sub(lambda m: mask_phone(m.group(0)), str(text or ""))
+
+
+def phone_failure_code(raw: str, country_known: Optional[bool] = None,
+                       exc_text: str = "") -> str:
+    """Which plain sentence a refused dial number gets.
+
+    Either the country is known (``country_known``) or, inside the shared
+    ingest, the normaliser's own message says it was missing.
+    """
+    if not (raw or "").strip():
+        return "phone_missing"
+    if country_known is False and not raw.strip().startswith("+"):
+        return "phone_country_required"
+    if country_known is None and exc_text.startswith("Country or region is required"):
+        return "phone_country_required"
+    return "phone_invalid"
+
+
+def cap_errors(items: list, cap: int = IMPORT_ERRORS_CAP) -> tuple[list, int, bool]:
+    """(list to return, true total, truncated)."""
+    return items[:cap], len(items), len(items) > cap
+
+
+def log_import_row_errors(source: str, campaign_id, entries: list) -> None:
+    """One WARNING per import: a count and the first few, phones masked.
+
+    ``entries`` are (row, code, detail, phone) tuples. Nothing here is per row
+    and nothing is INFO.
+    """
+    if not entries:
+        return
+    sample = "; ".join(
+        f"row={row} code={code} phone={mask_phone(phone)} detail={redact_digits(detail)[:200]}"
+        for row, code, detail, phone in entries[:IMPORT_LOG_SAMPLE]
+    )
+    logger.warning(
+        "%s import for campaign %s: %d row errors; first %d: %s",
+        source, campaign_id, len(entries), min(len(entries), IMPORT_LOG_SAMPLE), sample,
+    )
+
 
 @dataclass
 class LeadRecord:
@@ -83,6 +164,9 @@ class IngestError:
     row: Optional[int]
     error: str
     phone: Optional[str]
+    code: str = "save_failed"
+    # Internal cause for the server log only; never sent to the customer.
+    detail: str = ""
 
 
 @dataclass
@@ -214,13 +298,19 @@ def ingest_lead_records(
         raw = (rec.phone_raw or "").strip()
         if not raw:
             result.invalid += 1
-            result.errors.append(IngestError(rec.source_row, "Missing phone_number", None))
+            result.errors.append(IngestError(
+                rec.source_row, ROW_ERROR_TEXT["phone_missing"], None, "phone_missing",
+                "no phone number",
+            ))
             continue
         try:
             phone = normalize(raw)
         except ValueError as e:
             result.invalid += 1
-            result.errors.append(IngestError(rec.source_row, str(e), raw))
+            code = phone_failure_code(raw, None, str(e))
+            result.errors.append(IngestError(
+                rec.source_row, ROW_ERROR_TEXT[code], raw, code, str(e),
+            ))
             continue
 
         if phone in seen or phone in live_phones:
@@ -278,11 +368,13 @@ def ingest_lead_records(
         except OutboundCampaignDirectionConflict:
             raise
         except Exception as e:
-            logger.error("bulk_ingest insert chunk %d-%d failed: %s", i, i + len(chunk), e)
+            logger.error("bulk_ingest insert chunk %d-%d failed: %s", i, i + len(chunk),
+                         redact_digits(e))
             for lead in chunk:
-                result.errors.append(
-                    IngestError(None, f"Database insert failed: {e}", lead.get("phone_number"))
-                )
+                result.errors.append(IngestError(
+                    None, ROW_ERROR_TEXT["save_failed"], lead.get("phone_number"),
+                    "save_failed", str(e),
+                ))
 
     # Revive soft-deleted matches in place.
     for rev in to_revive:
@@ -320,8 +412,10 @@ def ingest_lead_records(
         except OutboundCampaignDirectionConflict:
             raise
         except Exception as e:
-            logger.error("bulk_ingest revive %s failed: %s", rev["id"], e)
-            result.errors.append(IngestError(None, f"Revive failed: {e}", None))
+            logger.error("bulk_ingest revive %s failed: %s", rev["id"], redact_digits(e))
+            result.errors.append(IngestError(
+                None, ROW_ERROR_TEXT["update_failed"], None, "update_failed", str(e),
+            ))
 
     logger.info(
         "bulk_ingest campaign=%s total=%d imported=%d revived=%d dup=%d invalid=%d",
