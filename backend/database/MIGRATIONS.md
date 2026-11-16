@@ -73,7 +73,13 @@ it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
 and `open_security_events` run with the reader's rights (`security_invoker`),
 so the row-level security of the tables beneath them applies.
 
-The current sole head is `0096_contact_list_permission`. It adds six nullable
+The current sole head is `0099_clean_install_tables`. It creates
+`tenant_recording_policy` and `tenant_provider_cost_events` when they are
+missing (a clean install had neither) and changes nothing where they exist.
+The full clean-install steps, roles, grants and checks are in
+[`../docs/clean-install-runbook.md`](../docs/clean-install-runbook.md).
+
+`0096_contact_list_permission` adds six nullable
 consent columns and the check `contact_lists_consent_complete` to
 `contact_lists` (one row per import), so a customer's confirmation that a
 list may be called is stored with its basis, source, permission date and

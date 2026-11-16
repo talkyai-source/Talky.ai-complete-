@@ -722,11 +722,11 @@ CREATE ROLE talky_runtime LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE 
 CREATE DATABASE talkyai OWNER talky_owner;
 ```
 
-**Runtime grants: Not verified.** `main` has no script that grants the runtime
-role its table, sequence and function rights. The read-only gate
+**Runtime grants:** `backend/database/runtime_role_grants.sql` grants the
+runtime role its table, sequence and function rights; see
+`backend/docs/clean-install-runbook.md`. The read-only gate
 `backend/scripts/verify_admin_runtime_privileges.py` reports what is missing.
-Run it after migrations (see 7.4). Codex's unmerged branch adds a
-`runtime_grants.py` tool (section 11); it is not on `main`.
+Run it after migrations (see 7.4).
 
 Bootstrap on the **new, empty** database, from `/opt/talky/backend`. Supply the
 owner DSN through your secret mechanism, not on a command line that is saved
@@ -754,8 +754,8 @@ Rules:
   mounts the 2026-06-02 snapshot for local development.
 - `backend/database/MIGRATIONS.md` still says the sole head is
   `0035_user_profiles_role_widen`. That paragraph is stale. The current sole
-  head in this tree is **`0082_support_system`** (checked by reading all 86
-  revision files: exactly one revision is not a parent of another).
+  head in this tree is **`0099_clean_install_tables`** (exactly one revision is
+  not a parent of another).
 - `complete_schema.sql` is the bootstrap CI uses; it is 3518 lines and has 71
   `CREATE TABLE` statements. Per `MIGRATIONS.md`, it does not contain every
   0009-0021 object, so the full chain must run.
