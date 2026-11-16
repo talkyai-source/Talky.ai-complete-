@@ -16,6 +16,7 @@ const AUTH_FLOW_PATHS = [
     "/auth/register",
     "/auth/reset-password",
     "/auth/forgot-password",
+    "/auth/verify-email",
 ];
 
 function isOnAuthFlowPath() {
