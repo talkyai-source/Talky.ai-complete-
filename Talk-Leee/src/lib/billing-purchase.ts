@@ -81,8 +81,9 @@ export function requireBillingBackend(): void {
 }
 export function approvedCheckoutUrl(url: string, kind: "checkout" | "portal" = "checkout"): string {
   const parsed = new URL(url);
-  const expectedHost = kind === "portal" ? "billing.stripe.com" : "checkout.stripe.com";
-  if (parsed.protocol !== "https:" || parsed.host !== expectedHost || parsed.username || parsed.password) throw new Error("The payment destination could not be verified. Your saved request is unchanged.");
+  // Exact hosts only. PayPal's approval pages are accepted for a checkout, never for the Stripe portal.
+  const expectedHosts = kind === "portal" ? ["billing.stripe.com"] : ["checkout.stripe.com", "www.paypal.com", "www.sandbox.paypal.com"];
+  if (parsed.protocol !== "https:" || !expectedHosts.includes(parsed.host) || parsed.username || parsed.password) throw new Error("The payment destination could not be verified. Your saved request is unchanged.");
   return parsed.href;
 }
 function validateAttempt(data: unknown, saved: SavedPurchase): CheckoutAttempt {

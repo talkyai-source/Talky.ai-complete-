@@ -120,3 +120,39 @@ test("a pending order states uncertainty rather than proving no charge", () => {
     // A pending local row does not establish whether the provider accepted money.
     assert.equal(ORDER_STATUS_LABEL.pending, "Payment unconfirmed");
 });
+
+// ── PayPal top-ups ──
+import { billingConfigSchema, paypalCaptureSchema, paypalCheckoutSchema } from "@/lib/topup-api";
+
+const PAYPAL_ORDER = "00000000-0000-4000-8000-000000000404";
+
+test("the billing config parses with the PayPal fields and treats a missing field as closed", () => {
+    const open = billingConfigSchema.parse({ topups_open: true, paypal_topups_open: true, paypal_topups_unavailable_reason: null });
+    assert.equal(open.paypal_topups_open, true);
+    const older = billingConfigSchema.parse({ topups_open: true });
+    assert.notEqual(older.paypal_topups_open, true);
+    assert.equal(older.paypal_topups_unavailable_reason ?? null, null);
+    const closed = billingConfigSchema.parse({ topups_open: true, paypal_topups_open: false, paypal_topups_unavailable_reason: "Closed for now." });
+    assert.equal(closed.paypal_topups_open, false);
+    assert.equal(closed.paypal_topups_unavailable_reason, "Closed for now.");
+});
+
+test("a malformed PayPal config field does not fail the whole config and reads as closed", () => {
+    const parsed = billingConfigSchema.parse({ topups_open: true, paypal_topups_open: "yes", paypal_topups_unavailable_reason: 7 });
+    assert.equal(parsed.topups_open, true);
+    assert.notEqual(parsed.paypal_topups_open, true);
+});
+
+test("the PayPal checkout answer parses", () => {
+    const parsed = paypalCheckoutSchema.parse({ order_id: PAYPAL_ORDER, paypal_order_id: "5O190127TN364715T",
+        checkout_url: "https://www.paypal.com/checkoutnow?token=5O190127TN364715T", minutes: 250, price_cents: 2500, currency: "gbp" });
+    assert.equal(parsed.minutes, 250);
+    assert.throws(() => paypalCheckoutSchema.parse({ order_id: "nope", paypal_order_id: "x", checkout_url: "https://www.paypal.com/", minutes: 1, price_cents: 1, currency: "gbp" }));
+});
+
+test("the PayPal capture answer parses each status and refuses an unknown one", () => {
+    for (const status of ["paid", "pending", "not_approved", "failed"] as const) {
+        assert.equal(paypalCaptureSchema.parse({ order_id: PAYPAL_ORDER, status, minutes: status === "paid" ? 250 : null }).status, status);
+    }
+    assert.throws(() => paypalCaptureSchema.parse({ order_id: PAYPAL_ORDER, status: "refunded", minutes: null }));
+});

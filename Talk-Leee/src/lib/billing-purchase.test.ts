@@ -2,7 +2,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
 import { env } from "./env";
-import { formatPurchasedPrice, startBillingCheckout, yearlySaving, type SavedPurchase } from "./billing-purchase";
+import { approvedCheckoutUrl, formatPurchasedPrice, startBillingCheckout, yearlySaving, type SavedPurchase } from "./billing-purchase";
 import { createHttpClient, __resetRefreshStateForTests } from "./http-client";
 const original = api.request;
 const originalFetch = globalThis.fetch;
@@ -45,4 +45,27 @@ test("yearly saving is worked out from the server's monthly and yearly amounts",
   // No comparable monthly offer: no claim at all.
   assert.equal(yearlySaving(year, [year]), null);
   assert.equal(yearlySaving(year, [{ ...month, currency: "gbp" }, year]), null);
+});
+
+test("approvedCheckoutUrl accepts the two exact PayPal hosts and Stripe's checkout host", () => {
+  assert.equal(approvedCheckoutUrl("https://www.paypal.com/checkoutnow?token=abc"), "https://www.paypal.com/checkoutnow?token=abc");
+  assert.equal(approvedCheckoutUrl("https://www.sandbox.paypal.com/checkoutnow?token=abc"), "https://www.sandbox.paypal.com/checkoutnow?token=abc");
+  assert.equal(approvedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_1"), "https://checkout.stripe.com/c/pay/cs_1");
+});
+
+for (const refused of [
+  "http://www.paypal.com/checkoutnow",
+  "https://paypal.com.evil.example",
+  "https://www.paypal.com.evil.example",
+  "https://evil.example/?u=https://www.paypal.com",
+  "https://www.paypal.com@evil.example/",
+  "https://user:pw@www.paypal.com/checkoutnow",
+]) {
+  test(`approvedCheckoutUrl refuses ${refused}`, () => {
+    assert.throws(() => approvedCheckoutUrl(refused), /could not be verified/);
+  });
+}
+
+test("a PayPal address is never accepted as the billing portal", () => {
+  assert.throws(() => approvedCheckoutUrl("https://www.paypal.com/checkoutnow", "portal"), /could not be verified/);
 });
