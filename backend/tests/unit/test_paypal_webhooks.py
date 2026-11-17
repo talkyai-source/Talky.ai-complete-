@@ -1,6 +1,7 @@
 """PayPal webhook handler: verify, receipt, dispatch. No database, no network."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -429,3 +430,68 @@ async def test_an_unverified_caller_cannot_forge_log_lines(world, caplog):
     assert line == ("paypal_webhook_rejected event=WH-1?paypal_webhook?event?WH-REAL?state?completed "
                     "type=X??ERROR?fake?line")
     assert len(line) < 200
+
+
+# -- not-yet-completed order, and the verification bound --------------------------------------
+
+
+async def test_completed_notice_for_an_unfinished_order_retries_and_stays_received(world):
+    world.svc.settle_answer = SimpleNamespace(order_id=ORDER, status="not_approved")
+    with pytest.raises(pw.PayPalWebhookRetry):
+        await run(world, body())
+    assert row(world)["state"] == "received" and row(world)["completed_at"] is None
+    world.svc.settle_answer = SimpleNamespace(order_id=ORDER, status="paid")
+    assert await run(world, body()) == {"status": "completed"}
+    assert row(world)["state"] == "completed" and row(world)["attempt_count"] == 2
+    assert len(world.svc.settled) == 2
+
+
+@pytest.mark.parametrize("event_type", ["PAYMENT.CAPTURE.DECLINED", "PAYMENT.CAPTURE.DENIED"])
+async def test_declined_and_denied_notices_keep_their_behaviour(world, event_type):
+    world.svc.settle_answer = SimpleNamespace(order_id=ORDER, status="not_approved")
+    assert await run(world, body(event_type=event_type)) == {"status": "completed"}
+    assert row(world)["detail"] == "capture_not_approved"
+
+
+class HeldClient:
+    def __init__(self):
+        self.gate = asyncio.Event()
+        self.calls = 0
+        self.error = None
+
+    async def verify_webhook_signature(self, **kw):
+        self.calls += 1
+        await self.gate.wait()
+        if self.error:
+            raise self.error
+        return True
+
+
+async def test_at_most_four_verifications_are_in_flight(world):
+    assert pw._MAX_VERIFICATIONS_IN_FLIGHT == 4
+    held = HeldClient()
+    tasks = [asyncio.create_task(run(world, body(event_id=f"WH-{i}"), client=held)) for i in range(4)]
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert held.calls == 4 and pw._verifications_in_flight == 4
+    with pytest.raises(pw.PayPalWebhookRetry):
+        await run(world, body(event_id="WH-5"), client=held)
+    assert held.calls == 4
+    held.gate.set()
+    assert [r["status"] for r in await asyncio.gather(*tasks)] == ["completed"] * 4
+    assert pw._verifications_in_flight == 0
+    assert await run(world, body(event_id="WH-6"), client=held) == {"status": "completed"}
+    assert held.calls == 5
+
+
+async def test_the_counter_returns_to_zero_after_a_verification_error(world):
+    held = HeldClient()
+    held.gate.set()
+    held.error = PayPalError(status=500, retryable=True)
+    with pytest.raises(pw.PayPalWebhookRetry):
+        await run(world, body(), client=held)
+    assert pw._verifications_in_flight == 0
+    held.error = RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        await run(world, body(), client=held)
+    assert pw._verifications_in_flight == 0

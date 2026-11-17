@@ -29,6 +29,8 @@ _SETTLE_EVENTS = frozenset(
     {"PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.DECLINED", "PAYMENT.CAPTURE.DENIED"}
 )
 _FINISHED = frozenset({"completed", "ignored", "needs_review"})
+_MAX_VERIFICATIONS_IN_FLIGHT = 4
+_verifications_in_flight = 0
 _RANK = {"ignored": 0, "completed": 1, "needs_review": 2}
 
 
@@ -129,6 +131,9 @@ async def _dispatch(
         outcome = await service.settle_paypal_order(paypal_order_id=paypal_order_id)
         if outcome is None:
             return "ignored", "not_our_order", None
+        if event_type == "PAYMENT.CAPTURE.COMPLETED" and outcome.status == "not_approved":
+            # PayPal's order does not show as completed yet: keep the receipt open.
+            raise PayPalWebhookRetry("order not completed at PayPal yet")
         return "completed", f"capture_{outcome.status}", str(outcome.order_id)
 
     if event_type == "PAYMENT.CAPTURE.REFUNDED":
@@ -203,6 +208,10 @@ async def handle_paypal_webhook(
         except PayPalNotConfigured:
             raise PayPalWebhookRetry("PayPal is not configured") from None
 
+    global _verifications_in_flight
+    if _verifications_in_flight >= _MAX_VERIFICATIONS_IN_FLIGHT:
+        raise PayPalWebhookRetry("too many verifications in flight")
+    _verifications_in_flight += 1
     try:
         genuine = await client.verify_webhook_signature(
             webhook_id=webhook_id, headers=headers, raw_body=raw_body
@@ -210,6 +219,8 @@ async def handle_paypal_webhook(
     except PayPalError:
         logger.warning("paypal_webhook_verify_unreachable event=%s type=%s", _log(event_id), _log(event_type))
         raise PayPalWebhookRetry("PayPal could not verify the event") from None
+    finally:
+        _verifications_in_flight -= 1
     if not genuine:
         logger.warning("paypal_webhook_rejected event=%s type=%s", _log(event_id), _log(event_type))
         raise PayPalWebhookRejected("signature not verified")
@@ -253,6 +264,8 @@ async def handle_paypal_webhook(
 
     try:
         state, detail, order_id = await _dispatch(pool, service, event_id, event_type, event, resource)
+    except PayPalWebhookRetry:
+        raise  # the receipt stays 'received' so PayPal's next delivery is processed
     except PayPalTopupError as exc:
         if exc.code != "review":
             await _fail(pool, event_id, f"topup_{exc.code}"[:64])
