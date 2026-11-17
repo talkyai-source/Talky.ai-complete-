@@ -73,7 +73,10 @@ it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
 and `open_security_events` run with the reader's rights (`security_invoker`),
 so the row-level security of the tables beneath them applies.
 
-The current sole head is `0101_paypal_webhook_events`: it creates
+The current sole head is `0102_paypal_subscriptions`: it creates the three
+PayPal plan tables (`paypal_plan_options`, `paypal_subscriptions`,
+`paypal_subscription_payments`) with forced row security and leaves Stripe's
+tables untouched. `0101_paypal_webhook_events` creates
 `paypal_webhook_events` (PayPal event ids and a hash, no event body, platform-only
 row security). `0100_force_legal_acceptance_rls` forces row
 security on `legal_acceptances`, which 0085 had enabled but never forced.
