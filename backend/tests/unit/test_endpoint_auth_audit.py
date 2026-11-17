@@ -74,6 +74,7 @@ _WEBHOOKS = {
         "before body/database access, without user or internal-service authority"
     ),
     "POST /api/v1/billing/webhooks": "Stripe webhook; signature verified inline",
+    "POST /api/v1/billing/paypal/webhooks": "PayPal webhook; signature verified with PayPal inline",
     "GET /api/v1/connectors/callback": "OAuth callback; state token verified inline",
     "POST /api/v1/connectors/salesforce/callback-requests/{tenant_id}/{token}": (
         "Salesforce -> Talky callback request; per-tenant webhook token verified inline"

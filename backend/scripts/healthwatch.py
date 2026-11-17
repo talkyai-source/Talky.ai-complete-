@@ -245,8 +245,15 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
             # Only a count is read; never payloads, recipients or event IDs.
             async with acquire_with_tenant(pool, None, timeout=1) as conn:
                 count = await conn.fetchval("SELECT count(*) FROM processed_webhook_events WHERE state='needs_review'")
+                paypal_count = 0
+                if await conn.fetchval("SELECT to_regclass('public.paypal_webhook_events') IS NOT NULL"):
+                    paypal_count = await conn.fetchval(
+                        "SELECT count(*) FROM paypal_webhook_events WHERE state = 'needs_review' "
+                        "OR (state IN ('failed', 'received') AND received_at < NOW() - INTERVAL '1 hour')")
+                count = (count or 0) + (paypal_count or 0)
                 tenants = await conn.fetch("SELECT id FROM tenants ORDER BY id LIMIT $1", max_tenants+1)
-            result["payments"] = {"status": "alert" if count else "ok", "needs_review": count}
+            result["payments"] = {"status": "alert" if count else "ok", "needs_review": count,
+                                "paypal_needs_review": paypal_count or 0}
             if len(tenants) > max_tenants:
                 result["trunks"] = {"status": "unavailable", "reason": "tenant_limit_exceeded"}
                 return result
