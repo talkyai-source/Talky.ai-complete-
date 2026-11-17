@@ -8,7 +8,8 @@ tables beside them:
   data, so the platform-only policy ``plan_price_options`` has.
 * ``paypal_subscriptions``: one row per purchase a customer started. Its id is
   the browser's request id, so a retry is the same purchase. A partial unique
-  index allows one live row per tenant.
+  index allows one live row per tenant. ``status`` is ours; ``paypal_status``
+  is the last status PayPal reported.
 * ``paypal_subscription_payments``: one row per PayPal payment on a
   subscription (the invoice list reads it). Ids and amounts only: no payer
   name, email or address is stored.
@@ -59,6 +60,7 @@ def upgrade():
         snapshot               JSONB NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
         status                 TEXT NOT NULL CHECK (status IN ('creating', 'unknown', 'approval_pending',
                                    'active', 'past_due', 'suspended', 'cancelled', 'expired', 'failed')),
+        paypal_status          TEXT,
         approval_url           TEXT,
         activated_at           TIMESTAMPTZ,
         current_period_start   TIMESTAMPTZ,
