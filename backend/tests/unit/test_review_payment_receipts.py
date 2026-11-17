@@ -44,6 +44,8 @@ class Conn:
     async def fetchval(self, sql, *args):
         if "pg_try_advisory_xact_lock" in sql:
             return True
+        if "to_regclass('public.paypal_webhook_events')" in sql:  # healthwatch's probe: no PayPal table here
+            return False
         if "state='needs_review'" in sql and "count(*)" in sql:  # healthwatch's exact query
             return sum(1 for r in self.s.rows.values() if r["state"] == "needs_review")
         raise AssertionError(sql)
@@ -162,11 +164,15 @@ async def test_healthwatch_query_no_longer_counts_a_dismissed_receipt(store):
         yield Conn(store)
 
     watch.acquire_with_tenant = acquire
-    assert (await watch.check_database(object(), None, now=None))["payments"] == {"status": "alert", "needs_review": 2}
+    # The PayPal part of the count is its own key; with no PayPal table it is zero.
+    assert (await watch.check_database(object(), None, now=None))["payments"] == {
+        "status": "alert", "needs_review": 2, "paypal_needs_review": 0}
     await recon().dismiss("evt_a", operator="op", reason=REASON)
-    assert (await watch.check_database(object(), None, now=None))["payments"] == {"status": "alert", "needs_review": 1}
+    assert (await watch.check_database(object(), None, now=None))["payments"] == {
+        "status": "alert", "needs_review": 1, "paypal_needs_review": 0}
     await recon().dismiss("evt_b", operator="op", reason=REASON)
-    assert (await watch.check_database(object(), None, now=None))["payments"] == {"status": "ok", "needs_review": 0}
+    assert (await watch.check_database(object(), None, now=None))["payments"] == {
+        "status": "ok", "needs_review": 0, "paypal_needs_review": 0}
 
 
 def _event():
