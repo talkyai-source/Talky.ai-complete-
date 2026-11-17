@@ -70,9 +70,10 @@ const PAYPAL_ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 const PAYPAL_PENDING_TEXT = "PayPal is still confirming this payment. Your minutes are added as soon as it is confirmed.";
 const PAYPAL_NOT_APPROVED_TEXT = "The PayPal payment was not completed. You have not been charged.";
 const PAYPAL_FAILED_TEXT = "PayPal could not take this payment. You have not been charged.";
+const PAYPAL_REVIEW_TEXT = "This payment needs a manual check. Nothing has been added to your minutes yet. Please contact support and give the order reference below.";
 const PAYPAL_UNCONFIRMED_TEXT = "We could not confirm the payment yet. If PayPal took it, your minutes are added shortly.";
 /** What the capture call answered: its status, or "error" when the call itself failed. */
-type PaypalCaptureState = "paid" | "pending" | "not_approved" | "failed" | "error";
+type PaypalCaptureState = "paid" | "pending" | "not_approved" | "failed" | "review" | "error";
 
 export function TopupCard({
   // Test seams only; production always settles on the exported timings.
@@ -96,7 +97,7 @@ export function TopupCard({
   const paypalMalformed = paypalSuccess && paypalOrderId === null;
   const [paypalCapture, setPaypalCapture] = useState<{ orderId: string; state: PaypalCaptureState } | null>(null);
   const paypalState: PaypalCaptureState | null = paypalOrderId !== null && paypalCapture?.orderId === paypalOrderId ? paypalCapture.state : null;
-  const paypalFinalNo = paypalMalformed || paypalState === "not_approved" || paypalState === "failed";
+  const paypalFinalNo = paypalMalformed || paypalState === "not_approved" || paypalState === "failed" || paypalState === "review";
 
   // After ?topup=success the saved order and balance are read every few
   // seconds until the provider's webhook has settled the newest order one way
@@ -110,12 +111,15 @@ export function TopupCard({
     return () => clearTimeout(timer);
   }, [settling, settleTimeoutMs]);
   const settleActive = settling && !settleExpired;
+  // A PayPal return names its order; a Stripe return does not, so it reads the newest one.
+  const orderForReturn = (read: TopupOrder[]): TopupOrder | null =>
+    paypalOrderId !== null ? read.find((order) => order.id === paypalOrderId) ?? null : newestOrder(read);
   const pollWhileUnconfirmed = (read: TopupOrder[] | undefined) =>
-    returnOutcome("success", read !== undefined, newestOrder(read ?? [])) === "unconfirmed" ? settlePollMs : false;
+    returnOutcome("success", read !== undefined, orderForReturn(read ?? [])) === "unconfirmed" ? settlePollMs : false;
 
   const packagesQ = useTopupPackages();
   const ordersQ = useTopupOrders(settleActive ? pollWhileUnconfirmed : undefined);
-  const newest = newestOrder(ordersQ.data ?? []);
+  const newest = orderForReturn(ordersQ.data ?? []);
   const outcome = returnOutcome(returned, ordersQ.isSuccess, newest);
   const balanceQ = useTopupBalance(settleActive && outcome === "unconfirmed" ? settlePollMs : undefined);
   const start = useStartTopup();
@@ -156,7 +160,7 @@ export function TopupCard({
     const promise = capturePaypalOrder(orderId)
       .then(
         (result): PaypalCaptureState => result.status,
-        (): PaypalCaptureState => "error",
+        (err: unknown): PaypalCaptureState => (isApiClientError(err) && err.status === 409 ? "review" : "error"),
       )
       .then((state) => {
         setPaypalCapture({ orderId, state });
@@ -199,7 +203,7 @@ export function TopupCard({
       const result = await paypalStart.mutateAsync(pkg.code);
       try {
         // Leaves the app; only PayPal's own hosts are followed.
-        window.location.assign(approvedCheckoutUrl(result.checkout_url));
+        window.location.assign(approvedCheckoutUrl(result.checkout_url, "paypal"));
       } catch (err) {
         setNotice(`${err instanceof Error ? err.message : "The payment page could not be opened."} Check your saved orders before trying again.`);
         setChosen(null);
@@ -322,7 +326,7 @@ export function TopupCard({
         {/* ── returning from the payment page ── */}
         {returned && <div role="status" className="space-y-2 rounded-lg border p-3 text-sm">
           {paypalFinalNo ? (
-            <p>{paypalMalformed || paypalState === "not_approved" ? PAYPAL_NOT_APPROVED_TEXT : PAYPAL_FAILED_TEXT}</p>
+            <p>{paypalState === "review" ? PAYPAL_REVIEW_TEXT : paypalMalformed || paypalState === "not_approved" ? PAYPAL_NOT_APPROVED_TEXT : PAYPAL_FAILED_TEXT}</p>
           ) : outcome === "paid" && newest ? (
             <p className="font-semibold text-emerald-700 dark:text-emerald-400">
               {ORDER_STATUS_LABEL.paid}: {newest.minutes.toLocaleString()} minutes. The saved order below confirms this payment.

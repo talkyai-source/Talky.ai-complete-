@@ -48,9 +48,23 @@ test("yearly saving is worked out from the server's monthly and yearly amounts",
 });
 
 test("approvedCheckoutUrl accepts the two exact PayPal hosts and Stripe's checkout host", () => {
-  assert.equal(approvedCheckoutUrl("https://www.paypal.com/checkoutnow?token=abc"), "https://www.paypal.com/checkoutnow?token=abc");
-  assert.equal(approvedCheckoutUrl("https://www.sandbox.paypal.com/checkoutnow?token=abc"), "https://www.sandbox.paypal.com/checkoutnow?token=abc");
+  assert.equal(approvedCheckoutUrl("https://www.paypal.com/checkoutnow?token=abc", "paypal"), "https://www.paypal.com/checkoutnow?token=abc");
+  assert.equal(approvedCheckoutUrl("https://www.sandbox.paypal.com/checkoutnow?token=abc", "paypal"), "https://www.sandbox.paypal.com/checkoutnow?token=abc");
   assert.equal(approvedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_1"), "https://checkout.stripe.com/c/pay/cs_1");
+});
+
+test("the paypal kind accepts the two PayPal hosts only and refuses Stripe's checkout", () => {
+  assert.equal(approvedCheckoutUrl("https://www.paypal.com/checkoutnow?token=abc", "paypal"), "https://www.paypal.com/checkoutnow?token=abc");
+  assert.equal(approvedCheckoutUrl("https://www.sandbox.paypal.com/checkoutnow?token=abc", "paypal"), "https://www.sandbox.paypal.com/checkoutnow?token=abc");
+  assert.throws(() => approvedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_1", "paypal"), /could not be verified/);
+});
+
+test("the checkout kind refuses the PayPal hosts and accepts Stripe's; portal is unchanged", () => {
+  assert.throws(() => approvedCheckoutUrl("https://www.paypal.com/checkoutnow", "checkout"), /could not be verified/);
+  assert.throws(() => approvedCheckoutUrl("https://www.sandbox.paypal.com/checkoutnow"), /could not be verified/);
+  assert.equal(approvedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_1", "checkout"), "https://checkout.stripe.com/c/pay/cs_1");
+  assert.equal(approvedCheckoutUrl("https://billing.stripe.com/p/session/x", "portal"), "https://billing.stripe.com/p/session/x");
+  assert.throws(() => approvedCheckoutUrl("https://checkout.stripe.com/c/pay/cs_1", "portal"), /could not be verified/);
 });
 
 for (const refused of [
@@ -61,8 +75,8 @@ for (const refused of [
   "https://www.paypal.com@evil.example/",
   "https://user:pw@www.paypal.com/checkoutnow",
 ]) {
-  test(`approvedCheckoutUrl refuses ${refused}`, () => {
-    assert.throws(() => approvedCheckoutUrl(refused), /could not be verified/);
+  test(`approvedCheckoutUrl refuses ${refused} under every kind`, () => {
+    for (const kind of ["checkout", "paypal", "portal"] as const) assert.throws(() => approvedCheckoutUrl(refused, kind), /could not be verified/);
   });
 }
 

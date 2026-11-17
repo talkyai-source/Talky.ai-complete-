@@ -79,10 +79,10 @@ export function hasManagedSubscription(subscription: BillingSubscription | null)
 export function requireBillingBackend(): void {
   if (!env.NEXT_PUBLIC_API_BASE_URL) throw new Error("Billing is unavailable because its service connection is not configured. Please contact support; no purchase was started.");
 }
-export function approvedCheckoutUrl(url: string, kind: "checkout" | "portal" = "checkout"): string {
+export function approvedCheckoutUrl(url: string, kind: "checkout" | "portal" | "paypal" = "checkout"): string {
   const parsed = new URL(url);
-  // Exact hosts only. PayPal's approval pages are accepted for a checkout, never for the Stripe portal.
-  const expectedHosts = kind === "portal" ? ["billing.stripe.com"] : ["checkout.stripe.com", "www.paypal.com", "www.sandbox.paypal.com"];
+  // Exact hosts only, per kind: Stripe's checkout, Stripe's portal, or PayPal's approval pages.
+  const expectedHosts = kind === "portal" ? ["billing.stripe.com"] : kind === "paypal" ? ["www.paypal.com", "www.sandbox.paypal.com"] : ["checkout.stripe.com"];
   if (parsed.protocol !== "https:" || !expectedHosts.includes(parsed.host) || parsed.username || parsed.password) throw new Error("The payment destination could not be verified. Your saved request is unchanged.");
   return parsed.href;
 }

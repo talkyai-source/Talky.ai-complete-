@@ -31,6 +31,7 @@ const NOT_APPROVED_TEXT = "The PayPal payment was not completed. You have not be
 const FAILED_TEXT = "PayPal could not take this payment. You have not been charged.";
 const UNCONFIRMED_TEXT = "We could not confirm the payment yet. If PayPal took it, your minutes are added shortly.";
 const PAID_TEXT = "Paid order: 125 minutes. The saved order below confirms this payment.";
+const REVIEW_TEXT = "This payment needs a manual check. Nothing has been added to your minutes yet. Please contact support and give the order reference below.";
 const CANCELLED_TEXT = "Checkout was cancelled. No payment was taken for this attempt.";
 
 let reads: Record<string, number> = {};
@@ -243,4 +244,44 @@ test("the Stripe return path (no provider) makes no capture call and keeps its c
   await sleep(30);
   assert.equal(count("/paypal/capture"), 0);
   assert.equal(screen.queryByText(NOT_APPROVED_TEXT), null);
+});
+
+// ── the returned order, not the newest one ──
+// Another order (60 minutes) was paid after the returned one was created, so it is the newest saved order.
+const otherPaid: TopupOrder = { ...paidOrder, id: "00000000-0000-4000-8000-000000000505", minutes: 60, created_at: "2026-10-02T00:00:00Z", paid_at: "2026-10-02T00:00:01Z" };
+const returnedPending: TopupOrder = { ...pendingOrder, created_at: "2026-10-01T00:00:00Z" };
+const returnedPaid: TopupOrder = { ...paidOrder, created_at: "2026-10-01T00:00:00Z" };
+
+test("a PayPal return never shows a different paid order as this payment; its own order decides", async () => {
+  capture = () => json({ order_id: ORDER_ID, status: "pending", minutes: null });
+  setup(back(""), [otherPaid, returnedPending]);
+  await screen.findByText(PENDING_TEXT);
+  assert.equal(screen.queryAllByText(/confirms this payment/).length, 0, "the other paid order is not this payment");
+  ordersNow = () => [otherPaid, returnedPaid];
+  await screen.findByText(PAID_TEXT, undefined, { timeout: 2000 });
+  assert.equal(screen.queryAllByText(/60 minutes\. The saved order/).length, 0);
+});
+
+test("a PayPal return whose order is not in the saved list yet is not confirmed, whatever else is paid", async () => {
+  capture = () => json({ order_id: ORDER_ID, status: "pending", minutes: null });
+  setup(back(""), [otherPaid]);
+  await screen.findByText(PENDING_TEXT);
+  assert.equal(screen.queryAllByText(/confirms this payment/).length, 0);
+  const before = count("/orders");
+  await sleep(100);
+  assert.ok(count("/orders") > before, "polling continues");
+});
+
+// ── a payment that needs a manual check ──
+test("a capture answered 409 says the payment needs a manual check, stops polling and shows the order reference", async () => {
+  capture = () => json({ detail: "Payment does not match the order" }, 409);
+  setup(back(""), [pendingOrder]);
+  await screen.findByText(REVIEW_TEXT);
+  assert.equal(screen.queryAllByText(/added shortly/).length, 0);
+  await screen.findByText(`Order reference: ${ORDER_ID}`);
+  await sleep(40);
+  const settled = count("/orders");
+  await sleep(100);
+  assert.equal(count("/orders"), settled, "polling stopped");
+  assert.equal(count("/paypal/capture"), 1);
 });
