@@ -36,6 +36,7 @@ from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
+    MAX_PASSWORD_LENGTH,
     PasswordValidationError,
     hash_password,
     validate_password_strength,
@@ -94,7 +95,7 @@ class ForgotPasswordRequest(BaseModel):
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
     code: str = Field(min_length=4, max_length=12)
-    new_password: str
+    new_password: str = Field(..., max_length=MAX_PASSWORD_LENGTH)
     confirm_password: Optional[str] = None
 
 

@@ -6,6 +6,8 @@ import unicodedata
 
 from pydantic import AfterValidator, BaseModel, EmailStr, Field
 
+from app.core.security.password import MAX_PASSWORD_LENGTH
+
 
 def _validate_account_name(value: str) -> str:
     if any(unicodedata.category(char) == "Cc" for char in value):
@@ -40,9 +42,13 @@ class RegisterRequest(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+# Generous on purpose: sign-in must not lock out accounts whose stored password predates the 128 rule.
+LOGIN_PASSWORD_MAX_LENGTH = 1024
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=LOGIN_PASSWORD_MAX_LENGTH)
     turnstile_token: Optional[str] = Field(default=None, min_length=1, max_length=2048)
 
 
@@ -201,7 +207,7 @@ class SignupVerifyCodeResponse(BaseModel):
 class SignupCompleteRequest(BaseModel):
     email: EmailStr
     code: str
-    password: str
+    password: str = Field(..., max_length=MAX_PASSWORD_LENGTH)
     confirm_password: str
     terms_version: Optional[str] = Field(None, min_length=1, max_length=128)
     privacy_version: Optional[str] = Field(None, min_length=1, max_length=128)
