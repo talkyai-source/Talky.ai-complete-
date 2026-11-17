@@ -67,10 +67,9 @@ def paypal_credentials() -> tuple[str, str] | None:
     if env == "sandbox":
         client_id = os.getenv("PAYPAL_SANDBOX_CLIENT_ID", "").strip()
         secret = os.getenv("PAYPAL_SANDBOX_CLIENT_SECRET", "").strip()
-        if client_id and secret:
-            return client_id, secret
-    client_id = os.getenv("PAYPAL_CLIENT_ID", "").strip()
-    secret = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
+    else:
+        client_id = os.getenv("PAYPAL_CLIENT_ID", "").strip()
+        secret = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
     if client_id and secret:
         return client_id, secret
     return None

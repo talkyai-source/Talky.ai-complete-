@@ -574,10 +574,15 @@ def test_get_client_without_webhook_id_and_rebuild(clean_env):
     clean_env.setenv("PAYPAL_ENV", "sandbox")
     clean_env.setenv("PAYPAL_CLIENT_ID", CLIENT_ID)
     clean_env.setenv("PAYPAL_CLIENT_SECRET", SECRET)
+    # The live pair is never sent to the sandbox: sandbox needs its own pair.
+    with pytest.raises(PayPalNotConfigured):
+        pc.get_paypal_client()
+    clean_env.setenv("PAYPAL_SANDBOX_CLIENT_ID", CLIENT_ID + "-sandbox")
+    clean_env.setenv("PAYPAL_SANDBOX_CLIENT_SECRET", SECRET + "-sandbox")
     first = pc.get_paypal_client()
     assert first._base == "https://api-m.sandbox.paypal.com"
     assert pc.get_paypal_client() is first
-    clean_env.setenv("PAYPAL_CLIENT_ID", CLIENT_ID + "-other")
+    clean_env.setenv("PAYPAL_SANDBOX_CLIENT_ID", CLIENT_ID + "-other")
     second = pc.get_paypal_client()
     assert second is not first
     assert pc.get_paypal_client() is second

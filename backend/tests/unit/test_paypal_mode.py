@@ -72,15 +72,18 @@ def test_live_credentials_need_both(monkeypatch):
     assert pm.paypal_credentials() is None
 
 
-def test_sandbox_own_pair_then_fallback(monkeypatch):
+def test_sandbox_uses_only_its_own_pair(monkeypatch):
     monkeypatch.setenv("PAYPAL_ENV", "sandbox")
+    monkeypatch.setenv("PAYPAL_WEBHOOK_ID", "wh")
     monkeypatch.setenv("PAYPAL_CLIENT_ID", ID)
     monkeypatch.setenv("PAYPAL_CLIENT_SECRET", SECRET)
-    assert pm.paypal_credentials() == (ID, SECRET)
+    assert pm.paypal_credentials() is None  # the live pair is never sent to the sandbox
+    assert pm.paypal_configured() is False
     monkeypatch.setenv("PAYPAL_SANDBOX_CLIENT_ID", SB_ID)
-    assert pm.paypal_credentials() == (ID, SECRET)  # half a pair is not used
+    assert pm.paypal_credentials() is None  # half a pair is not used
     monkeypatch.setenv("PAYPAL_SANDBOX_CLIENT_SECRET", SB_SECRET)
     assert pm.paypal_credentials() == (SB_ID, SB_SECRET)
+    assert pm.paypal_configured() is True
 
 
 def test_webhook_id_trimmed(monkeypatch):
