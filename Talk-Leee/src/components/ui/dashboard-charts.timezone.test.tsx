@@ -4,9 +4,10 @@ import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { LiveCallsTimeSeriesChart } from "./dashboard-charts";
 
+// Hour buckets: these tests are about the zone of the tick times (day buckets print dates since FX7c 0.3).
 const buckets = [
-    { startMs: Date.parse("2026-10-31T19:00:00Z"), endMs: Date.parse("2026-11-01T19:00:00Z"), total: 2, answered: 2, failed: 0, avgDurationSec: 60 },
-    { startMs: Date.parse("2026-11-01T19:00:00Z"), endMs: Date.parse("2026-11-02T19:00:00Z"), total: 3, answered: 3, failed: 0, avgDurationSec: 60 },
+    { startMs: Date.parse("2026-10-31T19:00:00Z"), endMs: Date.parse("2026-10-31T20:00:00Z"), total: 2, answered: 2, failed: 0, avgDurationSec: 60 },
+    { startMs: Date.parse("2026-11-01T19:00:00Z"), endMs: Date.parse("2026-11-01T20:00:00Z"), total: 3, answered: 3, failed: 0, avgDurationSec: 60 },
 ];
 beforeEach(() => {
     const original = Date.prototype.toLocaleTimeString;

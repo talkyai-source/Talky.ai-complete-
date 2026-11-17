@@ -1732,6 +1732,16 @@ function pointerDrawingX(clientX: number, rect: { left: number; width: number; h
   return (clientX - rect.left - (rect.width - w * scale) / 2) / scale;
 }
 
+/** Where a point of the drawing (in drawing units) is on screen: the inverse of pointerDrawingX, for both axes. */
+function drawingPointOnScreen(p: { x: number; y: number }, rect: { left: number; top: number; width: number; height: number }, w: number, h: number) {
+  const scale = Math.min(rect.width / w, rect.height / h);
+  if (!(scale > 0) || !Number.isFinite(scale)) return { x: rect.left + p.x, y: rect.top + p.y };
+  return {
+    x: rect.left + (rect.width - w * scale) / 2 + p.x * scale,
+    y: rect.top + (rect.height - h * scale) / 2 + p.y * scale,
+  };
+}
+
 function formatMmSs(seconds: number) {
   const s = Math.max(0, Math.round(seconds));
   const mm = Math.floor(s / 60);
@@ -1877,7 +1887,15 @@ export function LiveCallsTimeSeriesChart({
     if (n === 0) return [];
     const indices = Array.from(new Set([0, Math.floor((n - 1) / 3), Math.floor(((n - 1) * 2) / 3), n - 1]));
     const fallbackMs = visible.items[0]?.startMs ?? 0;
-    return indices.map((i) => ({ i, x: scale.xFor(i), label: formatHhMm(visible.items[i]?.startMs ?? fallbackMs, timeZone) }));
+    return indices.map((i) => {
+      const b = visible.items[i];
+      const startMs = b?.startMs ?? fallbackMs;
+      // A day bucket starts at its zone's midnight, so its time is the same on every label: print its date.
+      const label = b && b.endMs - b.startMs >= DAY_BUCKET_MIN_MS
+        ? formatZoneDateLabel(startMs, timeZone ?? browserTimeZoneName())
+        : formatHhMm(startMs, timeZone);
+      return { i, x: scale.xFor(i), label };
+    });
   }, [scale, visible.items, timeZone]);
 
   const markerInView = useMemo(() => {
@@ -1976,7 +1994,8 @@ export function LiveCallsTimeSeriesChart({
     const rect = svg.getBoundingClientRect();
     setActiveIdx(idx);
     onActiveBucketChange?.(visible.items[idx] ?? null);
-    showTooltipForIndex(idx, rect.left + p.x, rect.top + p.y);
+    const at = drawingPointOnScreen(p, rect, chart.w, chart.h);
+    showTooltipForIndex(idx, at.x, at.y);
   };
 
   const resetView = () => {
@@ -2027,7 +2046,7 @@ export function LiveCallsTimeSeriesChart({
           const svg = svgRef.current;
           if (!svg) return;
           const rect = svg.getBoundingClientRect();
-          const x = e.clientX - rect.left;
+          const x = pointerDrawingX(e.clientX, rect, chart.w, chart.h);
           const t = clamp((x - chart.left) / Math.max(1, chart.plotW), 0, 1);
           const nextZoom = clamp(zoom + (e.deltaY > 0 ? -0.12 : 0.12), 1, 2);
           const n = buckets.length;
@@ -2046,7 +2065,7 @@ export function LiveCallsTimeSeriesChart({
             const svg = svgRef.current;
             if (!svg || visible.items.length === 0) return;
             const rect = svg.getBoundingClientRect();
-            const x = e.clientX - rect.left;
+            const x = pointerDrawingX(e.clientX, rect, chart.w, chart.h);
             const clamped = clamp(x, chart.left, chart.left + chart.plotW);
             const t = (clamped - chart.left) / Math.max(1, chart.plotW);
             const idx = clamp(Math.round(t * Math.max(0, visible.items.length - 1)), 0, Math.max(0, visible.items.length - 1));
