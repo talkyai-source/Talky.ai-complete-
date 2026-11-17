@@ -32,12 +32,9 @@ PAYPAL_WEBHOOK_EVENTS: tuple[str, ...] = (
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
-def _env(name: str) -> str:
-    return os.getenv(name, "").strip()
-
 
 def paypal_env() -> Literal["live", "sandbox"] | None:
-    value = _env("PAYPAL_ENV").lower()
+    value = os.getenv("PAYPAL_ENV", "").strip().lower()
     if value == "live":
         return "live"
     if value == "sandbox":
@@ -68,19 +65,19 @@ def paypal_credentials() -> tuple[str, str] | None:
     if env is None:
         return None
     if env == "sandbox":
-        client_id = _env("PAYPAL_SANDBOX_CLIENT_ID")
-        secret = _env("PAYPAL_SANDBOX_CLIENT_SECRET")
+        client_id = os.getenv("PAYPAL_SANDBOX_CLIENT_ID", "").strip()
+        secret = os.getenv("PAYPAL_SANDBOX_CLIENT_SECRET", "").strip()
         if client_id and secret:
             return client_id, secret
-    client_id = _env("PAYPAL_CLIENT_ID")
-    secret = _env("PAYPAL_CLIENT_SECRET")
+    client_id = os.getenv("PAYPAL_CLIENT_ID", "").strip()
+    secret = os.getenv("PAYPAL_CLIENT_SECRET", "").strip()
     if client_id and secret:
         return client_id, secret
     return None
 
 
 def paypal_webhook_id() -> str | None:
-    return _env("PAYPAL_WEBHOOK_ID") or None
+    return os.getenv("PAYPAL_WEBHOOK_ID", "").strip() or None
 
 
 def paypal_configured() -> bool:
@@ -92,7 +89,7 @@ def paypal_configured() -> bool:
 
 
 def paypal_topups_switch() -> Literal["off", "team", "on"]:
-    value = _env("PAYPAL_TOPUPS_ENABLED").lower()
+    value = os.getenv("PAYPAL_TOPUPS_ENABLED", "").strip().lower()
     if value == "team":
         return "team"
     if value in _TRUE_VALUES:
