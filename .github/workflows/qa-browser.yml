@@ -1,21 +1,25 @@
-name: Optional PR browser checks
+name: PR browser checks
 
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      update_linux_snapshots:
+        description: Write the Linux reference images and upload them (no comparison)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   browser:
-    name: Browser smoke and visual (optional)
+    name: Browser smoke and visual
     # Not ubuntu-latest: it moved to 26.04 on 15 Nov 2026, where
     # `playwright install` stops with "does not support chromium on ubuntu26.04".
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    continue-on-error: true
     defaults:
       run:
         working-directory: Talk-Leee
@@ -35,7 +39,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: Talk-Leee/package-lock.json
+          cache-dependency-path: |
+            Talk-Leee/package-lock.json
+            Admin/frontend/package-lock.json
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       # Check the build that ships: next dev mounts every component twice
@@ -51,14 +57,52 @@ jobs:
             sleep 2
           done
           curl -fsS -o /dev/null http://127.0.0.1:3100/
+      # The admin journey drives the Admin app's own production build, which
+      # must call the API on its own origin (the spec answers it in the browser).
+      - name: Install the Admin app
+        if: ${{ !inputs.update_linux_snapshots }}
+        working-directory: Admin/frontend
+        run: npm ci
+      - name: Build the Admin app as it ships
+        if: ${{ !inputs.update_linux_snapshots }}
+        working-directory: Admin/frontend
+        env:
+          VITE_API_BASE_URL: /api/v1
+        run: npm run build
+      - name: Start the Admin production preview on the port the admin journey uses
+        if: ${{ !inputs.update_linux_snapshots }}
+        working-directory: Admin/frontend
+        run: |
+          nohup npm run preview -- --host 127.0.0.1 --port 4173 --strictPort > admin-preview.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:4173/ && break
+            sleep 2
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:4173/
       - name: Existing smoke and visual expectations (no snapshot rewrite)
-        run: npx playwright test tests/demo.smoke.spec.ts tests/dashboard-first-row.visual.spec.ts --project=chromium --workers=1 --reporter=list,html
+        if: ${{ !inputs.update_linux_snapshots }}
+        env:
+          ADMIN_BASE_URL: http://127.0.0.1:4173
+        run: npx playwright test tests/demo.smoke.spec.ts tests/dashboard-first-row.visual.spec.ts tests/journey-sign-in.spec.ts tests/journey-campaign-create.spec.ts tests/journey-import.spec.ts tests/journey-billing.spec.ts tests/journey-admin.spec.ts --project=chromium --workers=1 --reporter=list,html
+      # Manual run with the input ticked only: nothing is compared, and the
+      # images are uploaded, not committed.
+      - name: Write the Linux reference images
+        if: ${{ inputs.update_linux_snapshots }}
+        run: npx playwright test tests/dashboard-first-row.visual.spec.ts --project=chromium --workers=1 --update-snapshots --reporter=list
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.update_linux_snapshots }}
+        with:
+          name: linux-reference-images
+          path: Talk-Leee/tests/dashboard-first-row.visual.spec.ts-snapshots/*-linux.png
+          if-no-files-found: error
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: optional-browser-results
+          name: browser-results
           path: |
             Talk-Leee/test-results
             Talk-Leee/playwright-report
             Talk-Leee/next-start.log
+            Admin/frontend/admin-preview.log
           retention-days: 14

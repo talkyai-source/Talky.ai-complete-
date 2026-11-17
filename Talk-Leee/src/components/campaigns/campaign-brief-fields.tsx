@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/select";
 import {
     CAMPAIGN_NEXT_ACTION_OPTIONS,
     CAMPAIGN_TRANSFER_DAYS,
+    campaignBriefInvalidFields,
     campaignBriefValidation,
     campaignTransferErrors,
     MAX_TRANSFER_DESTINATIONS,
@@ -17,6 +18,7 @@ import {
     type CampaignTransferHours,
     type CampaignTransferIfNoAnswer,
     type CampaignBriefDraft,
+    type CampaignBriefInvalidField,
     type CampaignBriefLeadField,
     type CampaignNextAction,
     type CampaignFormField,
@@ -60,6 +62,11 @@ export function CampaignBriefFields({
     direction?: "outbound" | "inbound";
 }) {
     const validation = campaignBriefValidation(value);
+    // The message at the foot of the brief is tied to the field it is about.
+    const validationId = `${idPrefix}-validation-error`;
+    const invalidFields = validation ? campaignBriefInvalidFields(value) : [];
+    const inError = (field: CampaignBriefInvalidField) => invalidFields.includes(field);
+    const errorTie = (field: CampaignBriefInvalidField) => (inError(field) ? { "aria-invalid": true, "aria-describedby": validationId } : {});
     const transferApproved = value.approved_next_actions.includes("transfer");
 
     function update(patch: Partial<CampaignBriefDraft>) {
@@ -163,7 +170,8 @@ export function CampaignBriefFields({
                         maxLength={500}
                         required
                         disabled={disabled}
-                        aria-describedby={`${idPrefix}-opening-help`}
+                        aria-invalid={inError("opening_objective") || undefined}
+                        aria-describedby={`${idPrefix}-opening-help${inError("opening_objective") ? ` ${validationId}` : ""}`}
                         className="flex w-full resize-y rounded-lg border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                     />
                     <p id={`${idPrefix}-opening-help`} className="flex justify-between gap-3 text-xs text-muted-foreground">
@@ -180,6 +188,7 @@ export function CampaignBriefFields({
                         placeholder="Head of Operations"
                         maxLength={160}
                         disabled={disabled}
+                        {...errorTie("decision_maker_role")}
                     />
                     <p className="text-xs text-muted-foreground">
                         Leave blank when any informed contact can progress the call.
@@ -209,6 +218,7 @@ export function CampaignBriefFields({
                                     checked={checked}
                                     onChange={(event) => toggleAction(option.value, event.target.checked)}
                                     disabled={disabled}
+                                    {...(option.value === "transfer" ? errorTie("transfer_action") : {})}
                                     className="mt-0.5 h-4 w-4 rounded border-input accent-emerald-600"
                                 />
                                 <span>
@@ -228,11 +238,11 @@ export function CampaignBriefFields({
                     <legend className="text-sm font-medium">Approved follow-up email</legend>
                     <p className="text-xs text-muted-foreground">Configure the exact message below and connect your email integration. The agent sends it only after confirming the caller&apos;s address and request.</p>
                     <Label htmlFor={`${idPrefix}-email-subject`}>Subject</Label>
-                    <Input id={`${idPrefix}-email-subject`} maxLength={200} disabled={disabled}
+                    <Input id={`${idPrefix}-email-subject`} maxLength={200} disabled={disabled} {...errorTie("email_subject")}
                         value={value.email_action?.subject ?? ""}
                         onChange={(event) => update({ email_action: { subject: event.target.value, body: value.email_action?.body ?? "" } })} />
                     <Label htmlFor={`${idPrefix}-email-body`}>Message</Label>
-                    <textarea id={`${idPrefix}-email-body`} rows={4} maxLength={8000} disabled={disabled}
+                    <textarea id={`${idPrefix}-email-body`} rows={4} maxLength={8000} disabled={disabled} {...errorTie("email_body")}
                         className="w-full rounded-md border border-input bg-background p-3 text-sm"
                         value={value.email_action?.body ?? ""}
                         onChange={(event) => update({ email_action: { subject: value.email_action?.subject ?? "", body: event.target.value } })} />
@@ -249,6 +259,7 @@ export function CampaignBriefFields({
                             <Label htmlFor={`${idPrefix}-form-${key}`}>{label}</Label>
                             <Input id={`${idPrefix}-form-${key}`} type={key === "recipient" ? "email" : "text"}
                                 disabled={disabled} maxLength={key === "name" ? 100 : key === "recipient" ? 254 : 200}
+                                {...errorTie(`form_${key}`)}
                                 value={value.form_action?.[key] ?? ""}
                                 onChange={(event) => update({ form_action: {
                                     name: "", recipient: "", subject: "", fields: ["email"],
@@ -260,6 +271,7 @@ export function CampaignBriefFields({
                         {(["email", "phone", "follow_up", "project_type", "bidding_active"] as CampaignFormField[]).map((field) => (
                             <label key={field} className="flex items-center gap-2 text-xs">
                                 <input type="checkbox" disabled={disabled} checked={(value.form_action?.fields ?? ["email"]).includes(field)}
+                                    {...errorTie("form_fields")}
                                     onChange={(event) => {
                                         const current = value.form_action ?? { name: "", recipient: "", subject: "", fields: ["email"] as CampaignFormField[] };
                                         update({ form_action: { ...current, fields: event.target.checked ? [...current.fields, field] : current.fields.filter((item) => item !== field) } });
@@ -307,8 +319,8 @@ export function CampaignBriefFields({
                                             placeholder="+442071234567"
                                             maxLength={255}
                                             onChange={(event) => editRow(index, { number: event.target.value })}
-                                            aria-invalid={errors.number ? true : undefined}
-                                            aria-describedby={errors.number ? `${rowId(index, "number")}-error` : undefined}
+                                            aria-invalid={errors.number || (index === 0 && inError("transfer_destination")) ? true : undefined}
+                                            aria-describedby={errors.number ? `${rowId(index, "number")}-error` : index === 0 && inError("transfer_destination") ? validationId : undefined}
                                         />
                                         {errors.number && <p id={`${rowId(index, "number")}-error`} className="text-xs text-destructive">{errors.number}</p>}
                                     </div>
@@ -386,6 +398,8 @@ export function CampaignBriefFields({
                                             <input
                                                 type="checkbox"
                                                 aria-label={day.long}
+                                                aria-invalid={transferErrors.days ? true : undefined}
+                                                aria-describedby={transferErrors.days ? `${idPrefix}-transfer-days-error` : undefined}
                                                 checked={hours.days.includes(day.value)}
                                                 onChange={(event) => toggleDay(day.value, event.target.checked)}
                                                 className="h-4 w-4 rounded border-input accent-emerald-600"
@@ -500,6 +514,8 @@ export function CampaignBriefFields({
                         value={String(value.max_objection_attempts)}
                         onChange={(next) => update({ max_objection_attempts: Number(next) })}
                         disabled={disabled}
+                        ariaInvalid={inError("max_objection_attempts") || undefined}
+                        ariaDescribedBy={inError("max_objection_attempts") ? validationId : undefined}
                     >
                         {[1, 2, 3, 4, 5].map((attempts) => (
                             <option key={attempts} value={attempts}>
@@ -534,7 +550,7 @@ export function CampaignBriefFields({
             </div>
 
             {validation ? (
-                <p className="text-sm text-destructive" role="alert">{validation}</p>
+                <p id={validationId} className="text-sm text-destructive" role="alert">{validation}</p>
             ) : null}
         </section>
     );

@@ -61,7 +61,9 @@ function apiPath(route: Route): string {
 
 /** The data rows of the CSV inside a multipart upload body, as { header: cell } records. */
 function rowsOfUploadedCsv(multipart: string): Array<Record<string, string>> {
-    const csv = multipart.split(/\r?\n\r?\n/).slice(1).join("\n\n").split(/\r?\n--/)[0] ?? "";
+    // The file is one part among the permission fields (main 87d049b4): read the part that carries a filename.
+    const filePart = multipart.split(/\r?\n--/).find((part) => /filename="/.test(part)) ?? "";
+    const csv = filePart.split(/\r?\n\r?\n/).slice(1).join("\n\n");
     const [head, ...lines] = csv.split(/\r?\n/).filter((line) => line.trim() !== "");
     const headers = (head ?? "").split(",").map((h) => h.trim());
     return lines.map((line) => {
@@ -70,8 +72,21 @@ function rowsOfUploadedCsv(multipart: string): Array<Record<string, string>> {
     });
 }
 
+/** The permission-to-call form fields sent beside the file (BE/api/v1/endpoints/contacts.py:297-300). */
+function permissionOfUpload(multipart: string): Record<string, string> {
+    const fields: Record<string, string> = {};
+    for (const part of multipart.split(/\r?\n--/)) {
+        const name = /name="(permission_[a-z_]+)"/.exec(part)?.[1];
+        if (name) fields[name] = part.split(/\r?\n\r?\n/).slice(1).join("\n\n").trim();
+    }
+    return fields;
+}
+
 async function mockBackend(page: Page) {
-    const state = { leads: [] as Array<Record<string, unknown>>, uploads: [] as Array<{ query: string; rows: Array<Record<string, string>> }> };
+    const state = {
+        leads: [] as Array<Record<string, unknown>>,
+        uploads: [] as Array<{ query: string; rows: Array<Record<string, string>>; permission: Record<string, string> }>,
+    };
 
     await signInAsE2eUser(page);
     await mockDashboardApi(page);
@@ -115,7 +130,7 @@ async function mockBackend(page: Page) {
             // route :192-199, answer :420-434).
             if (method === "POST" && path === `/contacts/campaigns/${CAMPAIGN_ID}/upload`) {
                 const rows = rowsOfUploadedCsv(request.postData() ?? "");
-                state.uploads.push({ query: new URL(request.url()).search, rows });
+                state.uploads.push({ query: new URL(request.url()).search, rows, permission: permissionOfUpload(request.postData() ?? "") });
                 state.leads = rows.map((row, i) => {
                     const first = row.first_name || null;
                     const last = row.last_name || null;
@@ -169,7 +184,14 @@ test("a signed-in customer imports contacts from a CSV file and sees them in the
     await page.locator("#contacts-csv-file").setInputFiles({ name: "contacts.csv", mimeType: "text/csv", buffer: Buffer.from(CSV, "utf8") });
     await expect(page.getByTestId("contacts-preview-row")).toHaveCount(PEOPLE.length);
 
-    await page.getByRole("button", { name: "Upload 3 contacts" }).click(); // contacts/page.tsx:866
+    // Permission to call (main 87d049b4): the upload is held until the block is complete (contacts/page.tsx:661-662;
+    // its controls and texts: contact-permission-fields.tsx:66-148, lib/contact-permission.ts:46-71).
+    await page.getByRole("radio", { name: "They agreed to be called" }).check();
+    await page.getByLabel("Where this permission comes from").fill("Website sign-up form, March 2026");
+    await page.getByLabel("Date permission was given").fill("2026-03-14");
+    await page.getByRole("checkbox", { name: /^I confirm that I am allowed to call the people in this list/ }).check();
+
+    await page.getByRole("button", { name: "Upload 3 contacts" }).click();
 
     // The result card (contacts/page.tsx:888-899) and, behind it, the Contacts list with the imported people.
     const results = page.getByTestId("contacts-import-results");
@@ -186,4 +208,11 @@ test("a signed-in customer imports contacts from a CSV file and sees them in the
     expect(backend.uploads).toHaveLength(1);
     expect(backend.uploads[0]?.query).toBe("?skip_duplicates=true");
     expect(backend.uploads[0]?.rows.map((row) => row.phone_number)).toEqual(PEOPLE.map((p) => p.phone_number));
+    // ... and the permission the customer confirmed (lib/contact-permission.ts:121-131).
+    expect(backend.uploads[0]?.permission).toEqual({
+        permission_basis: "express_consent",
+        permission_source: "Website sign-up form, March 2026",
+        permission_date: "2026-03-14",
+        permission_statement_version: "2026-11-v1",
+    });
 });

@@ -205,6 +205,18 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    // The fields the banner's message is about (set with that message at save
+    // time), so the banner is tied to them for as long as it still shows it.
+    const [errorFields, setErrorFields] = useState<{ message: string; fields: string[] } | null>(null);
+    const fieldError = (message: string, fields: string[]) => {
+        setError(message);
+        setErrorFields({ message, fields });
+    };
+    const bannerTie = (field: string) => (
+        error && errorFields?.message === error && errorFields.fields.includes(field)
+            ? { "aria-invalid": true, "aria-describedby": "campaign-form-error" }
+            : {}
+    );
     // Edit: the version this form last read or wrote, and whether a save was
     // refused because someone else saved in between (QA H7 / F3-03).
     const [version, setVersion] = useState<string | null>(initialData?.updated_at ?? null);
@@ -625,20 +637,20 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             return;
         }
         if (!formData.name.trim()) {
-            setError("Add a campaign name.");
+            fieldError("Add a campaign name.", ["name"]);
             return;
         }
         const agentNames = parseAgentNames(agentNamesRaw);
         if (agentNames.length === 0) {
-            setError("Add at least one agent name (up to three — we rotate per call).");
+            fieldError("Add at least one agent name (up to three — we rotate per call).", ["agent_names"]);
             return;
         }
         if (!companyName.trim()) {
-            setError("Add the company or business name your agent represents.");
+            fieldError("Add the company or business name your agent represents.", ["company_name"]);
             return;
         }
         if (representativeNameTooLong(agentNames)) {
-            setError("The first representative name must be 120 characters or fewer.");
+            fieldError("The first representative name must be 120 characters or fewer.", ["agent_names"]);
             return;
         }
         if (!isRealtime && !guidance.valid) {
@@ -658,7 +670,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         const missing = missingRequiredSlots();
         if (!isRealtime && missing.length > 0) {
-            setError(`Missing required fields: ${missing.map((s) => s.label).join(", ")}`);
+            fieldError(`Missing required fields: ${missing.map((s) => s.label).join(", ")}`, missing.map((s) => `slot-${s.key}`));
             return;
         }
 
@@ -752,6 +764,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         <Input
                             id="name"
                             name="name"
+                            {...bannerTie("name")}
                             placeholder="e.g., Q1 Sales Outreach"
                             value={formData.name}
                             onChange={handleChange}
@@ -1275,6 +1288,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             <Input
                                 id="company_name"
                                 name="company_name"
+                                {...bannerTie("company_name")}
                                 placeholder="The name your agent says on the call"
                                 value={companyName}
                                 maxLength={MAX_BRIEF_NAME_LENGTH}
@@ -1288,6 +1302,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             <Input
                                 id="agent_names"
                                 name="agent_names"
+                                {...bannerTie("agent_names")}
                                 placeholder="Alex, Sam, Jordan"
                                 value={agentNamesRaw}
                                 onChange={(e) => setAgentNamesRaw(e.target.value)}
@@ -1363,6 +1378,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 {slot.kind === "textarea" || slot.kind === "list" || slot.kind === "kv-list" ? (
                                     <textarea
                                         id={`slot-${slot.key}`}
+                                        {...bannerTie(`slot-${slot.key}`)}
                                         placeholder={slot.placeholder}
                                         value={slotValues[slot.key] ?? ""}
                                         onChange={(e) => setSlot(slot.key, e.target.value)}
@@ -1373,6 +1389,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 ) : (
                                     <Input
                                         id={`slot-${slot.key}`}
+                                        {...bannerTie(`slot-${slot.key}`)}
                                         placeholder={slot.placeholder}
                                         value={slotValues[slot.key] ?? ""}
                                         onChange={(e) => setSlot(slot.key, e.target.value)}
@@ -1406,10 +1423,11 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             rows={4}
                             required
                             aria-invalid={!guidance.valid || undefined}
+                            aria-describedby={!guidance.valid && guidance.message ? "system_prompt-error" : undefined}
                             className={`flex w-full rounded-lg border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 ${guidance.overBudget ? "border-destructive" : "border-input"}`}
                         />
                         {guidance.message ? (
-                            <p className={`text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>{guidance.message}</p>
+                            <p id={guidance.valid ? undefined : "system_prompt-error"} className={`text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>{guidance.message}</p>
                         ) : (
                             <p className="text-xs text-muted-foreground">
                                 Layered on top of the core persona and guardrails; it is not the whole prompt. Keep behaviour here and
@@ -1438,7 +1456,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
                     {conflict && <CampaignVersionConflictNotice />}
                     {error && (
-                        <div role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div id="campaign-form-error" role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                             {error}
                         </div>
                     )}

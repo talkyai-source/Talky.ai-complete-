@@ -177,6 +177,10 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         return typeof restoredStep === "number" && restoredStep >= 0 && restoredStep <= 2 ? restoredStep : 0;
     });
     const [error, setError] = useState<string | null>(null);
+    // The message a refused knowledge file put in the banner, so the banner can
+    // be tied to the file control for as long as it still shows that message.
+    const [fileError, setFileError] = useState<string | null>(null);
+    const fileErrorShown = error !== null && error === fileError;
 
     // Step 1 — basics
     const [voiceSelection, setVoiceSelection] = useState<CampaignVoiceSettingsValue>(restoredDraft?.voiceSelection ?? {});
@@ -304,10 +308,12 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         const lower = f.name.toLowerCase();
         if (!(lower.endsWith(".md") || lower.endsWith(".txt"))) {
             setError("Please choose a .md or .txt file.");
+            setFileError("Please choose a .md or .txt file.");
             return;
         }
         if (f.size > MAX_UPLOAD_BYTES) {
             setError(`File too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}).`);
+            setFileError(`File too large (max ${fmtBytes(MAX_UPLOAD_BYTES)}).`);
             return;
         }
         setFile(f);
@@ -501,7 +507,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
             {onStartOver && wizardDraftHasContent(restoredDraft) && <DraftRestoredNotice onStartOver={onStartOver} />}
 
             {error && (
-                <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+                <div id="cw-error" role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
                     {error}
                 </div>
             )}
@@ -543,13 +549,17 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
 
                         <div>
                             <Label htmlFor="cw-agents">Representative names <span className="text-destructive" aria-hidden="true">*</span></Label>
-                            <Input id="cw-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
+                            <Input
+                                id="cw-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1"
+                                aria-invalid={representativeNameTooLong(agentNames) || undefined}
+                                aria-describedby={representativeNameTooLong(agentNames) ? "cw-agents-error" : undefined}
+                            />
                             <p className="mt-1 text-xs text-muted-foreground">
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
                                 {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                                 {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                             </p>
-                            {representativeNameTooLong(agentNames) && <p role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
+                            {representativeNameTooLong(agentNames) && <p id="cw-agents-error" role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
                             <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 
@@ -575,9 +585,10 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                                 id="cw-goal" value={goal} onChange={(e) => setGoal(e.target.value)} rows={2}
                                 placeholder="Optional nuance that is not already captured in the structured brief. Put business facts in Company knowledge."
                                 aria-invalid={guidance.overBudget || undefined}
+                                aria-describedby={guidance.overBudget ? "cw-goal-error" : undefined}
                                 className="mt-1 w-full resize-y rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
-                            <p className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
+                            <p id={guidance.overBudget ? "cw-goal-error" : undefined} className={`mt-1 text-xs ${guidance.overBudget ? "text-destructive" : "text-muted-foreground"}`}>
                                 {guidance.overBudget
                                     ? guidance.message
                                     : "The counter includes the structured brief and this freeform layer. Nothing is trimmed automatically."}
@@ -651,6 +662,8 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         ) : (
                             <button
                                 type="button" onClick={() => fileRef.current?.click()}
+                                // A button cannot carry aria-invalid; the banner is tied by description only.
+                                aria-describedby={fileErrorShown ? "cw-error" : undefined}
                                 className="flex w-full flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-gray-300 dark:border-white/15 px-4 py-10 text-center hover:border-emerald-400 hover:bg-emerald-50/40 dark:hover:bg-emerald-950/20"
                             >
                                 <Upload className="h-7 w-7 text-muted-foreground" />
