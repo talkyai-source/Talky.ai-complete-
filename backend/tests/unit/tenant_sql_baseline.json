@@ -9121,10 +9121,10 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "88d12bf202f230d7b779b93457b5e48aaf9d1b40ad84f0c2cb98cecda7ebf1be",
+      "id": "5e81ed0a3ac4e06c4590b3f860a34be08a018a3d89c10491427066be9644f4f2",
       "file": "app/api/v1/endpoints/auth/password_reset.py",
       "function": "reset_password",
-      "line": 416,
+      "line": 417,
       "method": "enforce_budget",
       "tables": [],
       "sql": "reset-ip",

@@ -127,3 +127,37 @@ test("sanitizeMeetingNotesHtml keeps only http, https, mailto and relative links
         assert.ok(out.includes(`href="${href}"`), `safe link dropped: ${href} -> ${out}`);
     }
 });
+
+test("sanitizeMeetingNotesHtml keeps allowed markup and drops img, script and handlers", () => {
+    const out = sanitizeMeetingNotesHtml(
+        `<p>Hello <b>there</b></p><img src="x" onerror="window.__pwned = 1"><script>window.__pwned = 2</script>`
+    );
+    assert.ok(out.includes("Hello"));
+    assert.ok(out.includes("<b>there</b>"));
+    assert.ok(!/img/i.test(out));
+    assert.ok(!/script/i.test(out));
+    assert.ok(!/onerror/i.test(out));
+});
+
+test("sanitizeMeetingNotesHtml drops javascript: links and inline handlers", () => {
+    const link = sanitizeMeetingNotesHtml(`<a href="javascript:alert(1)">x</a>`);
+    assert.ok(!/javascript:/i.test(link));
+    const para = sanitizeMeetingNotesHtml(`<p onclick="x()">t</p>`);
+    assert.ok(!/onclick/i.test(para));
+    assert.ok(para.includes("t"));
+});
+
+test("sanitizeMeetingNotesHtml never hands untrusted HTML to an element of the live document", () => {
+    const original = document.createElement;
+    const created: string[] = [];
+    document.createElement = function (this: Document, tag: string, ...rest: unknown[]) {
+        created.push(String(tag).toLowerCase());
+        return (original as (...a: unknown[]) => HTMLElement).call(this, tag, ...rest);
+    } as typeof document.createElement;
+    try {
+        sanitizeMeetingNotesHtml(`<p>Hi</p><img src="x" onerror="window.__pwned = 1">`);
+    } finally {
+        document.createElement = original;
+    }
+    assert.ok(!created.includes("div"), `live-document element created: ${created.join(",")}`);
+});

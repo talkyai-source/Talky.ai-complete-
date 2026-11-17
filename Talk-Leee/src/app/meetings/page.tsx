@@ -65,9 +65,7 @@ function sanitizeHtmlToText(html: string) {
     const trimmed = html.trim();
     if (trimmed.length === 0) return "";
     if (typeof document === "undefined") return trimmed;
-    const el = document.createElement("div");
-    el.innerHTML = trimmed;
-    return el.textContent ?? "";
+    return new window.DOMParser().parseFromString(trimmed, "text/html").body.textContent ?? "";
 }
 
 async function copyText(text: string) {

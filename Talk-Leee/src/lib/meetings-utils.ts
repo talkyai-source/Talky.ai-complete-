@@ -138,8 +138,9 @@ export function sanitizeMeetingNotesHtml(html: string) {
     if (typeof document === "undefined") return trimmed;
 
     const allowed = new Set(["A", "B", "BR", "DIV", "EM", "I", "LI", "OL", "P", "SPAN", "STRONG", "U", "UL"]);
-    const root = document.createElement("div");
-    root.innerHTML = trimmed;
+    // Parse in an inert document: an element of the live document would start
+    // image loads and run onerror handlers before the cleaning below.
+    const root = new window.DOMParser().parseFromString(trimmed, "text/html").body;
 
     const queue: Element[] = Array.from(root.querySelectorAll("*"));
     for (const el of queue) {

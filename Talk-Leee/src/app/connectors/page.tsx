@@ -14,6 +14,7 @@ import { permits, useKnownPermissions } from "@/lib/permissions";
 import type { ConnectorProviderStatus } from "@/lib/models";
 import { CONNECTOR_RETURN_FAILED_TEXT, type ConnectorOAuthReturn, type ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
+import { safeInternalPath } from "@/lib/post-auth-navigation";
 import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
 
 type ProviderType = ConnectorProviderType;
@@ -201,7 +202,7 @@ export default function ConnectorsPage() {
         return list.filter((x): x is ProviderType => (allowed as string[]).includes(x));
     }, [searchParams]);
 
-    const next = useMemo(() => searchParams.get("next") ?? "", [searchParams]);
+    const next = useMemo(() => safeInternalPath(searchParams.get("next")), [searchParams]);
 
     // Cards speak only from a real answer to GET /connectors/status.
     const statusAnswered = q.data !== undefined;

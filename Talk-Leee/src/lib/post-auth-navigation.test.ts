@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { postAuthDashboard } from "@/lib/post-auth-navigation";
+import { postAuthDashboard, safeInternalPath } from "@/lib/post-auth-navigation";
 
 test("every customer role lands on the customer dashboard", () => {
     for (const role of [undefined, null, "tenant_admin", "owner", "user", "readonly"]) {
@@ -86,3 +86,18 @@ test("white-label routing keeps precedence over customer return targets", () => 
         assert.equal(postAuthDashboard("white_label_admin", value), "/white-label/dashboard");
     }
 });
+
+for (const value of ["/campaigns/new", "/meetings?tab=1"]) {
+    test(`safeInternalPath keeps a same-site path: ${value}`, () => {
+        assert.equal(safeInternalPath(value), value);
+    });
+}
+
+for (const value of [
+    "https://evil.example", "//evil.example", "/\\evil.example", "javascript:alert(1)",
+    "/%2F%2Fevil.example", "", null, undefined,
+]) {
+    test(`safeInternalPath rejects: ${JSON.stringify(value)}`, () => {
+        assert.equal(safeInternalPath(value), "");
+    });
+}

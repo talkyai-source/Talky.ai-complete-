@@ -10,7 +10,15 @@
  */
 export function postAuthDashboard(role: string | null | undefined, next?: string | null): string {
     if (role === "white_label_admin") return "/white-label/dashboard";
-    if (typeof next !== "string" || next.length > 2048 || next !== next.trim()) return "/dashboard";
+    return safeInternalPath(next) || "/dashboard";
+}
+
+/**
+ * Returns `next` unchanged when it is a safe same-site path, otherwise "".
+ * Shared by login and any page that follows a `next` query value.
+ */
+export function safeInternalPath(next: string | null | undefined): string {
+    if (typeof next !== "string" || next.length > 2048 || next !== next.trim()) return "";
     // Validate decoded forms too: browsers/proxies must not reinterpret an
     // encoded slash, backslash, control character or auth route after login.
     // Keep the original query/fragment on success; never navigate a decoded URL.
@@ -23,15 +31,15 @@ export function postAuthDashboard(role: string | null | undefined, next?: string
                 return character === "\\" || code < 32 || (code >= 127 && code <= 159);
             });
             if (!candidate.startsWith("/") || candidate.startsWith("//") || unsafeCharacter) {
-                return "/dashboard";
+                return "";
             }
             const parsed = new URL(candidate, origin);
-            if (parsed.origin !== origin || /^\/auth(?:\/|$)/i.test(parsed.pathname)) return "/dashboard";
+            if (parsed.origin !== origin || /^\/auth(?:\/|$)/i.test(parsed.pathname)) return "";
             if (!candidate.includes("%")) return next;
             candidate = decodeURIComponent(candidate);
         }
     } catch {
         // Malformed escapes or URLs do not prevent an otherwise valid login.
     }
-    return "/dashboard";
+    return "";
 }
