@@ -225,6 +225,7 @@ def test_new_duplicate_contract_describes_owned_draft_without_invented_activity(
     ("post", "/api/v1/admin/secrets/validate-api-key", []),
     ("post", "/api/v1/public/contact-enquiries", []),
     ("post", "/api/v1/billing/webhooks", [{"StripeSignature": []}]),
+    ("post", "/api/v1/billing/paypal/webhooks", [{"PayPalTransmissionSig": []}]),
     ("post", "/api/v1/twilio/answer", [{"TwilioSignature": []}]),
     ("post", "/api/v1/vonage/event", [{"VonageWebhookJWT": []}]),
     ("post", "/api/v1/sip/telephony/call", [{"InternalServiceToken": []}]),

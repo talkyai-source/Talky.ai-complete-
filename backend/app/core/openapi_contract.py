@@ -36,12 +36,14 @@ _HEADER_SCHEMES = {
     "InternalServiceToken": ("X-Internal-Service-Token", "Configured internal-service credential; not a user session."),
     "WebhookSignature": ("X-Webhook-Signature", "Tenant HMAC signature. Timestamp freshness and required webhook headers also apply."),
     "StripeSignature": ("Stripe-Signature", "Stripe webhook signature over the original request body."),
+    "PayPalTransmissionSig": ("PAYPAL-TRANSMISSION-SIG", "PayPal webhook signature, verified with PayPal over the original request body."),
     "TwilioSignature": ("X-Twilio-Signature", "Provider signature over the configured callback URL and form fields."),
 }
 _SIGNED = {
     ("get", "/metrics"): "MetricsToken",
     ("get", "/api/v1/health/detailed"): "InternalServiceToken",
     ("post", "/api/v1/billing/webhooks"): "StripeSignature",
+    ("post", "/api/v1/billing/paypal/webhooks"): "PayPalTransmissionSig",
     ("post", "/api/v1/webhooks/call/goal-achieved"): "WebhookSignature",
     ("post", "/api/v1/webhooks/call/mark-spam"): "WebhookSignature",
     ("post", "/api/v1/webhooks/secure/call/goal-achieved"): "WebhookSignature",

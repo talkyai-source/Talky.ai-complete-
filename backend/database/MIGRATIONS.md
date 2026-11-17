@@ -73,7 +73,9 @@ it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
 and `open_security_events` run with the reader's rights (`security_invoker`),
 so the row-level security of the tables beneath them applies.
 
-The current sole head is `0100_force_legal_acceptance_rls`: it forces row
+The current sole head is `0101_paypal_webhook_events`: it creates
+`paypal_webhook_events` (PayPal event ids and a hash, no event body, platform-only
+row security). `0100_force_legal_acceptance_rls` forces row
 security on `legal_acceptances`, which 0085 had enabled but never forced.
 `0099_clean_install_tables` creates `tenant_recording_policy` and
 `tenant_provider_cost_events` when they are missing (a clean install had

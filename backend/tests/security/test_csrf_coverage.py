@@ -28,6 +28,7 @@ def test_csrf_exempt_list_matches_only_authenticated_callbacks_and_login_steps()
         "/api/v1/auth/passkeys/login/begin",
         "/api/v1/auth/passkeys/login/complete",
         "/api/v1/billing/webhooks",  # Stripe raw-body signature
+        "/api/v1/billing/paypal/webhooks",  # PayPal verify-webhook-signature
         "/api/v1/webhooks/call/goal-achieved",  # tenant HMAC + timestamp
         "/api/v1/webhooks/call/mark-spam",
         "/api/v1/webhooks/secure/call/goal-achieved",
