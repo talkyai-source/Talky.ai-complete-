@@ -261,24 +261,28 @@ class PayPalClient:
         json_body: Any = None,
         content: bytes | None = None,
     ) -> dict[str, Any]:
-        for attempt in (0, 1):
+        async def attempt() -> tuple[str, httpx.Response]:
             token = await self._access_token()
             headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
             if extra_headers:
                 headers.update(extra_headers)
-            response = await self._send(
+            sent = await self._send(
                 method, path, headers=headers, json_body=json_body, content=content
             )
-            if response.status_code == 401 and attempt == 0:
-                async with self._lock:
-                    if self._token == token:
-                        self._token = None
-                        self._token_expires_at = 0.0
-                continue
-            if not 200 <= response.status_code < 300:
-                raise self._error_from(response)
-            return self._json(response)
-        raise PayPalError(status=401)  # pragma: no cover - loop always returns or raises
+            return token, sent
+
+        token, response = await attempt()
+        if response.status_code == 401:
+            # The token was refused: forget it (unless another call already
+            # replaced it), sign in again and try this call once more.
+            async with self._lock:
+                if self._token == token:
+                    self._token = None
+                    self._token_expires_at = 0.0
+            token, response = await attempt()
+        if not 200 <= response.status_code < 300:
+            raise self._error_from(response)
+        return self._json(response)
 
     # -- orders and captures ----------------------------------------------
 
