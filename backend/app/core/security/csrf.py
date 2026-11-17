@@ -64,6 +64,7 @@ _EXEMPT_POST_PATHS = frozenset({
     "/api/v1/auth/passkeys/login/complete",
     # Only signature-verified callbacks, never webhook administration routes.
     "/api/v1/billing/webhooks",
+    "/api/v1/billing/paypal/webhooks",
     "/api/v1/webhooks/call/goal-achieved",
     "/api/v1/webhooks/call/mark-spam",
     "/api/v1/webhooks/secure/call/goal-achieved",

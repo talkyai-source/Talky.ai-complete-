@@ -58,6 +58,9 @@ export function useTopupPackages() {
 export const billingConfigSchema = z.object({
   topups_open: z.boolean(),
   topups_unavailable_reason: z.string().nullable().optional(),
+  // Older servers do not send these two: a missing or malformed value means PayPal is closed.
+  paypal_topups_open: z.boolean().optional().catch(false),
+  paypal_topups_unavailable_reason: z.string().nullable().optional().catch(null),
 });
 export type BillingConfig = z.infer<typeof billingConfigSchema>;
 
@@ -189,6 +192,43 @@ export function useStartTopup() {
     onSuccess: () => {
       // Refresh the saved order. A pending row remains unconfirmed and does
       // not establish whether the provider collected a payment.
+      qc.invalidateQueries({ queryKey: topupKeys.orders() });
+    },
+  });
+}
+
+// ── PayPal top-ups ──────────────────────────────────────────────────────────
+
+export const paypalCheckoutSchema = z.object({
+  order_id: z.guid(), paypal_order_id: z.string().min(1), checkout_url: z.string().url(),
+  minutes: z.number().finite(), price_cents: z.number().finite(), currency: z.string(),
+});
+export type PaypalCheckoutResult = z.infer<typeof paypalCheckoutSchema>;
+
+export const paypalCaptureSchema = z.object({
+  order_id: z.string(), status: z.enum(["paid", "pending", "not_approved", "failed"]),
+  minutes: z.number().finite().nullable().optional(),
+});
+export type PaypalCaptureResult = z.infer<typeof paypalCaptureSchema>;
+
+export async function startPaypalCheckout(packageCode: string): Promise<PaypalCheckoutResult> {
+  return paypalCheckoutSchema.parse(await api.request({
+    path: "/billing/topups/paypal/checkout", method: "POST", body: { package_code: packageCode },
+  }));
+}
+
+/** Takes the money: the server verifies the payment with PayPal. Safe to call twice. */
+export async function capturePaypalOrder(orderId: string): Promise<PaypalCaptureResult> {
+  return paypalCaptureSchema.parse(await api.request({
+    path: "/billing/topups/paypal/capture", method: "POST", body: { order_id: orderId }, timeoutMs: 30_000,
+  }));
+}
+
+export function useStartPaypalTopup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (packageCode: string) => startPaypalCheckout(packageCode),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: topupKeys.orders() });
     },
   });

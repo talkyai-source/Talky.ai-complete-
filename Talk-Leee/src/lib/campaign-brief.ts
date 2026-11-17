@@ -341,6 +341,48 @@ export function campaignBriefValidation(draft: CampaignBriefDraft): string | nul
     return null;
 }
 
+export type CampaignBriefInvalidField =
+    | "opening_objective" | "decision_maker_role" | "max_objection_attempts" | "transfer_action" | "transfer_destination"
+    | "email_subject" | "email_body" | "form_name" | "form_recipient" | "form_subject" | "form_fields";
+
+/**
+ * The fields the message of campaignBriefValidation is about: the same checks
+ * in the same order. Empty when the brief is valid, and for the transfer
+ * summary, whose own errors are already shown beside their fields.
+ */
+export function campaignBriefInvalidFields(draft: CampaignBriefDraft): CampaignBriefInvalidField[] {
+    if (!draft.opening_objective.trim() || draft.opening_objective.length > 500) return ["opening_objective"];
+    if (draft.decision_maker_role.length > 160) return ["decision_maker_role"];
+    if (!Number.isInteger(draft.max_objection_attempts)
+        || draft.max_objection_attempts < 1
+        || draft.max_objection_attempts > 5) {
+        return ["max_objection_attempts"];
+    }
+    const transferApproved = draft.approved_next_actions.includes("transfer");
+    if (transferApproved && !transferListInUse(draft) && !draft.transfer_destination.trim()) return ["transfer_destination"];
+    if (!transferApproved && (draft.transfer_destination.trim() || draft.transfer_destinations?.length || draft.transfer_hours
+        || draft.transfer_ring_seconds?.trim() || draft.transfer_if_no_answer)) {
+        return ["transfer_action"];
+    }
+    if (hasTransferErrors(campaignTransferErrors(draft))) return [];
+    if (draft.email_action && (!draft.email_action.subject.trim() || !draft.email_action.body.trim())) {
+        return [
+            ...(!draft.email_action.subject.trim() ? ["email_subject" as const] : []),
+            ...(!draft.email_action.body.trim() ? ["email_body" as const] : []),
+        ];
+    }
+    if (draft.form_action) {
+        const fields: CampaignBriefInvalidField[] = [
+            ...(!draft.form_action.name.trim() ? ["form_name" as const] : []),
+            ...(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.form_action.recipient.trim()) ? ["form_recipient" as const] : []),
+            ...(!draft.form_action.subject.trim() ? ["form_subject" as const] : []),
+            ...(!draft.form_action.fields.length ? ["form_fields" as const] : []),
+        ];
+        if (fields.length) return fields;
+    }
+    return [];
+}
+
 export function renderCampaignBrief(brief: CampaignBrief): string {
     const lines = ["## CAMPAIGN BRIEF"];
     if (brief.representative_name) {

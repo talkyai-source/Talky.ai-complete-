@@ -936,6 +936,11 @@ async def get_billing_config(
     checkout_open, checkout_reason = checkout_availability(**caller)
     topups_open, topups_reason = topup_availability(
         **caller, live_topups_enabled=_live_topups_enabled())
+    from app.domain.services.paypal_mode import PAYPAL_UNAVAILABLE, paypal_topup_availability
+
+    paypal_open, paypal_reason = paypal_topup_availability(**caller)
+    if not _live_topups_enabled():
+        paypal_open, paypal_reason = False, PAYPAL_UNAVAILABLE
 
     return {
         "stripe_configured": stripe_configured,
@@ -946,4 +951,6 @@ async def get_billing_config(
         "checkout_unavailable_reason": checkout_reason,
         "topups_open": topups_open,
         "topups_unavailable_reason": topups_reason,
+        "paypal_topups_open": paypal_open,
+        "paypal_topups_unavailable_reason": paypal_reason,
     }

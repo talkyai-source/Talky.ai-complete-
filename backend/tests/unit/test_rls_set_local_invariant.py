@@ -260,6 +260,7 @@ _RLS_TABLES = (
     "leads",
     "legal_acceptances",
     "meetings",
+    "paypal_webhook_events",
     "plan_price_options",
     "processed_webhook_events",
     "public_contact_enquiries",

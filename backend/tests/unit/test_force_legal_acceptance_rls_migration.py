@@ -26,8 +26,9 @@ def _sql(monkeypatch, operation):
     return statements
 
 
-def test_single_head_is_0100_on_top_of_0099():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0100_sits_on_top_of_0099_and_0101_is_the_head():
+    assert SCRIPTS.get_heads() == ["0101_paypal_webhook_events"]
+    assert SCRIPTS.get_revision("0101_paypal_webhook_events").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0099_clean_install_tables"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 

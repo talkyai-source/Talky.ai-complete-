@@ -95,7 +95,9 @@ for (const vp of viewports) {
     test(`dashboard first row layout is pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
         const name = `dashboard-kpi-row-${vp.name}.png`;
         const baseline = testInfo.snapshotPath(name, { kind: "screenshot" });
-        const missing = !existsSync(baseline);
+        // A run asked to write the images (--update-snapshots) is the one run that must not skip.
+        const writing = testInfo.config.updateSnapshots === "all" || testInfo.config.updateSnapshots === "changed";
+        const missing = !existsSync(baseline) && !writing;
         const reason =
             `No baseline for project "${testInfo.project.name}" on ${process.platform}: ${path.basename(baseline)} is missing. ` +
             `Create it on that platform with: npx playwright test tests/dashboard-first-row.visual.spec.ts --project=${testInfo.project.name} --update-snapshots`;

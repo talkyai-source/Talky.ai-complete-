@@ -21,15 +21,38 @@ def test_nightly_scans_are_scheduled_bounded_and_read_only():
     assert "deploy_to_server" not in text and "secrets.TALKY" not in text
 
 
-def test_optional_browser_job_uses_only_existing_local_smoke_and_visual_contracts():
+def test_browser_job_can_fail_and_uses_only_local_smoke_and_visual_contracts():
     text = _text(".github/workflows/qa-browser.yml")
-    for required in ("pull_request:", "continue-on-error: true", "timeout-minutes:",
+    for required in ("pull_request:", "timeout-minutes:",
                      "npm ci", "playwright install", "--project=chromium", "demo.smoke.spec.ts",
                      "dashboard-first-row.visual.spec.ts", "upload-artifact", "if: always()"):
         assert required in text
+    # The browser checks are a real check since 17 Nov 2026: a failure must fail the run.
+    assert "continue-on-error: true" not in text
     assert "PW_PROD_AUDIT: \"0\"" in text
     assert "127.0.0.1" in text and "api.talkleeai.com" not in text
-    assert "--update-snapshots" not in text and "pull_request_target" not in text
+    assert "pull_request_target" not in text
+
+
+def test_browser_reference_images_are_written_only_by_a_manual_run():
+    """A pull request must always compare. Writing new reference images is allowed
+    only in the step a person starts by hand with the input ticked, and that step
+    uploads the images instead of committing them."""
+    lines = _text(".github/workflows/qa-browser.yml").splitlines()
+    text = "\n".join(lines)
+    assert "workflow_dispatch:" in text and "update_linux_snapshots:" in text
+    writers = [index for index, line in enumerate(lines) if "--update-snapshots" in line]
+    assert len(writers) == 1
+    guard = "if: ${{ inputs.update_linux_snapshots }}"
+    # The guard sits on the same step, directly above the command.
+    assert any(guard in line for line in lines[max(0, writers[0] - 3):writers[0]])
+    # Every comparing run is switched off for that manual run, so nothing is compared and passed by accident.
+    comparing = [index for index, line in enumerate(lines)
+                 if "playwright test" in line and "--update-snapshots" not in line]
+    assert comparing
+    for index in comparing:
+        assert any("if: ${{ !inputs.update_linux_snapshots }}" in line for line in lines[max(0, index - 6):index])
+    assert "git commit" not in text and "git push" not in text
 
 
 def test_required_ci_executes_read_only_quarantine_and_backend_diff_gates():

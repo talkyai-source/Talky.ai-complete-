@@ -36,7 +36,10 @@ import {
   TOPUP_SETTLE_POLL_MS,
   TOPUP_SETTLE_TIMEOUT_MS,
   topupsClosedReason,
+  capturePaypalOrder,
+  topupKeys,
   useBillingConfig,
+  useStartPaypalTopup,
   useStartTopup,
   useTopupBalance,
   useTopupOrders,
@@ -63,6 +66,15 @@ function refusedBeforeOrder(err: unknown): string | null {
   return isApiClientError(err) && err.status !== undefined && [400, 403, 409].includes(err.status) ? err.message : null;
 }
 
+const PAYPAL_ORDER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PAYPAL_PENDING_TEXT = "PayPal is still confirming this payment. Your minutes are added as soon as it is confirmed.";
+const PAYPAL_NOT_APPROVED_TEXT = "The PayPal payment was not completed. You have not been charged.";
+const PAYPAL_FAILED_TEXT = "PayPal could not take this payment. You have not been charged.";
+const PAYPAL_REVIEW_TEXT = "This payment needs a manual check. Nothing has been added to your minutes yet. Please contact support and give the order reference below.";
+const PAYPAL_UNCONFIRMED_TEXT = "We could not confirm the payment yet. If PayPal took it, your minutes are added shortly.";
+/** What the capture call answered: its status, or "error" when the call itself failed. */
+type PaypalCaptureState = "paid" | "pending" | "not_approved" | "failed" | "review" | "error";
+
 export function TopupCard({
   // Test seams only; production always settles on the exported timings.
   settlePollMs = TOPUP_SETTLE_POLL_MS,
@@ -75,12 +87,23 @@ export function TopupCard({
 
   const returned = params.get("topup"); // "success" | "cancelled" | null
   const returnedOrder = params.get("order_id");
+  const returnedProvider = params.get("provider");
+
+  // A PayPal return: the server takes and verifies the payment (one capture
+  // call); the address alone never proves it. A missing or malformed order
+  // reference cannot be captured and reads as not completed.
+  const paypalSuccess = returnedProvider === "paypal" && returned === "success";
+  const paypalOrderId = paypalSuccess && returnedOrder !== null && PAYPAL_ORDER_ID.test(returnedOrder) ? returnedOrder : null;
+  const paypalMalformed = paypalSuccess && paypalOrderId === null;
+  const [paypalCapture, setPaypalCapture] = useState<{ orderId: string; state: PaypalCaptureState } | null>(null);
+  const paypalState: PaypalCaptureState | null = paypalOrderId !== null && paypalCapture?.orderId === paypalOrderId ? paypalCapture.state : null;
+  const paypalFinalNo = paypalMalformed || paypalState === "not_approved" || paypalState === "failed" || paypalState === "review";
 
   // After ?topup=success the saved order and balance are read every few
   // seconds until the provider's webhook has settled the newest order one way
   // or the other, or the window closes. The intervals die with the observers
   // on unmount; the manual refresh below stays either way.
-  const settling = returned === "success";
+  const settling = returned === "success" && !paypalFinalNo;
   const [settleExpired, setSettleExpired] = useState(false);
   useEffect(() => {
     if (!settling) return;
@@ -88,12 +111,15 @@ export function TopupCard({
     return () => clearTimeout(timer);
   }, [settling, settleTimeoutMs]);
   const settleActive = settling && !settleExpired;
+  // A PayPal return names its order; a Stripe return does not, so it reads the newest one.
+  const orderForReturn = (read: TopupOrder[]): TopupOrder | null =>
+    paypalOrderId !== null ? read.find((order) => order.id === paypalOrderId) ?? null : newestOrder(read);
   const pollWhileUnconfirmed = (read: TopupOrder[] | undefined) =>
-    returnOutcome("success", read !== undefined, newestOrder(read ?? [])) === "unconfirmed" ? settlePollMs : false;
+    returnOutcome("success", read !== undefined, orderForReturn(read ?? [])) === "unconfirmed" ? settlePollMs : false;
 
   const packagesQ = useTopupPackages();
   const ordersQ = useTopupOrders(settleActive ? pollWhileUnconfirmed : undefined);
-  const newest = newestOrder(ordersQ.data ?? []);
+  const newest = orderForReturn(ordersQ.data ?? []);
   const outcome = returnOutcome(returned, ordersQ.isSuccess, newest);
   const balanceQ = useTopupBalance(settleActive && outcome === "unconfirmed" ? settlePollMs : undefined);
   const start = useStartTopup();
@@ -124,6 +150,27 @@ export function TopupCard({
     void refreshUser({ silent: true });
   }, [settling, outcome, newestId, qc, refreshUser]);
 
+  // One capture per returned order. The promise is held in a ref (written and
+  // read only inside the effect) so a double render or strict mode cannot start it twice.
+  const captureCall = useRef<{ orderId: string; promise: Promise<void> } | null>(null);
+  useEffect(() => {
+    if (paypalOrderId === null) return;
+    if (captureCall.current?.orderId === paypalOrderId) return;
+    const orderId = paypalOrderId;
+    const promise = capturePaypalOrder(orderId)
+      .then(
+        (result): PaypalCaptureState => result.status,
+        (err: unknown): PaypalCaptureState => (isApiClientError(err) && err.status === 409 ? "review" : "error"),
+      )
+      .then((state) => {
+        setPaypalCapture({ orderId, state });
+        // Read the saved order and balance again now that the server has acted.
+        void qc.invalidateQueries({ queryKey: topupKeys.orders() });
+        void qc.invalidateQueries({ queryKey: topupKeys.balance() });
+      });
+    captureCall.current = { orderId, promise };
+  }, [paypalOrderId, qc]);
+
   const balance = balanceQ.data ?? null;
   const packages = packagesQ.data ?? [];
   // The server offers pay-as-you-go bundles only to accounts without a paid plan.
@@ -138,17 +185,40 @@ export function TopupCard({
   const catalogueFailed = balanceQ.isError || packagesQ.isError;
   const catalogueError = balanceQ.isError ? balanceQ.error : packagesQ.error;
 
-  const pending = start.isPending;
+  const paypalStart = useStartPaypalTopup();
+  const pending = start.isPending || paypalStart.isPending;
   const [chosen, setChosen] = useState<string | null>(null);
   const [mockNotice, setMockNotice] = useState<string | null>(null);
   // The order was created but the payment page could not be opened.
   const [notice, setNotice] = useState<string | null>(null);
+  const paypalOpen = configQ.data?.paypal_topups_open === true;
+
+  async function buyPaypal(pkg: TopupPackage) {
+    if (pending) return;
+    setMockNotice(null);
+    setNotice(null);
+    setChosen(pkg.code);
+    start.reset();
+    try {
+      const result = await paypalStart.mutateAsync(pkg.code);
+      try {
+        // Leaves the app; only PayPal's own hosts are followed.
+        window.location.assign(approvedCheckoutUrl(result.checkout_url, "paypal"));
+      } catch (err) {
+        setNotice(`${err instanceof Error ? err.message : "The payment page could not be opened."} Check your saved orders before trying again.`);
+        setChosen(null);
+      }
+    } catch {
+      setChosen(null);
+    }
+  }
 
   async function buy(pkg: TopupPackage) {
     if (pending) return; // the double-click guard — a second order is a second charge
     setMockNotice(null);
     setNotice(null);
     setChosen(pkg.code);
+    paypalStart.reset();
     try {
       const result = await start.mutateAsync(pkg.code);
 
@@ -255,7 +325,9 @@ export function TopupCard({
       <CardContent className="space-y-3 p-4 pt-0">
         {/* ── returning from the payment page ── */}
         {returned && <div role="status" className="space-y-2 rounded-lg border p-3 text-sm">
-          {outcome === "paid" && newest ? (
+          {paypalFinalNo ? (
+            <p>{paypalState === "review" ? PAYPAL_REVIEW_TEXT : paypalMalformed || paypalState === "not_approved" ? PAYPAL_NOT_APPROVED_TEXT : PAYPAL_FAILED_TEXT}</p>
+          ) : outcome === "paid" && newest ? (
             <p className="font-semibold text-emerald-700 dark:text-emerald-400">
               {ORDER_STATUS_LABEL.paid}: {newest.minutes.toLocaleString()} minutes. The saved order below confirms this payment.
             </p>
@@ -268,6 +340,8 @@ export function TopupCard({
           ) : (
             <p>Returned from checkout. This browser return does not confirm a payment, cancellation or minute credit. Check the saved order status below.</p>
           )}
+          {paypalState === "pending" ? <p>{PAYPAL_PENDING_TEXT}</p> : null}
+          {paypalState === "error" ? <p>{PAYPAL_UNCONFIRMED_TEXT}</p> : null}
           {returnedOrder && orders.some((order) => order.id === returnedOrder) && <p className="break-all">Order reference: {returnedOrder}</p>}
           <Button variant="outline" size="sm" onClick={() => { void ordersQ.refetch(); void balanceQ.refetch(); }}>Refresh saved status</Button>
         </div>}
@@ -301,14 +375,14 @@ export function TopupCard({
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
             <span>{refusal.message}</span>
           </div>
-        ) : start.isError ? (
+        ) : start.isError || paypalStart.isError ? (
           <div
             role="alert"
             className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600 dark:text-red-400" aria-hidden />
             <span>
-              {refusedBeforeOrder(start.error) ?? (
+              {refusedBeforeOrder(start.isError ? start.error : paypalStart.error) ?? (
                 <>
                   The purchase result was not confirmed. Review saved orders before trying again.
                   Contact the billing team if the saved status remains unclear.
@@ -367,7 +441,8 @@ export function TopupCard({
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {packages.map((pkg) => {
-              const busy = pending && chosen === pkg.code;
+              const busy = start.isPending && chosen === pkg.code;
+              const paypalBusy = paypalStart.isPending && chosen === pkg.code;
               const bestValue = pkg.code === bestValueCode;
               return (
                 <div
@@ -419,6 +494,25 @@ export function TopupCard({
                       </>
                     )}
                   </Button>
+                  {paypalOpen ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1.5 w-full"
+                      onClick={() => buyPaypal(pkg)}
+                      disabled={pending || pkg.currency === null || pkg.currency_exponent === null}
+                      aria-label={`Pay with PayPal for ${pkg.minutes} minutes for ${localAmountText(display, usdFromMinor(pkg.price_cents, pkg.currency, pkg.currency_exponent), formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent))}`}
+                    >
+                      {paypalBusy ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                          Opening PayPal…
+                        </>
+                      ) : (
+                        "Pay with PayPal"
+                      )}
+                    </Button>
+                  ) : null}
                 </div>
               );
             })}

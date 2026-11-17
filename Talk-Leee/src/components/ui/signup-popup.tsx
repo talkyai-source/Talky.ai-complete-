@@ -96,7 +96,7 @@ export function SignupPopup() {
             role="region"
             aria-labelledby={labelId}
             data-signup-popup=""
-            className="fixed bottom-4 right-4 z-[400] w-[min(calc(100%-2rem),24rem)] p-4"
+            className="fixed bottom-4 right-4 z-[400] w-[min(calc(100%-2rem),24rem)] p-4 bg-(image:--home-card-gradient) bg-cover bg-no-repeat"
         >
             <p id={labelId} className="text-sm leading-relaxed">
                 Want to see it handle a real call? Book a short demo and we&apos;ll walk you through it.
@@ -108,7 +108,12 @@ export function SignupPopup() {
                 >
                     <Link href={DEMO_PATH}>Book a Demo</Link>
                 </Button>
-                <Button type="button" variant="outline" onClick={cancel}>
+                <Button
+                    type="button"
+                    variant="outline"
+                    className="bg-red-600 text-white border-red-600 hover:bg-red-700 hover:text-white"
+                    onClick={cancel}
+                >
                     Cancel
                 </Button>
             </div>

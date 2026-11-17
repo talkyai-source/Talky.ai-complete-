@@ -306,12 +306,31 @@ test("signed in: never renders on any public page, past 10 s", () => {
     }
 });
 
-test("Cancel is not styled as a destructive action", () => {
+// Owner decision (17 Nov 2026): Cancel is red in both themes. This replaces the QA F1-03 rule that Cancel must not look like a destructive action.
+test("Cancel is red in both themes", () => {
     const { advance, restore } = mount();
     try {
         advance(DELAY);
         const cancel = [...popup()!.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
-        assert.ok(cancel && !/destructive/.test(cancel.className), cancel?.className);
+        assert.ok(cancel, "Cancel button is rendered");
+        const classes = cancel.className.split(/\s+/);
+        for (const expected of ["bg-red-600", "text-white", "border-red-600", "hover:bg-red-700"]) {
+            assert.ok(classes.includes(expected), `${expected} in: ${cancel.className}`);
+        }
+        assert.ok(!/destructive/.test(cancel.className), cancel.className);
+    } finally {
+        restore();
+    }
+});
+
+test("the popup card uses the Campaigns card gradient", () => {
+    const { advance, restore } = mount();
+    try {
+        advance(DELAY);
+        const classes = popup()!.className.split(/\s+/);
+        for (const expected of ["bg-(image:--home-card-gradient)", "bg-cover", "bg-no-repeat"]) {
+            assert.ok(classes.includes(expected), `${expected} in: ${popup()!.className}`);
+        }
     } finally {
         restore();
     }
