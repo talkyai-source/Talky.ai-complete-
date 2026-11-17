@@ -512,6 +512,31 @@ async def test_list_and_create_webhook():
     await client.aclose()
 
 
+async def test_update_webhook_events_patch_request():
+    srv = Server(api=lambda r: httpx.Response(200, json={"id": "W1"}))
+    client = make(srv)
+    out = await client.update_webhook_events("W1", event_names=["A.B", "C.D"])
+    assert out == {"id": "W1"}
+    req = srv.api_calls[-1]
+    assert req.method == "PATCH"
+    assert req.url.path == "/v1/notifications/webhooks/W1"
+    assert req.headers["content-type"] == "application/json"
+    assert json.loads(req.content) == [
+        {"op": "replace", "path": "/event_types", "value": [{"name": "A.B"}, {"name": "C.D"}]}
+    ]
+    await client.aclose()
+
+
+@pytest.mark.parametrize("bad", ["", "a/b", "../x", "a b", "x" * 65])
+async def test_update_webhook_events_rejects_bad_id(bad):
+    srv = Server()
+    client = make(srv)
+    with pytest.raises(ValueError):
+        await client.update_webhook_events(bad, event_names=["A.B"])
+    assert srv.api_calls == []
+    await client.aclose()
+
+
 async def test_list_webhooks_empty_shape():
     srv = Server(api=lambda r: httpx.Response(200, json={}))
     client = make(srv)

@@ -154,3 +154,13 @@ def test_live_in_production_is_open_when_on(monkeypatch):
 def test_reason_never_names_a_setting():
     assert "PAYPAL" not in pm.PAYPAL_UNAVAILABLE
     assert "_" not in pm.PAYPAL_UNAVAILABLE
+
+
+def test_webhook_events_unique_and_cover_money_events():
+    events = pm.PAYPAL_WEBHOOK_EVENTS
+    assert len(events) == len(set(events))
+    for name in (
+        "PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.REFUNDED", "PAYMENT.CAPTURE.REVERSED",
+        "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.RESOLVED",
+    ):
+        assert name in events

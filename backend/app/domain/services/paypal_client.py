@@ -405,6 +405,19 @@ class PayPalClient:
             json_body={"url": url, "event_types": [{"name": n} for n in event_names]},
         )
 
+    async def update_webhook_events(
+        self, webhook_id: str, *, event_names: Sequence[str]
+    ) -> dict[str, Any]:
+        # PayPal supports only "replace" on a webhook.
+        return await self._api(
+            "PATCH",
+            f"/v1/notifications/webhooks/{_path_id(webhook_id)}",
+            extra_headers={"Content-Type": "application/json"},
+            json_body=[
+                {"op": "replace", "path": "/event_types", "value": [{"name": n} for n in event_names]}
+            ],
+        )
+
 
 _client: PayPalClient | None = None
 _client_key: tuple[str, str, str] | None = None

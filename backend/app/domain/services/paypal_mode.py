@@ -15,6 +15,20 @@ PAYPAL_LIVE_API = "https://api-m.paypal.com"
 PAYPAL_SANDBOX_API = "https://api-m.sandbox.paypal.com"
 PAYPAL_UNAVAILABLE = "PayPal is not available yet."
 
+# The events the product subscribes to. One list, used by the setup tool and the webhook handler.
+PAYPAL_WEBHOOK_EVENTS: tuple[str, ...] = (
+    "CHECKOUT.ORDER.APPROVED",
+    "PAYMENT.CAPTURE.COMPLETED",
+    "PAYMENT.CAPTURE.DECLINED",
+    "PAYMENT.CAPTURE.DENIED",
+    "PAYMENT.CAPTURE.PENDING",
+    "PAYMENT.CAPTURE.REFUNDED",
+    "PAYMENT.CAPTURE.REVERSED",
+    "CUSTOMER.DISPUTE.CREATED",
+    "CUSTOMER.DISPUTE.UPDATED",
+    "CUSTOMER.DISPUTE.RESOLVED",
+)
+
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
