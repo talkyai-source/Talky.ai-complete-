@@ -7,6 +7,7 @@ models the once-only rule the way ``TopupService.credit_paid_order`` states it.
 from __future__ import annotations
 
 import copy
+import hashlib
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
@@ -36,6 +37,17 @@ class FakeConn:
 
     async def execute(self, sql, *args):
         self.store["sql"].append(sql)
+        if sql.startswith("INSERT INTO paypal_webhook_events"):
+            if self.store.get("review_write_fails"):
+                raise RuntimeError("db down")
+            rows = self.store.setdefault("review_rows", {})
+            if args[0] in rows:
+                rows[args[0]]["attempt_count"] += 1
+            else:
+                rows[args[0]] = dict(zip(
+                    ("event_id", "resource_id", "order_id", "provider_mode", "detail", "payload_hash"),
+                    args), attempt_count=1, sql=sql)
+            return "INSERT 0 1"
         order_id, tenant = args[0], args[1]
         row = self.store["orders"].get(order_id)
         ok = row is not None and row["tenant_id"] == tenant and row["status"] == "pending"
@@ -57,6 +69,8 @@ class FakeConn:
             row = self._find(lambda r: r["id"] == args[0] and r["tenant_id"] == args[1])
         elif "provider_session_id = $1 AND provider = 'paypal'" in sql:
             row = self._find(lambda r: r["provider_session_id"] == args[0] and r["provider"] == "paypal")
+        elif "WHERE id = $1::uuid AND provider = 'paypal'" in sql:
+            row = self._find(lambda r: r["id"] == args[0] and r["provider"] == "paypal")
         elif "provider_payment_id = $1 AND provider = 'paypal'" in sql:
             row = self._find(lambda r: r["provider_payment_id"] == args[0] and r["provider"] == "paypal")
         else:
@@ -655,3 +669,99 @@ async def test_refund_of_a_capture_that_belongs_to_another_order_is_review(env):
     client.capture_object = {"id": CAPTURE, "status": "REFUNDED", "custom_id": str(uuid4())}
     assert await svc.reverse_capture(capture_id=CAPTURE, kind="refund", event_id="evt-7") == "review"
     assert topups.reversals == []
+
+
+# -- review record, reverse on a not-paid order ----------------------------------------------
+
+
+async def test_review_on_capture_writes_one_platform_row_without_payer_data(env):
+    svc, client, topups, store = env
+    row = add_order(store)
+    answer = pp_order(row, value="9.99")
+    answer["payer"] = {"email_address": "payer@example.invalid"}
+    client.capture_answer = answer
+    with pytest.raises(PayPalTopupError) as e:
+        await svc.capture_for_tenant(tenant_id=TENANT, order_id=row["id"])
+    assert e.value.code == "review"
+    rows = store["review_rows"]
+    assert len(rows) == 1
+    event_id = f"local:review:{row['id']}:amount_mismatch"
+    rec = rows[event_id]
+    assert rec["resource_id"] == PP_ORDER and rec["order_id"] == row["id"]
+    assert rec["provider_mode"] == "test" and rec["detail"] == "amount_mismatch"
+    assert rec["payload_hash"] == hashlib.sha256(event_id.encode()).hexdigest()
+    assert "'LOCAL.CAPTURE.REVIEW', 'order'" in rec["sql"] and "'needs_review'" in rec["sql"]
+    assert "payer" not in str(rec)
+    assert store["acquired"][-1] is None
+
+
+async def test_a_second_review_raises_the_attempt_count(env):
+    svc, client, topups, store = env
+    row = add_order(store)
+    client.capture_answer = pp_order(row, value="9.99")
+    for _ in range(2):
+        with pytest.raises(PayPalTopupError):
+            await svc.capture_for_tenant(tenant_id=TENANT, order_id=row["id"])
+    assert len(store["review_rows"]) == 1
+    assert next(iter(store["review_rows"].values()))["attempt_count"] == 2
+
+
+async def test_review_on_the_already_captured_path_also_records(env):
+    svc, client, topups, store = env
+    row = add_order(store)
+    client.capture_error = PayPalError(status=422, name="UNPROCESSABLE", retryable=False)
+    client.order_answer = pp_order(row, value="9.99")
+    with pytest.raises(PayPalTopupError):
+        await svc.capture_for_tenant(tenant_id=TENANT, order_id=row["id"])
+    assert len(store["review_rows"]) == 1
+
+
+async def test_a_failing_review_write_still_raises_the_review_error(env, caplog):
+    svc, client, topups, store = env
+    row = add_order(store)
+    store["review_write_fails"] = True
+    client.capture_answer = pp_order(row, value="9.99")
+    with caplog.at_level("ERROR"):
+        with pytest.raises(PayPalTopupError) as e:
+            await svc.capture_for_tenant(tenant_id=TENANT, order_id=row["id"])
+    assert e.value.code == "review" and "paypal_topup_review_record_failed" in caplog.text
+
+
+async def test_the_event_id_is_cut_to_255_characters(env):
+    svc, client, topups, store = env
+    row = add_order(store)
+    await svc._record_review(row, "x" * 400)
+    ((event_id, rec),) = store["review_rows"].items()
+    assert len(event_id) == 255 and len(rec["detail"]) == 255
+
+
+async def test_settle_writes_no_review_row(env):
+    svc, client, topups, store = env
+    row = add_order(store)
+    client.order_answer = pp_order(row, value="9.99")
+    with pytest.raises(PayPalTopupError):
+        await svc.settle_paypal_order(paypal_order_id=PP_ORDER)
+    assert "review_rows" not in store
+
+
+@pytest.mark.parametrize("status", ["pending", "failed", "cancelled"])
+async def test_reverse_on_an_order_that_was_never_paid_is_review(env, status, caplog):
+    svc, client, topups, store = env
+    add_order(store, status=status, payment=CAPTURE)
+    with caplog.at_level("ERROR"):
+        out = await svc.reverse_capture(capture_id=CAPTURE, kind="dispute", event_id="evt-8")
+    assert out == "review" and topups.reversals == []
+    assert f"rule=reverse_on_{status}" in caplog.text
+
+
+@pytest.mark.parametrize("status", ["refunded", "disputed"])
+async def test_reverse_on_an_already_reversed_order_is_already(env, status):
+    svc, client, topups, store = env
+    add_order(store, status=status, payment=CAPTURE)
+    assert await svc.reverse_capture(capture_id=CAPTURE, kind="dispute", event_id="evt-9") == "already"
+
+
+async def test_reverse_on_a_paid_order_is_reversed(env):
+    svc, client, topups, store = env
+    add_order(store, status="paid", payment=CAPTURE)
+    assert await svc.reverse_capture(capture_id=CAPTURE, kind="dispute", event_id="evt-10") == "reversed"

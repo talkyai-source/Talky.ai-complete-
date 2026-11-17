@@ -20,6 +20,7 @@ capture collide in the database and credit once.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -34,7 +35,7 @@ from app.domain.services.paypal_client import (
     minor_units,
     money_value,
 )
-from app.domain.services.paypal_mode import paypal_env
+from app.domain.services.paypal_mode import paypal_env, paypal_provider_mode
 from app.domain.services.topup_service import TopupError, TopupService
 
 logger = logging.getLogger(__name__)
@@ -253,12 +254,41 @@ class PayPalTopupService:
             current = await client.get_order(paypal_order_id)
             state = current.get("status") if isinstance(current, dict) else None
             if state == "COMPLETED":
-                return await self._verify_and_credit(order, current)
+                return await self._verify_or_record(order, current)
             if state == "VOIDED":
                 await self._topups.mark_failed(session_id=paypal_order_id, status="failed")
                 return CaptureOutcome(oid, "failed", None)
             return CaptureOutcome(oid, "not_approved", None)
-        return await self._verify_and_credit(order, answer)
+        return await self._verify_or_record(order, answer)
+
+    async def _verify_or_record(self, order: dict, paypal_order: dict) -> CaptureOutcome:
+        """Browser-return path: a ``review`` also leaves one row for the alert."""
+        try:
+            return await self._verify_and_credit(order, paypal_order)
+        except PayPalTopupError as exc:
+            if exc.code == "review":
+                await self._record_review(order, str(exc))
+            raise
+
+    async def _record_review(self, order: dict, rule: str) -> None:
+        """Best effort: one platform-level row so a payment that needs a person is counted."""
+        event_id = f"local:review:{order['id']}:{rule}"[:255]
+        try:
+            async with acquire_with_tenant(self._pool, None) as conn:
+                await conn.execute(
+                    "INSERT INTO paypal_webhook_events "
+                    "(event_id, event_type, resource_type, resource_id, order_id, "
+                    "provider_mode, state, detail, payload_hash) "
+                    "VALUES ($1, 'LOCAL.CAPTURE.REVIEW', 'order', $2, $3::uuid, $4, "
+                    "'needs_review', $5, $6) "
+                    "ON CONFLICT (event_id) DO UPDATE SET "
+                    "attempt_count = paypal_webhook_events.attempt_count + 1",
+                    event_id, str(order["provider_session_id"])[:255], str(order["id"]),
+                    paypal_provider_mode() or "live", rule[:255],
+                    hashlib.sha256(event_id.encode()).hexdigest(),
+                )
+        except Exception:
+            logger.error("paypal_topup_review_record_failed order=%s", _short(order["id"]))
 
     @staticmethod
     def _log_capture_error(oid: str, exc: PayPalError) -> None:
@@ -337,7 +367,19 @@ class PayPalTopupService:
                         capture=capture_id)
                 return "review"
         moved = await self._topups.reverse(event_id=event_id, kind=kind, payment_id=capture_id)
-        return "reversed" if moved else "already"
+        if moved:
+            return "reversed"
+        # False: already reversed, or the order was never paid. Only the first is done.
+        async with acquire_with_tenant(self._pool, None) as conn:
+            current = await conn.fetchrow(
+                "SELECT status FROM topup_orders WHERE id = $1::uuid AND provider = 'paypal'",
+                oid,
+            )
+        status = current["status"] if current is not None else None
+        if status in ("refunded", "disputed"):
+            return "already"
+        _review(oid, row["provider_session_id"], f"reverse_on_{status}", capture=capture_id)
+        return "review"
 
 
 def _rows(tag: Any) -> int:

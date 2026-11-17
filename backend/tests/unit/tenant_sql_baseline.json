@@ -12810,6 +12810,40 @@
       "count": 1,
       "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:284.",
       "category": "system_provider_receipt"
+    },
+    {
+      "id": "3cfd99bc3920bf870305a250a96a6a6bb61ff8dfaaa67b35c6120dd7ff2756e1",
+      "file": "app/domain/services/paypal_topups.py",
+      "function": "PayPalTopupService._record_review",
+      "line": 278,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.CAPTURE.REVIEW', 'order', $2, $3::uuid, $4, 'needs_review', $5, $6) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Review marker for a PayPal payment that was taken but did not match its order (browser-return path). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch can count it. It is written only after capture_for_tenant has read the order with id AND tenant_id of the signed-in account, and it carries our order id, the PayPal order id, the failed rule and a hash of its own key: no payer data and nothing chosen by the caller. Source: paypal_topups.PayPalTopupService._record_review. Exact reviewed operation: execute; app/domain/services/paypal_topups.py:278.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "51493848011df758a04b95c656bd74058dea8f9ecb355e8e8a6dbbebe33e95ef",
+      "file": "app/domain/services/paypal_topups.py",
+      "function": "PayPalTopupService.reverse_capture",
+      "line": 374,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT status FROM topup_orders WHERE id = $1::uuid AND provider = 'paypal'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:374.",
+      "category": "individually_reviewed"
     }
   ]
 }
