@@ -12674,6 +12674,142 @@
       "count": 1,
       "reason": "Resend writes a new hashed verification token only on the user id returned by the lookup above, in the same transaction, and only while that account is still unverified (AND is_verified = FALSE). The id never comes from the caller, and the plain token is only ever sent to the account's own address. Source: auth/verify_email.py resend_verification_email. Exact reviewed operation: execute; app/api/v1/endpoints/auth/verify_email.py:180.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "7bfcc00032005fcf66a7719be11d344221ba65575b12c2510d3f70054ffd129c",
+      "file": "app/domain/services/paypal_topups.py",
+      "function": "PayPalTopupService.settle_paypal_order",
+      "line": 274,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id, minutes, price_cents, currency, status, provider, provider_session_id FROM topup_orders WHERE provider_session_id = $1 AND provider = 'paypal'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_session_id (the PayPal order id). Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:274.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "67b9d414c0327f544625c4b7a98df3542fc5927150b803a386a39288966351e7",
+      "file": "app/domain/services/paypal_topups.py",
+      "function": "PayPalTopupService.reverse_capture",
+      "line": 318,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id, status, provider_session_id FROM topup_orders WHERE provider_payment_id = $1 AND provider = 'paypal'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_payment_id (the PayPal capture id) for a refund or a dispute. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:318.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "34379a461b76f1ec0a62f645bb5765f9ff7451c325f4c5cb4df65e355922ab33",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "_dispatch",
+      "line": 174,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id FROM topup_orders WHERE provider_payment_id = $1 AND provider = 'paypal' LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Dispute updates only: it answers whether the disputed capture is one of ours, returns the order id for the receipt, and changes nothing. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:174.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "e7b4266c886df4b7ff7c55319ca500b7108be825d82f3dc9bbc90c679e28c9ae",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "handle_paypal_webhook",
+      "line": 222,
+      "method": "fetchval",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, provider_mode, state, payload_hash) VALUES ($1, $2, $3, $4, $5, 'received', $6) ON CONFLICT (event_id) DO NOTHING RETURNING event_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchval; app/domain/services/paypal_webhooks.py:222.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "b61dcfeed46e26f3df217de23cda5841a18e3dfac60b8b277ddfddd6797a74de",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "handle_paypal_webhook",
+      "line": 231,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "SELECT state, payload_hash FROM paypal_webhook_events WHERE event_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:231.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "6b9ce372a5e98d77994f1b2decdd72838c232d601dc799ba3e941093d89a0a25",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "handle_paypal_webhook",
+      "line": 245,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "UPDATE paypal_webhook_events SET attempt_count = attempt_count + 1 WHERE event_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:245.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "06e379a82765d1345a3315d6f4f71120be2b6ab4780ea6f7ac84051d5f4a2849",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "_update",
+      "line": 112,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "UPDATE paypal_webhook_events SET state = $2, detail = $3, order_id = COALESCE($4::uuid, order_id), completed_at = NOW() WHERE event_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:112.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "374ad8c0069cdff9a19f35edd8267b51808a0e43609afa88d837037716d0beed",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "_fail",
+      "line": 284,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "UPDATE paypal_webhook_events SET state = 'failed', detail = $2 WHERE event_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:284.",
+      "category": "system_provider_receipt"
     }
   ]
 }
