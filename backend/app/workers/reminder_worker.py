@@ -135,6 +135,7 @@ class ReminderWorker:
         callback_task = asyncio.create_task(self._voice_callback_loop())
         billing_task = asyncio.create_task(self._billing_delivery_loop())
         topup_usage_task = asyncio.create_task(self._topup_usage_loop())
+        paypal_plans_task = asyncio.create_task(self._paypal_plans_loop())
         connector_refresh_task = asyncio.create_task(self._connector_refresh_loop())
         campaign_alert_task = asyncio.create_task(self._campaign_alert_loop())
 
@@ -181,6 +182,11 @@ class ReminderWorker:
             connector_refresh_task.cancel()
             try:
                 await connector_refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            paypal_plans_task.cancel()
+            try:
+                await paypal_plans_task
             except (asyncio.CancelledError, Exception):
                 pass
             topup_usage_task.cancel()
@@ -259,6 +265,25 @@ class ReminderWorker:
             except Exception as exc:
                 logger.warning("Top-up usage scan failed: %s", type(exc).__name__)
             await asyncio.sleep(600)
+
+    async def _paypal_plans_loop(self):
+        """Keep plans bought with PayPal true to PayPal.
+
+        Ends a cancelled plan once its paid period is over and re-reads every
+        live subscription from PayPal every few hours, so a lost notice cannot
+        leave a plan running that is no longer paid for. Every five minutes.
+        """
+        from app.domain.services.paypal_mode import paypal_provider_mode
+        from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+        while self.running:
+            try:
+                if paypal_provider_mode() is not None:
+                    result = await PayPalSubscriptionService(self._db_pool).sweep()
+                    if any(result.values()):
+                        logger.info("PayPal plans sweep: %s", result)
+            except Exception as exc:
+                logger.warning("PayPal plans sweep failed: %s", type(exc).__name__)
+            await asyncio.sleep(300)
 
     async def _voice_callback_loop(self):
         from app.services.voice_callback_service import drain_voice_callbacks

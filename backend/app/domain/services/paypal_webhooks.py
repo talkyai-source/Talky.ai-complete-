@@ -1,7 +1,8 @@
 """PayPal webhook handler: verify with PayPal, record a receipt, dispatch.
 
 The event only tells us WHERE to look. Every money decision is made by
-``PayPalTopupService``, which re-reads PayPal. Nothing is written to the
+``PayPalTopupService`` (prepaid minutes) or ``PayPalSubscriptionService``
+(plans), which re-read PayPal. Nothing is written to the
 database before PayPal has confirmed the signature. The receipt row keeps ids
 and a SHA-256 of the body, never the body (it carries the payer's name, email
 and address). Nothing here logs a header, a signature or a body.
@@ -18,6 +19,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.billing_checkout import CheckoutError
 from app.domain.services.paypal_client import PayPalError, PayPalNotConfigured, get_paypal_client
 from app.domain.services.paypal_mode import paypal_provider_mode, paypal_webhook_id
 from app.domain.services.paypal_topups import PayPalTopupError, PayPalTopupService
@@ -27,6 +29,16 @@ logger = logging.getLogger(__name__)
 _CAPTURE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 _SETTLE_EVENTS = frozenset(
     {"PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.DECLINED", "PAYMENT.CAPTURE.DENIED"}
+)
+_PLAN_EVENTS = frozenset(
+    {
+        "BILLING.SUBSCRIPTION.ACTIVATED",
+        "BILLING.SUBSCRIPTION.UPDATED",
+        "BILLING.SUBSCRIPTION.CANCELLED",
+        "BILLING.SUBSCRIPTION.SUSPENDED",
+        "BILLING.SUBSCRIPTION.EXPIRED",
+        "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
+    }
 )
 _FINISHED = frozenset({"completed", "ignored", "needs_review"})
 _MAX_VERIFICATIONS_IN_FLIGHT = 4
@@ -118,10 +130,63 @@ async def _update(event_id: str, state: str, detail: str | None, order_id: str |
         )
 
 
+async def _plan_sync(
+    plans, subscription_id: Any, *, wait_for_payment: bool
+) -> tuple[str, str | None, str | None]:
+    if not isinstance(subscription_id, str) or not _CAPTURE_ID.match(subscription_id):
+        return "ignored", "no_subscription_id", None
+    outcome = await plans.sync(subscription_id)
+    if outcome is None:
+        return "ignored", "not_our_subscription", None
+    if outcome.review:
+        return "needs_review", "plan_review", outcome.subscription_id
+    if wait_for_payment and not outcome.activated and outcome.status == "approval_pending":
+        # PayPal does not show the payment yet: keep the receipt open.
+        raise PayPalWebhookRetry("payment not visible at PayPal yet")
+    return "completed", f"plan_{outcome.status}"[:64], outcome.subscription_id
+
+
 async def _dispatch(
-    pool, service, event_id: str, event_type: str, event: dict, resource: dict
+    pool, service, plans, event_id: str, event_type: str, event: dict, resource: dict
 ) -> tuple[str, str | None, str | None]:
     """(state, detail, our order id). Raises whatever the service raises."""
+    if event_type in _PLAN_EVENTS:
+        return await _plan_sync(plans, resource.get("id"), wait_for_payment=False)
+
+    if event_type == "PAYMENT.SALE.COMPLETED":
+        return await _plan_sync(plans, resource.get("billing_agreement_id"), wait_for_payment=True)
+
+    if event_type == "PAYMENT.SALE.REFUNDED":
+        sale_id = resource.get("sale_id")
+        if not isinstance(sale_id, str) or not _CAPTURE_ID.match(sale_id):
+            return "ignored", "no_sale_id", None
+        async with acquire_with_tenant(pool, None) as conn:
+            row = await conn.fetchrow(
+                "SELECT s.paypal_subscription_id FROM paypal_subscription_payments p "
+                "JOIN paypal_subscriptions s ON s.id = p.subscription_id AND s.tenant_id = p.tenant_id "
+                "WHERE p.paypal_transaction_id = $1 LIMIT 1",
+                sale_id,
+            )
+        if row is None:
+            return "ignored", "not_our_payment", None
+        state, detail, our_id = await _plan_sync(
+            plans, row["paypal_subscription_id"], wait_for_payment=False
+        )
+        if state == "completed":
+            return "completed", "plan_refund_recorded", our_id
+        return state, detail, our_id
+
+    if event_type == "PAYMENT.SALE.REVERSED":
+        sale_id = resource.get("id")
+        if not isinstance(sale_id, str) or not _CAPTURE_ID.match(sale_id):
+            return "ignored", "no_sale_id", None
+        answer = await plans.end_for_reversal(
+            transaction_id=sale_id, kind="reversal", event_id=f"paypal:plan-reversal:{event_id}"
+        )
+        if answer == "not_ours":
+            return "ignored", "not_our_payment", None
+        return "completed", f"plan_reversal_{answer}", None
+
     if event_type in _SETTLE_EVENTS:
         supplementary = resource.get("supplementary_data")
         ids = supplementary.get("related_ids") if isinstance(supplementary, dict) else None
@@ -168,7 +233,14 @@ async def _dispatch(
                 capture_id=capture_id, kind="dispute",
                 event_id=f"paypal:dispute:{dispute}:{capture_id}",
             )
-            results.append(_from_reverse(answer))
+            if answer != "unknown":
+                results.append(_from_reverse(answer))
+                continue
+            plan_answer = await plans.end_for_reversal(
+                transaction_id=capture_id, kind="dispute",
+                event_id=f"paypal:plan-dispute:{dispute}:{capture_id}",
+            )
+            results.append("ignored" if plan_answer == "not_ours" else "completed")
         state = _worst(results)
         return state, "dispute_created" if results else "no_transactions", None
 
@@ -195,6 +267,7 @@ async def handle_paypal_webhook(
     raw_body: bytes,
     client=None,
     service=None,
+    plans=None,
 ) -> dict[str, str]:
     event, event_id, event_type, resource = _parse(raw_body)
 
@@ -261,11 +334,18 @@ async def handle_paypal_webhook(
 
     if service is None:
         service = PayPalTopupService(pool)
+    if plans is None:
+        from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+
+        plans = PayPalSubscriptionService(pool)
 
     try:
-        state, detail, order_id = await _dispatch(pool, service, event_id, event_type, event, resource)
+        state, detail, order_id = await _dispatch(pool, service, plans, event_id, event_type, event, resource)
     except PayPalWebhookRetry:
         raise  # the receipt stays 'received' so PayPal's next delivery is processed
+    except CheckoutError as exc:
+        await _fail(pool, event_id, f"plan_{exc.code}"[:64])
+        raise
     except PayPalTopupError as exc:
         if exc.code != "review":
             await _fail(pool, event_id, f"topup_{exc.code}"[:64])
