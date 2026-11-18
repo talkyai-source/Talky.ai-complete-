@@ -90,11 +90,17 @@ _INVOICE_STATUS = {
     "reversed": "reversed", "pending": "pending", "declined": "failed", "failed": "failed",
 }
 _APPROVAL_WINDOW = timedelta(hours=3)
+# PayPal takes the first payment at once. This long after PayPal first showed the approval, with
+# the subscription ACTIVE and no payment of the price in sight, we stop it at PayPal and tell a
+# person (the clock is ``approved_at``, not the creation time: approving can take hours).
+_PAYMENT_WAIT = timedelta(hours=2)
 _NO_ID_FRESH = timedelta(minutes=2)
 
 MSG_CONFIRMING = "PayPal has not confirmed the first payment yet. This page checks again by itself."
 MSG_UNCONFIRMED = "The purchase is unconfirmed. Retry this saved request."
 _UNCONFIRMED = "PayPal did not confirm the purchase. Retry the same saved request."
+MSG_NOT_USED = ("This PayPal purchase was not used. If PayPal took a payment for it, "
+                "it will be refunded.")
 
 
 # The three status lists, once, as literal text (kept equal to LIVE / OPEN / HELD by a unit test).
@@ -182,12 +188,12 @@ _Q_SAVE = (
     "UPDATE paypal_subscriptions SET status = $3, paypal_status = $4, failed_payments = $5, "
     "activated_at = $6, last_payment_at = $7, current_period_start = $8, current_period_end = $9, "
     "cancel_at_period_end = $10, cancelled_at = $11, ended_at = $12, checked_at = $13, "
-    "updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid"
+    "approved_at = $14, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid"
 )
 _SAVED = (
     "status", "paypal_status", "failed_payments", "activated_at", "last_payment_at",
     "current_period_start", "current_period_end", "cancel_at_period_end", "cancelled_at",
-    "ended_at", "checked_at",
+    "ended_at", "checked_at", "approved_at",
 )
 _Q_TENANT_PROJECT = (
     "UPDATE tenants SET subscription_status = $2 "
@@ -238,6 +244,32 @@ _Q_SWEEP_STALE = (
     "AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '6 hours' "
     f"OR (status IN {_OPEN_SQL} AND checked_at < NOW() - INTERVAL '10 minutes')) "
     "ORDER BY checked_at NULLS FIRST LIMIT $1"
+)
+# Rows we gave up on that PayPal may still run (customer approved late, notice lost).
+_Q_SWEEP_ABANDONED = (
+    "SELECT * FROM paypal_subscriptions WHERE status IN ('failed', 'expired') "
+    "AND activated_at IS NULL AND paypal_subscription_id IS NOT NULL "
+    "AND created_at > NOW() - INTERVAL '3 days' "
+    "AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '1 hour') "
+    "ORDER BY checked_at NULLS FIRST LIMIT $1"
+)
+# Rows we ended that PayPal still shows running: cancel there again.
+_Q_SWEEP_STRAY = (
+    "SELECT * FROM paypal_subscriptions WHERE status = 'cancelled' "
+    "AND paypal_subscription_id IS NOT NULL AND paypal_status IN ('APPROVED', 'ACTIVE', 'SUSPENDED') "
+    "AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '1 hour') "
+    "ORDER BY checked_at NULLS FIRST LIMIT $1"
+)
+# Paying customers we have not been able to confirm with PayPal for days: a person is told.
+_Q_SWEEP_UNCONFIRMED = (
+    "SELECT * FROM paypal_subscriptions WHERE status IN ('active', 'past_due') "
+    "AND NOT cancel_at_period_end AND current_period_end < NOW() - INTERVAL '3 days' "
+    "AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '3 days') LIMIT $1"
+)
+# PayPal's payment list lagged at activation: let the next sweep read the row again.
+_Q_RECHECK_SOON = (
+    "UPDATE paypal_subscriptions SET checked_at = NULL, updated_at = NOW() "
+    "WHERE id = $1::uuid AND tenant_id = $2::uuid AND activated_at > NOW() - INTERVAL '2 days'"
 )
 _Q_PAYMENTS = (
     "SELECT p.id, p.tenant_id, p.paypal_transaction_id, p.status, p.amount_minor, p.currency, "
@@ -364,6 +396,9 @@ def _response(row) -> dict:
     message = None
     if state == "pending":
         message = MSG_CONFIRMING if row["paypal_status"] in ("APPROVED", "ACTIVE") else MSG_UNCONFIRMED
+    elif (state == "failed" and row["status"] == CANCELLED
+            and row["paypal_status"] in ("APPROVED", "ACTIVE")):
+        message = MSG_NOT_USED
     return {
         "request_id": str(row["id"]),
         "state": state,
@@ -696,6 +731,12 @@ class PayPalSubscriptionService:
             logger.error("paypal_plan_still_running_at_paypal row=%s paypal_status=%s",
                          _short(rid), pp)
             return SyncOutcome(rid, tenant_id, final, locked["activated_at"] is not None, review=True)
+        if action == "unpaid_active":
+            # PayPal stops charging, the tenant can buy again, a person refunds if money moved.
+            await self._cancel_quietly(row["paypal_subscription_id"], "No payment was confirmed")
+            await self._record_review(row, "active_without_payment")
+            logger.error("paypal_plan_active_without_payment row=%s", _short(rid))
+            return SyncOutcome(rid, tenant_id, final, False, review=True)
         if action == "recancel":
             await self._cancel_quietly(row["paypal_subscription_id"], "Cancelled by the customer")
             charged_after = bool(
@@ -706,7 +747,7 @@ class PayPalSubscriptionService:
             if charged_after:
                 # PayPal took a payment after the customer cancelled: a person refunds it.
                 await self._record_review(row, "charged_after_cancel")
-            await self._record_payments(row, sub)
+            await self._payments_then_recheck(row, sub)
             return SyncOutcome(rid, tenant_id, final, True, review=charged_after)
         activated = locked["activated_at"] is not None or action == "activated"
         if action == "activated":
@@ -714,7 +755,7 @@ class PayPalSubscriptionService:
         elif action == "ended":
             logger.info("paypal_plan_ended row=%s paypal_status=%s", _short(rid), pp)
         if activated:
-            await self._record_payments(row, sub)
+            await self._payments_then_recheck(row, sub)
         return SyncOutcome(rid, tenant_id, final, activated)
 
     async def _decide(self, conn, tenant, locked, *, pp, failed, paid, paid_at, next_billing, now,
@@ -727,6 +768,8 @@ class PayPalSubscriptionService:
             await _save(conn, locked, changes)
             return st, "stray"
         project, action = None, None
+        if pp in ("APPROVED", "ACTIVE") and not activated:
+            changes["approved_at"] = locked["approved_at"] or now  # the first time PayPal showed it
         if pp == "APPROVAL_PENDING":
             if st in OPEN:
                 if now - locked["created_at"] >= _APPROVAL_WINDOW:
@@ -745,7 +788,11 @@ class PayPalSubscriptionService:
                         conn, tenant, locked, changes, paid_at=paid_at, next_billing=next_billing,
                         now=now, option=option)
                 elif st in OPEN:
-                    changes["status"] = APPROVAL_PENDING
+                    if now - changes["approved_at"] >= _PAYMENT_WAIT:
+                        changes.update(status=CANCELLED, ended_at=now)
+                        action = "unpaid_active"
+                    else:
+                        changes["status"] = APPROVAL_PENDING
                 elif st in (FAILED, EXPIRED):
                     action = await self._revive(conn, tenant, locked, changes, now)
             elif st in HELD:
@@ -854,8 +901,20 @@ class PayPalSubscriptionService:
         except Exception:
             logger.error("paypal_plan_review_record_failed row=%s", _short(row["id"]))
 
-    async def _record_payments(self, row: dict, sub: dict) -> None:
-        """A record, never a gate: any failure is logged and swallowed."""
+    async def _payments_then_recheck(self, row: dict, sub: dict) -> None:
+        """Record the payments; none seen means PayPal's list may lag, so read the row again soon."""
+        if await self._record_payments(row, sub) > 0:
+            return
+        try:
+            async with acquire_with_tenant(self._pool, str(row["tenant_id"])) as conn:
+                await conn.execute(_Q_RECHECK_SOON, str(row["id"]), str(row["tenant_id"]))
+        except Exception as exc:
+            logger.warning("paypal_plan_recheck_not_set row=%s error=%s",
+                           _short(row["id"]), type(exc).__name__)
+
+    async def _record_payments(self, row: dict, sub: dict) -> int:
+        """A record, never a gate: any failure is logged and swallowed. Returns valid payments seen."""
+        seen = 0
         try:
             now = datetime.now(UTC)
             start = max(row["created_at"] - timedelta(days=1), now - timedelta(days=95))
@@ -867,6 +926,7 @@ class PayPalSubscriptionService:
                     parsed = self._payment_of(txn)
                     if parsed is None:
                         continue
+                    seen += 1
                     tid, status, minor, currency, paid_at = parsed
                     done = _rows(await conn.execute(
                         _Q_PAYMENT_UPDATE, tenant_id, str(row["id"]), tid, status))
@@ -877,6 +937,8 @@ class PayPalSubscriptionService:
         except Exception as exc:
             logger.warning("paypal_plan_payments_not_recorded row=%s error=%s",
                            _short(row["id"]), type(exc).__name__)
+            return 0
+        return seen
 
     @staticmethod
     def _payment_of(txn):
@@ -966,10 +1028,29 @@ class PayPalSubscriptionService:
             payment = await conn.fetchrow(_Q_PAYMENT_BY_TXN, transaction_id)
         if payment is None:
             return "not_ours"
-        tenant_id = str(payment["tenant_id"])
+        return await self._reverse(
+            str(payment["tenant_id"]), str(payment["subscription_id"]), str(payment["id"]),
+            kind, event_id)
+
+    async def end_subscription_for_reversal(self, *, paypal_subscription_id: str, kind: str,
+                                            event_id: str) -> str:
+        """Same effect as ``end_for_reversal``, found by PayPal's subscription id; no payment row."""
+        if kind not in ("dispute", "reversal"):
+            raise ValueError("kind must be dispute or reversal")
+        if not isinstance(paypal_subscription_id, str) or not _ID_RE.fullmatch(paypal_subscription_id):
+            return "not_ours"
+        async with acquire_with_tenant(self._pool, None) as conn:
+            row = await conn.fetchrow(_Q_ROW_BY_PP, paypal_subscription_id)
+        if row is None:
+            return "not_ours"
+        return await self._reverse(str(row["tenant_id"]), str(row["id"]), None, kind, event_id)
+
+    async def _reverse(self, tenant_id: str, subscription_id: str, payment_id: str | None,
+                       kind: str, event_id: str) -> str:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
-            tenant, locked = await self._lock(conn, tenant_id, str(payment["subscription_id"]))
-            await conn.execute(_Q_PAYMENT_REVERSE, str(payment["id"]), tenant_id)
+            tenant, locked = await self._lock(conn, tenant_id, subscription_id)
+            if payment_id is not None:
+                await conn.execute(_Q_PAYMENT_REVERSE, payment_id, tenant_id)
             ended = locked["status"] in HELD
             if ended:
                 await self._end(conn, tenant, locked)
@@ -983,10 +1064,12 @@ class PayPalSubscriptionService:
     # -- sweep -----------------------------------------------------------------
 
     async def sweep(self, *, limit: int = 50) -> dict[str, int]:
-        counts = {"ended": 0, "checked": 0, "failed": 0}
+        counts = {"ended": 0, "checked": 0, "failed": 0, "unconfirmed": 0}
         async with acquire_with_tenant(self._pool, None) as conn:
             due = await conn.fetch(_Q_SWEEP_DUE, limit)
             stale = await conn.fetch(_Q_SWEEP_STALE, limit)
+            abandoned = await conn.fetch(_Q_SWEEP_ABANDONED, limit)
+            stray = await conn.fetch(_Q_SWEEP_STRAY, limit)
         for item in due:
             try:
                 counts["ended"] += await self._end_if_due(str(item["tenant_id"]), str(item["id"]))
@@ -994,8 +1077,12 @@ class PayPalSubscriptionService:
                 counts["failed"] += 1
                 logger.error("paypal_plan_sweep_failed row=%s error=%s",
                              _short(item["id"]), type(exc).__name__)
-        for item in stale:
+        followed: set[str] = set()
+        for item in (*stale, *abandoned, *stray):
             row = dict(item)
+            if str(row["id"]) in followed:
+                continue
+            followed.add(str(row["id"]))
             try:
                 await self._refresh(row)
                 counts["checked"] += 1
@@ -1003,6 +1090,14 @@ class PayPalSubscriptionService:
                 counts["failed"] += 1
                 logger.error("paypal_plan_sweep_failed row=%s error=%s",
                              _short(row["id"]), type(exc).__name__)
+        # After the refreshes: rows that could be read now are no longer unconfirmed.
+        async with acquire_with_tenant(self._pool, None) as conn:
+            unconfirmed = await conn.fetch(_Q_SWEEP_UNCONFIRMED, limit)
+        for item in unconfirmed:
+            row = dict(item)
+            await self._record_review(row, "not_confirmed_with_paypal")
+            logger.error("paypal_plan_not_confirmed_with_paypal row=%s", _short(row["id"]))
+            counts["unconfirmed"] += 1
         return counts
 
     async def _end_if_due(self, tenant_id: str, row_id: str) -> int:

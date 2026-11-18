@@ -71,6 +71,7 @@ def test_subscriptions_keep_one_live_row_per_tenant(monkeypatch):
     )
     assert "cancel_at_period_end BOOLEAN NOT NULL DEFAULT FALSE" in create
     assert "paypal_status TEXT," in create
+    assert "approved_at TIMESTAMPTZ," in create
     assert (
         "CREATE UNIQUE INDEX IF NOT EXISTS paypal_subscriptions_one_live_per_tenant "
         "ON public.paypal_subscriptions (tenant_id) WHERE status IN "

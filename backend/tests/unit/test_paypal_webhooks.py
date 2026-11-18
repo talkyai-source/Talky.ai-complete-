@@ -71,9 +71,11 @@ class FakePlans:
         self.outcome = SimpleNamespace(
             subscription_id=PLAN_ROW, tenant_id="T", status="active", activated=True, review=False)
         self.end_answer = "not_ours"
+        self.sub_answer = "not_ours"
         self.error = None
         self.synced = []
         self.ended = []
+        self.ended_by_sub = []
 
     async def sync(self, paypal_subscription_id):
         self.synced.append(paypal_subscription_id)
@@ -86,6 +88,10 @@ class FakePlans:
         if self.error:
             raise self.error
         return self.end_answer
+
+    async def end_subscription_for_reversal(self, *, paypal_subscription_id, kind, event_id):
+        self.ended_by_sub.append(dict(paypal_subscription_id=paypal_subscription_id, kind=kind, event_id=event_id))
+        return self.sub_answer
 
 
 class Store:
@@ -635,6 +641,36 @@ async def test_reversal_calls_end_for_reversal_once(world, answer):
 async def test_reversal_of_a_foreign_payment_is_ignored(world):
     assert await run(world, body("PAYMENT.SALE.REVERSED", {"id": SALE})) == {"status": "ignored"}
     assert row(world)["detail"] == "not_our_payment"
+
+
+@pytest.mark.parametrize("answer", ["ended", "already"])
+async def test_reversal_falls_back_to_the_subscription_after_not_ours(world, answer):
+    world.plans.sub_answer = answer
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "completed"}
+    assert world.plans.ended_by_sub == [dict(
+        paypal_subscription_id=PP_SUB, kind="reversal", event_id="paypal:plan-reversal:WH-EVT-1")]
+    assert row(world)["detail"] == f"plan_reversal_{answer}"
+
+
+async def test_reversal_fallback_not_ours_is_ignored(world):
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "ignored"}
+    assert row(world)["detail"] == "not_our_payment" and len(world.plans.ended_by_sub) == 1
+
+
+@pytest.mark.parametrize("agreement", [None, 7, "bad id!", ""])
+async def test_reversal_fallback_needs_a_valid_subscription_id(world, agreement):
+    resource = {"id": SALE, "billing_agreement_id": agreement}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "ignored"}
+    assert world.plans.ended_by_sub == []
+
+
+@pytest.mark.parametrize("answer", ["ended", "already"])
+async def test_reversal_fallback_is_not_used_when_the_payment_is_ours(world, answer):
+    world.plans.end_answer = answer
+    await run(world, body("PAYMENT.SALE.REVERSED", {"id": SALE, "billing_agreement_id": PP_SUB}))
+    assert world.plans.ended_by_sub == []
 
 
 @pytest.mark.parametrize("resource", [{}, {"id": 9}, {"id": "bad id!"}])

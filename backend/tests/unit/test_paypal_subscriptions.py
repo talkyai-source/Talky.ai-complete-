@@ -120,6 +120,21 @@ class FakeConn:
                     if r["status"] in ps.LIVE
                     and (r["checked_at"] is None or r["checked_at"] < t - timedelta(hours=6)
                          or (r["status"] in ps.OPEN and r["checked_at"] < t - timedelta(minutes=10)))][: a[0]]
+        if sql == ps._Q_SWEEP_ABANDONED:
+            return [copy.deepcopy(r) for r in s["subs"].values()
+                    if r["status"] in ("failed", "expired") and r["activated_at"] is None
+                    and r["paypal_subscription_id"] and r["created_at"] > t - timedelta(days=3)
+                    and (r["checked_at"] is None or r["checked_at"] < t - timedelta(hours=1))][: a[0]]
+        if sql == ps._Q_SWEEP_STRAY:
+            return [copy.deepcopy(r) for r in s["subs"].values()
+                    if r["status"] == "cancelled" and r["paypal_subscription_id"]
+                    and r["paypal_status"] in ("APPROVED", "ACTIVE", "SUSPENDED")
+                    and (r["checked_at"] is None or r["checked_at"] < t - timedelta(hours=1))][: a[0]]
+        if sql == ps._Q_SWEEP_UNCONFIRMED:
+            return [copy.deepcopy(r) for r in s["subs"].values()
+                    if r["status"] in ("active", "past_due") and not r["cancel_at_period_end"]
+                    and r["current_period_end"] < t - timedelta(days=3)
+                    and (r["checked_at"] is None or r["checked_at"] < t - timedelta(days=3))][: a[0]]
         if sql == ps._Q_PAYMENTS:
             out = []
             for p in sorted(s["payments"].values(), key=lambda p: p["paid_at"], reverse=True):
@@ -177,6 +192,14 @@ class FakeConn:
             p = next(p for p in s["payments"].values() if p["id"] == a[0] and p["tenant_id"] == a[1])
             p["status"] = "reversed"
             return "UPDATE 1"
+        if sql == ps._Q_RECHECK_SOON:
+            r = s["subs"].get(a[0])
+            if r is None or r["tenant_id"] != a[1]:
+                return "UPDATE 0"
+            if r["activated_at"] is not None and r["activated_at"] > now() - timedelta(days=2):
+                r["checked_at"] = None
+                return "UPDATE 1"
+            return "UPDATE 0"
         if sql in (ps._Q_PAYMENT_UPDATE, ps._Q_PAYMENT_INSERT) and s.get("payments_fail"):
             raise RuntimeError("db down")
         if sql == ps._Q_PAYMENT_UPDATE:
@@ -212,7 +235,7 @@ def make_row(**over):
         "status": "approval_pending", "paypal_status": None, "approval_url": None,
         "activated_at": None, "current_period_start": None, "current_period_end": None,
         "cancel_at_period_end": False, "cancelled_at": None, "ended_at": None,
-        "last_payment_at": None, "failed_payments": 0, "checked_at": None,
+        "last_payment_at": None, "failed_payments": 0, "checked_at": None, "approved_at": None,
         "created_at": now() - timedelta(minutes=5), "updated_at": now(),
     }
     row.update(over)
@@ -1459,9 +1482,9 @@ async def test_reversal_bad_kind(env):
 async def test_sweep_ends_a_due_row_once(env):
     row = add_active(env, cancel_at_period_end=True, current_period_end=now() - timedelta(minutes=1),
                      checked_at=now())
-    assert await env.svc.sweep() == {"ended": 1, "checked": 0, "failed": 0}
+    assert await env.svc.sweep() == {"ended": 1, "checked": 0, "failed": 0, "unconfirmed": 0}
     assert stored(env, row)["status"] == "cancelled" and tenant(env)["subscription_status"] == CANCELLED
-    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 0}
+    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 0, "unconfirmed": 0}
 
 
 async def test_sweep_rechecks_the_condition_on_the_locked_row(env):
@@ -1503,7 +1526,7 @@ async def test_sweep_checks_stale_rows_and_survives_one_failure(env):
 
     env.client.get_subscription = flaky
     out = await env.svc.sweep()
-    assert out == {"ended": 0, "checked": 1, "failed": 1}
+    assert out == {"ended": 0, "checked": 1, "failed": 1, "unconfirmed": 0}
     assert stored(env, good)["status"] == "active" and stored(env, bad)["status"] == "approval_pending"
 
 
@@ -1515,7 +1538,7 @@ async def test_sweep_survives_a_failing_end(env):
         raise RuntimeError("db down")
 
     env.mp.setattr(env.svc, "_end", boom)
-    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 1}
+    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 1, "unconfirmed": 0}
 
 
 def test_the_stale_query_also_picks_open_rows_after_ten_minutes():
@@ -1538,7 +1561,7 @@ async def test_sweep_refreshes_an_open_row_after_ten_minutes_only(env):
 
 async def test_sweep_skips_fresh_rows_and_honours_the_limit(env):
     add_row(env, checked_at=now())
-    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 0}
+    assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 0, "unconfirmed": 0}
     for _ in range(3):
         add_row(env, checked_at=now() - timedelta(hours=7))
     assert (await env.svc.sweep(limit=2))["checked"] == 2
@@ -1664,7 +1687,8 @@ async def test_every_statement_is_tenant_bound_except_the_listed_ones(env):
     await env.svc.release_open_for_tenant(TENANT)
     await ps.has_live_subscription(FakeConn(env.store), TENANT)
     exceptions = {ps._Q_ROW_BY_PP, ps._Q_PLAN_OPTION, ps._Q_PAYMENT_BY_TXN, ps._Q_REVIEW,
-                  ps._Q_SWEEP_DUE, ps._Q_SWEEP_STALE}
+                  ps._Q_SWEEP_DUE, ps._Q_SWEEP_STALE, ps._Q_SWEEP_ABANDONED,
+                  ps._Q_SWEEP_STRAY, ps._Q_SWEEP_UNCONFIRMED}
     for sql in env.store["sql"]:
         if sql in exceptions:
             continue
@@ -1673,3 +1697,244 @@ async def test_every_statement_is_tenant_bound_except_the_listed_ones(env):
             continue
         assert ("tenant_id = $" in sql or sql.startswith("INSERT INTO paypal_subscriptions (id, tenant_id")
                 or "tenant_id, subscription_id" in sql), sql
+
+
+# -- S1: the sweep follows rows that are not live -------------------------------------
+
+
+def test_sweep_discovery_queries_are_static_and_bounded():
+    assert "status IN ('failed', 'expired') AND activated_at IS NULL" in ps._Q_SWEEP_ABANDONED
+    assert "paypal_subscription_id IS NOT NULL AND created_at > NOW() - INTERVAL '3 days'" in ps._Q_SWEEP_ABANDONED
+    assert "checked_at < NOW() - INTERVAL '1 hour'" in ps._Q_SWEEP_ABANDONED
+    assert "status = 'cancelled'" in ps._Q_SWEEP_STRAY
+    assert "paypal_status IN ('APPROVED', 'ACTIVE', 'SUSPENDED')" in ps._Q_SWEEP_STRAY
+    assert ps._Q_SWEEP_UNCONFIRMED == (
+        "SELECT * FROM paypal_subscriptions WHERE status IN ('active', 'past_due') "
+        "AND NOT cancel_at_period_end AND current_period_end < NOW() - INTERVAL '3 days' "
+        "AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '3 days') LIMIT $1")
+    for query in (ps._Q_SWEEP_ABANDONED, ps._Q_SWEEP_STRAY, ps._Q_SWEEP_UNCONFIRMED):
+        assert query.endswith("LIMIT $1")
+
+
+async def test_sweep_rereads_an_expired_row_and_activates_it_when_paid(env):
+    row = add_row(env, status="expired", ended_at=now() - timedelta(hours=1),
+                  created_at=now() - timedelta(hours=2))
+    env.client.remote[row["paypal_subscription_id"]] = pp_sub(row, "ACTIVE")
+    env.client.txns[row["paypal_subscription_id"]] = [txn(f"{TXN_PREFIX}1")]
+    out = await env.svc.sweep()
+    assert out["checked"] == 1 and stored(env, row)["status"] == "active" and len(env.grants) == 1
+    assert (await env.svc.sweep())["checked"] == 0 and len(env.grants) == 1
+
+
+async def test_sweep_does_not_pick_an_old_abandoned_row_or_one_without_an_id(env):
+    old = add_row(env, status="expired", ended_at=now(), created_at=now() - timedelta(days=4))
+    idless = make_row(status="failed", ended_at=now(), tenant_id=OTHER_TENANT)
+    env.store["subs"][idless["id"]] = idless
+    out = await env.svc.sweep()
+    assert out["checked"] == 0 and ("get", old["paypal_subscription_id"]) not in env.client.calls
+
+
+async def test_sweep_cancels_again_a_cancelled_row_that_paypal_still_shows_running(env):
+    row = add_row(env, status="cancelled", ended_at=now(), paypal_status="ACTIVE",
+                  checked_at=now() - timedelta(hours=2))
+    env.client.remote[row["paypal_subscription_id"]] = pp_sub(row, "ACTIVE", paid=False)
+    out = await env.svc.sweep()
+    assert out["checked"] == 1
+    assert ("cancel", row["paypal_subscription_id"], "Plan ended") in env.client.calls
+    assert f"local:review:plan:{row['id']}:still_running_at_paypal" in env.store["reviews"]
+    assert (await env.svc.sweep())["checked"] == 0  # stamped: not read again within the hour
+
+
+async def test_a_cancelled_row_drops_out_once_paypal_reports_cancelled(env):
+    row = add_row(env, status="cancelled", ended_at=now(), paypal_status="ACTIVE",
+                  checked_at=now() - timedelta(hours=2))
+    env.client.remote[row["paypal_subscription_id"]] = pp_sub(row, "CANCELLED", paid=False)
+    await env.svc.sweep()
+    assert stored(env, row)["paypal_status"] == "CANCELLED" and "cancel" not in env.client.names()
+    stored(env, row)["checked_at"] = now() - timedelta(hours=2)
+    assert (await env.svc.sweep())["checked"] == 0
+
+
+async def test_unconfirmed_plan_is_reported_and_left_alone(env):
+    row = add_active(env, current_period_end=now() - timedelta(days=4), checked_at=now() - timedelta(days=4))
+    env.client.get_error = PayPalError(status=500, name="X", retryable=True)
+    before = copy.deepcopy(stored(env, row))
+    out = await env.svc.sweep()
+    assert out == {"ended": 0, "checked": 0, "failed": 1, "unconfirmed": 1}
+    assert f"local:review:plan:{row['id']}:not_confirmed_with_paypal" in env.store["reviews"]
+    assert stored(env, row) == before and tenant(env)["subscription_status"] == ACTIVE
+
+
+async def test_a_plan_that_could_be_read_is_not_unconfirmed(env):
+    row = add_active(env, current_period_end=now() - timedelta(days=4), checked_at=now() - timedelta(days=4))
+    env.client.remote[row["paypal_subscription_id"]] = pp_sub(row, "ACTIVE")
+    out = await env.svc.sweep()
+    assert out["unconfirmed"] == 0 and out["checked"] == 1 and not env.store["reviews"]
+
+
+# -- S2: ACTIVE at PayPal but no payment -------------------------------------------
+
+
+async def test_approved_at_is_set_once_and_never_moved(env):
+    row = add_row(env)
+    await apply(env, row, "APPROVED", paid=False)
+    first = stored(env, row)["approved_at"]
+    assert first is not None and abs(first - now()) < timedelta(seconds=5)
+    await apply(env, row, "ACTIVE", paid=False)
+    await apply(env, row, "APPROVED", paid=False)
+    assert stored(env, row)["approved_at"] == first
+
+
+async def test_approved_at_is_not_set_by_approval_pending(env):
+    row = add_row(env)
+    await apply(env, row, "APPROVAL_PENDING", paid=False)
+    assert stored(env, row)["approved_at"] is None
+
+
+async def test_a_revived_row_gets_approved_at(env):
+    row = add_row(env, status="failed", ended_at=now())
+    await apply(env, row, "APPROVED", paid=False)
+    assert stored(env, row)["approved_at"] is not None and stored(env, row)["status"] == "approval_pending"
+
+
+async def test_active_without_payment_shortly_after_approval_waits(env):
+    row = add_row(env, approved_at=now() - timedelta(minutes=10))
+    out = await apply(env, row, "ACTIVE", paid=False)
+    assert stored(env, row)["status"] == "approval_pending" and not out.review and not env.store["reviews"]
+    assert "cancel" not in env.client.names()
+
+
+async def test_active_without_payment_two_hours_after_approval_is_cancelled_and_reviewed(env):
+    row = add_row(env, approved_at=now() - timedelta(hours=2, minutes=1))
+    out = await apply(env, row, "ACTIVE", paid=False)
+    s = stored(env, row)
+    assert out.review and not out.activated and out.status == "cancelled"
+    assert s["status"] == "cancelled" and s["ended_at"] is not None and s["activated_at"] is None
+    assert ("cancel", row["paypal_subscription_id"], "No payment was confirmed") in env.client.calls
+    assert f"local:review:plan:{row['id']}:active_without_payment" in env.store["reviews"]
+    assert not env.grants and tenant(env)["plan_id"] == "free"
+
+
+async def test_a_payment_that_shows_up_before_two_hours_activates(env):
+    row = add_row(env, approved_at=now() - timedelta(hours=1, minutes=50))
+    out = await apply(env, row, "ACTIVE", paid=True)
+    assert out.activated and stored(env, row)["status"] == "active" and len(env.grants) == 1
+
+
+async def test_a_slow_approval_is_not_cancelled_at_its_first_active_read(env):
+    row = add_row(env, created_at=now() - timedelta(hours=2, minutes=50))
+    out = await apply(env, row, "ACTIVE", paid=False)
+    assert not out.review and stored(env, row)["status"] == "approval_pending"
+    assert stored(env, row)["approved_at"] is not None and "cancel" not in env.client.names()
+
+
+async def test_a_cancelled_unpaid_purchase_tells_the_customer(env):
+    row = add_row(env, approved_at=now() - timedelta(hours=3))
+    await apply(env, row, "ACTIVE", paid=False)
+    out = await env.svc.get_attempt(tenant_id=TENANT, request_id=row["id"])
+    assert out["state"] == "failed" and out["message"] == ps.MSG_NOT_USED
+
+
+# -- S3: payments recorded soon after activation ------------------------------------
+
+
+async def test_no_transactions_at_activation_asks_for_a_recheck(env):
+    row = add_row(env)
+    await apply(env, row, "ACTIVE")
+    assert ps._Q_RECHECK_SOON in env.store["sql"] and stored(env, row)["checked_at"] is None
+
+
+async def test_transactions_seen_means_no_recheck(env):
+    row = add_row(env)
+    env.client.txns[row["paypal_subscription_id"]] = [txn(f"{TXN_PREFIX}1")]
+    await apply(env, row, "ACTIVE")
+    assert ps._Q_RECHECK_SOON not in env.store["sql"] and stored(env, row)["checked_at"] is not None
+
+
+async def test_only_invalid_transactions_count_as_none(env):
+    row = add_row(env)
+    env.client.txns[row["paypal_subscription_id"]] = [txn("bad id"), "junk"]
+    await apply(env, row, "ACTIVE")
+    assert ps._Q_RECHECK_SOON in env.store["sql"]
+
+
+async def test_a_failing_payment_list_asks_for_a_recheck(env):
+    row = add_active(env)
+    env.client.list_error = PayPalError(status=500, name="X", retryable=True)
+    await apply(env, row, "ACTIVE")
+    assert ps._Q_RECHECK_SOON in env.store["sql"]
+
+
+async def test_the_recheck_is_bounded_by_the_activation_date(env):
+    row = add_active(env, activated_at=now() - timedelta(days=3))
+    await apply(env, row, "ACTIVE")
+    assert ps._Q_RECHECK_SOON in env.store["sql"] and stored(env, row)["checked_at"] is not None
+    assert "activated_at > NOW() - INTERVAL '2 days'" in ps._Q_RECHECK_SOON
+
+
+async def test_a_failing_recheck_statement_is_swallowed(env):
+    row = add_row(env)
+    real = FakeConn.execute
+
+    async def failing(self, sql, *a):
+        if sql == ps._Q_RECHECK_SOON:
+            raise RuntimeError("db down")
+        return await real(self, sql, *a)
+
+    env.mp.setattr(FakeConn, "execute", failing)
+    out = await apply(env, row, "ACTIVE")
+    assert out.activated
+
+
+# -- S4: message --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("pp,message", [
+    ("APPROVED", ps.MSG_NOT_USED), ("ACTIVE", ps.MSG_NOT_USED), ("CANCELLED", None), (None, None)])
+def test_not_used_message_only_for_a_purchase_paypal_had_approved(pp, message):
+    out = ps._response(make_row(status="cancelled", paypal_status=pp))
+    assert out["state"] == "failed" and out["message"] == message
+
+
+@pytest.mark.parametrize("over", [
+    {"status": "failed", "paypal_status": "ACTIVE"}, {"status": "failed"},
+    {"status": "cancelled", "paypal_status": "ACTIVE", "activated_at": now()}])
+def test_other_rows_keep_their_message(over):
+    out = ps._response(make_row(**over))
+    assert out["message"] is None
+
+
+# -- S5: ending a plan by PayPal's subscription id ------------------------------------
+
+
+async def test_end_by_subscription_not_ours(env):
+    assert await env.svc.end_subscription_for_reversal(
+        paypal_subscription_id="".join([SUB_PREFIX, "nope"]), kind="reversal", event_id="e") == "not_ours"
+    assert await env.svc.end_subscription_for_reversal(
+        paypal_subscription_id="bad id!", kind="reversal", event_id="e") == "not_ours"
+    assert await env.svc.end_subscription_for_reversal(
+        paypal_subscription_id=None, kind="reversal", event_id="e") == "not_ours"
+    assert env.client.calls == []
+
+
+async def test_end_by_subscription_ends_once_and_touches_no_payment(env):
+    row = add_active(env)
+    tid = await seed_payment(env, row)
+    sid = row["paypal_subscription_id"]
+    assert await env.svc.end_subscription_for_reversal(
+        paypal_subscription_id=sid, kind="reversal", event_id="e1") == "ended"
+    s = stored(env, row)
+    assert s["status"] == "cancelled" and s["ended_at"] is not None
+    assert tenant(env)["subscription_status"] == CANCELLED
+    assert env.store["payments"][tid]["status"] == "completed"
+    assert ("cancel", sid, "Payment reversed") in env.client.calls
+    assert f"local:review:plan:{row['id']}:reversal" in env.store["reviews"]
+    assert await env.svc.end_subscription_for_reversal(
+        paypal_subscription_id=sid, kind="reversal", event_id="e2") == "already"
+    assert env.client.names().count("cancel") == 1
+
+
+async def test_end_by_subscription_bad_kind(env):
+    with pytest.raises(ValueError):
+        await env.svc.end_subscription_for_reversal(
+            paypal_subscription_id="x", kind="refund", event_id="e")

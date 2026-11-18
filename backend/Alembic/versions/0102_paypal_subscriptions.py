@@ -9,7 +9,8 @@ tables beside them:
 * ``paypal_subscriptions``: one row per purchase a customer started. Its id is
   the browser's request id, so a retry is the same purchase. A partial unique
   index allows one live row per tenant. ``status`` is ours; ``paypal_status``
-  is the last status PayPal reported.
+  is the last status PayPal reported and ``approved_at`` the first time PayPal
+  showed the customer's approval.
 * ``paypal_subscription_payments``: one row per PayPal payment on a
   subscription (the invoice list reads it). Ids and amounts only: no payer
   name, email or address is stored.
@@ -62,6 +63,7 @@ def upgrade():
                                    'active', 'past_due', 'suspended', 'cancelled', 'expired', 'failed')),
         paypal_status          TEXT,
         approval_url           TEXT,
+        approved_at            TIMESTAMPTZ,
         activated_at           TIMESTAMPTZ,
         current_period_start   TIMESTAMPTZ,
         current_period_end     TIMESTAMPTZ,

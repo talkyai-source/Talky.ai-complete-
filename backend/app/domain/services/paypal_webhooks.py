@@ -184,6 +184,13 @@ async def _dispatch(
             transaction_id=sale_id, kind="reversal", event_id=f"paypal:plan-reversal:{event_id}"
         )
         if answer == "not_ours":
+            agreement = resource.get("billing_agreement_id")
+            if isinstance(agreement, str) and _CAPTURE_ID.match(agreement):
+                answer = await plans.end_subscription_for_reversal(
+                    paypal_subscription_id=agreement, kind="reversal",
+                    event_id=f"paypal:plan-reversal:{event_id}",
+                )
+        if answer == "not_ours":
             return "ignored", "not_our_payment", None
         return "completed", f"plan_reversal_{answer}", None
 

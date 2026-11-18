@@ -318,3 +318,28 @@ async def test_another_tenant_cannot_see_or_change_the_row(pp_db):
     assert raised.value.status_code == 404
     assert await fixture.svc.cancel_for_tenant(str(second)) is None
     assert (await _row(fixture, rid))["status"] == "approval_pending"
+
+
+async def test_active_without_a_payment_for_two_hours_is_cancelled_and_grants_nothing(pp_db):
+    fixture = pp_db
+    rid = uuid4()
+    out = await _start(fixture, request_id=rid)
+    sid = out["session_id"]
+    fixture.client.remote[sid]["status"] = "ACTIVE"  # approved, but no payment of the price shows up
+    first = await fixture.svc.sync(sid)
+    assert not first.review and (await _row(fixture, rid))["status"] == "approval_pending"
+    assert (await _row(fixture, rid))["approved_at"] is not None
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(
+            "UPDATE paypal_subscriptions SET approved_at = NOW() - INTERVAL '3 hours' WHERE id=$1", rid)
+    before = await _tenant(fixture)
+    second = await fixture.svc.sync(sid)
+    assert second.review and not second.activated
+    row = await _row(fixture, rid)
+    assert row["status"] == "cancelled" and row["ended_at"] is not None and row["activated_at"] is None
+    assert await _tenant(fixture) == before
+    assert fixture.client.remote[sid]["status"] == "CANCELLED"
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        assert await conn.fetchval(
+            "SELECT state FROM paypal_webhook_events WHERE event_id=$1",
+            f"local:review:plan:{rid}:active_without_payment") == "needs_review"
