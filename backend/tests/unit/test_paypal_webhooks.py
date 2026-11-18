@@ -12,12 +12,16 @@ from uuid import uuid4
 import pytest
 
 from app.domain.services import paypal_webhooks as pw
+from app.domain.services.billing_checkout import CheckoutError
 from app.domain.services.paypal_client import PayPalError, PayPalNotConfigured
 from app.domain.services.paypal_topups import PayPalTopupError
 
 ORDER = str(uuid4())
 CAPTURE = "CAP" + "-" + "synthetic1"
 PP_ORDER = "PPO" + "-" + "synthetic1"
+PP_SUB = "".join(["I", "-", "synthetic", "0001"])
+SALE = "".join(["SALE", "-", "synthetic", "1"])
+PLAN_ROW = str(uuid4())
 SIG_VALUE = "".join(["sig", "-", "synthetic", "-", "value"])
 HEADERS = {
     "paypal-transmission-sig": SIG_VALUE,
@@ -62,11 +66,40 @@ class FakeService:
         return self.reverse_answers
 
 
+class FakePlans:
+    def __init__(self):
+        self.outcome = SimpleNamespace(
+            subscription_id=PLAN_ROW, tenant_id="T", status="active", activated=True, review=False)
+        self.end_answer = "not_ours"
+        self.sub_answer = "not_ours"
+        self.error = None
+        self.synced = []
+        self.ended = []
+        self.ended_by_sub = []
+
+    async def sync(self, paypal_subscription_id):
+        self.synced.append(paypal_subscription_id)
+        if self.error:
+            raise self.error
+        return self.outcome
+
+    async def end_for_reversal(self, *, transaction_id, kind, event_id):
+        self.ended.append(dict(transaction_id=transaction_id, kind=kind, event_id=event_id))
+        if self.error:
+            raise self.error
+        return self.end_answer
+
+    async def end_subscription_for_reversal(self, *, paypal_subscription_id, kind, event_id):
+        self.ended_by_sub.append(dict(paypal_subscription_id=paypal_subscription_id, kind=kind, event_id=event_id))
+        return self.sub_answer
+
+
 class Store:
     def __init__(self):
         self.rows = {}
         self.sql = []
         self.orders = {CAPTURE: ORDER}
+        self.sales = {}
         self.opens = 0
 
 
@@ -91,6 +124,9 @@ class FakeConn:
         if "FROM paypal_webhook_events" in sql:
             row = self.s.rows.get(a[0])
             return None if row is None else {"state": row["state"], "payload_hash": row["payload_hash"]}
+        if "FROM paypal_subscription_payments" in sql:
+            sub = self.s.sales.get(a[0])
+            return None if sub is None else {"paypal_subscription_id": sub}
         if "FROM topup_orders" in sql:
             oid = self.s.orders.get(a[0])
             return None if oid is None else {"id": oid}
@@ -125,7 +161,7 @@ def world(monkeypatch):
     monkeypatch.setattr(pw, "acquire_with_tenant", fake_acquire)
     monkeypatch.setenv("PAYPAL_ENV", "sandbox")
     monkeypatch.setenv("PAYPAL_WEBHOOK_ID", "".join(["wh", "-", "synthetic"]))
-    return SimpleNamespace(store=store, client=FakeClient(), svc=FakeService())
+    return SimpleNamespace(store=store, client=FakeClient(), svc=FakeService(), plans=FakePlans())
 
 
 def body(event_type="PAYMENT.CAPTURE.COMPLETED", resource=None, event_id="WH-EVT-1", resource_type="capture"):
@@ -139,7 +175,8 @@ def body(event_type="PAYMENT.CAPTURE.COMPLETED", resource=None, event_id="WH-EVT
 async def run(world, raw, **kw):
     return await pw.handle_paypal_webhook(
         object(), headers=HEADERS, raw_body=raw,
-        client=kw.get("client", world.client), service=kw.get("service", world.svc))
+        client=kw.get("client", world.client), service=kw.get("service", world.svc),
+        plans=kw.get("plans", world.plans))
 
 
 def row(world, event_id="WH-EVT-1"):
@@ -495,3 +532,184 @@ async def test_the_counter_returns_to_zero_after_a_verification_error(world):
     with pytest.raises(RuntimeError):
         await run(world, body(), client=held)
     assert pw._verifications_in_flight == 0
+
+
+# -- plans bought with a PayPal subscription -----------------------------------------------
+
+PLAN_EVENTS = [
+    "BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.UPDATED", "BILLING.SUBSCRIPTION.CANCELLED",
+    "BILLING.SUBSCRIPTION.SUSPENDED", "BILLING.SUBSCRIPTION.EXPIRED", "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
+]
+
+
+@pytest.mark.parametrize("event_type", PLAN_EVENTS)
+async def test_subscription_events_sync_the_subscription_by_resource_id(world, event_type):
+    world.plans.outcome.status = "cancelled"
+    assert await run(world, body(event_type, {"id": PP_SUB}, resource_type="subscription")) == {"status": "completed"}
+    assert world.plans.synced == [PP_SUB]
+    assert row(world)["detail"] == "plan_cancelled" and row(world)["order_id"] == PLAN_ROW
+    assert world.svc.settled == [] and world.svc.reversed == []
+
+
+@pytest.mark.parametrize("resource", [{}, {"id": 5}, {"id": "bad id!"}, {"id": "a" * 65}])
+async def test_subscription_event_without_a_valid_id_is_ignored(world, resource):
+    assert await run(world, body(PLAN_EVENTS[0], resource)) == {"status": "ignored"}
+    assert row(world)["detail"] == "no_subscription_id" and world.plans.synced == []
+
+
+async def test_subscription_that_is_not_ours_is_ignored(world):
+    world.plans.outcome = None
+    assert await run(world, body(PLAN_EVENTS[0], {"id": PP_SUB})) == {"status": "ignored"}
+    assert row(world)["detail"] == "not_our_subscription"
+
+
+async def test_subscription_needing_review_gives_needs_review(world):
+    world.plans.outcome.review = True
+    assert await run(world, body(PLAN_EVENTS[1], {"id": PP_SUB})) == {"status": "needs_review"}
+    assert row(world)["detail"] == "plan_review" and row(world)["order_id"] == PLAN_ROW
+
+
+async def test_subscription_event_does_not_wait_for_a_payment(world):
+    world.plans.outcome.status, world.plans.outcome.activated = "approval_pending", False
+    assert await run(world, body(PLAN_EVENTS[0], {"id": PP_SUB})) == {"status": "completed"}
+
+
+async def test_sale_completed_syncs_by_billing_agreement_id(world):
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.COMPLETED", resource, resource_type="sale")) == {"status": "completed"}
+    assert world.plans.synced == [PP_SUB]
+
+
+@pytest.mark.parametrize("resource", [{"id": SALE}, {"id": SALE, "billing_agreement_id": "bad id!"}])
+async def test_sale_completed_without_a_subscription_is_ignored(world, resource):
+    assert await run(world, body("PAYMENT.SALE.COMPLETED", resource)) == {"status": "ignored"}
+    assert row(world)["detail"] == "no_subscription_id" and world.plans.synced == []
+
+
+async def test_sale_completed_while_approval_pending_retries_and_stays_received(world):
+    world.plans.outcome.status, world.plans.outcome.activated = "approval_pending", False
+    raw = body("PAYMENT.SALE.COMPLETED", {"id": SALE, "billing_agreement_id": PP_SUB})
+    with pytest.raises(pw.PayPalWebhookRetry):
+        await run(world, raw)
+    assert row(world)["state"] == "received" and row(world)["completed_at"] is None
+    world.plans.outcome.status, world.plans.outcome.activated = "active", True
+    assert await run(world, raw) == {"status": "completed"}
+    assert row(world)["attempt_count"] == 2
+
+
+async def test_sale_completed_for_a_foreign_subscription_is_ignored(world):
+    world.plans.outcome = None
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.COMPLETED", resource)) == {"status": "ignored"}
+
+
+async def test_refund_of_a_known_sale_resyncs_and_records_the_refund(world):
+    world.store.sales[SALE] = PP_SUB
+    result = await run(world, body("PAYMENT.SALE.REFUNDED", {"id": "REF-1", "sale_id": SALE}))
+    assert result == {"status": "completed"}
+    assert world.plans.synced == [PP_SUB] and row(world)["detail"] == "plan_refund_recorded"
+    assert world.plans.ended == []
+    sql = [q for q in world.store.sql if "paypal_subscription_payments" in q]
+    assert len(sql) == 1 and "s.tenant_id = p.tenant_id" in sql[0]
+
+
+async def test_refund_of_an_unknown_sale_is_ignored(world):
+    assert await run(world, body("PAYMENT.SALE.REFUNDED", {"sale_id": SALE})) == {"status": "ignored"}
+    assert row(world)["detail"] == "not_our_payment" and world.plans.synced == []
+
+
+@pytest.mark.parametrize("resource", [{}, {"sale_id": 5}, {"sale_id": "bad id!"}])
+async def test_refund_without_a_valid_sale_id_is_ignored(world, resource):
+    assert await run(world, body("PAYMENT.SALE.REFUNDED", resource)) == {"status": "ignored"}
+    assert row(world)["detail"] == "no_sale_id"
+
+
+async def test_refund_whose_subscription_needs_review_is_needs_review(world):
+    world.store.sales[SALE] = PP_SUB
+    world.plans.outcome.review = True
+    assert await run(world, body("PAYMENT.SALE.REFUNDED", {"sale_id": SALE})) == {"status": "needs_review"}
+
+
+@pytest.mark.parametrize("answer", ["ended", "already"])
+async def test_reversal_calls_end_for_reversal_once(world, answer):
+    world.plans.end_answer = answer
+    assert await run(world, body("PAYMENT.SALE.REVERSED", {"id": SALE})) == {"status": "completed"}
+    assert world.plans.ended == [dict(transaction_id=SALE, kind="reversal", event_id="paypal:plan-reversal:WH-EVT-1")]
+    assert row(world)["detail"] == f"plan_reversal_{answer}"
+
+
+async def test_reversal_of_a_foreign_payment_is_ignored(world):
+    assert await run(world, body("PAYMENT.SALE.REVERSED", {"id": SALE})) == {"status": "ignored"}
+    assert row(world)["detail"] == "not_our_payment"
+
+
+@pytest.mark.parametrize("answer", ["ended", "already"])
+async def test_reversal_falls_back_to_the_subscription_after_not_ours(world, answer):
+    world.plans.sub_answer = answer
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "completed"}
+    assert world.plans.ended_by_sub == [dict(
+        paypal_subscription_id=PP_SUB, kind="reversal", event_id="paypal:plan-reversal:WH-EVT-1")]
+    assert row(world)["detail"] == f"plan_reversal_{answer}"
+
+
+async def test_reversal_fallback_not_ours_is_ignored(world):
+    resource = {"id": SALE, "billing_agreement_id": PP_SUB}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "ignored"}
+    assert row(world)["detail"] == "not_our_payment" and len(world.plans.ended_by_sub) == 1
+
+
+@pytest.mark.parametrize("agreement", [None, 7, "bad id!", ""])
+async def test_reversal_fallback_needs_a_valid_subscription_id(world, agreement):
+    resource = {"id": SALE, "billing_agreement_id": agreement}
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "ignored"}
+    assert world.plans.ended_by_sub == []
+
+
+@pytest.mark.parametrize("answer", ["ended", "already"])
+async def test_reversal_fallback_is_not_used_when_the_payment_is_ours(world, answer):
+    world.plans.end_answer = answer
+    await run(world, body("PAYMENT.SALE.REVERSED", {"id": SALE, "billing_agreement_id": PP_SUB}))
+    assert world.plans.ended_by_sub == []
+
+
+@pytest.mark.parametrize("resource", [{}, {"id": 9}, {"id": "bad id!"}])
+async def test_reversal_without_a_valid_id_is_ignored(world, resource):
+    assert await run(world, body("PAYMENT.SALE.REVERSED", resource)) == {"status": "ignored"}
+    assert world.plans.ended == []
+
+
+async def test_dispute_on_a_plan_payment_reaches_the_plan_service_after_unknown(world):
+    world.svc.reverse_answers = "unknown"
+    world.plans.end_answer = "ended"
+    assert await run(world, body("CUSTOMER.DISPUTE.CREATED", dispute(SALE))) == {"status": "completed"}
+    assert world.svc.reversed[0]["capture_id"] == SALE
+    assert world.plans.ended == [
+        dict(transaction_id=SALE, kind="dispute", event_id=f"paypal:plan-dispute:PP-D-1:{SALE}")]
+
+
+async def test_dispute_on_a_foreign_payment_is_ignored(world):
+    world.svc.reverse_answers = "unknown"
+    assert await run(world, body("CUSTOMER.DISPUTE.CREATED", dispute(SALE))) == {"status": "ignored"}
+    assert len(world.plans.ended) == 1
+
+
+@pytest.mark.parametrize("answer", ["reversed", "already", "review"])
+async def test_dispute_on_a_prepaid_minutes_payment_never_reaches_the_plan_service(world, answer):
+    world.svc.reverse_answers = answer
+    await run(world, body("CUSTOMER.DISPUTE.CREATED", dispute(CAPTURE)))
+    assert world.plans.ended == []
+
+
+async def test_plan_service_paypal_error_retries(world):
+    world.plans.error = PayPalError(status=503, retryable=True)
+    with pytest.raises(pw.PayPalWebhookRetry):
+        await run(world, body(PLAN_EVENTS[0], {"id": PP_SUB}))
+    assert row(world)["state"] == "failed" and row(world)["detail"] == "paypal_error_503"
+
+
+async def test_plan_service_checkout_error_marks_failed_and_propagates(world):
+    world.plans.error = CheckoutError("checkout_unconfirmed", "x", 503)
+    with pytest.raises(CheckoutError):
+        await run(world, body(PLAN_EVENTS[0], {"id": PP_SUB}))
+    assert row(world)["state"] == "failed" and row(world)["detail"] == "plan_checkout_unconfirmed"

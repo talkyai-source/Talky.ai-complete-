@@ -50,3 +50,62 @@ def test_a_prepaid_plan_with_zero_included_minutes_is_never_unlimited():
 @pytest.mark.parametrize("allocated,plan_minutes", [(300, 300), (0, None), (0, 300), (None, 0)])
 def test_any_other_allowance_is_not_unlimited(allocated, plan_minutes):
     assert minutes_unlimited(allocated, plan_minutes, "subscription") is False
+
+
+@pytest.mark.parametrize("status", ["active", "trialing"])
+def test_a_paypal_plan_in_good_standing_buys_subscriber_top_ups(status):
+    assert purchase_audience("paypal", status) == SUBSCRIBER
+
+
+@pytest.mark.parametrize("status", ["past_due", "suspended", "incomplete"])
+def test_a_paypal_plan_not_in_good_standing_cannot_buy_minutes(status):
+    with pytest.raises(PurchaseRefused) as refused:
+        purchase_audience("paypal", status)
+    assert refused.value.code == "subscription_not_in_good_standing"
+
+
+class _Row(dict):
+    pass
+
+
+async def _audience_with(monkeypatch, stripe_id, paypal_holds, status="active"):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from app.domain.services import payg
+
+    monkeypatch.setattr(
+        payg, "read_call_authority", AsyncMock(return_value=SimpleNamespace(allowed=True))
+    )
+    lookups = []
+
+    async def held(conn, tenant_id):
+        lookups.append(tenant_id)
+        return paypal_holds
+
+    monkeypatch.setattr("app.domain.services.paypal_subscriptions.held_subscription_exists", held)
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value=_Row(stripe_subscription_id=stripe_id, subscription_status=status))
+    )
+    return await payg.tenant_purchase_audience(conn, "tenant-1"), lookups
+
+
+async def test_a_held_paypal_plan_makes_the_tenant_a_subscriber(monkeypatch):
+    audience, lookups = await _audience_with(monkeypatch, None, True)
+    assert audience == SUBSCRIBER and lookups == ["tenant-1"]
+
+
+async def test_a_held_paypal_plan_that_is_not_in_good_standing_is_refused(monkeypatch):
+    with pytest.raises(PurchaseRefused) as refused:
+        await _audience_with(monkeypatch, None, True, status="past_due")
+    assert refused.value.code == "subscription_not_in_good_standing"
+
+
+async def test_no_stripe_id_and_no_paypal_plan_stays_pay_as_you_go(monkeypatch):
+    audience, lookups = await _audience_with(monkeypatch, None, False)
+    assert audience == PAYG and lookups == ["tenant-1"]
+
+
+async def test_a_stripe_subscriber_never_triggers_the_paypal_lookup(monkeypatch):
+    audience, lookups = await _audience_with(monkeypatch, "sub_synthetic", True)
+    assert audience == SUBSCRIBER and lookups == []

@@ -596,3 +596,273 @@ def test_get_client_without_webhook_id_and_rebuild(clean_env):
 def test_error_text_is_clipped():
     err = PayPalError(status=400, name="n" * 500)
     assert len(str(err)) < 300
+
+
+# ---- subscriptions: approval link, products, plans ----------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from app.domain.services.paypal_client import subscription_approval_url  # noqa: E402
+
+
+def test_subscription_approval_url_accepts_right_host_per_env():
+    link = _links(("approve", "https://www.paypal.com/a"))
+    assert subscription_approval_url(link, env="live") == "https://www.paypal.com/a"
+    sb = _links(("approve", "https://www.sandbox.paypal.com/a"))
+    assert subscription_approval_url(sb, env="sandbox") == "https://www.sandbox.paypal.com/a"
+    assert subscription_approval_url(sb, env="live") is None
+    assert subscription_approval_url(link, env="sandbox") is None
+
+
+def test_subscription_approval_url_refusals():
+    refused = [
+        ("edit", "https://www.paypal.com/a"),
+        ("approve", "https://evil.example/a"),
+        ("approve", "https://www.paypal.com.evil.example/a"),
+        ("approve", "http://www.paypal.com/a"),
+        ("approve", "https://user@www.paypal.com/a"),
+        ("approve", "https://user:pw@www.paypal.com/a"),
+        ("approve", "https://www.paypal.com:8443/a"),
+    ]
+    for pair in refused:
+        assert subscription_approval_url(_links(pair), env="live") is None
+    assert subscription_approval_url({}, env="live") is None
+    assert subscription_approval_url({"links": "x"}, env="live") is None
+    assert subscription_approval_url(_links(("approve", "https://www.paypal.com/a")), env="other") is None
+    # a refused link does not hide a good one
+    both = _links(("approve", "https://evil.example/a"), ("approve", "https://www.paypal.com/b"))
+    assert subscription_approval_url(both, env="live") == "https://www.paypal.com/b"
+
+
+async def test_create_product_exact_request():
+    srv = Server(api=lambda r: httpx.Response(201, json={"id": "PROD-1", "name": "N"}))
+    client = make(srv)
+    out = await client.create_product(request_id="rq1", name="N", description="D")
+    assert out["id"] == "PROD-1"
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("POST", "/v1/catalogs/products")
+    assert req.headers["PayPal-Request-Id"] == "rq1"
+    assert req.headers["Prefer"] == "return=representation"
+    assert json.loads(req.content) == {
+        "name": "N", "description": "D", "type": "SERVICE", "category": "SOFTWARE",
+    }
+    await client.create_product(request_id="rq2", name="N", description="D", home_url="https://x.example")
+    assert json.loads(srv.api_calls[-1].content)["home_url"] == "https://x.example"
+    await client.aclose()
+
+
+async def test_list_products_query_and_shapes():
+    srv = Server(api=lambda r: httpx.Response(200, json={"products": [{"id": "A"}, "junk", 3]}))
+    client = make(srv)
+    assert await client.list_products(page=2, page_size=20) == [{"id": "A"}]
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("GET", "/v1/catalogs/products")
+    assert dict(req.url.params) == {"page_size": "20", "page": "2"}
+    srv2 = Server(api=lambda r: httpx.Response(200, json={}))
+    other = make(srv2)
+    assert await other.list_products() == []
+    await client.aclose()
+    await other.aclose()
+
+
+PLAN_KW = dict(
+    request_id="rq", product_id="PROD-1", name="Plan", description="Desc",
+    interval="month", currency="usd", value="99.00",
+)
+
+
+async def test_create_plan_exact_request():
+    srv = Server(api=lambda r: httpx.Response(201, json={"id": "P-1"}))
+    client = make(srv)
+    await client.create_plan(**PLAN_KW)
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("POST", "/v1/billing/plans")
+    assert req.headers["PayPal-Request-Id"] == "rq"
+    assert req.headers["Prefer"] == "return=representation"
+    assert json.loads(req.content) == {
+        "product_id": "PROD-1", "name": "Plan", "description": "Desc", "status": "ACTIVE",
+        "billing_cycles": [{
+            "frequency": {"interval_unit": "MONTH", "interval_count": 1},
+            "tenure_type": "REGULAR", "sequence": 1, "total_cycles": 0,
+            "pricing_scheme": {"fixed_price": {"value": "99.00", "currency_code": "USD"}},
+        }],
+        "payment_preferences": {"auto_bill_outstanding": True, "payment_failure_threshold": 2},
+    }
+    await client.create_plan(**{**PLAN_KW, "interval": "year", "payment_failure_threshold": 3})
+    body = json.loads(srv.api_calls[-1].content)
+    assert body["billing_cycles"][0]["frequency"]["interval_unit"] == "YEAR"
+    assert body["payment_preferences"]["payment_failure_threshold"] == 3
+    await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"interval": "week"}, {"interval": "MONTH"}, {"value": "0.00"}, {"value": "1.234"}, {"currency": "JPY"}],
+)
+async def test_create_plan_refusals_make_no_call(override):
+    srv = Server()
+    client = make(srv)
+    with pytest.raises(ValueError):
+        await client.create_plan(**{**PLAN_KW, **override})
+    assert srv.requests == []
+    await client.aclose()
+
+
+async def test_list_plans_and_get_plan():
+    srv = Server(api=lambda r: httpx.Response(200, json={"plans": [{"id": "P-1"}, 5]}))
+    client = make(srv)
+    assert await client.list_plans(product_id="PROD-1", page=3) == [{"id": "P-1"}]
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("GET", "/v1/billing/plans")
+    assert dict(req.url.params) == {"product_id": "PROD-1", "page_size": "20", "page": "3"}
+    assert req.headers["Prefer"] == "return=representation"
+    await client.get_plan("P-1")
+    last = srv.api_calls[-1]
+    assert (last.method, last.url.path) == ("GET", "/v1/billing/plans/P-1")
+    srv2 = Server(api=lambda r: httpx.Response(200, json={}))
+    other = make(srv2)
+    assert await other.list_plans(product_id="PROD-1") == []
+    await client.aclose()
+    await other.aclose()
+
+
+SUB_KW = dict(
+    request_id="rq", plan_id="P-1", custom_id="cust", return_url="https://x.example/ok",
+    cancel_url="https://x.example/no", brand_name="Brand",
+)
+
+
+async def test_create_subscription_exact_request():
+    srv = Server(api=lambda r: httpx.Response(201, json={"id": "I-1", "status": "APPROVAL_PENDING"}))
+    client = make(srv)
+    out = await client.create_subscription(**SUB_KW)
+    assert out["id"] == "I-1"
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("POST", "/v1/billing/subscriptions")
+    assert req.headers["PayPal-Request-Id"] == "rq"
+    assert req.headers["Prefer"] == "return=representation"
+    assert json.loads(req.content) == {
+        "plan_id": "P-1", "custom_id": "cust",
+        "application_context": {
+            "brand_name": "Brand", "user_action": "SUBSCRIBE_NOW",
+            "shipping_preference": "NO_SHIPPING",
+            "payment_method": {"payee_preferred": "IMMEDIATE_PAYMENT_REQUIRED"},
+            "return_url": "https://x.example/ok", "cancel_url": "https://x.example/no",
+        },
+    }
+    await client.create_subscription(**{**SUB_KW, "custom_id": "c" * 127})
+    await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "override",
+    [{"return_url": "http://x.example/ok"}, {"cancel_url": "javascript:alert(1)"},
+     {"custom_id": "c" * 128}, {"custom_id": ""}],
+)
+async def test_create_subscription_refusals_make_no_call(override):
+    srv = Server()
+    client = make(srv)
+    with pytest.raises(ValueError):
+        await client.create_subscription(**{**SUB_KW, **override})
+    assert srv.requests == []
+    await client.aclose()
+
+
+async def test_get_subscription_request():
+    srv = Server(api=lambda r: httpx.Response(200, json={"id": "I-1"}))
+    client = make(srv)
+    assert await client.get_subscription("I-1") == {"id": "I-1"}
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("GET", "/v1/billing/subscriptions/I-1")
+    await client.aclose()
+
+
+async def test_cancel_subscription_accepts_204_and_clips_reason():
+    srv = Server(api=lambda r: httpx.Response(204))
+    client = make(srv)
+    assert await client.cancel_subscription("I-1", reason="r" * 200) is None
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("POST", "/v1/billing/subscriptions/I-1/cancel")
+    assert json.loads(req.content) == {"reason": "r" * 128}
+    assert req.headers["Content-Type"] == "application/json"
+    await client.aclose()
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+async def test_cancel_subscription_refuses_empty_reason(reason):
+    srv = Server()
+    client = make(srv)
+    with pytest.raises(ValueError):
+        await client.cancel_subscription("I-1", reason=reason)
+    assert srv.requests == []
+    await client.aclose()
+
+
+async def test_204_without_allow_empty_still_invalid_response():
+    srv = Server(api=lambda r: httpx.Response(204))
+    client = make(srv)
+    with pytest.raises(PayPalError) as caught:
+        await client.get_subscription("I-1")
+    assert caught.value.name == "INVALID_RESPONSE"
+    await client.aclose()
+
+
+async def test_cancel_subscription_error_still_raises():
+    srv = Server(api=lambda r: httpx.Response(422, json={"name": "UNPROCESSABLE_ENTITY"}))
+    client = make(srv)
+    with pytest.raises(PayPalError):
+        await client.cancel_subscription("I-1", reason="x")
+    await client.aclose()
+
+
+async def test_list_subscription_transactions_request_and_times():
+    srv = Server(api=lambda r: httpx.Response(200, json={"transactions": [{"id": "T"}, "x"]}))
+    client = make(srv)
+    plus2 = timezone(timedelta(hours=2))
+    out = await client.list_subscription_transactions(
+        "I-1",
+        start_time=datetime(2026, 11, 18, 2, 0, 0, tzinfo=plus2),
+        end_time=datetime(2026, 11, 19, 3, 4, 5, tzinfo=timezone.utc),
+    )
+    assert out == [{"id": "T"}]
+    (req,) = srv.api_calls
+    assert (req.method, req.url.path) == ("GET", "/v1/billing/subscriptions/I-1/transactions")
+    assert dict(req.url.params) == {
+        "start_time": "2026-11-18T00:00:00Z", "end_time": "2026-11-19T03:04:05Z",
+    }
+    srv2 = Server(api=lambda r: httpx.Response(200, json={}))
+    other = make(srv2)
+    aware = datetime(2026, 11, 18, tzinfo=timezone.utc)
+    assert await other.list_subscription_transactions("I-1", start_time=aware, end_time=aware) == []
+    await client.aclose()
+    await other.aclose()
+
+
+async def test_list_subscription_transactions_refuses_naive_times():
+    srv = Server()
+    client = make(srv)
+    naive = datetime(2026, 11, 18)
+    aware = datetime(2026, 11, 18, tzinfo=timezone.utc)
+    with pytest.raises(ValueError):
+        await client.list_subscription_transactions("I-1", start_time=naive, end_time=aware)
+    with pytest.raises(ValueError):
+        await client.list_subscription_transactions("I-1", start_time=aware, end_time=naive)
+    assert srv.requests == []
+    await client.aclose()
+
+
+@pytest.mark.parametrize("bad", ["", "a/b", "../x", "a b", "x" * 65, "I-1/cancel"])
+async def test_subscription_ids_in_paths_are_checked(bad):
+    srv = Server()
+    client = make(srv)
+    aware = datetime(2026, 11, 18, tzinfo=timezone.utc)
+    for call in (
+        lambda: client.get_plan(bad),
+        lambda: client.get_subscription(bad),
+        lambda: client.cancel_subscription(bad, reason="x"),
+        lambda: client.list_subscription_transactions(bad, start_time=aware, end_time=aware),
+    ):
+        with pytest.raises(ValueError):
+            await call()
+    assert srv.requests == []
+    await client.aclose()

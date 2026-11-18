@@ -13,6 +13,7 @@ import logging
 import re
 import time
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from urllib.parse import quote, urlparse
@@ -121,6 +122,39 @@ def approval_url(order: Mapping[str, Any], *, env: str) -> str | None:
     return None
 
 
+def subscription_approval_url(subscription: Mapping[str, Any], *, env: str) -> str | None:
+    host = _APPROVAL_HOSTS.get(env)
+    links = subscription.get("links") if isinstance(subscription, Mapping) else None
+    if host is None or not isinstance(links, Sequence) or isinstance(links, (str, bytes)):
+        return None
+    for link in links:
+        if not isinstance(link, Mapping) or link.get("rel") != "approve":
+            continue
+        href = link.get("href")
+        if not isinstance(href, str):
+            continue
+        try:
+            parsed = urlparse(href)
+            port = parsed.port
+        except ValueError:
+            continue
+        if (
+            parsed.scheme == "https"
+            and parsed.hostname == host
+            and port in (None, 443)
+            and parsed.username is None
+            and parsed.password is None
+        ):
+            return href
+    return None
+
+
+def _utc_text(moment: datetime) -> str:
+    if not isinstance(moment, datetime) or moment.tzinfo is None or moment.utcoffset() is None:
+        raise ValueError("time must be timezone-aware")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _path_id(value: str) -> str:
     if not isinstance(value, str) or _ID_RE.fullmatch(value) is None:
         raise ValueError("invalid PayPal id")
@@ -178,6 +212,7 @@ class PayPalClient:
         json_body: Any = None,
         content: bytes | None = None,
         data: dict[str, str] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> httpx.Response:
         try:
             response = await self._http.request(
@@ -187,6 +222,7 @@ class PayPalClient:
                 json=json_body,
                 content=content,
                 data=data,
+                params=params,
             )
         except httpx.HTTPError:
             logger.info("paypal %s %s -> network error", method, path)
@@ -260,6 +296,8 @@ class PayPalClient:
         extra_headers: Mapping[str, str] | None = None,
         json_body: Any = None,
         content: bytes | None = None,
+        params: Mapping[str, str] | None = None,
+        allow_empty: bool = False,
     ) -> dict[str, Any]:
         async def attempt() -> tuple[str, httpx.Response]:
             token = await self._access_token()
@@ -267,7 +305,8 @@ class PayPalClient:
             if extra_headers:
                 headers.update(extra_headers)
             sent = await self._send(
-                method, path, headers=headers, json_body=json_body, content=content
+                method, path, headers=headers, json_body=json_body, content=content,
+                params=params,
             )
             return token, sent
 
@@ -282,6 +321,8 @@ class PayPalClient:
             token, response = await attempt()
         if not 200 <= response.status_code < 300:
             raise self._error_from(response)
+        if allow_empty and not response.content:
+            return {}
         return self._json(response)
 
     # -- orders and captures ----------------------------------------------
@@ -421,6 +462,151 @@ class PayPalClient:
                 {"op": "replace", "path": "/event_types", "value": [{"name": n} for n in event_names]}
             ],
         )
+
+    # -- catalog products, billing plans, subscriptions ---------------------
+
+    async def create_product(
+        self, *, request_id: str, name: str, description: str, home_url: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "name": name, "description": description, "type": "SERVICE", "category": "SOFTWARE",
+        }
+        if home_url is not None:
+            body["home_url"] = home_url
+        return await self._api(
+            "POST",
+            "/v1/catalogs/products",
+            extra_headers={"PayPal-Request-Id": request_id, "Prefer": "return=representation"},
+            json_body=body,
+        )
+
+    async def list_products(self, *, page: int = 1, page_size: int = 20) -> list[dict[str, Any]]:
+        body = await self._api(
+            "GET",
+            "/v1/catalogs/products",
+            params={"page_size": str(page_size), "page": str(page)},
+        )
+        items = body.get("products")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+    async def create_plan(
+        self,
+        *,
+        request_id: str,
+        product_id: str,
+        name: str,
+        description: str,
+        interval: str,
+        currency: str,
+        value: str,
+        payment_failure_threshold: int = 2,
+    ) -> dict[str, Any]:
+        if interval not in ("month", "year"):
+            raise ValueError("interval must be month or year")
+        code = _check_currency(currency)
+        if minor_units(value, code) == 0:
+            raise ValueError("amount must be greater than zero")
+        body = {
+            "product_id": product_id,
+            "name": name,
+            "description": description,
+            "status": "ACTIVE",
+            "billing_cycles": [
+                {
+                    "frequency": {"interval_unit": interval.upper(), "interval_count": 1},
+                    "tenure_type": "REGULAR",
+                    "sequence": 1,
+                    "total_cycles": 0,
+                    "pricing_scheme": {"fixed_price": {"value": value, "currency_code": code}},
+                }
+            ],
+            "payment_preferences": {
+                "auto_bill_outstanding": True,
+                "payment_failure_threshold": payment_failure_threshold,
+            },
+        }
+        return await self._api(
+            "POST",
+            "/v1/billing/plans",
+            extra_headers={"PayPal-Request-Id": request_id, "Prefer": "return=representation"},
+            json_body=body,
+        )
+
+    async def list_plans(
+        self, *, product_id: str, page: int = 1, page_size: int = 20
+    ) -> list[dict[str, Any]]:
+        body = await self._api(
+            "GET",
+            "/v1/billing/plans",
+            extra_headers={"Prefer": "return=representation"},
+            params={"product_id": product_id, "page_size": str(page_size), "page": str(page)},
+        )
+        items = body.get("plans")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
+
+    async def get_plan(self, plan_id: str) -> dict[str, Any]:
+        return await self._api("GET", f"/v1/billing/plans/{_path_id(plan_id)}")
+
+    async def create_subscription(
+        self,
+        *,
+        request_id: str,
+        plan_id: str,
+        custom_id: str,
+        return_url: str,
+        cancel_url: str,
+        brand_name: str,
+    ) -> dict[str, Any]:
+        if not custom_id or len(custom_id) > 127:
+            raise ValueError("custom_id must be 1 to 127 characters")
+        if not _is_https(return_url) or not _is_https(cancel_url):
+            raise ValueError("return and cancel addresses must be https")
+        body = {
+            "plan_id": plan_id,
+            "custom_id": custom_id,
+            "application_context": {
+                "brand_name": brand_name,
+                "user_action": "SUBSCRIBE_NOW",
+                "shipping_preference": "NO_SHIPPING",
+                "payment_method": {"payee_preferred": "IMMEDIATE_PAYMENT_REQUIRED"},
+                "return_url": return_url,
+                "cancel_url": cancel_url,
+            },
+        }
+        return await self._api(
+            "POST",
+            "/v1/billing/subscriptions",
+            extra_headers={"PayPal-Request-Id": request_id, "Prefer": "return=representation"},
+            json_body=body,
+        )
+
+    async def get_subscription(self, subscription_id: str) -> dict[str, Any]:
+        return await self._api("GET", f"/v1/billing/subscriptions/{_path_id(subscription_id)}")
+
+    async def cancel_subscription(self, subscription_id: str, *, reason: str) -> None:
+        sid = _path_id(subscription_id)
+        text = reason[:128] if isinstance(reason, str) else ""
+        if not text.strip():
+            raise ValueError("reason must not be empty")
+        await self._api(
+            "POST",
+            f"/v1/billing/subscriptions/{sid}/cancel",
+            extra_headers={"Content-Type": "application/json"},
+            json_body={"reason": text},
+            allow_empty=True,
+        )
+
+    async def list_subscription_transactions(
+        self, subscription_id: str, *, start_time: datetime, end_time: datetime
+    ) -> list[dict[str, Any]]:
+        sid = _path_id(subscription_id)
+        body = await self._api(
+            "GET",
+            f"/v1/billing/subscriptions/{sid}/transactions",
+            params={"start_time": _utc_text(start_time), "end_time": _utc_text(end_time)},
+        )
+        items = body.get("transactions")
+        return [i for i in items if isinstance(i, dict)] if isinstance(items, list) else []
 
 
 _client: PayPalClient | None = None

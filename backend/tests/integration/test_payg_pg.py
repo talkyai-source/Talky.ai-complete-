@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -331,3 +332,53 @@ async def test_the_pricing_page_reads_current_pay_as_you_go_prices_without_sign_
     assert body["plan"]["id"] == PAYG_PLAN_ID
     assert {p["code"] for p in body["packages"]} >= {"payg_125", "payg_175", "payg_250"}
     assert all(p["minutes"] > 0 and p["price_cents"] > 0 for p in body["packages"])
+
+
+async def _paypal_plan_row(db, key, status):
+    """A PayPal subscription row for a fixture tenant, plus the price option it needs."""
+    option, row = uuid4(), uuid4()
+    # The "unlimited" tenant's plan is unique to this test run, so the
+    # (plan, interval, provider_mode) uniqueness of price options cannot clash.
+    plan_id = await db.owner.fetchval("SELECT plan_id FROM tenants WHERE id = $1", db.tenants["unlimited"])
+    await db.owner.execute(
+        """INSERT INTO plan_price_options
+           (id, plan_id, stripe_price_id, stripe_product_id, kind, interval, amount_minor,
+            currency, currency_exponent, provider_mode, active)
+           VALUES ($1, $2, $3, $4, 'stripe', 'month', 1900, 'usd', 2, 'test', FALSE)""",
+        option, plan_id, "price_" + uuid4().hex, "prod_" + uuid4().hex)
+    await db.owner.execute(
+        """INSERT INTO paypal_subscriptions
+           (id, tenant_id, price_option_id, plan_id, provider_mode, paypal_plan_id, snapshot,
+            status, activated_at)
+           VALUES ($1, $2, $3, $4, 'test', $5, '{}'::jsonb, $6, $7)""",
+        row, db.tenants[key], option, plan_id, "P-" + uuid4().hex[:20], status,
+        datetime.now(UTC) if status == "active" else None)
+    return option, row
+
+
+async def _drop_paypal_plan_row(db, option, row):
+    await db.owner.execute("DELETE FROM paypal_subscriptions WHERE id = $1", row)
+    await db.owner.execute("DELETE FROM plan_price_options WHERE id = $1", option)
+
+
+async def test_a_plan_held_through_paypal_makes_the_tenant_a_subscriber(payg_db):
+    db = payg_db
+    assert await _audience(db, "new") == PAYG
+    option, row = await _paypal_plan_row(db, "new", "active")
+    # Activating a PayPal plan marks the tenant's subscription active.
+    await db.owner.execute("UPDATE tenants SET subscription_status = 'active' WHERE id = $1", db.tenants["new"])
+    try:
+        assert await _audience(db, "new") == SUBSCRIBER
+    finally:
+        await _drop_paypal_plan_row(db, option, row)
+        await db.owner.execute(
+            "UPDATE tenants SET subscription_status = 'inactive' WHERE id = $1", db.tenants["new"])
+
+
+async def test_an_unfinished_paypal_purchase_leaves_the_tenant_on_pay_as_you_go(payg_db):
+    db = payg_db
+    option, row = await _paypal_plan_row(db, "new", "approval_pending")
+    try:
+        assert await _audience(db, "new") == PAYG
+    finally:
+        await _drop_paypal_plan_row(db, option, row)

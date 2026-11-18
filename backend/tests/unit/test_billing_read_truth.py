@@ -225,10 +225,14 @@ def test_historical_capture_survives_current_catalog_edits_and_retains_distinct_
 
 
 @pytest.mark.asyncio
-async def test_invoice_list_and_detail_share_projection_and_bound_tenant():
+async def test_invoice_list_and_detail_share_projection_and_bound_tenant(monkeypatch):
     row, pool = invoice_row(), Pool()
     pool.conn.fetch = AsyncMock(return_value=[row])
     user = SimpleNamespace(tenant_id=str(row["tenant_id"]))
+    monkeypatch.setattr(
+        "app.domain.services.paypal_subscriptions.PayPalSubscriptionService.payments_for_tenant",
+        AsyncMock(return_value=[]),
+    )
     listed = await api.list_invoices(10, user, pool)
     detail = await api.get_invoice(str(row["id"]), user, pool)
     assert listed["invoices"] == [detail]

@@ -167,3 +167,80 @@ def test_webhook_events_unique_and_cover_money_events():
         "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.RESOLVED",
     ):
         assert name in events
+
+
+# ---- plans ------------------------------------------------------------------
+
+def test_webhook_events_include_subscription_events():
+    events = pm.PAYPAL_WEBHOOK_EVENTS
+    assert len(events) == 19
+    assert len(set(events)) == 19
+    assert events[:10] == (
+        "CHECKOUT.ORDER.APPROVED", "PAYMENT.CAPTURE.COMPLETED", "PAYMENT.CAPTURE.DECLINED",
+        "PAYMENT.CAPTURE.DENIED", "PAYMENT.CAPTURE.PENDING", "PAYMENT.CAPTURE.REFUNDED",
+        "PAYMENT.CAPTURE.REVERSED", "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED",
+        "CUSTOMER.DISPUTE.RESOLVED",
+    )
+    assert events[10:] == (
+        "BILLING.SUBSCRIPTION.ACTIVATED", "BILLING.SUBSCRIPTION.UPDATED",
+        "BILLING.SUBSCRIPTION.CANCELLED", "BILLING.SUBSCRIPTION.SUSPENDED",
+        "BILLING.SUBSCRIPTION.EXPIRED", "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
+        "PAYMENT.SALE.COMPLETED", "PAYMENT.SALE.REFUNDED", "PAYMENT.SALE.REVERSED",
+    )
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [("team", "team"), (" TEAM ", "team"), ("true", "on"), ("1", "on"), ("on", "on"),
+     ("off", "off"), ("maybe", "off"), ("", "off")],
+)
+def test_plans_switch(monkeypatch, raw, expected):
+    monkeypatch.setenv("PAYPAL_PLANS_ENABLED", raw)
+    assert pm.paypal_plans_switch() == expected
+
+
+def test_plans_switch_unset_is_off(monkeypatch):
+    monkeypatch.delenv("PAYPAL_PLANS_ENABLED", raising=False)
+    assert pm.paypal_plans_switch() == "off"
+
+
+@pytest.fixture
+def billing_live(monkeypatch):
+    monkeypatch.setattr(pm, "get_billing_mode", lambda: "live")
+
+
+def test_plan_availability_off(monkeypatch, billing_live):
+    monkeypatch.delenv("PAYPAL_PLANS_ENABLED", raising=False)
+    _live(monkeypatch)
+    assert pm.paypal_plan_availability(is_platform_admin=True, email=None) == (False, pm.PAYPAL_UNAVAILABLE)
+    monkeypatch.setenv("PAYPAL_TOPUPS_ENABLED", "on")  # the top-up switch is not the plans switch
+    assert pm.paypal_plan_availability(is_platform_admin=True, email=None) == (False, pm.PAYPAL_UNAVAILABLE)
+
+
+def test_plan_availability_on(monkeypatch, billing_live):
+    _live(monkeypatch)
+    monkeypatch.setenv("PAYPAL_PLANS_ENABLED", "on")
+    assert pm.paypal_plan_availability(is_platform_admin=False, email="x@y.com") == (True, None)
+
+
+def test_plan_availability_team(monkeypatch, billing_live):
+    _live(monkeypatch)
+    monkeypatch.setenv("PAYPAL_PLANS_ENABLED", "team")
+    monkeypatch.setenv("STRIPE_TEST_CHECKOUT_EMAILS", "mate@example.com")
+    assert pm.paypal_plan_availability(is_platform_admin=False, email="mate@example.com") == (True, None)
+    assert pm.paypal_plan_availability(is_platform_admin=False, email="stranger@example.com") == (
+        False, pm.PAYPAL_UNAVAILABLE)
+
+
+def test_plan_availability_not_configured(monkeypatch, billing_live):
+    _live(monkeypatch, webhook=False)
+    monkeypatch.setenv("PAYPAL_PLANS_ENABLED", "on")
+    assert pm.paypal_plan_availability(is_platform_admin=True, email=None) == (False, pm.PAYPAL_UNAVAILABLE)
+
+
+@pytest.mark.parametrize("other", ["test", "mock", "disabled", "unconfigured"])
+def test_plan_availability_mode_mismatch(monkeypatch, other):
+    _live(monkeypatch)
+    monkeypatch.setenv("PAYPAL_PLANS_ENABLED", "on")
+    monkeypatch.setattr(pm, "get_billing_mode", lambda: other)
+    assert pm.paypal_plan_availability(is_platform_admin=True, email=None) == (False, pm.PAYPAL_UNAVAILABLE)

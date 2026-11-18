@@ -23,6 +23,7 @@ from app.api.v1.endpoints.assistant_ws import router as assistant_ws_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
 from app.api.v1.endpoints.billing_paypal import router as billing_paypal_router
+from app.api.v1.endpoints.billing_paypal_subscriptions import router as billing_paypal_subscriptions_router
 from app.api.v1.endpoints.billing_paypal_webhook import router as billing_paypal_webhook_router
 from app.api.v1.endpoints.billing_topups import (
     admin_router as billing_topups_admin_router,
@@ -114,6 +115,7 @@ api_router.include_router(analytics_router)
 # Registered BEFORE billing_router so /billing/topups/* is matched by its own
 # routes rather than by any future /billing/{param} pattern.
 api_router.include_router(billing_paypal_router)
+api_router.include_router(billing_paypal_subscriptions_router)
 api_router.include_router(billing_paypal_webhook_router)
 api_router.include_router(billing_topups_router)
 api_router.include_router(billing_topups_admin_router)

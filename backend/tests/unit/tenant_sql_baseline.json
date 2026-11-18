@@ -1579,7 +1579,7 @@
       "id": "2e5bfdba273df44decbf357a7bde58ab886e7e817f0aeee190d59c8352c5205f",
       "file": "app/api/v1/endpoints/billing.py",
       "function": "_invoice_rows",
-      "line": 654,
+      "line": 731,
       "method": "fetch",
       "tables": [
         "invoice_snapshots",
@@ -2612,7 +2612,7 @@
       "id": "5ff82a66c75ad8e74690a66ddc68b19b8bb39c411ef1c295536bb426dd9d308f",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.sync_subscription",
-      "line": 468,
+      "line": 488,
       "method": "execute",
       "tables": [
         "subscriptions"
@@ -4330,7 +4330,7 @@
       "id": "890a5620a348ef42b7b97def054ae1afa214810b226ce30fc8d799c686dd7dcf",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts._claim",
-      "line": 142,
+      "line": 145,
       "method": "fetchval",
       "tables": [
         "subscriptions"
@@ -6928,7 +6928,7 @@
       "id": "df31a0cd985962c76e550958ab4556d929ff1a1234a6768397337e1b9bc31b26",
       "file": "app/api/v1/endpoints/billing.py",
       "function": "get_daily_usage",
-      "line": 578,
+      "line": 655,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -11514,10 +11514,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "b1cd01a3054b6269102ffb0e7011676463e4f737601d21112b9ce9a74b70b92e",
+      "id": "d222b461ec30f2b1faa1a3df19b817bb951099c7f289b9e503d3b1a0a70cfc40",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.create",
-      "line": 359,
+      "line": 379,
       "method": "_stripe_call",
       "tables": [],
       "sql": "create",
@@ -11525,7 +11525,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 2,
-      "reason": "The string selects a Stripe SDK operation. It is not SQL or a database identifier. Exact reviewed operation: _stripe_call; app/domain/services/billing_checkout.py:359.",
+      "reason": "The string selects a Stripe SDK operation. It is not SQL or a database identifier. Exact reviewed operation: _stripe_call; app/domain/services/billing_checkout.py:379.",
       "category": "not_database_sql"
     },
     {
@@ -12713,7 +12713,7 @@
       "id": "34379a461b76f1ec0a62f645bb5765f9ff7451c325f4c5cb4df65e355922ab33",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_dispatch",
-      "line": 174,
+      "line": 258,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12723,14 +12723,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Dispute updates only: it answers whether the disputed capture is one of ours, returns the order id for the receipt, and changes nothing. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:174.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Dispute updates only: it answers whether the disputed capture is one of ours, returns the order id for the receipt, and changes nothing. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:258.",
       "category": "individually_reviewed"
     },
     {
       "id": "e7b4266c886df4b7ff7c55319ca500b7108be825d82f3dc9bbc90c679e28c9ae",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 222,
+      "line": 313,
       "method": "fetchval",
       "tables": [
         "paypal_webhook_events"
@@ -12740,14 +12740,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchval; app/domain/services/paypal_webhooks.py:222.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchval; app/domain/services/paypal_webhooks.py:313.",
       "category": "system_provider_receipt"
     },
     {
       "id": "b61dcfeed46e26f3df217de23cda5841a18e3dfac60b8b277ddfddd6797a74de",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 231,
+      "line": 322,
       "method": "fetchrow",
       "tables": [
         "paypal_webhook_events"
@@ -12757,14 +12757,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:231.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:322.",
       "category": "system_provider_receipt"
     },
     {
       "id": "6b9ce372a5e98d77994f1b2decdd72838c232d601dc799ba3e941093d89a0a25",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 245,
+      "line": 336,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12774,14 +12774,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:245.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:336.",
       "category": "system_provider_receipt"
     },
     {
       "id": "06e379a82765d1345a3315d6f4f71120be2b6ab4780ea6f7ac84051d5f4a2849",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_update",
-      "line": 112,
+      "line": 126,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12791,14 +12791,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:112.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:126.",
       "category": "system_provider_receipt"
     },
     {
       "id": "374ad8c0069cdff9a19f35edd8267b51808a0e43609afa88d837037716d0beed",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_fail",
-      "line": 284,
+      "line": 384,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12808,7 +12808,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:284.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:384.",
       "category": "system_provider_receipt"
     },
     {
@@ -12844,6 +12844,212 @@
       "count": 1,
       "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:374.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "24b315bdd7dca75b6658aed78f539b365d826ec3bba12da867063424b3ceaad9",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sync",
+      "line": 678,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE paypal_subscription_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:678.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "7dbfc5af78dc6c9ff445f5734ad8280814cfba54b7967ce7d3b1ff0eda592704",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.end_for_reversal",
+      "line": 1028,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_subscription_payments"
+      ],
+      "sql": "SELECT id, tenant_id, subscription_id FROM paypal_subscription_payments WHERE paypal_transaction_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1028.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "d517413e429d2f424f1200b7bce68e0eb8eb293f5324d5ec373276437f2df6d1",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService._plan_option",
+      "line": 505,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_plan_options"
+      ],
+      "sql": "SELECT paypal_plan_id, provider_mode, interval, amount_minor, currency, active, verified_at FROM paypal_plan_options WHERE price_option_id = $1::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:505.",
+      "category": "platform_catalog"
+    },
+    {
+      "id": "751c47bfec7a9903977c065e4ca98c85319ae5f63703c95e95d1962fc3fa5d7d",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService._record_review",
+      "line": 898,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.PLAN.REVIEW', 'subscription', $2, NULL, $3, 'needs_review', $4, $5) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:898.",
+      "category": "system_provider_receipt"
+    },
+    {
+      "id": "92b36a0f21b827a1e8ffb9ab4ea259295286cbd1e29e66da76421d506dc7da33",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sweep",
+      "line": 1069,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT id, tenant_id FROM paypal_subscriptions WHERE status = 'active' AND cancel_at_period_end AND current_period_end <= NOW() ORDER BY current_period_end LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1069.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "a58656db090728cb8108aed77ea9e8fa7dc90ae259b5bd24621a57f8101a0100",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sweep",
+      "line": 1070,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE status IN ('creating', 'unknown', 'approval_pending', 'active', 'past_due', 'suspended') AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '6 hours' OR (status IN ('creating', 'unknown', 'approval_pending') AND checked_at < NOW() - INTERVAL '10 minutes')) ORDER BY checked_at NULLS FIRST LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1070.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "610d06b38d3170483be75a4e3784ce301002a9da5ceee29e77c0a11b17d13af9",
+      "file": "app/domain/services/paypal_webhooks.py",
+      "function": "_dispatch",
+      "line": 164,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_subscription_payments",
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT s.paypal_subscription_id FROM paypal_subscription_payments p JOIN paypal_subscriptions s ON s.id = p.subscription_id AND s.tenant_id = p.tenant_id WHERE p.paypal_transaction_id = $1 LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (a refund of a plan payment): finds which PayPal subscription the refunded payment belongs to by PayPal's transaction id (unique index); the two tables are joined on subscription id AND tenant_id. It returns the PayPal subscription id only, which is then passed to PayPalSubscriptionService.sync. It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:164.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "299aa6eb3a14a37671e96ccbbced6b8270085194bb0acf83b3b1bda7ee6d61cf",
+      "file": "app/api/v1/endpoints/billing.py",
+      "function": "_paypal_priced_option_ids",
+      "line": 961,
+      "method": "fetch",
+      "tables": [
+        "paypal_plan_options",
+        "plan_price_options"
+      ],
+      "sql": "SELECT pp.price_option_id FROM paypal_plan_options pp JOIN plan_price_options o ON o.id = pp.price_option_id WHERE pp.active AND pp.verified_at IS NOT NULL AND pp.provider_mode = $1 AND pp.amount_minor = o.amount_minor AND pp.currency = o.currency AND pp.interval = o.interval",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Public plan list: which approved price options have a verified PayPal billing plan with the same terms. paypal_plan_options and plan_price_options are platform catalog tables (no tenant_id column, platform-only policy). It returns price option ids only and is skipped entirely when PayPal plans are closed for the caller. Exact reviewed operation: fetch; app/api/v1/endpoints/billing.py:961.",
+      "category": "platform_catalog"
+    },
+    {
+      "id": "461751b083aef4dbdf6d94e1f20aa3961efe41546152fc58ee16af7b98b33206",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.end_subscription_for_reversal",
+      "line": 1043,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE paypal_subscription_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1043.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "f27b597611809426dc307f3c9163b3511ce2531e64d917830d77ec5d4e301bb6",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sweep",
+      "line": 1071,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE status IN ('failed', 'expired') AND activated_at IS NULL AND paypal_subscription_id IS NOT NULL AND created_at > NOW() - INTERVAL '3 days' AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '1 hour') ORDER BY checked_at NULLS FIRST LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1071.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "ec8dfe3b69ee2b9d30b17497f962cfce5bd026f0369ba1942b0354a48e83fe68",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sweep",
+      "line": 1072,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE status = 'cancelled' AND paypal_subscription_id IS NOT NULL AND paypal_status IN ('APPROVED', 'ACTIVE', 'SUSPENDED') AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '1 hour') ORDER BY checked_at NULLS FIRST LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1072.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "6a7283106e60f9ebd4c935eb5f737feffb595555472efbc398b853fe51932ad9",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.sweep",
+      "line": 1095,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions"
+      ],
+      "sql": "SELECT * FROM paypal_subscriptions WHERE status IN ('active', 'past_due') AND NOT cancel_at_period_end AND current_period_end < NOW() - INTERVAL '3 days' AND (checked_at IS NULL OR checked_at < NOW() - INTERVAL '3 days') LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1095.",
+      "category": "system_discovery"
     }
   ]
 }

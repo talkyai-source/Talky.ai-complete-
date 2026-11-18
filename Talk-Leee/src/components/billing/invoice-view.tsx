@@ -18,6 +18,11 @@ export function BillingSupport({ reference }: { reference?: string }) {
   </p>;
 }
 
+/** What names an invoice row: its number, Stripe id, or (a PayPal payment has neither) the PayPal transaction. */
+export function invoiceLabel(invoice: BillingInvoice): string {
+  return invoice.invoice_number ?? invoice.stripe_invoice_id ?? (invoice.source_reference ? `PayPal payment ${invoice.source_reference}` : invoice.id);
+}
+
 export function invoiceDate(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "Unavailable";
 }
@@ -55,7 +60,7 @@ export function BillingInvoiceList() {
           <div className="overflow-x-auto"><table className="min-w-full text-sm"><caption className="sr-only">Recent saved invoice amounts and status</caption>
             <thead><tr className="border-b text-left"><th scope="col" className="p-3">Invoice</th><th scope="col" className="p-3">Period</th><th scope="col" className="p-3">Invoice total</th><th scope="col" className="p-3">Paid</th><th scope="col" className="p-3">Remaining</th><th scope="col" className="p-3">Status</th></tr></thead>
             <tbody>{query.data?.map((invoice) => <tr key={invoice.id} className="border-b">
-              <td className="p-3"><Link className="inline-block py-1 -my-1 font-semibold underline" href={`/billing/invoices/${invoice.id}`}>{invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id}</Link></td>
+              <td className="p-3"><Link className="inline-block py-1 -my-1 font-semibold underline" href={`/billing/invoices/${invoice.id}`}>{invoiceLabel(invoice)}</Link></td>
               <td className="p-3">{invoiceDate(invoice.period_start)} – {invoiceDate(invoice.period_end)}</td>
               <td className="p-3"><LocalMinorAmount minor={invoice.total} currency={invoice.currency} exponent={invoice.currency_exponent} /></td>
               <td className="p-3"><LocalMinorAmount minor={invoice.amount_paid} currency={invoice.currency} exponent={invoice.currency_exponent} /></td>
@@ -78,7 +83,7 @@ export function BillingInvoiceDetail({ id }: { id: string }) {
 export function InvoiceFacts({ invoice }: { invoice: BillingInvoice }) {
   const money = (value: number | null, currency = invoice.currency) => <LocalMinorAmount minor={value} currency={currency}
     exponent={currency?.toLowerCase() === invoice.currency?.toLowerCase() ? invoice.currency_exponent : null} />;
-  const reference = invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id;
+  const reference = invoiceLabel(invoice);
   return <div className="space-y-6">
     <div className="flex flex-wrap gap-3 print:hidden"><Button asChild variant="outline" size="sm"><Link href="/billing/invoices"><ArrowLeft className="mr-1 h-4 w-4" aria-hidden /> Recent invoices</Link></Button>
       <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="mr-1 h-4 w-4" aria-hidden /> Print</Button><Documents invoice={invoice} /></div>

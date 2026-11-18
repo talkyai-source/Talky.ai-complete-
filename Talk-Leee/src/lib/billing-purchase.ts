@@ -11,6 +11,8 @@ const priceFields = {
 };
 export const billingPriceSchema = z.object({
   ...priceFields, active: z.boolean(), checkout_available: z.boolean(), unavailable_reason: z.string().nullable().optional(),
+  // Optional, not defaulted: an option built in code (and one from an older server) simply has no PayPal offer.
+  paypal_available: z.boolean().optional(),
 });
 export const purchasedPriceSchema = z.object({ ...priceFields, plan_id: z.string().min(1), plan_name: z.string().min(1) });
 export const billingCatalogSchema = z.array(z.object({
@@ -29,6 +31,7 @@ export const billingSubscriptionSchema = z.object({
   minutes_state: z.enum(["known", "unlimited", "unavailable"]).default("unavailable"),
   minutes_allocated: z.number(), minutes_used: z.number(), minutes_remaining: z.number(),
   purchased_price_option: purchasedPriceSchema.nullable().default(null), billing_portal_available: z.boolean().default(false),
+  billing_provider: z.enum(["stripe", "paypal"]).nullable().default(null),
 });
 export type BillingSubscription = z.infer<typeof billingSubscriptionSchema>;
 export const checkoutAttemptSchema = z.object({
@@ -37,7 +40,8 @@ export const checkoutAttemptSchema = z.object({
   price_option: purchasedPriceSchema, mock_mode: z.literal(false), message: z.string().nullable().optional(),
 });
 export type CheckoutAttempt = z.infer<typeof checkoutAttemptSchema>;
-export const savedPurchaseSchema = z.object({ request_id: uuid, price_option: purchasedPriceSchema });
+// `provider` is stored only for a PayPal purchase; absent means Stripe (what older saved purchases hold).
+export const savedPurchaseSchema = z.object({ request_id: uuid, price_option: purchasedPriceSchema, provider: z.enum(["stripe", "paypal"]).optional() });
 export type SavedPurchase = z.infer<typeof savedPurchaseSchema>;
 
 export function formatPurchasedPrice(price: PurchasedPrice | BillingPrice): string {
@@ -74,6 +78,7 @@ export function yearlySavingParts(year: BillingPrice, options: readonly BillingP
 export function hasManagedSubscription(subscription: BillingSubscription | null): boolean {
   if (!subscription || ["inactive", "canceled", "cancelled", "incomplete_expired"].includes(subscription.status)) return false;
   if (subscription.purchased_price_option?.kind === "free") return false;
+  if (subscription.billing_provider === "paypal") return true;
   return subscription.purchased_price_option?.kind === "stripe" || subscription.billing_portal_available;
 }
 export function requireBillingBackend(): void {
@@ -86,7 +91,7 @@ export function approvedCheckoutUrl(url: string, kind: "checkout" | "portal" | "
   if (parsed.protocol !== "https:" || !expectedHosts.includes(parsed.host) || parsed.username || parsed.password) throw new Error("The payment destination could not be verified. Your saved request is unchanged.");
   return parsed.href;
 }
-function validateAttempt(data: unknown, saved: SavedPurchase): CheckoutAttempt {
+export function validateAttempt(data: unknown, saved: SavedPurchase, urlKind: "checkout" | "paypal" = "checkout"): CheckoutAttempt {
   const parsed = checkoutAttemptSchema.safeParse(data);
   if (!parsed.success) throw new Error("The billing response could not be verified. Keep the saved request and check again.");
   const result = parsed.data;
@@ -95,13 +100,13 @@ function validateAttempt(data: unknown, saved: SavedPurchase): CheckoutAttempt {
     throw new Error("The returned purchase details do not match your saved selection. Keep this request reference and contact support before starting another purchase.");
   }
   if (result.state === "open" && (!result.checkout_url || !result.session_id)) throw new Error("Checkout is not ready. Check the saved request again.");
-  if (result.checkout_url) approvedCheckoutUrl(result.checkout_url);
+  if (result.checkout_url) approvedCheckoutUrl(result.checkout_url, urlKind);
   return result;
 }
-export function validateOutstandingAttempt(data: unknown): CheckoutAttempt {
+export function validateOutstandingAttempt(data: unknown, urlKind: "checkout" | "paypal" = "checkout"): CheckoutAttempt {
   const parsed = checkoutAttemptSchema.safeParse(data);
   if (!parsed.success) throw new Error("The existing purchase could not be verified. Keep your request reference and contact support.");
-  return validateAttempt(parsed.data, { request_id: parsed.data.request_id, price_option: parsed.data.price_option });
+  return validateAttempt(parsed.data, { request_id: parsed.data.request_id, price_option: parsed.data.price_option }, urlKind);
 }
 export async function startBillingCheckout(saved: SavedPurchase, signal?: AbortSignal): Promise<CheckoutAttempt> {
   requireBillingBackend();
