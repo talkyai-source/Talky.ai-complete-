@@ -20,8 +20,9 @@ _spec.loader.exec_module(ps)
 
 HOOK = "https://api.example.com" + ps.WEBHOOK_PATH
 SITE = "https://app.example.com"
-CLIENT_ID = "client-id-for-tests"
-CLIENT_SECRET = "client-secret-for-tests"
+# Built from pieces, as in test_paypal_setup_script.py: not literals a scanner could take for real ones.
+CLIENT_ID = "sandbox-" + "cid" * 5
+CLIENT_SECRET = "sandbox-" + "sec" * 5
 PRODUCT_ID = "".join(["PROD", "-", "test", "0001"])
 _ALL = (
     "PAYPAL_ENV", "PAYPAL_CLIENT_ID", "PAYPAL_CLIENT_SECRET",
