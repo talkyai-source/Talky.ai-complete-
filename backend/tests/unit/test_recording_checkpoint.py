@@ -56,7 +56,7 @@ def make_session(sid, gw=None, **extra):
     return SimpleNamespace(
         call_id=sid, media_gateway=gw or FakeGw(), _dialer_tenant_id=TENANT,
         config=SimpleNamespace(tenant_id=TENANT, campaign_id=None, lead_id=None),
-        call_session=None, **extra,
+        call_session=None, **{"_recording_policy_decided": True, **extra},
     )
 
 
@@ -165,6 +165,12 @@ async def test_checkpoint_done_removes_folder_and_is_not_recreated(env):
     gw.caller += [chunk(100, 1)]
     await cp.checkpoint_pass()
     cp.checkpoint_done("sess-1")
+    # The files are removed off the event loop, so the end of a call never
+    # waits on the disk: give that a moment.
+    for _ in range(100):
+        if not folder(env, "sess-1").exists():
+            break
+        await asyncio.sleep(0.02)
     assert not folder(env, "sess-1").exists()
     gw.caller += [chunk(100, 2)]
     assert await cp.checkpoint_pass() == 0
@@ -425,3 +431,19 @@ async def test_hook_failure_never_breaks_the_save_path(hooks, monkeypatch):
     gw.caller += [chunk(20000, 1)]
     await tr._save_call_recording_with_budget(make_session("sess-1", gw), "pbx1")
     assert len(spool.list_entries()) == 1
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_copied_before_the_call_has_taken_its_recording_decision(env):
+    """Until the notice decision exists, the audio may belong to a tenant who
+    switched recording off, or be what was said before the spoken notice."""
+    gw = FakeGw()
+    gw.caller.extend([b"\x01\x02" * 160, b"\x03\x04" * 160])
+    vs = make_session("11111111-1111-4111-8111-00000000aaaa", gw, _recording_policy_decided=False)
+    env.live["pbx-undecided"] = vs
+    assert await cp.checkpoint_pass() == 0
+    assert not (env.spool / "live").exists() or not any((env.spool / "live").iterdir())
+
+    vs._recording_policy_decided = True
+    assert await cp.checkpoint_pass() == 1
+    assert (env.spool / "live" / vs.call_id / "caller.pcm").exists()

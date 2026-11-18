@@ -30,6 +30,7 @@ from app.domain.services.recording_spool import (
     _KEY_RE,
     SpoolEntry,
     _from_dict,
+    has_audio,
     read_entry,
     spool_dir,
     write_entry,
@@ -100,8 +101,17 @@ def checkpoint_done(session_call_id) -> None:
         keys = {st.key for st in list(_STATE.values()) if st.session_call_id == sid}
         if _KEY_RE.match(sid):
             keys.add(sid)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
         for key in keys:
-            _rmtree(key)
+            if loop is not None:
+                # Called from the end of a call: deleting files must not hold
+                # up the other live calls.
+                loop.run_in_executor(None, _rmtree, key)
+            else:
+                _rmtree(key)
     except Exception:
         pass
 
@@ -126,7 +136,23 @@ def _write_files(
     if sid in _DONE:
         return
     folder = _folder(key)
+    try:
+        _write_files_inner(folder, reset, caller_new, agent_new, meta_bytes)
+    finally:
+        if sid in _DONE:
+            # checkpoint_done ran while this write was in flight (or the
+            # write failed after it): the folder must not outlive the call.
+            shutil.rmtree(folder, ignore_errors=True)
+
+
+def _write_files_inner(folder: str, reset: bool, caller_new: list, agent_new: list, meta_bytes: bytes) -> None:
     os.makedirs(folder, mode=0o700, exist_ok=True)
+    for private in (os.path.dirname(folder), os.path.dirname(os.path.dirname(folder))):
+        # makedirs gives the mode to the last folder only.
+        try:
+            os.chmod(private, 0o700)
+        except OSError:
+            pass
     meta_path = os.path.join(folder, "meta.json")
     tmp_path = meta_path + ".tmp"
     fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_BINARY, 0o600)
@@ -152,9 +178,6 @@ def _write_files(
         "agent.bin",
         b"".join(_AGENT_HDR.pack(int(off), len(chunk)) + chunk for off, chunk in agent_new),
     )
-    if sid in _DONE:
-        # checkpoint_done ran while this write was in flight.
-        shutil.rmtree(folder, ignore_errors=True)
 
 
 def _read_folder(key: str):
@@ -207,7 +230,7 @@ def _recover_sync(key: str) -> tuple[str, float]:
     if duration < _MIN_SECONDS:
         shutil.rmtree(_folder(key), ignore_errors=True)
         return "short", duration
-    if read_entry(key) is not None:
+    if has_audio(key) and read_entry(key) is not None:
         # A pending entry with this key already holds the call's audio.
         shutil.rmtree(_folder(key), ignore_errors=True)
         return "already_pending", duration
@@ -278,6 +301,11 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
     if _is_true_inbound_session(vs):
         return False
     if getattr(vs, "_transfer_connected", False) or getattr(vs, "_recording_saved_at_transfer", False):
+        return False
+    if getattr(vs, "_recording_policy_decided", False) is not True:
+        # Until the call has taken its recording decision nothing goes to
+        # disk: not the audio of a tenant who switched recording off, and
+        # not what was said before the spoken notice.
         return False
     gateway = getattr(vs, "media_gateway", None)
     if gateway is None:

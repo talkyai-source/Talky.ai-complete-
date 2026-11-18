@@ -74,6 +74,10 @@ def spool_dir() -> str:
 def _ensure_dir() -> str:
     path = spool_dir()
     os.makedirs(path, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)  # also when it existed already with a wider mode
+    except OSError:
+        pass
     return path
 
 
@@ -119,11 +123,27 @@ def write_entry(entry: SpoolEntry, wav_bytes: bytes) -> None:
     _atomic_write(json_path, _entry_bytes(entry))
 
 
+def has_audio(key: str) -> bool:
+    """Whether the pending folder holds this entry's WAV."""
+    try:
+        wav_path, _ = _paths(key)
+    except ValueError:
+        return False
+    return os.path.isfile(wav_path)
+
+
 def update_entry(entry: SpoolEntry) -> None:
-    """Rewrite only the JSON sidecar (the WAV is untouched)."""
+    """Rewrite only the JSON sidecar (the WAV is untouched).
+
+    Does nothing when the WAV is not there: an entry is its audio, and a
+    sidecar alone would make a later recovery believe the audio is safe
+    (and would bring back an entry that was already saved and removed).
+    """
     _check_key(entry.key)
+    wav_path, json_path = _paths(entry.key)
+    if not os.path.isfile(wav_path):
+        return
     _ensure_dir()
-    _, json_path = _paths(entry.key)
     _atomic_write(json_path, _entry_bytes(entry))
 
 

@@ -601,20 +601,40 @@ async def _spool_pass() -> int:
     from datetime import datetime, timezone
 
     from app.domain.services.recording_service import _with_recording_pool_budget
-    from app.domain.services.recording_spool import list_entries, update_entry
+    from app.domain.services.recording_spool import (
+        has_audio, list_entries, read_entry, remove_entry, update_entry,
+    )
 
     entries = await asyncio.to_thread(list_entries)
     now = datetime.now(timezone.utc)
     awaiting_max = _env_float("RECORDING_AWAITING_MAX_AGE_S", 4500.0)
+    expire_after = _env_float("RECORDING_PENDING_MAX_AGE_DAYS", 30.0, minimum=1.0) * 86400.0
     processed = 0
     for entry in entries:
         if processed >= _LOOP_MAX_PER_PASS:
             break
         if entry.key in _PROCESSING:
             continue
+        # The listing is a moment old. Another path may have saved and
+        # removed this entry since, or changed it: read it again.
+        key = entry.key
+        entry = await asyncio.to_thread(read_entry, key)
+        if entry is None or not await asyncio.to_thread(has_audio, key):
+            continue
         age = _age_seconds(entry.created_at, now)
         if age is None:
             age = 0.0
+        if age > expire_after:
+            # The health check has alerted on this entry every minute since
+            # its first quarter of an hour. Audio must not outlive that for
+            # ever outside the stored recordings (an account that was
+            # deleted, a call row that is gone): it is removed, loudly.
+            logger.error(
+                "recording_spool_expired call=%s age_days=%.1f attempts=%d last_error=%s",
+                str(entry.pbx_call_id)[:12], age / 86400.0, entry.attempts, entry.last_error,
+            )
+            await asyncio.to_thread(remove_entry, key)
+            continue
         if entry.awaiting:
             if _awaiting_finalizer is not None:
                 if age > _AWAITING_FINALIZER_AGE_S:
@@ -645,7 +665,11 @@ async def _spool_pass() -> int:
 
 
 async def recording_spool_loop(stop_event: asyncio.Event) -> None:
-    """Retry pending recordings until ``stop_event`` is set. Never deletes for age."""
+    """Retry pending recordings until ``stop_event`` is set.
+
+    An entry that cannot be saved stays for RECORDING_PENDING_MAX_AGE_DAYS
+    (default 30) and is then removed with an error line.
+    """
     logger.info("recording_spool_loop_started")
     interval = _env_float("RECORDING_SPOOL_RETRY_INTERVAL_S", 60.0, minimum=10.0)
     delay = _LOOP_FIRST_DELAY_S

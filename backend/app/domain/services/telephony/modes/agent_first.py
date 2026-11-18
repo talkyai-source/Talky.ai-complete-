@@ -295,6 +295,8 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         if as_opener:
             text = opener_with_notice
         if not text:
+            # Decided: no notice is owed (or recording is off, see above).
+            voice_session._recording_policy_decided = True
             record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
             logger.info(
                 "recording_disclosure_not_required call_id=%s reason=%s",
@@ -330,6 +332,9 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
             if callable(set_gate):
                 set_gate(call_id, False)
                 set_gate(call_id, True)
+        # Decided, and the buffers now start at the notice: from here the
+        # live copy on disk may follow the call (recording_checkpoint).
+        voice_session._recording_policy_decided = True
 
         logger.info(
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
