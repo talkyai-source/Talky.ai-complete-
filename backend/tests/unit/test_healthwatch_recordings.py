@@ -102,6 +102,7 @@ async def test_the_statements_exclude_calls_that_ended_less_than_fifteen_minutes
         assert "interval '15 minutes'" in sql and "interval '24 hours'" in sql
         assert sql.rsplit("WHERE", 1)[1].lstrip().startswith(("tenant_id = $1::uuid", "r.tenant_id = $1::uuid"))
         assert "direction = 'outbound'" in sql and "duration_seconds >= 5" in sql
+        assert "is_test = false" in sql, "test calls are not counted as missing"
 
 
 async def test_a_stuck_pending_entry_alerts(watch, monkeypatch):
@@ -125,14 +126,15 @@ async def test_an_awaiting_entry_older_than_ninety_minutes_is_stuck(watch, monke
     assert (await _report(watch))["pending_stuck"] == 1
 
 
-async def test_an_unreadable_spool_gives_none_and_does_not_alert_by_itself(watch, monkeypatch):
+async def test_an_unreadable_pending_folder_is_reported_as_unavailable(watch, monkeypatch):
     _install(watch, monkeypatch)
 
     def boom():
         raise OSError("x")
     monkeypatch.setattr(watch.recording_spool, "list_entries", boom)
     report = await _report(watch)
-    assert report["pending_stuck"] is None and report["status"] == "ok"
+    assert report["pending_stuck"] is None
+    assert report["status"] == "unavailable" and report["reason"] == "pending_folder_unreadable"
 
 
 @pytest.mark.parametrize("unconfirmed,recorded,status", [

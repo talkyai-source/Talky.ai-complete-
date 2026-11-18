@@ -243,13 +243,13 @@ _PENDING_AWAITING_STUCK_SECONDS = 5400
 _CALLS_ANSWERED_SQL = """SELECT count(*) AS answered,
     (SELECT default_consent_mode FROM tenant_recording_policy WHERE tenant_id = $1::uuid) AS mode
     FROM calls
-    WHERE tenant_id = $1::uuid AND direction = 'outbound' AND answered_at <= now()
+    WHERE tenant_id = $1::uuid AND direction = 'outbound' AND is_test = false AND answered_at <= now()
       AND ended_at >= now() - interval '24 hours' AND ended_at <= now() - interval '15 minutes'
       AND duration_seconds >= 5"""
 _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.notice_state = 'unconfirmed') AS unconfirmed,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.transfer_part = 'missing') AS transfer_missing,
-    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.answered_at <= now()
+    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
       AND c.duration_seconds >= 5) AS matched
     FROM recordings_s3 r JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
@@ -257,7 +257,7 @@ _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - inter
 # Before migration 0103 the notice/transfer columns do not exist: same shape, zero counts.
 _RECORDINGS_OLD_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
     0 AS unconfirmed, 0 AS transfer_missing,
-    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.answered_at <= now()
+    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
       AND c.duration_seconds >= 5) AS matched
     FROM recordings_s3 r JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
@@ -345,7 +345,14 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                 pending = None
             alert = (missing > 0 or (pending or 0) > 0 or transfer_missing > 0
                      or (unconfirmed >= 3 and unconfirmed * 2 >= recorded))
-            if recordings_read:
+            if recordings_read and pending is None and not alert:
+                # The counts are fine but the pending folder could not be read:
+                # that is not "ok".
+                result["recordings"] = {"status": "unavailable", "reason": "pending_folder_unreadable",
+                                        "missing": missing, "pending_stuck": None,
+                                        "transfer_missing": transfer_missing,
+                                        "unconfirmed": unconfirmed, "recorded": recorded}
+            elif recordings_read:
                 result["recordings"] = {"status": "alert" if alert else "ok", "missing": missing,
                                         "pending_stuck": pending, "transfer_missing": transfer_missing,
                                         "unconfirmed": unconfirmed, "recorded": recorded}
