@@ -323,6 +323,21 @@ test("Cancel is red in both themes", () => {
     }
 });
 
+test("Book a Demo hovers to indigo-600 in the dark theme", () => {
+    const { advance, restore } = mount();
+    try {
+        advance(DELAY);
+        const demo = popup()!.querySelector("a");
+        assert.ok(demo);
+        assert.equal(demo.textContent, "Book a Demo");
+        const classes = demo.className.split(/\s+/);
+        assert.ok(classes.includes("dark:hover:bg-indigo-600"), demo.className);
+        assert.ok(!classes.includes("dark:hover:bg-indigo-400"), demo.className);
+    } finally {
+        restore();
+    }
+});
+
 test("the popup card uses the Campaigns card gradient", () => {
     const { advance, restore } = mount();
     try {
