@@ -5,7 +5,7 @@ Campaigns control how Talk-Lee makes outbound calls, what the AI agent is trying
 ### Open Campaigns
 
 1. Select **Campaigns** from the sidebar.
-2. The Campaign Performance page lists your available campaigns.
+2. The Campaigns page lists your available campaigns.
 3. Use the available sorting/filtering controls to find a campaign.
 4. Depending on campaign status, you can open, pause, resume, edit, or delete a campaign.
 
@@ -29,7 +29,7 @@ Select a column heading to sort by it.
 
 ### Campaign statuses
 
-- **Active** — the campaign is calling, or ready to call within its schedule
+- **Running** — the campaign is calling, or ready to call within its schedule
 - **Paused** — calling is stopped and can be resumed
 - **Completed** — the contact list has been worked through
 - **Draft** — the campaign is not finished and cannot call yet
@@ -41,10 +41,10 @@ Statuses available to you depend on your account configuration.
 The campaign list includes filters above the table:
 
 - **Campaign name** — type to search
-- **Status** — limit the list to a status such as active or paused
+- **Status** — limit the list to a status such as running or paused
 - **Success rate** — enter a minimum and maximum percentage
 
-Use **Export** to download the filtered list, and **New Campaign** to start a new one.
+Use **Export** to download the filtered list, and **Create campaign** to start a new one.
 
 ### Move through a long list
 
@@ -62,14 +62,10 @@ Use the controls above the table to choose how many rows to show at once and to 
    - **Export Selected** — open the export and reporting options
    - **Delete Selected** — remove the campaigns after confirming
 
-![The bulk-action panel showing a readiness warning, with Resume unavailable and a Check again link](/docs/outbound-campaigns-04-readiness-warning.webp)
-
-**Resume Selected** is unavailable when the selected campaigns cannot currently place calls. When that happens, Talk-Lee explains why beside the buttons — for example that the selected telephone trunk is not ready. Select **Check again** to re-test, or open **Settings → Telephony** to review the trunk.
-
 ### Create a New Campaign
 
 1. Open **Campaigns**.
-2. Select **New Campaign** or the create-campaign action.
+2. Select **Create campaign** or the create-campaign action.
 3. Complete the campaign setup sections shown in the wizard.
 
 ![The top of the campaign form, showing the name, brand, persona options and representative name](/docs/outbound-campaigns-05-identity.webp)
@@ -241,9 +237,22 @@ Choose a voice based on the campaign audience. A professional sales campaign sho
 
 Changes normally take effect on the next call rather than on calls already in progress. Pause the campaign first if a change must not apply mid-run.
 
+### Duplicate
+
+1. Open the campaign.
+2. Select **Duplicate**.
+
+![Lead Qualification](/docs/outbound-campaigns-13-duplicate.webp)
+
+The copy is a draft with the same settings, knowledge files and lead fields. Contacts, calls and results are not copied.
+
 ### Export campaign data
 
 Use **Export** on the campaign list, or **Export Selected** after selecting campaigns, to open the export and reporting options. Choose the data and format you need, then download the file.
+
+![Export & Reporting](/docs/outbound-campaigns-15-export.webp)
+
+PDF opens a print view; save as PDF from your browser.
 
 Treat exported files as confidential. They can contain customer contact details.
 
@@ -298,7 +307,7 @@ Never launch a new campaign without testing it first.
 ### Recommended test process
 
 1. Save the campaign.
-2. Open the campaign and use the available **Test Agent** or preview function.
+2. Open the campaign and use the available **Test agent** or preview function.
 
    ![The test dialog, offering a choice of who opens the conversation and a headphones option](/docs/outbound-campaigns-12-test-dialog.webp)
 3. Test the opening.
@@ -335,3 +344,15 @@ The campaign should not go live until:
 ### Readiness check
 
 Before a campaign can place calls, Talk-Lee checks that a telephone route is available. If the campaign shows a readiness warning, resolve it before launching. Select **Check again** after making a change in **Settings → Telephony**.
+
+### Start campaign
+
+1. Open the campaign.
+2. Select **Start**.
+
+![Start campaign](/docs/outbound-campaigns-14-start-campaign.webp)
+
+**Start campaign** — "Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the callee." — offers two options: **AI agent speaks first** and **Callee speaks first**.
+
+- **AI agent speaks first** — Agent plays a pre-synthesized greeting the instant the callee picks up. Best for cold outreach.
+- **Callee speaks first** — Agent waits for the callee to say “hello” before responding. Feels more natural on warm lists.
