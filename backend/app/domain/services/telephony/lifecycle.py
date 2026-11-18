@@ -820,10 +820,6 @@ async def _apply_account_call_cap(voice_session) -> None:
         logger.warning("outbound_account_call_cap_unavailable call=%s err=%s",
                        short_id, type(exc).__name__)
         return
-    if getattr(voice_session, "_transfer_connected", False):
-        # A person already took over; the transfer limit stands (it was raised
-        # in _on_transfer_connected before this late read returned).
-        return
     if isinstance(account_max, int) and 0 < account_max < _SESSION_MAX_DURATION_S:
         voice_session._max_call_duration_seconds = account_max
         logger.info("outbound_account_call_cap call=%s max_s=%d", short_id, account_max)
@@ -5326,12 +5322,19 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
         _current = getattr(voice_session, "_max_call_duration_seconds", _SESSION_MAX_DURATION_S)
         if isinstance(_current, bool) or not isinstance(_current, (int, float)) or _current <= 0:
             _current = _SESSION_MAX_DURATION_S
-        voice_session._max_call_duration_seconds = max(int(_current), transfer_max_duration_seconds())
-        logger.info(
-            "transfer_call_limit_raised call=%s max_s=%d",
-            call_id[:12],
-            voice_session._max_call_duration_seconds,
-        )
+        if _current < _SESSION_MAX_DURATION_S:
+            # The account set its own, shorter maximum call length. It limits
+            # what a call may cost, so it stands for a transferred call too.
+            logger.info(
+                "transfer_call_limit_kept call=%s max_s=%d", call_id[:12], int(_current),
+            )
+        else:
+            voice_session._max_call_duration_seconds = max(int(_current), transfer_max_duration_seconds())
+            logger.info(
+                "transfer_call_limit_raised call=%s max_s=%d",
+                call_id[:12],
+                voice_session._max_call_duration_seconds,
+            )
     pipeline = getattr(voice_session, "pipeline", None)
     if pipeline is not None:
         # Same PBX-id vs. pipeline-call_id mismatch as _on_call_ended's
@@ -5397,36 +5400,56 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
         logger.warning("Transfer media teardown failed for %s: %s", call_id[:12], exc)
 
 
-async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> None:
-    """Join the person's conversation to the parked AI recording at call end.
+# Joins in flight; held here so they are not collected before they finish.
+_TRANSFER_FINALIZE_TASKS: set = set()
 
-    Bounded to 30 s; on a timeout or error the spool retry loop finishes the
-    entry. Never raises (except cancellation).
+
+async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> None:
+    """Start joining the person's conversation onto the parked agent recording.
+
+    Fetching the file, joining, encoding and saving can take many seconds for
+    a long conversation, so they run as their own task and never hold up the
+    rest of the teardown. If that task does not finish (shutdown, an error),
+    the entry stays awaiting and the retry loop finishes it. Never raises
+    (except cancellation).
     """
     try:
-        from app.domain.services.recording_spool import list_entries
+        from app.domain.services.recording_spool import list_entries, write_entry
+        from app.domain.services.telephony.recording import _build_spool_entry
 
+        adapter = get_adapter()
         entries = await asyncio.to_thread(list_entries)
         session_id = str(getattr(voice_session, "call_id", ""))
-        entry = next(
-            (
-                e
-                for e in entries
-                if e.awaiting == "transfer_part"
-                and (e.session_call_id == session_id or e.pbx_call_id == call_id)
-            ),
-            None,
-        )
+        awaiting = [e for e in entries if e.awaiting == "transfer_part"]
+        # This call's own entry. A PBX channel id can be used again by a later
+        # call, so it is only a fallback, and then the newest entry wins.
+        entry = next((e for e in awaiting if e.session_call_id == session_id), None)
         if entry is None:
-            logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
-            return
-        await asyncio.wait_for(
-            finalize_transfer_entry(entry, adapter=get_adapter(), voice_session=voice_session),
-            30.0,
+            same_channel = [e for e in awaiting if e.pbx_call_id == call_id]
+            entry = same_channel[-1] if same_channel else None
+        if entry is None:
+            name_fn = getattr(adapter, "transfer_recording_name", None)
+            name = name_fn(call_id) if callable(name_fn) else None
+            if not name:
+                logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
+                return
+            # The agent's part held no audio, so nothing was parked, but the
+            # person's conversation was recorded: park an empty agent part so
+            # it is joined and saved like any other.
+            entry = _build_spool_entry(
+                voice_session, call_id, sample_rate=8000, duration=0.0,
+                awaiting_transfer=True, transfer_recording_name=name,
+            )
+            await asyncio.to_thread(write_entry, entry, b"")
+        task = asyncio.create_task(
+            finalize_transfer_entry(entry, adapter=adapter, call_ended=True),
+            name=f"transfer-recording-finalize:{call_id[:12]}",
         )
+        _TRANSFER_FINALIZE_TASKS.add(task)
+        task.add_done_callback(_TRANSFER_FINALIZE_TASKS.discard)
     except asyncio.CancelledError:
         raise
-    except Exception:  # noqa: BLE001 - includes the 30 s timeout
+    except Exception:  # noqa: BLE001
         logger.warning("transfer_recording_finalize_deferred call=%s", call_id[:12])
 
 

@@ -1278,7 +1278,15 @@ class AsteriskAdapter(CallControlAdapter):
             length = resp.content_length
             if length is not None and length > max_bytes:
                 raise ValueError("ari_body_too_large")
-            return await resp.read()
+            # A reply without a declared length is bounded while it is read.
+            chunks: list = []
+            total = 0
+            async for chunk in resp.content.iter_chunked(1 << 20):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError("ari_body_too_large")
+                chunks.append(chunk)
+            return b"".join(chunks)
 
     async def list_active_channel_ids(self) -> Optional[set]:
         """Return the set of channel IDs Asterisk currently has up.
@@ -2583,6 +2591,22 @@ class AsteriskAdapter(CallControlAdapter):
 
     def forget_transfer_recording(self, parent_id: str) -> None:
         self._transfer_recordings.pop(parent_id, None)
+
+    async def transfer_recording_is_live(self, name: str) -> Optional[bool]:
+        """True while the phone system is still recording under this name,
+        False when it is not, None when it could not be asked."""
+        try:
+            status, _ = await self._ari(
+                "GET",
+                f"/recordings/live/{quote(name, safe='')}",
+                ok=(200, 404),
+                return_status=True,
+            )
+            return status == 200
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            return None
 
     async def stop_transfer_recording(self, name: str) -> None:
         try:

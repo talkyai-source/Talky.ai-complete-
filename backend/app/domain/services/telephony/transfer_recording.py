@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_S = 3600
 _MIN_S = 600
-_MAX_S = 14400
+_MAX_S = 7200
 _OUT_RATE = 8000
 # With no phone system to ask, an entry waits this long before its transfer
 # part is given up (the file, if any, is then left for the weekly clean-up).
@@ -90,12 +90,14 @@ def append_transfer_part(ai_wav: Optional[bytes], part_wav: bytes) -> tuple[byte
     """One stereo 8 kHz WAV: AI part (caller L / agent R) then the transfer part
     on both channels. Returns (wav_bytes, duration_seconds)."""
     import numpy as np
+    import struct
 
     part, part_rate = _read_wav(part_wav)
-    mono = part.astype(np.int32).mean(axis=1) if part.shape[1] > 1 else part[:, 0]
-    mono = np.rint(mono).astype(np.int16).reshape(-1, 1)
+    if part.shape[1] > 1:
+        mono = np.rint(part.astype(np.int32).mean(axis=1)).astype(np.int16).reshape(-1, 1)
+    else:
+        mono = part  # already (frames, 1) int16: a view, no copy
     mono = _to_rate(mono, part_rate)
-    part_stereo = np.repeat(mono, 2, axis=1)
 
     ai_stereo = None
     if ai_wav:
@@ -111,14 +113,26 @@ def append_transfer_part(ai_wav: Optional[bytes], part_wav: bytes) -> tuple[byte
         except ValueError:
             ai_stereo = None
 
-    joined = part_stereo if ai_stereo is None else np.concatenate([ai_stereo, part_stereo], axis=0)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wf:
-        wf.setnchannels(2)
-        wf.setsampwidth(2)
-        wf.setframerate(_OUT_RATE)
-        wf.writeframes(np.ascontiguousarray(joined, dtype="<i2").tobytes())
-    return buf.getvalue(), joined.shape[0] / float(_OUT_RATE)
+    # One buffer for the whole file, filled in place: an hour of talk is
+    # about 115 MB here, and every extra copy would cost the same again in
+    # the one process that carries all live calls.
+    ai_frames = 0 if ai_stereo is None else int(ai_stereo.shape[0])
+    part_frames = int(mono.shape[0])
+    frames = ai_frames + part_frames
+    data_bytes = frames * 4
+    out = bytearray(44 + data_bytes)
+    struct.pack_into(
+        "<4sI4s4sIHHIIHH4sI", out, 0,
+        b"RIFF", 36 + data_bytes, b"WAVE", b"fmt ", 16, 1, 2, _OUT_RATE,
+        _OUT_RATE * 4, 4, 16, b"data", data_bytes,
+    )
+    samples = np.frombuffer(out, dtype="<i2", offset=44).reshape(-1, 2)
+    if ai_frames:
+        samples[:ai_frames] = ai_stereo
+    samples[ai_frames:, 0] = mono[:, 0]
+    samples[ai_frames:, 1] = mono[:, 0]
+    del samples
+    return out, frames / float(_OUT_RATE)
 
 
 def _ai_duration(entry) -> float:
@@ -128,7 +142,9 @@ def _ai_duration(entry) -> float:
         return 0.0
 
 
-async def finalize_transfer_entry(entry, *, adapter: Any, voice_session: Any = None) -> str:
+async def finalize_transfer_entry(
+    entry, *, adapter: Any, voice_session: Any = None, call_ended: bool = False,
+) -> str:
     """Join the transfer part to the spooled AI part and save. Never raises
     (except cancellation); on an unexpected error returns "retry" with the
     entry still awaiting."""
@@ -138,7 +154,10 @@ async def finalize_transfer_entry(entry, *, adapter: Any, voice_session: Any = N
         return "retry"
     _FINALIZING.add(key)
     try:
-        return await _finalize_locked(entry, adapter=adapter, voice_session=voice_session, call=call)
+        return await _finalize_locked(
+            entry, adapter=adapter, voice_session=voice_session, call=call,
+            call_ended=call_ended or voice_session is not None,
+        )
     except asyncio.CancelledError:
         raise
     except Exception as exc:  # noqa: BLE001 - the retry loop comes back to it
@@ -154,7 +173,9 @@ async def finalize_transfer_entry(entry, *, adapter: Any, voice_session: Any = N
         _FINALIZING.discard(key)
 
 
-async def _finalize_locked(entry, *, adapter: Any, voice_session: Any, call: str) -> str:
+async def _finalize_locked(
+    entry, *, adapter: Any, voice_session: Any, call: str, call_ended: bool,
+) -> str:
     from app.domain.services import recording_spool as spool
     from app.domain.services.telephony.recording import process_spool_entry
 
@@ -164,6 +185,13 @@ async def _finalize_locked(entry, *, adapter: Any, voice_session: Any, call: str
     if name and adapter is None:
         reason = "no_adapter"
     elif name:
+        if not call_ended:
+            # The retry loop, not the end of the call. If the phone system is
+            # still recording (a call that outlived a restart of this
+            # service), leave it alone: stopping now would cut the recording.
+            is_live = getattr(adapter, "transfer_recording_is_live", None)
+            if callable(is_live) and await is_live(name) is True:
+                return "retry"
         await adapter.stop_transfer_recording(name)
         part_wav = await adapter.fetch_stored_recording(name)
         reason = "not_found"
@@ -178,6 +206,14 @@ async def _finalize_locked(entry, *, adapter: Any, voice_session: Any, call: str
             joined = True
         except ValueError:
             reason = "unreadable"
+        except Exception as exc:  # noqa: BLE001 - out of memory, a resampler fault
+            # Not tried again: every try would fetch the whole file once more.
+            # The agent's part is saved; the phone system keeps its copy.
+            reason = "join_failed"
+            logger.error(
+                "transfer_recording_join_failed call=%s err=%s", call, type(exc).__name__
+            )
+    part_wav = None  # the joined file holds it now; free the fetched copy
 
     if not joined and reason == "no_adapter":
         # The phone system cannot be asked. Nothing is given up for that

@@ -32,7 +32,7 @@ ENV = "TELEPHONY_TRANSFER_MAX_CALL_DURATION_S"
         ("5", 600),
         ("0", 600),
         ("-50", 600),
-        ("99999", 14400),
+        ("99999", 7200),
     ],
 )
 def test_transfer_max_duration_reader(monkeypatch, raw, expected):
@@ -116,11 +116,16 @@ async def test_handover_raises_limit_and_logs(wired, caplog):
 
 
 @pytest.mark.asyncio
-async def test_account_cap_of_180_is_replaced_by_transfer_limit(wired):
+async def test_an_account_cap_below_ten_minutes_stands_after_a_handover(wired, caplog):
+    """The account set its own, shorter maximum call length. It limits what a
+    call may cost, so a transferred call keeps it."""
     vs = make_vs(max_s=180)
     wired.vs = vs
-    await lifecycle._on_transfer_connected("pbx-1", "target-1")
-    assert vs._max_call_duration_seconds == 3600
+    with caplog.at_level(logging.INFO):
+        await lifecycle._on_transfer_connected("pbx-1", "target-1")
+    assert vs._max_call_duration_seconds == 180
+    assert "transfer_call_limit_kept call=pbx-1 max_s=180" in caplog.text
+    assert "transfer_call_limit_raised" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -271,7 +276,7 @@ async def test_prepaid_balance_deadline_still_ends_a_transferred_call(wired):
 
 
 @pytest.mark.asyncio
-async def test_late_account_cap_read_does_not_lower_a_transferred_call(monkeypatch):
+async def test_an_account_cap_read_late_still_applies_to_a_transferred_call(monkeypatch):
     class _Conn:
         async def fetchval(self, *a):
             return 180
@@ -298,7 +303,8 @@ async def test_late_account_cap_read_does_not_lower_a_transferred_call(monkeypat
     moved._dialer_tenant_id = "t1"
     moved._transfer_connected = True
     await lifecycle._apply_account_call_cap(moved)
-    assert moved._max_call_duration_seconds == 3600
+    # The account's own limit stands, whenever its read comes back.
+    assert moved._max_call_duration_seconds == 180
 
 
 # --------------------------------------------------------------------------
@@ -348,52 +354,109 @@ def test_awaiting_finalizer_registered_at_import():
     assert recording._awaiting_finalizer is tr.finalize_awaiting_entry
 
 
+async def _joins_finished():
+    tasks = list(lifecycle._TRANSFER_FINALIZE_TASKS)
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    await asyncio.sleep(0)
+
+
+def _fake_join(monkeypatch, got, *, hold=None):
+    async def fin(entry, *, adapter, call_ended):
+        got.append((entry, adapter, call_ended))
+        if hold is not None:
+            await hold.wait()
+        return "saved"
+
+    monkeypatch.setattr(lifecycle, "finalize_transfer_entry", fin)
+
+
 @pytest.mark.asyncio
-async def test_teardown_helper_finalises_the_matching_entry(monkeypatch):
+async def test_teardown_helper_starts_the_join_for_this_calls_own_entry(monkeypatch):
+    """The entry is found by this call's own id, and the join runs as its own
+    task: the rest of the teardown never waits for it."""
     entries = [
         SimpleNamespace(awaiting=None, session_call_id="sess-1", pbx_call_id="pbx-1"),
-        SimpleNamespace(awaiting="transfer_part", session_call_id="other", pbx_call_id="other"),
+        SimpleNamespace(awaiting="transfer_part", session_call_id="an-older-call", pbx_call_id="pbx-1"),
         SimpleNamespace(awaiting="transfer_part", session_call_id="sess-1", pbx_call_id="pbx-x"),
     ]
     from app.domain.services import recording_spool
 
     monkeypatch.setattr(recording_spool, "list_entries", lambda: entries)
-    got = []
-
-    async def fin(entry, *, adapter, voice_session):
-        got.append((entry, adapter, voice_session))
-        return "saved"
-
-    monkeypatch.setattr(lifecycle, "finalize_transfer_entry", fin)
+    got, hold = [], asyncio.Event()
+    _fake_join(monkeypatch, got, hold=hold)
     adapter = object()
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
-    vs = make_vs()
-    await lifecycle._finalize_transfer_recording_at_end(vs, "pbx-1")
-    assert got == [(entries[2], adapter, vs)]
+
+    await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")  # returns at once
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    assert got == [(entries[2], adapter, True)], "not the older call that used the same channel id"
+    assert len(lifecycle._TRANSFER_FINALIZE_TASKS) == 1, "the join is still running; the teardown went on"
+    hold.set()
+    await _joins_finished()
+    assert not lifecycle._TRANSFER_FINALIZE_TASKS
 
 
 @pytest.mark.asyncio
-async def test_teardown_helper_missing_entry_and_timeout_never_raise(monkeypatch, caplog):
+async def test_teardown_helper_falls_back_to_the_newest_entry_of_the_channel(monkeypatch):
+    entries = [
+        SimpleNamespace(awaiting="transfer_part", session_call_id="older", pbx_call_id="pbx-1"),
+        SimpleNamespace(awaiting="transfer_part", session_call_id="newer", pbx_call_id="pbx-1"),
+    ]
+    from app.domain.services import recording_spool
+
+    monkeypatch.setattr(recording_spool, "list_entries", lambda: entries)
+    got = []
+    _fake_join(monkeypatch, got)
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
+    await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")
+    await _joins_finished()
+    assert got == [(entries[1], None, True)]
+
+
+@pytest.mark.asyncio
+async def test_teardown_helper_parks_an_empty_agent_part_when_only_the_person_was_recorded(monkeypatch):
+    """No audio from the agent's part means nothing was parked at the handover.
+    The person's conversation was still recorded: it must not be left behind."""
+    from app.domain.services import recording_spool
+    from app.domain.services.telephony import recording
+
+    monkeypatch.setattr(recording_spool, "list_entries", lambda: [])
+    written, built, got = [], [], []
+    monkeypatch.setattr(recording_spool, "write_entry", lambda entry, wav: written.append((entry, wav)))
+
+    def build(vs, call_id, **kw):
+        built.append((call_id, kw))
+        return SimpleNamespace(key="k-empty", pbx_call_id=call_id)
+
+    monkeypatch.setattr(recording, "_build_spool_entry", build)
+    _fake_join(monkeypatch, got)
+    adapter = SimpleNamespace(transfer_recording_name=lambda call_id: "talky-xferrec-pbx-1")
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
+
+    await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")
+    await _joins_finished()
+    assert built == [("pbx-1", {"sample_rate": 8000, "duration": 0.0, "awaiting_transfer": True,
+                                "transfer_recording_name": "talky-xferrec-pbx-1"})]
+    assert written and written[0][1] == b""
+    assert got == [(written[0][0], adapter, True)]
+
+
+@pytest.mark.asyncio
+async def test_teardown_helper_never_raises(monkeypatch, caplog):
     from app.domain.services import recording_spool
 
     monkeypatch.setattr(recording_spool, "list_entries", lambda: [])
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
     with caplog.at_level(logging.WARNING):
         await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")
     assert "transfer_recording_entry_missing call=pbx-1" in caplog.text
 
-    entry = SimpleNamespace(awaiting="transfer_part", session_call_id="sess-1", pbx_call_id="pbx-1")
-    monkeypatch.setattr(recording_spool, "list_entries", lambda: [entry])
+    def broken():
+        raise OSError("pending folder unreadable")
 
-    async def hang(entry, **kw):
-        await asyncio.sleep(60)
-
-    real_wait_for = asyncio.wait_for
-
-    async def quick_wait_for(aw, timeout):
-        return await real_wait_for(aw, 0.05)
-
-    monkeypatch.setattr(lifecycle, "finalize_transfer_entry", hang)
-    monkeypatch.setattr(lifecycle.asyncio, "wait_for", quick_wait_for)
+    monkeypatch.setattr(recording_spool, "list_entries", broken)
     caplog.clear()
     with caplog.at_level(logging.WARNING):
         await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")
