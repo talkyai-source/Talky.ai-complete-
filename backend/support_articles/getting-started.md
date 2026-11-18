@@ -56,7 +56,7 @@ Corporate networks that block real-time audio may prevent in-browser calling. If
 
 ### Create an account
 
-1. Open the Talk-Lee website and select **Get Started** or **Register**.
+1. Open the Talk-Lee website and select **Get Started** or **Create an account**.
 2. Enter your name, business name, and email address, then continue.
 
    ![The first registration step, asking for name, business name and email](/docs/getting-started-04-register-details.webp)
@@ -99,7 +99,7 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 
 - **Dashboard** — account and calling overview
 - **Campaigns** — create and manage outbound campaigns
-- **Inbound** — manage inbound AI call flows where enabled
+- **Inbound Campaigns** — manage inbound AI call flows where enabled
 - **Call History** — review completed calls, transcripts, summaries, and recordings
 - **Contacts** — import and manage campaign contacts
 - **Analytics** — review calling performance
@@ -107,11 +107,12 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 - **Connectors** — connect supported external services
 - **AI Options** — configure AI, voice, and model settings
 - **Security** — your account security; recovery codes appear once two-factor authentication is on
+- **Team**
 - **Billing & Logs** — view plan, usage, and billing information
 - **Settings** — profile, device, telephony, and recording settings
 - **Logout** — sign out of Talk-Lee
 
-Depending on your plan and role you may also see **Assistant**, **Meetings**, **Reminders**, **Email**, **Reviews**, or **Notifications**. Use the controls available to your account; a listed or unavailable screen is not a promise that an administrative workflow is enabled.
+Depending on your plan and role you may also see **Security Center** or **Agent Quality**. Use the controls available to your account; a listed or unavailable screen is not a promise that an administrative workflow is enabled.
 
 Selecting the **Talk-Lee** name at the top of the sidebar returns you to the public home page.
 
@@ -124,6 +125,14 @@ A control beside the Talk-Lee name collapses the sidebar to icons only, giving m
 ### Your account panel
 
 The bottom of the sidebar shows your name and your role in the account, such as Tenant Admin. Use it to confirm which account and role you are working in, which matters when you have access to more than one.
+
+### Team
+
+1. Select **Team** from the left sidebar.
+
+![Team](/docs/getting-started-13-team.webp)
+
+Administrators also see **Invite teammate**, **Deactivate**, **Remove** and **Invite someone**.
 
 ### Light and dark appearance
 
