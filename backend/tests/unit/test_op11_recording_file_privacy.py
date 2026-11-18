@@ -12,7 +12,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.domain.services.recording_service import RecordingBuffer, RecordingService, _write_wav_file
+from app.domain.services.recording_service import (
+    RecordingBuffer, RecordingService, RetentionVerdict, _write_wav_file,
+)
 
 
 def test_new_recording_is_readable_and_removable_by_its_owner(tmp_path):
@@ -120,7 +122,10 @@ async def test_denied_file_open_does_not_register_success_or_fallback_elsewhere(
     monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
     monkeypatch.setattr(recording, "RECORDING_AUDIO_CODEC", "wav")
     svc = RecordingService(db_pool=AsyncMock())
-    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        svc, "_retention_decision",
+        AsyncMock(return_value=RetentionVerdict("keep", "not_required", "not_required")),
+    )
     inserted = AsyncMock()
     linked = AsyncMock()
     monkeypatch.setattr(svc, "_insert_recording_record", inserted)

@@ -754,7 +754,7 @@ Rules:
   mounts the 2026-06-02 snapshot for local development.
 - `backend/database/MIGRATIONS.md` still says the sole head is
   `0035_user_profiles_role_widen`. That paragraph is stale. The current sole
-  head in this tree is **`0102_paypal_subscriptions`** (exactly one revision is
+  head in this tree is **`0103_recording_notice_state`** (exactly one revision is
   not a parent of another).
 - `complete_schema.sql` is the bootstrap CI uses; it is 3518 lines and has 71
   `CREATE TABLE` statements. Per `MIGRATIONS.md`, it does not contain every

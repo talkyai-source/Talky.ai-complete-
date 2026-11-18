@@ -233,7 +233,8 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.error(
                 "recording_disclosure_unavailable call_id=%s — no DB pool to "
-                "resolve the recording policy; recording will be suppressed",
+                "resolve the recording policy; the recording is kept and marked "
+                "notice not confirmed",
                 call_id[:12],
             )
             return
@@ -243,7 +244,8 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.error(
                 "recording_disclosure_no_tenant call_id=%s — cannot resolve "
-                "the recording policy; recording will be suppressed",
+                "the recording policy; the recording is kept and marked "
+                "notice not confirmed",
                 call_id[:12],
             )
             return
@@ -324,13 +326,12 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         # and if it is interrupted we stop — we do not get a second chance
         # at this call, but we also do not make things worse.
         #
-        # Still FAILS CLOSED: an interrupted notice is never counted as
-        # delivered, so `record_disclosure_state` below lands on
-        # DISCLOSURE_FAILED and `save_and_link` discards the audio exactly
-        # as it would if we had never attempted a second time. This change
-        # can only ever REMOVE a retry that talked over the caller; it
-        # cannot cause a recording to be kept that previously would not
-        # have been.
+        # An interrupted notice is never counted as delivered, so
+        # `record_disclosure_state` below lands on DISCLOSURE_FAILED. Since the
+        # owner's decision of 18 November 2026 the save no longer discards the
+        # audio for that: an outbound recording is kept and marked
+        # "unconfirmed" (inbound and RECORDING_REQUIRE_NOTICE_PROOF still refuse).
+        # This change only REMOVES a retry that talked over the caller.
         # track_latency=False (2026-09-24, call 6e0e221b): this notice is the
         # FIRST audio on a callee-first outbound call, spoken before turn 0's
         # own start_turn/mark_llm_start ever run. Left at the default (True)
@@ -381,7 +382,7 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
                 "recording_disclosure_unconfirmed call_id=%s interrupted=%s delivery=%s "
                 "receipt_status=%s evidence=%s — notice incomplete or unproven "
                 "short; not retried (a restart would talk over the caller "
-                "a second time); recording will be suppressed",
+                "a second time); the recording is kept and marked notice not confirmed",
                 call_id[:12], interrupted, getattr(session, "_tts_delivery_status", None),
                 receipt.get("status") if isinstance(receipt, dict) else None,
                 receipt.get("evidence") if isinstance(receipt, dict) else None,
@@ -434,8 +435,8 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
     except Exception as exc:
         record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
         logger.error(
-            "recording_disclosure_failed call_id=%s err=%s — recording will "
-            "be suppressed for this call",
+            "recording_disclosure_failed call_id=%s err=%s — the recording is "
+            "kept and marked notice not confirmed",
             call_id[:12], exc, exc_info=True,
         )
 

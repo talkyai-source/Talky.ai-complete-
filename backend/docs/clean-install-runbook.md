@@ -45,7 +45,7 @@ Migration `0099_clean_install_tables` creates `tenant_recording_policy` and `ten
 ## 4. Check it
 
 ```bash
-alembic heads        # one line: 0102_paypal_subscriptions (head)
+alembic heads        # one line: 0103_recording_notice_state (head)
 alembic current      # must print the same revision
 DATABASE_URL="$MIGRATION_DATABASE_URL" python scripts/verify_alembic_current_heads.py
 psql "$MIGRATION_DATABASE_URL" -c "SELECT id FROM plans ORDER BY id;"          # basic, business, payg, payment_test, plus older rows

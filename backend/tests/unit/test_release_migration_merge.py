@@ -37,7 +37,8 @@ CALLS_CHANGED_SINCE = "0098_calls_changed_since_index"
 CLEAN_INSTALL_TABLES = "0099_clean_install_tables"
 FORCE_LEGAL_ACCEPTANCE = "0100_force_legal_acceptance_rls"
 PAYPAL_RECEIPTS = "0101_paypal_webhook_events"
-HEAD = "0102_paypal_subscriptions"
+PAYPAL_PLANS = "0102_paypal_subscriptions"
+HEAD = "0103_recording_notice_state"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -50,7 +51,8 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
     # (pay as you go), on 0082 (support system), which sits on the payment
     # merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == PAYPAL_RECEIPTS
+    assert SCRIPTS.get_revision(HEAD).down_revision == PAYPAL_PLANS
+    assert SCRIPTS.get_revision(PAYPAL_PLANS).down_revision == PAYPAL_RECEIPTS
     assert SCRIPTS.get_revision(PAYPAL_RECEIPTS).down_revision == FORCE_LEGAL_ACCEPTANCE
     assert SCRIPTS.get_revision(FORCE_LEGAL_ACCEPTANCE).down_revision == CLEAN_INSTALL_TABLES
     assert SCRIPTS.get_revision(CLEAN_INSTALL_TABLES).down_revision == CALLS_CHANGED_SINCE
@@ -209,4 +211,4 @@ def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_th
     assert revisions == [SUPPORT, PAYG, CALL_SIGNALS, LEGAL, WORKFLOWS,
                          PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, ABUSE, HARDEN,
                          RECEIPT_DISMISSED, CONTACT_LIST_PERMISSION, WIZARD_PLAN_LINE, CALLS_CHANGED_SINCE,
-                         CLEAN_INSTALL_TABLES, FORCE_LEGAL_ACCEPTANCE, PAYPAL_RECEIPTS, HEAD]
+                         CLEAN_INSTALL_TABLES, FORCE_LEGAL_ACCEPTANCE, PAYPAL_RECEIPTS, PAYPAL_PLANS, HEAD]

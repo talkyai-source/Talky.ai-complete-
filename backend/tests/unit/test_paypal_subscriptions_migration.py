@@ -34,8 +34,9 @@ def _create(statements, table):
     return found[0]
 
 
-def test_single_head_is_0102_on_top_of_0101():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0102_sits_on_top_of_0101_under_0103():
+    assert SCRIPTS.get_heads() == ["0103_recording_notice_state"]
+    assert SCRIPTS.get_revision("0103_recording_notice_state").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0101_paypal_webhook_events"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 

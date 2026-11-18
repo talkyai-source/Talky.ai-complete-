@@ -91,7 +91,10 @@ async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkey
     buf.add_chunk(b"\x01\x02" * 400)
     svc = rs.RecordingService(db_pool=AsyncMock())
     # Encoding/offload unit scope; actual admission is exercised in OP07 controls.
-    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        svc, "_retention_decision",
+        AsyncMock(return_value=rs.RetentionVerdict("keep", "not_required", "not_required")),
+    )
     inserted = {}
 
     async def fake_insert(**kwargs):
@@ -147,7 +150,7 @@ def test_policy_body_validates_modes_digits_and_country_codes():
 
 def test_policy_response_explains_the_absent_state():
     out = rec_ep._policy_response(None)
-    assert out.configured is False and "NOT recorded" in out.effect
+    assert out.configured is False and "calls are recorded" in out.effect and "NOT" not in out.effect  # owner decision, 18 November 2026
     out = rec_ep._policy_response({"default_consent_mode": "one_party", "retention_days": 90, "two_party_country_codes": None, "announcement_text": ""})
     assert out.configured and out.default_consent_mode == "one_party" and out.two_party_country_codes == []
     assert out.announcement_text is None  # NOT NULL column stores '' for "none"

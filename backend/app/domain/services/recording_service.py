@@ -573,6 +573,35 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
         fh.write(wav_data)
 
 
+SAVE_SAVED = "saved"      # stored and registered; the pending copy may go
+SAVE_REFUSED = "refused"  # a definite decision not to keep it; the pending copy may go
+SAVE_RETRY = "retry"      # not decided or not stored yet; the pending copy MUST stay
+
+
+@dataclass(frozen=True)
+class SaveOutcome:
+    """What a save attempt came to, for the caller that holds the pending copy.
+
+    Only ``saved`` and ``refused`` are final. ``retry`` covers every case where
+    the audio could not be stored or the decision could not be taken now (a
+    storage error, a database error, a policy that could not be read): the
+    caller keeps its copy and tries again later.
+    """
+
+    status: str
+    recording_id: Optional[str] = None
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class RetentionVerdict:
+    """``status`` is ``keep``, ``refuse`` or ``retry``; ``notice_state`` is set on keep."""
+
+    status: str
+    notice_state: Optional[str]
+    reason: str
+
+
 # ---------------------------------------------------------------------------
 # RecordingService
 # ---------------------------------------------------------------------------
@@ -621,16 +650,24 @@ class RecordingService:
         """Backward-compatible storage path helper used by legacy tests/callers."""
         return self._s3_key(tenant_id, campaign_id, call_id)
 
-    async def _retention_allowed(
+    async def _retention_decision(
         self,
         call_id: str,
         tenant_id: str,
         destination_country_code: Optional[str] = None,
-    ) -> bool:
-        """Check the current configured policy and tenant-owned call before storage.
+        *,
+        strict_notice: bool = False,
+    ) -> RetentionVerdict:
+        """Decide whether a captured recording is kept, refused or retried.
 
-        This is a technical retention admission, not proof of legal consent or
-        human hearing. A UUID-shaped call ID alone is not ownership evidence.
+        Owner decision, 18 November 2026 ("every recording recorded at any
+        cost"): a recording of an outbound call is KEPT when the notice receipt
+        is missing and marked ``unconfirmed``. It is refused only when the
+        tenant's saved policy is ``disabled``, when ``strict_notice`` is set
+        (inbound), or when ``RECORDING_REQUIRE_NOTICE_PROOF`` is on. When the
+        decision cannot be taken now the answer is ``retry``; nothing is
+        destroyed on an error. This is a technical admission, not proof of
+        legal consent or human hearing.
         """
         try:
             tenant_uuid = UUID(str(tenant_id))
@@ -649,11 +686,15 @@ class RecordingService:
                 )
             if not row:
                 logger.warning("recording_call_binding_unavailable call=%s", call_id)
-                return False
+                return RetentionVerdict("retry", None, "call_binding_unavailable")
             from app.domain.services.recording_policy_service import (
+                NOTICE_DELIVERED,
+                NOTICE_NOT_REQUIRED,
+                POLICY_LOOKUP_FAILED_REASON,
                 RecordingPolicyService,
-                consent_satisfied,
                 get_callee_country,
+                notice_proof_required,
+                notice_state,
             )
             decision = await RecordingPolicyService(self._db).decide(
                 tenant_id=str(tenant_uuid),
@@ -661,18 +702,68 @@ class RecordingService:
                 # The country the live notice decision used (QA F12-04).
                 callee_country_code=get_callee_country(call_id, str(row["id"])),
             )
-            allowed = bool(
-                decision.should_record and consent_satisfied(decision, call_id, str(row["id"]))
-            )
-            if not allowed:
+            if decision.reason == POLICY_LOOKUP_FAILED_REASON:
+                return RetentionVerdict("retry", None, "policy_unavailable")
+            if not decision.should_record:
                 logger.info(
                     "recording_retention_suppressed call=%s policy_reason=%s",
                     call_id, decision.reason,
                 )
-            return allowed
+                return RetentionVerdict("refuse", None, decision.reason)
+            state = notice_state(decision, call_id, str(row["id"]))
+            if state == NOTICE_NOT_REQUIRED:
+                return RetentionVerdict("keep", state, "not_required")
+            if state == NOTICE_DELIVERED:
+                return RetentionVerdict("keep", state, "delivered")
+            if strict_notice or notice_proof_required():
+                logger.info(
+                    "recording_retention_suppressed call=%s policy_reason=%s",
+                    call_id, decision.reason,
+                )
+                return RetentionVerdict("refuse", None, "notice_unconfirmed")
+            logger.warning(
+                "recording_kept_notice_unconfirmed call=%s policy_reason=%s",
+                call_id, decision.reason,
+            )
+            return RetentionVerdict("keep", state, "unconfirmed")
         except Exception:
             logger.warning("recording_retention_admission_unavailable call=%s", call_id)
-            return False
+            return RetentionVerdict("retry", None, "admission_unavailable")
+
+    async def _retention_allowed(
+        self,
+        call_id: str,
+        tenant_id: str,
+        destination_country_code: Optional[str] = None,
+    ) -> bool:
+        """True when the recording is to be kept (see ``_retention_decision``)."""
+        verdict = await self._retention_decision(call_id, tenant_id, destination_country_code)
+        return verdict.status == "keep"
+
+    @staticmethod
+    def _verdict_outcome(verdict: RetentionVerdict) -> SaveOutcome:
+        status = SAVE_REFUSED if verdict.status == "refuse" else SAVE_RETRY
+        return SaveOutcome(status, None, verdict.reason)
+
+    async def _already_saved_id(self, call_id: str, tenant_id: str) -> Optional[str]:
+        """The id of an ``uploaded`` recording already stored for this call, if any.
+
+        Makes a retried save idempotent. Skipped for a non-UUID call id; any
+        error means "not known", and the save proceeds.
+        """
+        try:
+            call_uuid = UUID(str(call_id))
+            tenant_uuid = UUID(str(tenant_id))
+            async with _acquire_recording_connection(self._db, call_id, str(tenant_uuid)) as conn:
+                found = await conn.fetchval(
+                    "SELECT id FROM recordings_s3 WHERE tenant_id = $1 AND call_id = $2 "
+                    "AND status = 'uploaded' ORDER BY created_at DESC LIMIT 1",
+                    tenant_uuid,
+                    call_uuid,
+                )
+        except Exception:
+            return None
+        return str(found) if isinstance(found, UUID) else None
 
     @_with_recording_pool_budget
     async def save_recording(
@@ -704,42 +795,60 @@ class RecordingService:
     # ── Main workflow ─────────────────────────────────────────────
 
     @_with_recording_pool_budget
-    async def save_and_link(
+    async def save_and_link_outcome(
         self,
         call_id: str,
         buffer: RecordingBuffer,
         tenant_id: str,
         campaign_id: str,
         destination_country_code: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        Upload recording to S3 and create DB records.
+        *,
+        strict_notice: bool = False,
+        transfer_part: Optional[str] = None,
+        mark_failure: bool = True,
+    ) -> SaveOutcome:
+        """Save a recording and say whether the pending copy may be dropped.
 
-        Returns recording UUID string on success, None on failure.
-        Never raises — storage failures should not break call flow.
-
-        Every storage path requires current tenant/call ownership and the
-        configured policy/disclosure gate. Dependency failure suppresses storage.
+        Owner decision, 18 November 2026: a captured outbound recording is kept
+        even when the notice receipt is missing, and marked ``unconfirmed``.
+        ``strict_notice`` keeps the older rule for this call (a required notice
+        with no delivery proof refuses the recording); it is set for inbound
+        calls. ``transfer_part`` is ``"included"`` or ``"missing"`` for a call
+        that was handed to a person, else ``None``. ``mark_failure`` false
+        leaves out the ``failed`` row on a storage error (a retry of a save
+        that already left one). Never raises.
         """
         if not buffer or buffer.total_bytes == 0:
             logger.warning(f"No audio to save for call {call_id}")
-            return None
+            return SaveOutcome(SAVE_REFUSED, None, "no_audio")
 
-        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
-            return None
+        existing = await self._already_saved_id(call_id, tenant_id)
+        if existing:
+            return SaveOutcome(SAVE_SAVED, existing, "already_saved")
+
+        verdict = await self._retention_decision(
+            call_id, tenant_id, destination_country_code, strict_notice=strict_notice
+        )
+        if verdict.status != "keep":
+            return self._verdict_outcome(verdict)
 
         if not self._s3.is_available():
             logger.info(f"S3 not configured — saving recording locally for call {call_id}.")
-            return await self._save_local(
-                call_id, buffer, tenant_id, campaign_id, destination_country_code
+            return await self._save_local_outcome(
+                call_id, buffer, tenant_id, campaign_id, destination_country_code,
+                strict_notice=strict_notice, transfer_part=transfer_part,
+                mark_failure=mark_failure,
             )
 
         try:
             wav_data, ext, mime_type = await asyncio.to_thread(
                 encode_recording_audio, buffer.get_wav_bytes()
             )
-            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
-                return None
+            verdict = await self._retention_decision(
+                call_id, tenant_id, destination_country_code, strict_notice=strict_notice
+            )
+            if verdict.status != "keep":
+                return self._verdict_outcome(verdict)
             key = self._s3_key(tenant_id, campaign_id, call_id, ext)
             upload_started = datetime.utcnow()
 
@@ -748,16 +857,10 @@ class RecordingService:
                 f"size={len(wav_data)}B bucket={self._s3.bucket} key={key}"
             )
             # ROOT CAUSE FIX (2026-07-13): S3Client.upload() is a synchronous
-            # boto3 call (blocking socket I/O) — calling it directly here
-            # blocks the single asyncio event loop for the full upload
-            # round-trip (can be seconds for a multi-minute call's WAV over
-            # a slow/loaded link), stalling every other in-flight call's
-            # audio pump on this process. asyncio.to_thread runs it on a
-            # worker thread so the loop keeps servicing other calls while
-            # this upload is in flight; the coroutine still awaits the
-            # result so save_and_link's return value / ordering is
-            # unchanged. `wav_data`/`key` are plain immutable bytes/str, so
-            # there is nothing for the thread to race against.
+            # boto3 call (blocking socket I/O); run it on a worker thread so
+            # the single asyncio event loop keeps servicing other calls.
+            # `wav_data`/`key` are plain immutable bytes/str, so there is
+            # nothing for the thread to race against.
             await asyncio.to_thread(self._s3.upload, key, wav_data, content_type=mime_type)
             upload_finished = datetime.utcnow()
 
@@ -773,21 +876,45 @@ class RecordingService:
                 upload_started=upload_started,
                 upload_finished=upload_finished,
                 mime_type=mime_type,
+                notice_state=verdict.notice_state,
+                transfer_part=transfer_part,
             )
 
             if not recording_id:
                 await self._discard_unregistered_object(
                     call_id, tenant_id, self._s3.bucket, key
                 )
-                return None
+                return SaveOutcome(SAVE_RETRY, None, "register_failed")
 
             await self._update_call_recording_url(call_id, tenant_id, recording_id)
-            return str(recording_id)
+            return SaveOutcome(SAVE_SAVED, str(recording_id), "")
 
         except Exception as exc:
             logger.error(f"Recording upload failed for call {call_id}: {exc}", exc_info=True)
-            await self._mark_upload_failed(call_id, tenant_id, campaign_id, str(exc))
-            return None
+            if mark_failure:
+                await self._mark_upload_failed(call_id, tenant_id, campaign_id, str(exc))
+            return SaveOutcome(SAVE_RETRY, None, "storage_failed")
+
+    @_with_recording_pool_budget
+    async def save_and_link(
+        self,
+        call_id: str,
+        buffer: RecordingBuffer,
+        tenant_id: str,
+        campaign_id: str,
+        destination_country_code: Optional[str] = None,
+    ) -> Optional[str]:
+        """Upload recording and create DB records; the recording id or None.
+
+        Never raises. Thin wrapper over ``save_and_link_outcome``: a refused or
+        retry outcome reads as None here; callers that must tell the two apart
+        (to keep a pending copy) use the outcome method.
+        """
+        return (
+            await self.save_and_link_outcome(
+                call_id, buffer, tenant_id, campaign_id, destination_country_code
+            )
+        ).recording_id
 
     # ── Local file fallback ───────────────────────────────────────
 
@@ -800,6 +927,26 @@ class RecordingService:
         campaign_id: str = "unknown",
         destination_country_code: Optional[str] = None,
     ) -> Optional[str]:
+        """Local-disk save; the recording id or None (see ``_save_local_outcome``)."""
+        return (
+            await self._save_local_outcome(
+                call_id, buffer, tenant_id, campaign_id, destination_country_code
+            )
+        ).recording_id
+
+    @_with_recording_pool_budget
+    async def _save_local_outcome(
+        self,
+        call_id: str,
+        buffer: RecordingBuffer,
+        tenant_id: str = "unknown",
+        campaign_id: str = "unknown",
+        destination_country_code: Optional[str] = None,
+        *,
+        strict_notice: bool = False,
+        transfer_part: Optional[str] = None,
+        mark_failure: bool = True,
+    ) -> SaveOutcome:
         """
         Save recording to local filesystem when S3 is not configured.
         Also inserts a row into recordings_s3 (status='local') so the
@@ -808,12 +955,15 @@ class RecordingService:
         Directory is controlled by the LOCAL_RECORDINGS_DIR environment variable
         (default: ./recordings relative to the working directory).
 
-        Returns the recording UUID string on success, None on failure.
+        Follows the same outcome rules as ``save_and_link_outcome``.
         """
         if not buffer or buffer.total_bytes == 0:
-            return None
-        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
-            return None
+            return SaveOutcome(SAVE_REFUSED, None, "no_audio")
+        verdict = await self._retention_decision(
+            call_id, tenant_id, destination_country_code, strict_notice=strict_notice
+        )
+        if verdict.status != "keep":
+            return self._verdict_outcome(verdict)
 
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
         abs_dir = os.path.abspath(recordings_dir)
@@ -822,7 +972,7 @@ class RecordingService:
             raw_wav = buffer.get_wav_bytes()
             if not raw_wav:
                 logger.warning(f"No WAV data to save locally for call {call_id}")
-                return None
+                return SaveOutcome(SAVE_REFUSED, None, "no_audio")
             # Compress for storage (MP3 by default; see encode_recording_audio).
             # The encoder is a subprocess, so it runs off the event loop too.
             wav_data, ext, mime_type = await asyncio.to_thread(encode_recording_audio, raw_wav)
@@ -838,17 +988,14 @@ class RecordingService:
                     call_id,
                     tenant_id,
                 )
-                return None
-            # ROOT CAUSE FIX (2026-07-13): os.makedirs + open()/write() are
-            # synchronous filesystem calls — blocking on this process's
-            # single asyncio event loop for as long as the disk write takes
-            # (worse under load or on a slow/network-backed volume), during
-            # which every other in-flight call is starved. Offload the
-            # whole makedirs+write sequence to a worker thread; `filepath`/
-            # `wav_data` are immutable local values captured at call time,
-            # so there is no shared mutable state for the thread to race.
-            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
-                return None
+                return SaveOutcome(SAVE_REFUSED, None, "path_outside_root")
+            # ROOT CAUSE FIX (2026-07-13): the makedirs+write sequence is
+            # synchronous filesystem I/O; offload it to a worker thread.
+            verdict = await self._retention_decision(
+                call_id, tenant_id, destination_country_code, strict_notice=strict_notice
+            )
+            if verdict.status != "keep":
+                return self._verdict_outcome(verdict)
             await asyncio.to_thread(_write_wav_file, recordings_dir, filepath, wav_data)
             logger.info(
                 f"Recording saved locally: {filepath} ({len(wav_data):,} bytes, "
@@ -858,11 +1005,12 @@ class RecordingService:
             logger.error(f"Local recording save failed for call {call_id}: {exc}", exc_info=True)
             # A full disk (ENOSPC) used to leave no trace but this log line
             # (QA F7-04): leave the same 'failed' row the cloud path does.
-            await self._mark_upload_failed(
-                call_id, tenant_id, campaign_id, f"local_write_failed:{type(exc).__name__}",
-                bucket="local", region="local",
-            )
-            return None
+            if mark_failure:
+                await self._mark_upload_failed(
+                    call_id, tenant_id, campaign_id, f"local_write_failed:{type(exc).__name__}",
+                    bucket="local", region="local",
+                )
+            return SaveOutcome(SAVE_RETRY, None, "storage_failed")
 
         # Insert DB record so the frontend can find this recording.
         # s3_bucket='local' identifies it as local-disk storage.
@@ -882,16 +1030,17 @@ class RecordingService:
             s3_region="local",
             status="uploaded",
             mime_type=mime_type,
+            notice_state=verdict.notice_state,
+            transfer_part=transfer_part,
         )
 
         if recording_id:
             await self._update_call_recording_url(call_id, tenant_id, recording_id)
             logger.info(f"Local recording registered in DB: recording_id={recording_id}")
-            return str(recording_id)
-        else:
-            logger.error(f"Local recording saved to disk but DB insert failed for {call_id}")
-            await self._discard_unregistered_object(call_id, tenant_id, "local", filepath)
-            return None
+            return SaveOutcome(SAVE_SAVED, str(recording_id), "")
+        logger.error(f"Local recording saved to disk but DB insert failed for {call_id}")
+        await self._discard_unregistered_object(call_id, tenant_id, "local", filepath)
+        return SaveOutcome(SAVE_RETRY, None, "register_failed")
 
     # ── Presigned URL ─────────────────────────────────────────────
 
@@ -1026,6 +1175,8 @@ class RecordingService:
         s3_region: Optional[str] = None,
         status: str = "uploaded",
         mime_type: str = "audio/wav",
+        notice_state: Optional[str] = None,
+        transfer_part: Optional[str] = None,
     ) -> Optional[UUID]:
         """Insert a row into recordings_s3 and return the new UUID.
 
@@ -1076,8 +1227,8 @@ class RecordingService:
                             s3_bucket, s3_key, s3_region,
                             file_size_bytes, duration_seconds,
                             status, upload_started_at, upload_finished_at,
-                            mime_type
-                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+                            mime_type, notice_state, transfer_part
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
                         RETURNING id
                         """,
                         resolved_call_id,
@@ -1092,6 +1243,8 @@ class RecordingService:
                         upload_started,
                         upload_finished,
                         mime_type,
+                        notice_state,
+                        transfer_part,
                     )
                 return row["id"] if row else None
         except Exception as exc:

@@ -73,7 +73,10 @@ it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
 and `open_security_events` run with the reader's rights (`security_invoker`),
 so the row-level security of the tables beneath them applies.
 
-The current sole head is `0102_paypal_subscriptions`: it creates the three
+The current sole head is `0103_recording_notice_state`: it adds the nullable
+`notice_state` (`delivered`, `not_required`, `unconfirmed`) and `transfer_part`
+(`included`, `missing`) columns to `recordings_s3`; rows written before it stay
+NULL (recorded under the old rule). `0102_paypal_subscriptions` creates the three
 PayPal plan tables (`paypal_plan_options`, `paypal_subscriptions`,
 `paypal_subscription_payments`) with forced row security and leaves Stripe's
 tables untouched. `0101_paypal_webhook_events` creates
