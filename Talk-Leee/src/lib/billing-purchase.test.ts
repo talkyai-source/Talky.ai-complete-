@@ -86,8 +86,10 @@ test("a PayPal address is never accepted as the billing portal", () => {
 
 const priceOption = { id: saved.price_option.id, kind: "stripe", interval: "month", interval_count: 1, amount_minor: 1250, currency: "usd", currency_exponent: 2, active: true, checkout_available: true };
 const catalogue = (option: object) => [{ id: "starter", name: "Starter", minutes: 100, concurrent_calls: 1, billing_mode: "live", price_options: [option] }];
-test("paypal_available defaults to false and parses when present", () => {
-  assert.equal(billingCatalogSchema.parse(catalogue(priceOption))[0]!.price_options[0]!.paypal_available, false);
+test("paypal_available is absent (no PayPal offer) for an older server and parses when present", () => {
+  assert.equal(billingCatalogSchema.parse(catalogue(priceOption))[0]!.price_options[0]!.paypal_available, undefined);
+  assert.equal(billingCatalogSchema.parse(catalogue({ ...priceOption, paypal_available: false }))[0]!.price_options[0]!.paypal_available, false);
+  assert.equal(billingCatalogSchema.safeParse(catalogue({ ...priceOption, paypal_available: "yes" })).success, false);
   assert.equal(billingCatalogSchema.parse(catalogue({ ...priceOption, paypal_available: true }))[0]!.price_options[0]!.paypal_available, true);
 });
 const subscriptionBody = { status: "active", minutes_allocated: 1, minutes_used: 0, minutes_remaining: 1, purchased_price_option: saved.price_option };

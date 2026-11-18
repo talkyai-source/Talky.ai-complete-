@@ -11,7 +11,8 @@ const priceFields = {
 };
 export const billingPriceSchema = z.object({
   ...priceFields, active: z.boolean(), checkout_available: z.boolean(), unavailable_reason: z.string().nullable().optional(),
-  paypal_available: z.boolean().default(false),
+  // Optional, not defaulted: an option built in code (and one from an older server) simply has no PayPal offer.
+  paypal_available: z.boolean().optional(),
 });
 export const purchasedPriceSchema = z.object({ ...priceFields, plan_id: z.string().min(1), plan_name: z.string().min(1) });
 export const billingCatalogSchema = z.array(z.object({
