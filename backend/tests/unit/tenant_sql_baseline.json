@@ -8159,10 +8159,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "533000c19a698501ee6ebb7826525571875712c75dc22cb11bab5cfecd57d34d",
+      "id": "6eea64baf50ceb3671ee02908334acebbbd4771122a1adeb2882f76ce8d106a1",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4317,
+      "line": 4341,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8174,10 +8174,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "f3702f80ef19099ed3d65ccaf2b1f4f29022a553f7f8eb376621809afeaca3f8",
+      "id": "77aeb54f1700b67ecc9db29abbfe3f514af5875bd3d8b5dd5443d21333aad1b5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5235,
+      "line": 5259,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8189,10 +8189,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "4b77da67946e638dcc55b66081b75640267acd8f4e885085121c0dd80dac138d",
+      "id": "36b112125c1b8516c76f28802dc9718b54a35c7e6b41fd97df2bda2da793c5bc",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3325,
+      "line": 3349,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8204,10 +8204,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "2cf20e830e8d89e85e62db3a5564cba24d99549e22621ff873bd1f466dc7175b",
+      "id": "7569c01c5e8aa8a0ba9b51fca597f4588ab3abd0bc7c53450f9abf71200b0de5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5408,
+      "line": 5432,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8219,10 +8219,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "716dca39cd466b36adb6294d3f54d3096852010f2fa0a70c5929d1294b466553",
+      "id": "77802a22e2737633610cbf45403bfb170784ae8537c10d88123b11e1649b06c3",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3675,
+      "line": 3699,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8234,10 +8234,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "f02e6d184caf99fc89a6939721cfad7ce88a07e36ae55aee1f9fbb98cecc20ee",
+      "id": "cf1d9f8d72e769877e3f2707869500442ed80beddb301096ecdaaf04fea51864",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 6119,
+      "line": 6143,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -13052,10 +13052,10 @@
       "category": "system_discovery"
     },
     {
-      "id": "9a4f4096a53465f9e7ccbaebfaac1f773982bdb3f3247e74ed1e29b4adf2cadb",
+      "id": "f07154e019e818e72ce9768ef4a873fb0133aee4bcc536d62eb64e6febabcaa4",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter.delete_stored_recording",
-      "line": 2632,
+      "line": 2656,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -13063,7 +13063,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2632.",
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2656.",
       "category": "not_database_sql"
     }
   ]
