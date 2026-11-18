@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from app.domain.services.billing_mode import is_billing_team
+from app.domain.services.billing_mode import get_billing_mode, is_billing_team
 
 PAYPAL_LIVE_API = "https://api-m.paypal.com"
 PAYPAL_SANDBOX_API = "https://api-m.sandbox.paypal.com"
@@ -27,6 +27,15 @@ PAYPAL_WEBHOOK_EVENTS: tuple[str, ...] = (
     "CUSTOMER.DISPUTE.CREATED",
     "CUSTOMER.DISPUTE.UPDATED",
     "CUSTOMER.DISPUTE.RESOLVED",
+    "BILLING.SUBSCRIPTION.ACTIVATED",
+    "BILLING.SUBSCRIPTION.UPDATED",
+    "BILLING.SUBSCRIPTION.CANCELLED",
+    "BILLING.SUBSCRIPTION.SUSPENDED",
+    "BILLING.SUBSCRIPTION.EXPIRED",
+    "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
+    "PAYMENT.SALE.COMPLETED",
+    "PAYMENT.SALE.REFUNDED",
+    "PAYMENT.SALE.REVERSED",
 )
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
@@ -103,6 +112,37 @@ def paypal_topup_availability(
     if not paypal_configured():
         return False, PAYPAL_UNAVAILABLE
     switch = paypal_topups_switch()
+    if switch == "off":
+        return False, PAYPAL_UNAVAILABLE
+    sandbox_in_production = (
+        paypal_env() == "sandbox"
+        and os.getenv("ENVIRONMENT", "").strip().lower() == "production"
+    )
+    if switch == "team" or sandbox_in_production:
+        if is_billing_team(is_platform_admin=is_platform_admin, email=email):
+            return True, None
+        return False, PAYPAL_UNAVAILABLE
+    return True, None
+
+
+def paypal_plans_switch() -> Literal["off", "team", "on"]:
+    value = os.getenv("PAYPAL_PLANS_ENABLED", "").strip().lower()
+    if value == "team":
+        return "team"
+    if value in _TRUE_VALUES:
+        return "on"
+    return "off"
+
+
+def paypal_plan_availability(
+    *, is_platform_admin: bool, email: str | None
+) -> tuple[bool, str | None]:
+    """Whether this caller may buy a plan with PayPal now, and why not."""
+    if not paypal_configured():
+        return False, PAYPAL_UNAVAILABLE
+    if paypal_provider_mode() != get_billing_mode():
+        return False, PAYPAL_UNAVAILABLE
+    switch = paypal_plans_switch()
     if switch == "off":
         return False, PAYPAL_UNAVAILABLE
     sandbox_in_production = (
