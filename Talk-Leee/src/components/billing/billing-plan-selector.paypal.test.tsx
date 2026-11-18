@@ -193,6 +193,19 @@ test("a PayPal cancel return forgets the saved copy of that request and still as
   assert.equal((screen.getByRole("button", { name: "Select Starter" }) as HTMLButtonElement).disabled, false);
 });
 
+test("a PayPal purchase the server closed with an explanation shows that explanation and makes no claim about a charge", async () => {
+  const words = "This PayPal purchase was not used. If PayPal took a payment for it, it will be refunded.";
+  for (const outcome of ["cancelled", "success"]) {
+    cleanup(); window.sessionStorage.clear();
+    window.history.replaceState({}, "", RETURN(outcome));
+    handleRead = async () => attempt("failed", { message: words });
+    mount();
+    await screen.findByText(words);
+    assert.equal(screen.queryByText("You cancelled at PayPal. Nothing was charged."), null);
+    assert.equal(screen.queryByText(/server confirmed the saved checkout failed/), null);
+  }
+});
+
 test("a PayPal cancel return never says nothing was charged when the server shows the purchase went through", async () => {
   window.history.replaceState({}, "", RETURN("cancelled"));
   handleRead = async () => attempt("activated");

@@ -20,18 +20,22 @@ function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPu
   const cancelled = returned === "cancel" || returned === "cancelled";
   // Only a server read that found the attempt open, expired or failed proves no payment was taken.
   const cancelConfirmed = cancelled && (attempt?.state === "open" || attempt?.state === "expired" || attempt?.state === "failed");
+  // A PayPal purchase the server closed with its own explanation (for example one that was not used because
+  // another purchase was already in place): the server's words are shown, and no claim about a charge is made.
+  const explained = paypal && attempt?.state === "failed" && attempt.message ? attempt.message : null;
   return <div className="space-y-3">
     {error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{error}</p>}
     {refusal && refusal.message !== error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{refusal.message}</p>}
     {!storageAvailable && <p role="alert" className="text-sm">The browser could not read or update the saved purchase. Enable session storage and reload before starting another purchase.</p>}
-    {paypal && cancelConfirmed && <p role="status" className="text-sm">You cancelled at PayPal. Nothing was charged.</p>}
+    {paypal && cancelConfirmed && !explained && <p role="status" className="text-sm">You cancelled at PayPal. Nothing was charged.</p>}
+    {explained && <p role="status" className="rounded-xl border p-4 text-sm">{explained}</p>}
     {paypal && cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You came back from PayPal. This does not confirm whether a payment was made. {attempt ? "Check the saved purchase below." : "Checking with the server…"}</p>}
     {!paypal && cancelConfirmed && <p role="status" className="text-sm">Checkout was cancelled. No payment was taken for this attempt.</p>}
     {!paypal && cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You returned from checkout. This does not confirm whether payment completed. Check or resume the saved purchase below.</p>}
     {pendingConfirmation && <p role="status" className="text-sm font-medium">Confirming your purchase with {providerName}…</p>}
     {returned === "success" && !(paypal && pendingConfirmation) && !(attempt && ["activated", "expired", "failed"].includes(attempt.state)) && <p role="status" className="text-sm">{paypal ? (attempt?.message || "PayPal has not confirmed the payment yet. Refresh this page in a minute; you have not been charged twice.") : "Payment confirmation is pending. Returning from checkout does not activate a subscription."}</p>}
     {attempt?.state === "activated" && <p role="status" className="rounded-xl border border-emerald-500/30 p-4">The server confirmed this purchase. Your current plan is shown from billing records.</p>}
-    {(attempt?.state === "expired" || attempt?.state === "failed") && <p role="status" className="text-sm">The server confirmed the saved checkout {attempt.state === "expired" ? "expired" : "failed"}. You may choose an available offer again.</p>}
+    {(attempt?.state === "expired" || attempt?.state === "failed") && !explained && <p role="status" className="text-sm">The server confirmed the saved checkout {attempt.state === "expired" ? "expired" : "failed"}. You may choose an available offer again.</p>}
     {saved && <div className="space-y-3 rounded-xl border p-4">
       <p className="font-medium">Saved purchase: {saved.price_option.plan_name} — <LocalPurchasedPrice price={saved.price_option} /></p>
       <p className="text-sm">{attempt?.state === "open" ? "Checkout is open. Resume this purchase instead of creating another." : "This purchase is not yet confirmed. Its selection is kept for safe retry."}</p>
