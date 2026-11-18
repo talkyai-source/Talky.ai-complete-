@@ -37,6 +37,7 @@ import pytest
 from app.domain.services.recording_service import (
     RecordingBuffer,
     RecordingService,
+    RetentionVerdict,
     S3Client,
     mix_stereo_recording,
 )
@@ -91,6 +92,12 @@ def _uninitialized_container():
     container = AsyncMock()
     container.is_initialized = False
     return container
+
+
+@pytest.fixture(autouse=True)
+def _isolated_spool(tmp_path, monkeypatch):
+    # Keep the durable pending folder out of the working directory.
+    monkeypatch.setenv("RECORDING_SPOOL_DIR", str(tmp_path / "spool"))
 
 
 @pytest.mark.asyncio
@@ -204,7 +211,8 @@ async def test_mix_does_not_block_other_coroutines():
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_buffer_snapshot_immune_to_concurrent_clear():
+async def test_buffer_snapshot_immune_to_concurrent_clear(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECORDING_SPOOL_DIR", str(tmp_path))
     # >0.5s of 16kHz mono audio (duration gate in _save_call_recording) so
     # the snapshot survives all the way to the container-not-initialized
     # log this test uses as its "the mix used pre-clear data" oracle.
@@ -254,9 +262,9 @@ async def test_buffer_snapshot_immune_to_concurrent_clear():
     # presence proves the mix (and the duration computed from the
     # snapshotted caller_chunks) used the pre-clear data.
     logged = " ".join(
-        str(call.args[0]) for call in mock_logger.warning.call_args_list
+        str(arg) for call in mock_logger.warning.call_args_list for arg in call.args
     )
-    assert "container not initialized" in logged
+    assert "container_unavailable" in logged
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +292,10 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
 
     svc = RecordingService(db_pool=AsyncMock())
     # Encoding/offload unit scope; actual admission is exercised in OP07 controls.
-    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        svc, "_retention_decision",
+        AsyncMock(return_value=RetentionVerdict("keep", "not_required", "not_required")),
+    )
     with patch(
         "app.domain.services.recording_service.asyncio.to_thread",
         side_effect=spy_to_thread,
