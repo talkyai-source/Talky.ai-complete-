@@ -168,6 +168,8 @@ async def checkout_db(billing_db, monkeypatch):  # noqa: F811 - imported pytest 
             f'GRANT SELECT,INSERT,UPDATE,DELETE ON tenants,subscriptions TO "{fixture.role}"'
         )
         await conn.execute(f'GRANT SELECT ON plans,billing_ledger TO "{fixture.role}"')
+        # The card claim now reads whether a plan is held through PayPal.
+        await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON paypal_subscriptions TO "{fixture.role}"')
         # A plan activation closes the running allowance window, which reads
         # call usage when the tenant has top-up ledger rows.
         await conn.execute(f'GRANT SELECT ON calls,call_legs TO "{fixture.role}"')
@@ -270,6 +272,48 @@ async def test_an_active_free_option_is_refused_and_grants_nothing(checkout_db):
     assert raised.value.code == "billing_offer_unavailable" and raised.value.request_not_started
     assert await _tenant(fixture) == before
     assert fixture.provider.calls == []
+
+
+async def _paypal_row(fixture, status):
+    row = uuid4()
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(
+            """INSERT INTO paypal_subscriptions
+               (id,tenant_id,price_option_id,plan_id,provider_mode,paypal_plan_id,snapshot,status,activated_at)
+               VALUES($1,$2,$3,$4,'test',$5,'{}'::jsonb,$6,$7)""",
+            row, fixture.tenants[0], fixture.option, fixture.plan, "P-" + uuid4().hex[:20], status,
+            datetime.now(UTC) if status == "active" else None,
+        )
+    return row
+
+
+async def _drop_paypal_row(fixture, row):
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("DELETE FROM paypal_subscriptions WHERE id=$1", row)
+
+
+async def test_a_plan_held_through_paypal_refuses_a_card_checkout(checkout_db):
+    fixture = checkout_db
+    row = await _paypal_row(fixture, "active")
+    try:
+        with pytest.raises(checkout.CheckoutError) as raised:
+            await _create(fixture)
+        assert raised.value.code == "subscription_exists" and raised.value.request_not_started
+        assert fixture.provider.calls == []
+    finally:
+        await _drop_paypal_row(fixture, row)
+
+
+async def test_an_unfinished_paypal_purchase_makes_a_card_checkout_outstanding(checkout_db):
+    fixture = checkout_db
+    row = await _paypal_row(fixture, "approval_pending")
+    try:
+        with pytest.raises(checkout.CheckoutError) as raised:
+            await _create(fixture)
+        assert raised.value.code == "checkout_outstanding" and raised.value.request_not_started
+        assert fixture.provider.calls == []
+    finally:
+        await _drop_paypal_row(fixture, row)
 
 
 async def test_a_free_request_saved_before_the_change_never_grants_minutes(checkout_db):

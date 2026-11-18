@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
@@ -13,6 +14,8 @@ import asyncpg
 
 from app.core.config import get_settings
 from app.core.db_utils import acquire_with_tenant
+
+logger = logging.getLogger(__name__)
 
 
 class CheckoutError(ValueError):
@@ -143,7 +146,18 @@ class CheckoutAttempts:
                         """SELECT EXISTS(SELECT 1 FROM subscriptions WHERE tenant_id=$1::uuid
                            AND status NOT IN ('canceled','cancelled','incomplete_expired'))""", str(tenant_id),
                     )
-                    if tenant["stripe_subscription_id"] or active:
+                    paypal = await conn.fetchval(
+                        """SELECT status FROM paypal_subscriptions WHERE tenant_id=$1::uuid
+                           AND status IN ('creating','unknown','approval_pending','active','past_due','suspended') LIMIT 1""",
+                        str(tenant_id),
+                    )
+                    if paypal in ("creating", "unknown", "approval_pending"):
+                        raise CheckoutError(
+                            "checkout_outstanding",
+                            "A PayPal purchase is already in progress for this account. Finish it at PayPal or try again in a few minutes.",
+                            request_not_started=True,
+                        )
+                    if tenant["stripe_subscription_id"] or active or paypal:
                         raise CheckoutError("subscription_exists", "Manage your existing subscription in the billing portal, or contact support if the portal is unavailable.", request_not_started=True)
                     outstanding = await conn.fetchrow(
                         """SELECT * FROM billing_checkout_attempts WHERE tenant_id=$1::uuid
@@ -319,6 +333,12 @@ class CheckoutAttempts:
             except BillingCatalogUnavailable as exc:
                 row = await self._existing_or_reject_offer(tenant_id, request_id, str(exc))
             else:
+                # An unfinished PayPal purchase must not block paying by card.
+                try:
+                    from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+                    await PayPalSubscriptionService(self.pool).release_open_for_tenant(tenant_id)
+                except Exception as exc:
+                    logger.warning("PayPal release before card checkout failed: %s", type(exc).__name__)
                 try:
                     row = await self._claim(tenant_id, request_id, option, email, business_name)
                 except CheckoutError as exc:

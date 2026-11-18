@@ -1,6 +1,6 @@
 """Pay as you go: prepaid minutes without a subscription (owner decision 31 Oct 2026).
 
-Subscribers in good standing buy ``subscriber`` top-up bundles. Every other
+Subscribers in good standing (a plan held through Stripe or PayPal) buy ``subscriber`` top-up bundles. Every other
 account that may place calls buys ``payg`` bundles; the first paid bundle moves
 an account with no plan onto the prepaid ``payg`` plan. An account the call
 guard would refuse (suspended, archived, cancelled, unpaid) cannot buy minutes,
@@ -46,10 +46,14 @@ class PurchaseRefused(Exception):
         self.message = message
 
 
-def purchase_audience(stripe_subscription_id: Optional[str], subscription_status: Any) -> str:
-    """Which minute bundles this account may buy, or why it may buy none."""
+def purchase_audience(subscription_ref: Optional[str], subscription_status: Any) -> str:
+    """Which minute bundles this account may buy, or why it may buy none.
+
+    Any truthy ``subscription_ref`` means the account holds a plan
+    subscription, with Stripe or PayPal.
+    """
     status = canonical(subscription_status)
-    if stripe_subscription_id:
+    if subscription_ref:
         if status in {ACTIVE, TRIALING}:
             return SUBSCRIBER
         raise PurchaseRefused(
@@ -85,4 +89,10 @@ async def tenant_purchase_audience(conn, tenant_id: str) -> str:
     )
     if row is None:
         raise PurchaseRefused("account_cannot_buy_minutes", "This account cannot buy minutes. Contact support.")
-    return purchase_audience(row["stripe_subscription_id"], row["subscription_status"])
+    reference = row["stripe_subscription_id"]
+    if not reference:
+        from app.domain.services.paypal_subscriptions import held_subscription_exists
+
+        if await held_subscription_exists(conn, str(tenant_id)):
+            reference = "paypal"
+    return purchase_audience(reference, row["subscription_status"])

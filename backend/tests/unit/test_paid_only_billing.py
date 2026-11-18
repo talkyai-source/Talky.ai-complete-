@@ -202,6 +202,9 @@ class _Acquire:
                     }
                 return row
 
+            async def fetchval(self, sql, *args):
+                return None  # no row: no plan held through PayPal
+
         return Conn()
 
     async def __aexit__(self, *exc):

@@ -277,6 +277,97 @@ async def test_another_outstanding_request_returns_its_durable_recovery_receipt(
     conn.execute.assert_not_awaited()
 
 
+def _claim_service(monkeypatch, paypal_status):
+    """A claim whose tenant has no Stripe plan; the PayPal lookup answers ``paypal_status``."""
+    tenant_id = uuid4()
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(side_effect=[
+            {"id": tenant_id, "status": "active", "stripe_customer_id": None, "stripe_subscription_id": None},
+            None,
+        ]),
+        fetchval=AsyncMock(side_effect=[False, paypal_status]), execute=AsyncMock(),
+    )
+
+    @asynccontextmanager
+    async def acquire(*args):
+        yield conn
+
+    monkeypatch.setattr(checkout, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(checkout, "billing_return_urls", lambda _: ("https://app.example/billing", "https://app.example/billing"))
+    svc = checkout.CheckoutAttempts(None, SimpleNamespace())
+    monkeypatch.setattr(svc, "_get", AsyncMock(return_value={"id": "saved"}))
+    return svc, tenant_id, conn
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("held", ["active", "past_due", "suspended"])
+async def test_a_held_paypal_plan_blocks_a_card_checkout_as_an_existing_subscription(monkeypatch, held):
+    svc, tenant_id, conn = _claim_service(monkeypatch, held)
+    with pytest.raises(checkout.CheckoutError) as rejected:
+        await svc._claim(tenant_id, uuid4(), option(), "synthetic@example.com", None)
+    assert rejected.value.code == "subscription_exists" and rejected.value.request_not_started is True
+    conn.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unfinished", ["creating", "unknown", "approval_pending"])
+async def test_an_unfinished_paypal_purchase_blocks_a_card_checkout_as_outstanding(monkeypatch, unfinished):
+    svc, tenant_id, conn = _claim_service(monkeypatch, unfinished)
+    with pytest.raises(checkout.CheckoutError) as rejected:
+        await svc._claim(tenant_id, uuid4(), option(), "synthetic@example.com", None)
+    assert rejected.value.code == "checkout_outstanding" and rejected.value.request_not_started is True
+    assert "PayPal" in str(rejected.value)
+    conn.execute.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_no_paypal_plan_leaves_the_card_claim_unchanged(monkeypatch):
+    svc, tenant_id, conn = _claim_service(monkeypatch, None)
+    conn.fetchrow = AsyncMock(side_effect=[
+        {"id": tenant_id, "status": "active", "stripe_customer_id": None, "stripe_subscription_id": None},
+        None, None,
+    ])
+    await svc._claim(tenant_id, uuid4(), option(), "synthetic@example.com", None)
+    conn.execute.assert_awaited_once()
+    assert "paypal_subscriptions" in conn.fetchval.await_args_list[1].args[0]
+    assert "tenant_id=$1::uuid" in conn.fetchval.await_args_list[1].args[0]
+
+
+class _Released(Exception):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("release_fails", [False, True])
+async def test_an_unfinished_paypal_purchase_is_released_before_the_claim(monkeypatch, release_fails):
+    from app.domain.services import billing_catalog
+
+    order = []
+
+    class Service:
+        def __init__(self, pool):
+            pass
+
+        async def release_open_for_tenant(self, tenant_id):
+            order.append(("release", tenant_id))
+            if release_fails:
+                raise RuntimeError("synthetic")
+
+    async def claim(*args):
+        order.append(("claim",))
+        raise _Released
+
+    monkeypatch.setattr("app.domain.services.paypal_subscriptions.PayPalSubscriptionService", Service)
+    monkeypatch.setattr(billing_catalog, "resolve_checkout_option", AsyncMock(return_value=option()))
+    svc = checkout.CheckoutAttempts(None, SimpleNamespace())
+    monkeypatch.setattr(svc, "_get", AsyncMock(return_value=None))
+    monkeypatch.setattr(svc, "_claim", claim)
+    tenant_id = str(uuid4())
+    with pytest.raises(_Released):
+        await svc.create(tenant_id=tenant_id, request_id=uuid4(), price_option_id=uuid4(), email="synthetic@example.com")
+    assert order == [("release", tenant_id), ("claim",)], "a failed release still lets the card checkout go on"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("concurrent_receipt", [False, True])
 async def test_unavailable_offer_cannot_unlock_a_concurrently_saved_request(monkeypatch, concurrent_receipt):

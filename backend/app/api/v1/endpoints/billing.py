@@ -90,6 +90,7 @@ class SubscriptionResponse(BaseModel):
     minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     purchased_price_option: Optional[dict[str, Any]] = None
     billing_portal_available: bool = False
+    billing_provider: Optional[Literal["stripe", "paypal"]] = None
 
 
 class CancelResponse(BaseModel):
@@ -353,6 +354,15 @@ async def get_subscription(
     """
     try:
         subscription = await billing.get_subscription(current_user.tenant_id)
+        try:
+            from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+
+            paypal = await PayPalSubscriptionService(db_pool).current_for_tenant(
+                current_user.tenant_id
+            )
+        except Exception as exc:
+            logger.warning("PayPal subscription read failed: %s", type(exc).__name__)
+            paypal = None
 
         from app.core.db_utils import acquire_with_tenant
         from app.domain.services.minutes_quota import compute_minutes_status
@@ -375,6 +385,31 @@ async def get_subscription(
         allocated = quota.allocated
         minutes_remaining = quota.remaining_minutes
 
+        if paypal is not None:
+            return SubscriptionResponse(
+                status=subscription.get("status", "unknown"),
+                plan_id=subscription.get("plan_id"),
+                plan_name=plan.get("name") if plan else None,
+                current_period_start=(
+                    paypal["current_period_start"].isoformat()
+                    if paypal["current_period_start"]
+                    else None
+                ),
+                current_period_end=(
+                    paypal["current_period_end"].isoformat()
+                    if paypal["current_period_end"]
+                    else None
+                ),
+                cancel_at_period_end=paypal["cancel_at_period_end"],
+                minutes_allocated=allocated,
+                minutes_used=minutes_used,
+                minutes_remaining=minutes_remaining,
+                minutes_state=quota.state,
+                purchased_price_option=paypal["purchased_price_option"],
+                billing_portal_available=False,
+                billing_provider="paypal",
+            )
+
         return SubscriptionResponse(
             status=subscription.get("status", "unknown"),
             plan_id=subscription.get("plan_id"),
@@ -396,6 +431,7 @@ async def get_subscription(
             minutes_state=quota.state,
             purchased_price_option=subscription.get("purchased_price_option"),
             billing_portal_available=bool(subscription.get("billing_portal_available")),
+            billing_provider="stripe" if subscription.get("stripe_subscription_id") else None,
         )
 
     except Exception as e:
@@ -469,14 +505,22 @@ async def cancel_subscription(
     current_user: CurrentUser = Depends(get_current_user),
     billing: BillingService = Depends(get_billing_service),
     audit_logger: AuditLogger = Depends(get_audit_logger),
+    db_pool=Depends(get_db_pool),
 ):
     """
     Cancel the current subscription.
     """
+    from app.domain.services.billing_checkout import CheckoutError
+    from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+
     try:
-        result = await billing.cancel_subscription(
-            tenant_id=current_user.tenant_id, cancel_at_period_end=True
+        result = await PayPalSubscriptionService(db_pool).cancel_for_tenant(
+            current_user.tenant_id
         )
+        if result is None:
+            result = await billing.cancel_subscription(
+                tenant_id=current_user.tenant_id, cancel_at_period_end=True
+            )
 
         # Log event (Day 8)
         await audit_logger.log(
@@ -491,8 +535,12 @@ async def cancel_subscription(
             user_agent=request.headers.get("user-agent"),
         )
 
-        return CancelResponse(**result)
+        return CancelResponse(
+            **{key: result[key] for key in CancelResponse.model_fields if key in result}
+        )
 
+    except CheckoutError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
@@ -542,8 +590,16 @@ async def list_invoices(
     List invoices for the current tenant.
     """
     try:
+        from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+
         rows = await _invoice_rows(db_pool, current_user.tenant_id, limit=limit)
-        return {"invoices": [_invoice_public(row) for row in rows], "count": len(rows)}
+        invoices = [_invoice_public(row) for row in rows]
+        invoices += await PayPalSubscriptionService(db_pool).payments_for_tenant(
+            current_user.tenant_id, limit=limit
+        )
+        invoices.sort(key=lambda item: item.get("created_at") or "", reverse=True)
+        invoices = invoices[:limit]
+        return {"invoices": invoices, "count": len(invoices)}
 
     except Exception as e:
         logger.error("Invoice list unavailable error_type=%s", type(e).__name__)
@@ -796,7 +852,16 @@ async def get_invoice(
         raise HTTPException(status_code=400, detail="Invalid id")
 
     try:
+        from app.domain.services.paypal_subscriptions import PayPalSubscriptionService
+
         rows = await _invoice_rows(db_pool, tenant_uuid, invoice_id=inv_uuid, limit=1)
+        paypal_payments = (
+            []
+            if rows
+            else await PayPalSubscriptionService(db_pool).payments_for_tenant(
+                tenant_uuid, limit=1, payment_id=inv_uuid
+            )
+        )
     except Exception as e:
         logger.error("Invoice unavailable error_type=%s", type(e).__name__)
         raise HTTPException(
@@ -808,6 +873,8 @@ async def get_invoice(
         ) from e
 
     if not rows:
+        if paypal_payments:
+            return paypal_payments[0]
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     return _invoice_public(rows[0])
@@ -878,6 +945,30 @@ async def get_adjustments(
         ) from exc
 
 
+async def _paypal_priced_option_ids(pool, *, is_platform_admin: bool, email) -> set[str]:
+    """Price options this caller may buy with PayPal now (empty when PayPal plans are closed for them)."""
+    from app.core.db_utils import acquire_with_tenant
+    from app.domain.services.paypal_mode import paypal_plan_availability, paypal_provider_mode
+
+    open_, _reason = paypal_plan_availability(is_platform_admin=is_platform_admin, email=email)
+    if not open_:
+        return set()
+    try:
+        async with acquire_with_tenant(pool, None) as conn:
+            rows = await conn.fetch(
+                """SELECT pp.price_option_id FROM paypal_plan_options pp
+                     JOIN plan_price_options o ON o.id = pp.price_option_id
+                    WHERE pp.active AND pp.verified_at IS NOT NULL AND pp.provider_mode = $1
+                      AND pp.amount_minor = o.amount_minor AND pp.currency = o.currency
+                      AND pp.interval = o.interval""",
+                paypal_provider_mode(),
+            )
+        return {str(row["price_option_id"]) for row in rows}
+    except Exception as exc:
+        logger.warning("PayPal plan availability read failed: %s", type(exc).__name__)
+        return set()
+
+
 @router.get("/plans")
 async def list_billing_plans(
     db_client: Client = Depends(get_db_client),
@@ -909,6 +1000,16 @@ async def list_billing_plans(
             for option in plan.get("price_options") or []:
                 if option.get("checkout_available"):
                     option.update(checkout_available=False, unavailable_reason=reason)
+    paypal_ids = await _paypal_priced_option_ids(
+        db_client.pool,
+        is_platform_admin=_is_platform_admin(current_user) if current_user else False,
+        email=getattr(current_user, "email", None),
+    )
+    for plan in plans:
+        for option in plan.get("price_options") or []:
+            option["paypal_available"] = (
+                bool(option.get("checkout_available")) and str(option.get("id")) in paypal_ids
+            )
     return plans
 
 
@@ -936,9 +1037,14 @@ async def get_billing_config(
     checkout_open, checkout_reason = checkout_availability(**caller)
     topups_open, topups_reason = topup_availability(
         **caller, live_topups_enabled=_live_topups_enabled())
-    from app.domain.services.paypal_mode import PAYPAL_UNAVAILABLE, paypal_topup_availability
+    from app.domain.services.paypal_mode import (
+        PAYPAL_UNAVAILABLE, paypal_plan_availability, paypal_topup_availability,
+    )
 
     paypal_open, paypal_reason = paypal_topup_availability(**caller)
+    paypal_plans_open, paypal_plans_reason = paypal_plan_availability(**caller)
+    if not checkout_open:
+        paypal_plans_open, paypal_plans_reason = False, checkout_reason
     if not _live_topups_enabled():
         paypal_open, paypal_reason = False, PAYPAL_UNAVAILABLE
 
@@ -953,4 +1059,6 @@ async def get_billing_config(
         "topups_unavailable_reason": topups_reason,
         "paypal_topups_open": paypal_open,
         "paypal_topups_unavailable_reason": paypal_reason,
+        "paypal_plans_open": paypal_plans_open,
+        "paypal_plans_unavailable_reason": paypal_plans_reason,
     }
