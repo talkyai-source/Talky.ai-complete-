@@ -256,7 +256,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "Requests for Review",
       description:
-        "Use approved information for routine enquiries and collect requests for review. Live human transfer is not currently available.",
+        "Use approved information for routine enquiries and collect requests for review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       title: "Stay Connected",
@@ -284,7 +284,7 @@ export default function TravelIndustryIndustryPage() {
     {
       question: "Can AI act as a virtual receptionist for hotels?",
       answer:
-        "AI can use approved hotel information and collect guest requests for review. Live human transfer is not currently available.",
+        "AI can use approved hotel information and collect guest requests for review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       question: "How quickly can we get started?",

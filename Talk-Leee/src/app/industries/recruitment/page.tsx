@@ -248,7 +248,7 @@ export default function RecruitmentIndustryPage() {
     {
       question: "Can it manage candidate phone calls and inquiries?",
       answer:
-        "Use approved answers for routine candidate enquiries and collect requests for recruiter review. Live human transfer is not currently available.",
+        "Use approved answers for routine candidate enquiries and collect requests for recruiter review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       question: "How quickly can our team get started?",

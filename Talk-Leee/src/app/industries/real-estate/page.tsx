@@ -212,7 +212,7 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Requests for Review",
-      description: "Collect a caller request for your team to review. Live human transfer is not currently available.",
+      description: "Collect a caller request for your team to review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       title: "More Leads, Less Work",
@@ -241,7 +241,7 @@ export default function RealEstateIndustryPage() {
     {
       title: "Team Review",
       description:
-        "Your team can review captured requests and decide what follow-up is appropriate. Live human transfer is not currently available.",
+        "Your team can review captured requests and decide what follow-up is appropriate. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
   ];
 
@@ -284,7 +284,7 @@ export default function RealEstateIndustryPage() {
     {
       question: "Can an agent take over the call?",
       answer:
-        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
+        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does AI work after business hours?",

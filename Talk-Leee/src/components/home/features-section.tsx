@@ -24,7 +24,7 @@ const services = [
   {
     icon: Settings,
     title: "Requests for Your Team",
-    description: "Collect caller requests for review. Live transfer to a human agent is not currently available.",
+    description: "Collect caller requests for review, or transfer a live outbound campaign call to a person on your list. Live transfer is not yet available on incoming calls.",
   },
   {
     icon: BarChart3,
