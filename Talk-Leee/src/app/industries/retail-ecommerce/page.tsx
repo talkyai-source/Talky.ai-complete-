@@ -105,7 +105,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Requests for Review",
-      description: "Review captured customer requests. Live human transfer is not currently available.",
+      description: "Review captured customer requests. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       title: "Handle Peak Demand",
@@ -182,7 +182,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Review Requests",
-      description: "Review captured requests. Live human transfer is not currently available.",
+      description: "Review captured requests. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
   ];
 
@@ -320,7 +320,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       question: "Can AI transfer customers to human agents?",
       answer:
-        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
+        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does AI work after business hours?",

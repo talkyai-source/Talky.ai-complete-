@@ -64,7 +64,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Voice Agents for Finance",
       description:
-        "Use approved information to answer routine questions and collect requests for review. Live human transfer is not currently available.",
+        "Use approved information to answer routine questions and collect requests for review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       title: "AI Financial Customer Service",
@@ -168,7 +168,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Fraud & Security Reporting",
       description:
-        "Live transfer to fraud or security staff is not available. Keep your institution’s existing reporting channels available for those concerns.",
+        "Live transfer is not a channel for reporting fraud or security concerns. Keep your institution’s existing reporting channels available for those concerns.",
     },
   ];
 
@@ -274,7 +274,7 @@ export default function FinancialServicesIndustryPage() {
     {
       question: "Can AI route customers to the correct department?",
       answer:
-        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
+        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does it integrate with our existing systems?",

@@ -185,7 +185,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Connect",
       description:
-        "Collect requests that need human expertise for your team to review. Live human transfer is not currently available.",
+        "Collect requests that need human expertise for your team to review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
   ];
 
@@ -274,7 +274,7 @@ export default function ProfessionalServicesIndustryPage() {
     },
     {
       title: "Intelligent Call Routing",
-      description: "Collect the requested department or specialist for your team to review. Live human transfer is not currently available.",
+      description: "Collect the requested department or specialist for your team to review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
     },
     {
       title: "Automated Follow-Ups",
@@ -356,7 +356,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "Can existing clients still speak with a human?",
       answer:
-        "Live human transfer is not currently available. The agent can collect a request for your team to review; this does not arrange a callback.",
+        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Can it work outside business hours?",
