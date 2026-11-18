@@ -540,7 +540,10 @@ async def cancel_subscription(
         )
 
     except CheckoutError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        raise HTTPException(
+            status_code=e.status_code,
+            detail="PayPal could not cancel the subscription. Please try again.",
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:

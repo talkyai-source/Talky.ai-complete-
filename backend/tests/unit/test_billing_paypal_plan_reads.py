@@ -179,7 +179,9 @@ async def test_cancel_keeps_the_status_code_and_message_of_a_checkout_error(payp
     paypal.answers["cancel_for_tenant"] = CheckoutError("paypal_busy", "Try again shortly.", 503)
     with pytest.raises(HTTPException) as error:
         await api.cancel_subscription(request, USER, billing, audit, object())
-    assert error.value.status_code == 503 and error.value.detail == "Try again shortly."
+    # The status is the service's; the text is the route's own, never the exception's.
+    assert error.value.status_code == 503
+    assert error.value.detail == "PayPal could not cancel the subscription. Please try again."
     billing.cancel_subscription.assert_not_awaited()
 
 

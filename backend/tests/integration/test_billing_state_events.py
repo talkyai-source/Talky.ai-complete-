@@ -30,6 +30,8 @@ async def state_db(checkout_db):  # noqa: F811
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute(f'GRANT SELECT,INSERT,UPDATE,DELETE ON invoices TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT,INSERT ON invoice_snapshots TO "{fixture.role}"')
+        # The invoice list and detail also read payments of a plan bought with PayPal.
+        await conn.execute(f'GRANT SELECT ON paypal_subscription_payments TO "{fixture.role}"')
         await conn.execute(f'GRANT USAGE ON SEQUENCE invoice_snapshots_id_seq TO "{fixture.role}"')
         await conn.execute(f'GRANT SELECT ON user_profiles TO "{fixture.role}"')
         # A won dispute first looks for a disputed top-up order.
