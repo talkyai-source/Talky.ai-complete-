@@ -84,6 +84,17 @@ for (const { pathname, Page, heading, title, expected } of cases) {
     });
 }
 
+test("the category page content fills at least one screen above the footer", () => {
+    for (const { pathname, Page } of cases) {
+        const { container } = renderPublic(pathname, <Page />);
+        const content = container.querySelector("main > div > ul[role='list']")?.parentElement;
+        assert.ok(content, pathname);
+        assert.ok(content.classList.contains("min-h-[calc(100svh-var(--home-navbar-height))]"), `${pathname}: ${content.className}`);
+        assert.equal(content.nextElementSibling?.tagName, "FOOTER", pathname);
+        cleanup();
+    }
+});
+
 test("the pages set no description of their own, so the root layout's is inherited", () => {
     for (const m of [productsMetadata, useCasesMetadata, industriesMetadata]) {
         assert.equal(Object.hasOwn(m, "description"), false);

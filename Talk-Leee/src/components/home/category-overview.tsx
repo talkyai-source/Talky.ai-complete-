@@ -34,7 +34,7 @@ export function CategoryOverviewPage({ heading, items }: { heading: string; item
   return (
     <main className="home-navbar-offset bg-cyan-50 dark:bg-black">
       <Navbar />
-      <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
+      <div className="mx-auto w-full max-w-6xl min-h-[calc(100svh-var(--home-navbar-height))] px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
             {heading}

@@ -104,7 +104,7 @@ export function SignupPopup() {
             <div className="mt-3 flex flex-row flex-nowrap items-center justify-center gap-3">
                 <Button
                     asChild
-                    className="bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                    className="bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600"
                 >
                     <Link href={DEMO_PATH}>Book a Demo</Link>
                 </Button>

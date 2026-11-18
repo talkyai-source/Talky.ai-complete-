@@ -14,7 +14,7 @@ export default function DocsLayout({ children }: { children: ReactNode }) {
   return (
     <div className="home-navbar-offset min-h-screen flex flex-col bg-cyan-50 dark:bg-black">
       <Navbar />
-      <div className="flex-1 mx-auto w-full max-w-7xl px-4 md:px-6 lg:px-8 py-10 md:py-12 lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-12 lg:items-start">
+      <div className="flex-1 mx-auto w-full max-w-7xl min-h-[calc(100svh-var(--home-navbar-height))] px-4 md:px-6 lg:px-8 py-10 md:py-12 lg:grid lg:grid-cols-[16rem_minmax(0,1fr)] lg:gap-12 lg:items-start">
         <DocsSidebar pages={pages} />
         <main className="min-w-0 w-full max-w-3xl mt-8 lg:mt-0">{children}</main>
       </div>
