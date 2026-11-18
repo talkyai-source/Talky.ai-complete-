@@ -26,11 +26,12 @@ import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequ
 import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useTopupBalance } from "@/lib/topup-api";
-import { type BillingSubscription } from "@/lib/billing-purchase";
+import { hasManagedSubscription, type BillingSubscription } from "@/lib/billing-purchase";
 import { LocalMinorAmount, LocalPurchasedPrice } from "@/components/billing/local-money";
 import { localAmountText, useDisplayCurrency } from "@/components/pricing/local-price";
 import { usdFromMinor } from "@/lib/display-currency";
-import { useCheckoutConfirmationPending } from "@/components/billing/use-billing-purchase";
+import { useCheckoutConfirmationPending, useCheckoutConfirmationProvider } from "@/components/billing/use-billing-purchase";
+import { PaypalPlanManage } from "@/components/billing/paypal-plan-manage";
 import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
   useBillingPlan,
@@ -307,6 +308,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   // A ?checkout=success return still being confirmed (use-billing-purchase
   // polls the attempt); the old plan and status would be wrong meanwhile.
   const confirming = useCheckoutConfirmationPending();
+  const confirmingProvider = useCheckoutConfirmationProvider() === "paypal" ? "PayPal" : "Stripe";
 
   if (!subscription) {
     return (
@@ -329,7 +331,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   }
 
   const details = [
-    { label: "Plan", value: confirming ? "Confirming your purchase with Stripe…" : (prepaidOnly && paygQ.data) || subscription.plan_name || "No plan selected", icon: Layers3, large: true },
+    { label: "Plan", value: confirming ? `Confirming your purchase with ${confirmingProvider}…` : (prepaidOnly && paygQ.data) || subscription.plan_name || "No plan selected", icon: Layers3, large: true },
     {
       label: "Billing cycle",
       value: formatDateRange(subscription.current_period_start, subscription.current_period_end),
@@ -396,6 +398,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
             <Link href="/billing/plans">Manage plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
         </div>
+        {subscription.billing_provider === "paypal" && hasManagedSubscription(subscription) && <div className="mt-4"><PaypalPlanManage subscription={subscription} /></div>}
       </CardContent>
     </Card>
   );
@@ -721,7 +724,7 @@ function RecentInvoices({
                   <tr key={inv.id} className="border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
                       <Link href={`/billing/invoices/${inv.id}`} className="inline-block py-1 -my-1 font-semibold text-foreground hover:underline">
-                        {inv.invoice_number || inv.stripe_invoice_id || inv.id.slice(0, 8)}
+                        {inv.invoice_number || inv.stripe_invoice_id || (inv.source_reference ? `PayPal payment ${inv.source_reference}` : inv.id.slice(0, 8))}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(inv.period_start)} – {formatDate(inv.period_end)}</td>

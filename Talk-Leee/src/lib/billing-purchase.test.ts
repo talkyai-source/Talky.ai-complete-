@@ -2,7 +2,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
 import { env } from "./env";
-import { approvedCheckoutUrl, formatPurchasedPrice, startBillingCheckout, yearlySaving, type SavedPurchase } from "./billing-purchase";
+import { approvedCheckoutUrl, billingCatalogSchema, billingSubscriptionSchema, formatPurchasedPrice, hasManagedSubscription, savedPurchaseSchema, startBillingCheckout, yearlySaving, type SavedPurchase } from "./billing-purchase";
 import { createHttpClient, __resetRefreshStateForTests } from "./http-client";
 const original = api.request;
 const originalFetch = globalThis.fetch;
@@ -82,4 +82,29 @@ for (const refused of [
 
 test("a PayPal address is never accepted as the billing portal", () => {
   assert.throws(() => approvedCheckoutUrl("https://www.paypal.com/checkoutnow", "portal"), /could not be verified/);
+});
+
+const priceOption = { id: saved.price_option.id, kind: "stripe", interval: "month", interval_count: 1, amount_minor: 1250, currency: "usd", currency_exponent: 2, active: true, checkout_available: true };
+const catalogue = (option: object) => [{ id: "starter", name: "Starter", minutes: 100, concurrent_calls: 1, billing_mode: "live", price_options: [option] }];
+test("paypal_available defaults to false and parses when present", () => {
+  assert.equal(billingCatalogSchema.parse(catalogue(priceOption))[0]!.price_options[0]!.paypal_available, false);
+  assert.equal(billingCatalogSchema.parse(catalogue({ ...priceOption, paypal_available: true }))[0]!.price_options[0]!.paypal_available, true);
+});
+const subscriptionBody = { status: "active", minutes_allocated: 1, minutes_used: 0, minutes_remaining: 1, purchased_price_option: saved.price_option };
+test("billing_provider defaults to null and parses when present", () => {
+  assert.equal(billingSubscriptionSchema.parse(subscriptionBody).billing_provider, null);
+  assert.equal(billingSubscriptionSchema.parse({ ...subscriptionBody, billing_provider: "paypal" }).billing_provider, "paypal");
+  assert.equal(billingSubscriptionSchema.safeParse({ ...subscriptionBody, billing_provider: "other" }).success, false);
+});
+test("an active PayPal subscriber has a managed subscription; a cancelled or inactive one does not", () => {
+  const paypal = (over: object) => billingSubscriptionSchema.parse({ ...subscriptionBody, billing_provider: "paypal", ...over });
+  assert.equal(hasManagedSubscription(paypal({})), true);
+  assert.equal(hasManagedSubscription(paypal({ cancel_at_period_end: true })), true);
+  assert.equal(hasManagedSubscription(paypal({ purchased_price_option: null })), true);
+  assert.equal(hasManagedSubscription(paypal({ status: "cancelled" })), false);
+  assert.equal(hasManagedSubscription(paypal({ status: "inactive" })), false);
+});
+test("a saved purchase stores the provider only when it is PayPal", () => {
+  assert.equal(savedPurchaseSchema.parse(saved).provider, undefined);
+  assert.equal(savedPurchaseSchema.parse({ ...saved, provider: "paypal" }).provider, "paypal");
 });

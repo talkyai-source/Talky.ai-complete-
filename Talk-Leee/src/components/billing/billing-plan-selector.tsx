@@ -8,11 +8,15 @@ import { hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/b
 import { LocalPurchasedPrice, LocalYearlySaving } from "@/components/billing/local-money";
 import { useBillingRefusal } from "@/lib/billing-refusal";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
+import { PaypalPlanManage } from "./paypal-plan-manage";
+import { usePaypalPlansConfig } from "@/lib/paypal-plan-api";
 
 const navigate = (url: string) => window.location.assign(url);
 function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPurchase> }) {
   const { saved, attempt, error, busy, storageAvailable, returned, pendingConfirmation } = purchase;
   const refusal = useBillingRefusal("plan");
+  const paypal = purchase.provider === "paypal";
+  const providerName = paypal ? "PayPal" : "Stripe";
   const cancelled = returned === "cancel" || returned === "cancelled";
   // Only a server read that found the attempt open, expired or failed proves no payment was taken.
   const cancelConfirmed = cancelled && (attempt?.state === "open" || attempt?.state === "expired" || attempt?.state === "failed");
@@ -20,10 +24,12 @@ function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPu
     {error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{error}</p>}
     {refusal && refusal.message !== error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{refusal.message}</p>}
     {!storageAvailable && <p role="alert" className="text-sm">The browser could not read or update the saved purchase. Enable session storage and reload before starting another purchase.</p>}
-    {cancelConfirmed && <p role="status" className="text-sm">Checkout was cancelled. No payment was taken for this attempt.</p>}
-    {cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You returned from checkout. This does not confirm whether payment completed. Check or resume the saved purchase below.</p>}
-    {pendingConfirmation && <p role="status" className="text-sm font-medium">Confirming your purchase with Stripe…</p>}
-    {returned === "success" && !(attempt && ["activated", "expired", "failed"].includes(attempt.state)) && <p role="status" className="text-sm">Payment confirmation is pending. Returning from checkout does not activate a subscription.</p>}
+    {paypal && cancelConfirmed && <p role="status" className="text-sm">You cancelled at PayPal. Nothing was charged.</p>}
+    {paypal && cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You came back from PayPal. This does not confirm whether a payment was made. {attempt ? "Check the saved purchase below." : "Checking with the server…"}</p>}
+    {!paypal && cancelConfirmed && <p role="status" className="text-sm">Checkout was cancelled. No payment was taken for this attempt.</p>}
+    {!paypal && cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You returned from checkout. This does not confirm whether payment completed. Check or resume the saved purchase below.</p>}
+    {pendingConfirmation && <p role="status" className="text-sm font-medium">Confirming your purchase with {providerName}…</p>}
+    {returned === "success" && !(paypal && pendingConfirmation) && !(attempt && ["activated", "expired", "failed"].includes(attempt.state)) && <p role="status" className="text-sm">{paypal ? (attempt?.message || "PayPal has not confirmed the payment yet. Refresh this page in a minute; you have not been charged twice.") : "Payment confirmation is pending. Returning from checkout does not activate a subscription."}</p>}
     {attempt?.state === "activated" && <p role="status" className="rounded-xl border border-emerald-500/30 p-4">The server confirmed this purchase. Your current plan is shown from billing records.</p>}
     {(attempt?.state === "expired" || attempt?.state === "failed") && <p role="status" className="text-sm">The server confirmed the saved checkout {attempt.state === "expired" ? "expired" : "failed"}. You may choose an available offer again.</p>}
     {saved && <div className="space-y-3 rounded-xl border p-4">
@@ -43,6 +49,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   const subscriptionQuery = useBillingPlan(scope);
   const purchase = useBillingPurchase(scope, onNavigate);
   const refusal = useBillingRefusal("plan");
+  const paypalOpen = usePaypalPlansConfig().data?.paypal_plans_open === true;
   const [interval, setInterval] = useState<"month" | "year">("month");
   const [portalError, setPortalError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
@@ -72,7 +79,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
     {portalError && <p role="alert">{portalError}</p>}
     {plansQuery.isLoading || subscriptionQuery.isLoading ? <p role="status">Loading plans…</p> : plansQuery.isError || subscriptionQuery.isError ?
       <div role="alert" className="space-y-3"><p>Plans could not be verified. Your current subscription is unchanged.</p><Button variant="outline" onClick={() => { void plansQuery.refetch(); void subscriptionQuery.refetch(); }}>Retry</Button></div> : <>
-      {managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
+      {managed && subscription?.billing_provider === "paypal" ? <PaypalPlanManage subscription={subscription} /> : managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
       {annualAvailable && <fieldset className="flex flex-wrap items-center justify-center gap-4"><legend className="mb-2 text-center font-semibold">Billing interval</legend>{(["month", "year"] as const).map(value => <label key={value} className="inline-flex items-center gap-2"><input type="radio" name="billing-interval" value={value} checked={selectedInterval === value} disabled={Boolean(purchase.saved) || purchase.busy} onChange={() => setInterval(value)} />{value === "month" ? "Monthly" : "Yearly"}</label>)}</fieldset>}
       {plans.length === 0 && <p>No approved plans are currently available.</p>}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{plans.map(plan => {
@@ -85,6 +92,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
           <p className="text-sm">Monthly included allowance: {plan.minutes === 0 ? "Unlimited" : `${plan.minutes.toLocaleString()} minutes`}<br />Concurrent calls: {plan.concurrent_calls}</p>
           {!available && <p className="text-sm">{price?.unavailable_reason || "This offer is not available for checkout."}</p>}
           <Button disabled={blocked || !available || currentFree} onClick={() => { if (price) void purchase.run({ plan, price }); }}>{currentFree ? "Current free plan" : price?.kind === "free" ? `Choose ${plan.name}` : `Select ${plan.name}`}</Button>
+          {paypalOpen && price?.paypal_available && price.checkout_available && <Button variant="outline" disabled={blocked || !available || currentFree} onClick={() => { void purchase.run({ plan, price }, "paypal"); }}>Pay with PayPal</Button>}
         </CardContent></Card>;
       })}</div>
     </>}
