@@ -226,7 +226,7 @@ def _policy_effect(mode: Optional[str]) -> str:
         return "Calls are recorded; the agent speaks a recording notice first where the policy requires it."
     if mode == "disabled":
         return "Calls are not recorded."
-    return "No policy configured: calls are NOT recorded until one is saved."
+    return "No policy saved: calls are recorded, and the agent speaks a recording notice first."
 
 
 def _policy_response(row: Any) -> RecordingPolicyResponse:
@@ -250,7 +250,7 @@ async def get_recording_policy(
     user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ):
-    """The tenant's call-recording policy (absent = recording OFF)."""
+    """The tenant's call-recording policy (absent = recorded, with a spoken notice)."""
     tenant_id = _tenant_id(user)
     async with acquire_with_tenant(db_pool, tenant_id) as conn:
         row = await conn.fetchrow(

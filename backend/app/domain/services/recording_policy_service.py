@@ -5,21 +5,32 @@ call origination path to decide whether a pre-answer announcement must
 play. Keeps the compliance decision in one place so the audio pipeline
 stays simple.
 
-The DB row lives in `tenant_recording_policy`. Recording is enabled only by
-an explicit readable tenant policy. A missing row or a policy-store failure
-defaults recording OFF; legal intent must never be inferred from absence.
+The DB row lives in `tenant_recording_policy`.
+
+Rule (owner decision, 18 November 2026: "make sure every recording get
+recorded at any cost"):
+  * A tenant with no saved policy IS recorded, and the agent speaks the
+    recording notice (the most protective mode that still records).
+  * A captured recording of an outbound call is never discarded because the
+    notice receipt is missing: it is KEPT and MARKED `unconfirmed`
+    (`notice_state`). Only a saved `disabled` policy, an inbound call
+    (`strict_notice=True`) or the platform switch
+    `RECORDING_REQUIRE_NOTICE_PROOF` still refuse a recording.
+  * When the decision cannot be taken (policy store unreadable) the save is
+    retried later; nothing is destroyed on an error.
 
 The disclosure ledger records supported transport delivery evidence for the
 configured notice. It does not certify human hearing or legal consent.
 
 The ledger is deliberately process-local and in-memory: it records a
-fact about a live call that only this process observed, and it must
-fail CLOSED (an unknown call reads as "no disclosure"), so losing it on
-restart can only ever suppress a recording — never permit one.
+fact about a live call that only this process observed. An unknown call
+reads as "no disclosure", so losing the ledger on restart marks a recording
+`unconfirmed` (outbound) or refuses it (inbound / proof switch).
 """
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -68,25 +79,31 @@ class RecordingDecision:
     reason: str  # machine-readable; logged for audit
 
 
-# No policy is not consent. These two decisions are separate so operators can
-# distinguish an unconfigured tenant from a dependency incident, while both
-# fail closed on audio retention.
+# Owner decision, 18 November 2026: a tenant with no saved policy is recorded,
+# and the agent speaks the notice (announcement_text=None means the platform
+# minimum notice). These two decisions stay separate so operators can
+# distinguish an unconfigured tenant from a dependency incident.
+POLICY_LOOKUP_FAILED_REASON = "recording_policy_lookup_failed"
+POLICY_ABSENT_REASON = "tenant_policy_absent_default_announce"
+
 _ABSENT_POLICY_DEFAULT = RecordingDecision(
-    should_record=False,
-    announcement_required=False,
+    should_record=True,
+    announcement_required=True,
     announcement_text=None,
     opt_out_dtmf_digit=None,
     retention_days=90,
-    reason="tenant_policy_absent_recording_off",
+    reason=POLICY_ABSENT_REASON,
 )
 
+# On a live call the agent still speaks the notice. At save time this reason
+# means "retry": the decision cannot be taken now and nothing may be destroyed.
 _POLICY_LOOKUP_FAILURE_DEFAULT = RecordingDecision(
-    should_record=False,
-    announcement_required=False,
+    should_record=True,
+    announcement_required=True,
     announcement_text=None,
     opt_out_dtmf_digit=None,
-    retention_days=0,
-    reason="recording_policy_lookup_failed_recording_off",
+    retention_days=90,
+    reason=POLICY_LOOKUP_FAILED_REASON,
 )
 
 
@@ -118,20 +135,18 @@ class RecordingPolicyService:
             row = await self._load_row(tenant_id)
         except Exception as exc:
             logger.error(
-                "recording_policy_lookup_failed tenant=%s err=%s — recording disabled",
+                "recording_policy_lookup_failed tenant=%s err=%s — the live call "
+                "speaks the notice; the save is retried until the policy is readable",
                 tenant_id,
                 exc,
             )
             return _POLICY_LOOKUP_FAILURE_DEFAULT
         if row is None:
-            # Zero rows is ambiguous: the tenant may never have configured a
-            # policy, or a row may exist that this connection could not read.
-            # Either way recording is turned OFF (never inferred from
-            # absence), and that is a compliance decision, so it is logged at
-            # WARNING rather than left as a silent default.
-            logger.warning(
+            # Zero rows: the tenant never saved a policy (owner decision,
+            # 18 November 2026): record, with the spoken notice.
+            logger.info(
                 "recording_policy_absent tenant=%s — no readable policy row; "
-                "recording disabled until an explicit policy is configured",
+                "the default applies: record, with the spoken notice",
                 tenant_id,
             )
             return _ABSENT_POLICY_DEFAULT
@@ -222,8 +237,7 @@ DISCLOSURE_FAILED = "failed"          # required but NOT delivered
 
 # call_id -> state. Bounded FIFO: a call whose entry has been evicted
 # reads back as "unknown", which `consent_satisfied` treats exactly like
-# "not delivered" — eviction can only suppress a recording, never permit
-# one. 10k entries is far more than the number of calls that can be in
+# "not delivered" (outbound recordings are then kept as `unconfirmed`). 10k entries is far more than the number of calls that can be in
 # flight, so eviction only ever touches long-finished calls.
 _DISCLOSURE_LEDGER: "OrderedDict[str, str]" = OrderedDict()
 _LEDGER_MAX_ENTRIES = 10_000
@@ -269,9 +283,9 @@ def clear_disclosure_state(*call_ids: Optional[str]) -> None:
 
 
 # call_id -> the callee country the notice decision used (QA F12-04), so the
-# save-time gate re-runs the same decision. Same bound and fail-closed reading
-# as the disclosure ledger: a missing entry reads as "can't be placed", which
-# makes a one-party tenant owe a notice that was never delivered.
+# save-time gate re-runs the same decision. Same bound as the disclosure
+# ledger: a missing entry reads as "can't be placed", which makes a one-party
+# tenant owe a notice that was never delivered (marked `unconfirmed`).
 _CALLEE_COUNTRY: "OrderedDict[str, Optional[str]]" = OrderedDict()
 
 
@@ -312,6 +326,42 @@ def disclosure_delivered(*call_ids: Optional[str]) -> bool:
     """Supported completed transport evidence, never a human-hearing claim."""
     return get_disclosure_state(*call_ids) in {
         DISCLOSURE_SPOKEN, DISCLOSURE_TRANSMITTED,
+    }
+
+
+NOTICE_DELIVERED = "delivered"
+NOTICE_NOT_REQUIRED = "not_required"
+NOTICE_UNCONFIRMED = "unconfirmed"
+
+
+def notice_state(decision: Any, *call_ids: Optional[str]) -> str:
+    """The notice state stored with a recording (transport evidence only)."""
+    if not getattr(decision, "announcement_required", False):
+        return NOTICE_NOT_REQUIRED
+    if disclosure_delivered(*call_ids):
+        return NOTICE_DELIVERED
+    return NOTICE_UNCONFIRMED
+
+
+def is_saved_policy(decision: Any) -> bool:
+    """True when the decision comes from a policy the tenant saved.
+
+    False for the two defaults (no saved policy; policy store unreadable).
+    Inbound calls record only under a saved policy, as before 18 November
+    2026: the defaults were opened for outbound calls only.
+    """
+    return getattr(decision, "reason", None) not in {
+        POLICY_ABSENT_REASON, POLICY_LOOKUP_FAILED_REASON,
+    }
+
+
+def notice_proof_required() -> bool:
+    """Platform switch back to the old rule (no kept recording without proof).
+
+    Read at call time from ``RECORDING_REQUIRE_NOTICE_PROOF``; default off.
+    """
+    return os.getenv("RECORDING_REQUIRE_NOTICE_PROOF", "").strip().lower() in {
+        "1", "true", "yes", "on",
     }
 
 

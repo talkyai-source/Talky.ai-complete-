@@ -117,6 +117,13 @@ class Connection:
     async def fetchval(self, sql, *args):
         query = " ".join(sql.split())
         if query == (
+            "SELECT id FROM recordings_s3 WHERE tenant_id = $1 AND call_id = $2 "
+            "AND status = 'uploaded' ORDER BY created_at DESC LIMIT 1"
+        ):
+            # The retry-safety lookup: nothing saved yet for this call.
+            assert args == (UUID(TENANT), UUID(CALL))
+            return None
+        if query == (
             "SELECT EXISTS ( SELECT 1 FROM recordings_s3 "
             "WHERE tenant_id = $1 AND s3_bucket = $2 AND s3_key = $3 )"
         ):
@@ -195,6 +202,14 @@ def fixture(monkeypatch, tmp_path):
     assert pool.leases == pool.releases
 
 
+# The cloud entry (save_recording -> save_and_link_outcome) first looks for an
+# already saved recording: ONE extra pool lease before the calls lookup. The
+# local entry (_save_local) does not. Failure indexes below are the old ones
+# plus `lease(entry)`.
+def lease(entry):
+    return 1 if entry == "cloud" else 0
+
+
 async def save(fx, entry="cloud"):
     method = fx.service._save_local if entry == "local" else fx.service.save_recording
     return await method(CALL, fx.buffer, TENANT, CAMPAIGN)
@@ -204,7 +219,7 @@ async def save(fx, entry="cloud"):
 @pytest.mark.parametrize("entry", ["cloud", "local"])
 @pytest.mark.parametrize("failure_at", [1, 3, 5, 6], ids=["admission", "recheck", "insert", "link"])
 async def test_c4_second_acquisition_saves_and_links_once(fixture, entry, failure_at):
-    fixture.pool.fail_at = {failure_at}
+    fixture.pool.fail_at = {failure_at + lease(entry)}
     assert await save(fixture, entry) == str(RECORDING)
     assert len(fixture.clock.sleeps) == 1
     assert len(fixture.conn.inserts) == len(fixture.conn.rows) == len(fixture.conn.links) == 1
@@ -218,7 +233,7 @@ async def test_c4_second_acquisition_saves_and_links_once(fixture, entry, failur
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_from", [1, 5, 6], ids=["admission", "insert", "link"])
 async def test_c4_exhaustion_is_bounded_and_logs_call_id(fixture, caplog, failure_from):
-    fixture.pool.fail_from = failure_from
+    fixture.pool.fail_from = failure_from + lease("cloud")
     result = await save(fixture)
     assert result == (str(RECORDING) if failure_from == 6 else None)
     assert 50 <= fixture.clock.now <= 60.01
@@ -233,7 +248,7 @@ async def test_c4_exhaustion_is_bounded_and_logs_call_id(fixture, caplog, failur
 
 @pytest.mark.asyncio
 async def test_c4_admission_and_insert_share_one_retry_budget(fixture, caplog):
-    fixture.pool.fail_at = {1, 2, 3, 8, 9, 10}
+    fixture.pool.fail_at = {1, 2, 3, 9, 10, 11}
     assert await save(fixture) is None
     assert 50 <= fixture.clock.now <= 60.01
     assert len(fixture.uploads) == 1
@@ -271,16 +286,27 @@ async def test_c4_actual_transaction_exit_failure_never_replays_committed_insert
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("gate", ["foreign-call", "disabled", "disclosure-missing"])
+@pytest.mark.parametrize("gate", ["foreign-call", "disabled"])
 async def test_c4_retry_preserves_ownership_and_consent_gates(fixture, gate):
     fixture.pool.fail_at = {1}
     if gate == "foreign-call":
         fixture.conn.owned = False
     else:
-        fixture.conn.mode = "disabled" if gate == "disabled" else "two_party"
+        fixture.conn.mode = "disabled"
     assert await save(fixture) is None
     assert len(fixture.clock.sleeps) == 1
     assert fixture.uploads == fixture.conn.inserts == fixture.conn.links == []
+
+
+@pytest.mark.asyncio
+async def test_c4_retry_keeps_a_missing_notice_receipt_and_marks_it_unconfirmed(fixture):
+    # Owner decision, 18 November 2026: a missing receipt no longer discards.
+    fixture.pool.fail_at = {1}
+    fixture.conn.mode = "two_party"
+    assert await save(fixture) == str(RECORDING)
+    assert len(fixture.clock.sleeps) == 1
+    assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == 1
+    assert fixture.conn.inserts[0][-2] == "unconfirmed"
 
 
 @pytest.mark.asyncio
@@ -296,7 +322,7 @@ async def test_c4_caller_cancellation_is_not_retried_or_swallowed(fixture):
 
 @pytest.mark.asyncio
 async def test_c4_policy_timeout_remains_fail_closed_without_retry(fixture, caplog):
-    fixture.pool.fail_at = {2}
+    fixture.pool.fail_at = {2 + lease("cloud")}
     assert await save(fixture) is None
     assert fixture.uploads == fixture.conn.inserts == fixture.conn.links == []
     assert fixture.clock.sleeps == []
@@ -307,7 +333,7 @@ async def test_c4_policy_timeout_remains_fail_closed_without_retry(fixture, capl
 @pytest.mark.asyncio
 async def test_c4_orphan_check_retries_admission_without_replaying_insert(fixture):
     fixture.conn.insert_error = OSError("Synthetic rejected INSERT")
-    fixture.pool.fail_at = {6}
+    fixture.pool.fail_at = {6 + lease("cloud")}
     assert await save(fixture) is None
     assert len(fixture.clock.sleeps) == 1
     assert len(fixture.uploads) == len(fixture.conn.inserts) == 1
@@ -324,7 +350,7 @@ async def test_c4_upload_duration_does_not_consume_acquisition_budget(fixture):
         return original_upload(*args, **kwargs)
 
     fixture.service._s3.upload = upload
-    fixture.pool.fail_at = {5}
+    fixture.pool.fail_at = {5 + lease("cloud")}
     assert await save(fixture) == str(RECORDING)
     assert len(fixture.clock.sleeps) == 1
     assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == 1
@@ -367,17 +393,23 @@ async def test_c4_retry_preserves_local_disk_failure_record(fixture, monkeypatch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("country", "disclosure", "allowed"),
-    [("PK", None, True), ("GB", None, False), (None, None, False), ("GB", "spoken", True)],
+    ("country", "disclosure", "notice_state"),
+    [
+        ("PK", None, "not_required"), ("GB", None, "unconfirmed"),
+        (None, None, "unconfirmed"), ("GB", "spoken", "delivered"),
+    ],
 )
 async def test_c4_retry_preserves_recorded_callee_country_notice_gate(
-    fixture, country, disclosure, allowed,
+    fixture, country, disclosure, notice_state,
 ):
     policy.clear_disclosure_state(CALL)
     policy.record_callee_country(country, CALL)
     if disclosure:
         policy.record_disclosure_state(disclosure, CALL)
     fixture.pool.fail_at = {1}
-    assert await save(fixture) == (str(RECORDING) if allowed else None)
+    # Owner decision, 18 November 2026: every case is kept; the row says whether
+    # the notice was owed and proven.
+    assert await save(fixture) == str(RECORDING)
     assert len(fixture.clock.sleeps) == 1
-    assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == int(allowed)
+    assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == 1
+    assert fixture.conn.inserts[0][-2] == notice_state

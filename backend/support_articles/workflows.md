@@ -16,8 +16,7 @@ For a new outbound campaign:
 14. Launch the campaign.
 15. Monitor the Dashboard and Analytics.
 16. Review Call History and recordings.
-17. Clear follow-ups in Assistant.
-18. Improve guidance/knowledge based on real calls.
+17. Improve guidance/knowledge based on real calls.
 
 For a new inbound agent:
 

@@ -9,6 +9,7 @@ import {
     CallPartiesPanel,
     InboundConsentStatePanel,
     InboundRouteSnapshot,
+    RecordingNotes,
     TransferLegsPanel,
 } from "@/components/calls/call-panels";
 import type { TransferLeg } from "@/lib/dashboard-api";
@@ -247,4 +248,20 @@ test("the consent and media panel renders the fields the server sent, capability
     assert.ok(screen.getByText("admitted"));
     assert.ok(screen.getByText("granted"));
     assert.ok(screen.getByText("within business hours"));
+});
+
+test("recording notes show the three plain lines", () => {
+    render(<RecordingNotes recordingNotice="unconfirmed" recordingTransferPart="missing" />);
+    assert.ok(screen.getByText("The recording notice could not be confirmed on this call."));
+    assert.ok(screen.getByText("The conversation after the transfer was not recorded."));
+    assert.equal(screen.queryByText("Includes the conversation after the transfer."), null);
+    cleanup();
+    render(<RecordingNotes recordingNotice="delivered" recordingTransferPart="included" />);
+    assert.ok(screen.getByText("Includes the conversation after the transfer."));
+    assert.equal(screen.queryByText("The recording notice could not be confirmed on this call."), null);
+});
+
+test("recording notes add nothing when both values are absent", () => {
+    const { container } = render(<RecordingNotes recordingNotice={null} />);
+    assert.equal(container.innerHTML, "");
 });

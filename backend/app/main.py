@@ -652,6 +652,20 @@ async def lifespan(app: FastAPI):
     from app.core.process_role import telephony_enabled
 
     _telephony_enabled = telephony_enabled()
+
+    # Durable recording spool: retry pending call recordings. Only the process
+    # that owns calls runs it; it stops with the shared listener stop-event.
+    if _telephony_enabled:
+        from app.domain.services.telephony.recording import recording_spool_loop
+
+        app.state.redis_listener_tasks.append(
+            asyncio.create_task(recording_spool_loop(app.state.redis_listener_stop))
+        )
+        from app.domain.services.recording_checkpoint import recording_checkpoint_loop
+
+        app.state.redis_listener_tasks.append(
+            asyncio.create_task(recording_checkpoint_loop(app.state.redis_listener_stop))
+        )
     _is_owner = False
     if _telephony_enabled:
         try:

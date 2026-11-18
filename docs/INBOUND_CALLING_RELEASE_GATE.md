@@ -36,7 +36,7 @@ The safe default remains closed at every layer:
 - non-Asterisk production adapter: rejected
 - non-Redis or unverifiable telephony ownership: rejected
 - unavailable or errored Redis global-concurrency state: rejected for inbound admission
-- absent or unreadable recording policy: recording remains OFF
+- absent or unreadable recording policy: recording remains OFF for inbound calls (the outbound default changed on 18 November 2026; inbound did not)
 - controlled inbound transfer: production declaration remains code-owned OFF;
   a proof-only staging path additionally requires one exact UUID-valid
   tenant/config allowlist plus the independent platform switch

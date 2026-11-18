@@ -24,7 +24,7 @@ A second step at sign-in, from an authenticator app. Enable it from this page.
 
 ### Tenant-wide security
 
-Administrators also see **Tenant-wide security**: **Audit activity** (who changed what, and when), **Audit and access** (security events and access review), **API keys and tokens** and **Voice security**. The last two currently state that they are not available here.
+Administrators also see **Tenant-wide security**: **Audit activity** (who changed what, and when) and **Audit and access** (security events and access review).
 
 ### Data retention and recordings
 
@@ -44,6 +44,7 @@ Use the Profile tab to review or update information such as:
 
 - Name
 - Business/organization name
+- Timezone
 - Account/tenant information
 
 ![The profile settings, showing name and business details](/docs/settings-01-profile.webp)

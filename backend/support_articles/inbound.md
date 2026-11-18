@@ -4,7 +4,7 @@ Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound c
 
 ## Typical setup flow
 
-1. Open **Inbound**.
+1. Open **Inbound Campaigns**.
 2. Create or select an inbound agent/campaign.
 3. Choose the AI role, such as receptionist or customer support.
 4. Configure the greeting and objective.

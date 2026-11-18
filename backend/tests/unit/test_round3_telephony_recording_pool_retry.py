@@ -19,6 +19,7 @@ PBX = "synthetic-pbx-recording-retry"
 @pytest.fixture
 def fixture(service_fixture, monkeypatch):
     fx = service_fixture
+    monkeypatch.setenv("RECORDING_SPOOL_DIR", str(fx.directory / "spool"))
     fx.lookup_rows = True
     fx.lookup_queries = []
     fx.lookup_error = None
@@ -88,7 +89,9 @@ async def test_c4_upstream_timeout_recovers_original_call_and_saves_and_links(fi
     assert fixture.lookup_queries == [(PBX, UUID(TENANT))]
     assert fixture.stub_inserts == []  # a timeout is not proof of a missing calls row
     assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == 1
-    assert fixture.clears == [(CALL, fixture.clock.now)]
+    # The audio is on disk before any database access, so the in-memory copy is
+    # freed at capture time (clock 0), not after the retries.
+    assert fixture.clears == [(CALL, 0)]
 
 
 @pytest.mark.asyncio
@@ -105,31 +108,43 @@ async def test_c4_stub_acquisition_timeout_retries_without_repeating_stub_write(
 async def test_c4_upstream_and_service_share_the_same_minute_budget(fixture, caplog):
     fixture.pool.fail_at = {1, 2, 3, 9, 10, 11}
     await telephony._save_call_recording(fixture.voice, PBX)
-    assert 50 <= fixture.clock.now <= 60.01
-    assert len(fixture.uploads) == 1
+    assert fixture.clock.now <= 60.01  # one shared budget, never reset between steps
+    assert fixture.uploads == []  # policy unreadable: nothing is stored, nothing lost
     assert fixture.conn.inserts == fixture.conn.links == []
     assert fixture.deletes == []
-    assert "recording_db_pool_retry_exhausted" in caplog.text
+    assert "recording_policy_lookup_failed" in caplog.text
+    from app.domain.services import recording_spool as spool
+    [pending] = spool.list_entries()
+    assert (pending.attempts, pending.last_error) == (1, "policy_unavailable")
 
 
 @pytest.mark.asyncio
-async def test_c4_upstream_exhaustion_waits_with_backoff_then_logs_and_discards(fixture, caplog):
+async def test_c4_upstream_exhaustion_waits_with_backoff_then_logs_and_keeps_pending(fixture, caplog):
     fixture.pool.fail_from = 1
     await telephony._save_call_recording(fixture.voice, PBX)
     assert 50 <= fixture.clock.now <= 60.01
     assert fixture.clock.sleeps
     assert fixture.uploads == fixture.conn.inserts == fixture.stub_inserts == []
-    assert fixture.clears == [(CALL, fixture.clock.now)]
+    assert fixture.clears == [(CALL, 0)]
     assert any(item.levelname == "ERROR" and PBX in item.message for item in caplog.records)
+    from app.domain.services import recording_spool as spool
+    pending = spool.list_entries()
+    assert [(e.attempts, e.last_error) for e in pending] == [(1, "call_lookup_failed")]
 
 
 @pytest.mark.asyncio
-async def test_c4_upstream_query_timeout_keeps_existing_fallback_without_retry(fixture):
+async def test_c4_upstream_query_timeout_keeps_recording_pending_without_stub(fixture):
+    # A failed lookup is not proof of a missing calls row: no stub is written,
+    # the audio stays in the spool for a later retry.
     fixture.lookup_error = TimeoutError("Synthetic lookup query timeout")
     await telephony._save_call_recording(fixture.voice, PBX)
-    assert len(fixture.lookup_queries) == len(fixture.stub_inserts) == 1
+    assert len(fixture.lookup_queries) == 1
+    assert fixture.stub_inserts == []
     assert fixture.clock.sleeps == []
-    assert len(fixture.uploads) == len(fixture.conn.inserts) == len(fixture.conn.links) == 1
+    assert fixture.uploads == fixture.conn.inserts == []
+    from app.domain.services import recording_spool as spool
+    pending = spool.list_entries()
+    assert [(e.attempts, e.last_error) for e in pending] == [(1, "call_lookup_failed")]
 
 
 @pytest.mark.asyncio

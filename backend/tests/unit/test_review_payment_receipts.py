@@ -46,6 +46,8 @@ class Conn:
             return True
         if "to_regclass('public.paypal_webhook_events')" in sql:  # healthwatch's probe: no PayPal table here
             return False
+        if "information_schema.columns" in sql:  # healthwatch's recording-columns probe
+            return 0
         if "state='needs_review'" in sql and "count(*)" in sql:  # healthwatch's exact query
             return sum(1 for r in self.s.rows.values() if r["state"] == "needs_review")
         raise AssertionError(sql)

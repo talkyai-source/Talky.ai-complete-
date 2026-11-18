@@ -73,7 +73,6 @@ async def invoke(fixture, entry, tenant=TENANT):
     "failure",
     [
         "disabled",
-        "disclosure-failed",
         "policy-unavailable",
         "foreign-call",
         "binding-unavailable",
@@ -87,11 +86,6 @@ async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, ent
             False, False, None, None, 90, "tenant_policy_disabled"
         )
         policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
-    elif failure == "disclosure-failed":
-        fixture.decide.return_value = policy.RecordingDecision(
-            True, True, "notice", None, 90, "two_party"
-        )
-        policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
     elif failure == "policy-unavailable":
         fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
     elif failure == "foreign-call":
@@ -106,6 +100,43 @@ async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, ent
     fixture.s3.upload.assert_not_called()
     fixture.legacy_upload.assert_not_called()
     fixture.service._insert_recording_record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+async def test_failed_notice_outbound_is_kept_and_marked_unconfirmed(fixture, entry):
+    # Owner decision, 18 November 2026: a missing/failed notice receipt no
+    # longer discards an outbound recording; the row says "unconfirmed".
+    fixture.decide.return_value = policy.RecordingDecision(
+        True, True, "notice", None, 90, "two_party"
+    )
+    policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+    assert await invoke(fixture, entry)
+    if entry != "legacy":
+        fixture.service._insert_recording_record.assert_awaited_once()
+        assert fixture.service._insert_recording_record.await_args.kwargs["notice_state"] == "unconfirmed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entry", ["cloud", "local"])
+async def test_failed_notice_inbound_strict_notice_still_refuses(fixture, entry):
+    fixture.decide.return_value = policy.RecordingDecision(
+        True, True, "notice", None, 90, "two_party"
+    )
+    policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+    service = fixture.service
+    if entry == "local":
+        outcome = await service._save_local_outcome(
+            CALL, fixture.buffer, TENANT, CAMPAIGN, strict_notice=True
+        )
+    else:
+        outcome = await service.save_and_link_outcome(
+            CALL, fixture.buffer, TENANT, CAMPAIGN, strict_notice=True
+        )
+    assert (outcome.status, outcome.reason) == (recording.SAVE_REFUSED, "notice_unconfirmed")
+    assert not list(fixture.directory.rglob("*.wav"))
+    fixture.s3.upload.assert_not_called()
+    service._insert_recording_record.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -231,7 +262,10 @@ async def test_teardown_database_failure_never_creates_disk_only_orphan(fixture,
     policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
     fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "disabled")
     await _save_call_recording(voice, "synthetic-pbx")
-    assert not list(fixture.directory.rglob("*.wav"))
+    # No audio reaches recording storage; the only copy is the durable pending
+    # folder (<recordings dir>/.pending) until the database is back.
+    assert not [p for p in fixture.directory.rglob("*.wav") if ".pending" not in p.parts]
+    assert len(list((fixture.directory / ".pending").glob("*.wav"))) == 1
     fixture.s3.upload.assert_not_called()
     fixture.service._insert_recording_record.assert_not_awaited()
     gateway.clear_recording_buffer.assert_called_once_with(CALL)

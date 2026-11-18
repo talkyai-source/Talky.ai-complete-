@@ -78,13 +78,14 @@ _BASE_ROW = {
 
 
 @pytest.mark.asyncio
-async def test_missing_row_safe_default():
+async def test_missing_row_records_with_the_spoken_notice():
+    # Owner decision, 18 November 2026: no saved policy = record + speak notice.
     svc = RecordingPolicyService(_FakePool(None))
     decision = await svc.decide(tenant_id="11111111-1111-4111-8111-111111111111")
-    assert decision.should_record is False
-    assert decision.announcement_required is False
+    assert decision.should_record is True
+    assert decision.announcement_required is True
     assert decision.announcement_text is None
-    assert decision.reason == "tenant_policy_absent_recording_off"
+    assert decision.reason == "tenant_policy_absent_default_announce"
 
 
 @pytest.mark.asyncio
@@ -235,15 +236,17 @@ async def test_two_party_unknown_country_defaults_to_announce():
 
 
 @pytest.mark.asyncio
-async def test_db_failure_falls_back_to_safe_default():
+async def test_db_failure_speaks_the_notice_and_flags_the_save_for_retry():
     class BrokenPool:
         def acquire(self):
             raise RuntimeError("db down")
     svc = RecordingPolicyService(BrokenPool())
     decision = await svc.decide(tenant_id="11111111-1111-4111-8111-111111111111")
-    assert decision.should_record is False
-    assert decision.announcement_required is False
-    assert decision.reason == "recording_policy_lookup_failed_recording_off"
+    assert decision.should_record is True
+    assert decision.announcement_required is True
+    assert decision.reason == "recording_policy_lookup_failed"
+    from app.domain.services.recording_policy_service import POLICY_LOOKUP_FAILED_REASON
+    assert decision.reason == POLICY_LOOKUP_FAILED_REASON
 
 
 @pytest.mark.asyncio

@@ -470,26 +470,45 @@ def _buffer():
     return buf
 
 
-async def _save(decision):
+async def _save(decision, strict_notice=False):
     s3 = _FakeS3()
+    s3.notice_states = []
     svc = RecordingService(db_pool=_FakeDbPool(), s3_client=s3)
+    real_insert = svc._insert_recording_record
+
+    async def spy(**kwargs):
+        s3.notice_states.append(kwargs.get("notice_state"))
+        return await real_insert(**kwargs)
+
+    svc._insert_recording_record = spy
     with patch.object(
         rps.RecordingPolicyService, "decide", new=AsyncMock(return_value=decision)
     ):
-        result = await svc.save_and_link(
+        outcome = await svc.save_and_link_outcome(
             call_id=CALL_UUID,
             buffer=_buffer(),
             tenant_id=TENANT,
             campaign_id="33333333-3333-3333-3333-333333333333",
+            strict_notice=strict_notice,
         )
-    return result, s3
+    return outcome.recording_id, s3
 
 
 @pytest.mark.asyncio
-async def test_recording_suppressed_when_required_notice_not_delivered():
+async def test_outbound_recording_kept_and_marked_when_required_notice_not_delivered():
+    # Owner decision, 18 November 2026: a missing receipt no longer discards.
     result, s3 = await _save(_ANNOUNCE)
 
-    assert result is None, "audio must not be retained without the notice"
+    assert result is not None, "an outbound recording is kept without the receipt"
+    assert len(s3.uploads) == 1
+    assert s3.notice_states == ["unconfirmed"], "and the row says the notice is unconfirmed"
+
+
+@pytest.mark.asyncio
+async def test_inbound_recording_still_suppressed_when_required_notice_not_delivered():
+    result, s3 = await _save(_ANNOUNCE, strict_notice=True)
+
+    assert result is None, "inbound keeps the strict rule"
     assert s3.uploads == [], "nothing may reach storage"
 
 
@@ -500,6 +519,7 @@ async def test_recording_retained_when_notice_was_spoken():
 
     assert result is not None
     assert len(s3.uploads) == 1
+    assert s3.notice_states == ["delivered"]
 
 
 @pytest.mark.asyncio
@@ -512,19 +532,39 @@ async def test_recording_retained_when_no_notice_required():
 
     assert result is not None
     assert len(s3.uploads) == 1
+    assert s3.notice_states == ["not_required"]
 
 
 @pytest.mark.asyncio
-async def test_local_save_blocked_after_known_disclosure_failure():
+async def test_local_save_follows_the_notice_rule_after_known_disclosure_failure(tmp_path, monkeypatch):
     """The teardown fallback calls _save_local directly, bypassing
-    save_and_link's gate."""
+    save_and_link's gate: it applies the same rule. Outbound is kept (marked
+    unconfirmed); inbound (strict_notice) is refused."""
+    monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
     record_disclosure_state(DISCLOSURE_FAILED, CALL_UUID)
     svc = RecordingService(db_pool=_FakeDbPool(), s3_client=_FakeS3())
+    states = []
+    real_insert = svc._insert_recording_record
 
-    result = await svc._save_local(
-        call_id=CALL_UUID, buffer=_buffer(), tenant_id=TENANT, campaign_id="c1",
-    )
-    assert result is None
+    async def spy(**kwargs):
+        states.append(kwargs.get("notice_state"))
+        return await real_insert(**kwargs)
+
+    svc._insert_recording_record = spy
+    with patch.object(
+        rps.RecordingPolicyService, "decide", new=AsyncMock(return_value=_ANNOUNCE)
+    ):
+        strict = await svc._save_local_outcome(
+            call_id=CALL_UUID, buffer=_buffer(), tenant_id=TENANT, campaign_id="c1",
+            strict_notice=True,
+        )
+        assert strict.status == "refused" and strict.reason == "notice_unconfirmed"
+        assert states == []
+        result = await svc._save_local(
+            call_id=CALL_UUID, buffer=_buffer(), tenant_id=TENANT, campaign_id="c1",
+        )
+    assert result is not None
+    assert states == ["unconfirmed"]
 
 
 # ---------------------------------------------------------------------------
@@ -546,6 +586,12 @@ class _DisabledRowConn:
 
     async def __aexit__(self, *_):
         return False
+
+    def transaction(self):
+        return _FakeTxnCtx()
+
+    async def execute(self, *a, **k):
+        return None
 
     async def fetchrow(self, *a, **k):
         return {
@@ -583,6 +629,7 @@ async def test_disabled_policy_turns_off_both_recording_and_announcement():
         tenant_id="22222222-2222-4222-8222-222222222222"
     )
 
+    assert decision.reason == "tenant_policy_disabled", "the saved row was actually read"
     assert decision.should_record is False
     assert decision.announcement_required is False
     assert decision.announcement_text is None
@@ -630,10 +677,11 @@ async def test_two_party_default_still_announces_and_records():
 
 
 @pytest.mark.asyncio
-async def test_partial_interrupted_notice_never_marks_ledger_spoken_or_retains():
+async def test_partial_interrupted_notice_never_marks_ledger_spoken_and_is_kept_unconfirmed():
     """A notice cut short by barge-in must read as FAILED, never SPOKEN —
-    and that must propagate all the way to save_and_link refusing the
-    upload, not just to the ledger state in isolation. This is the ledger
+    and that must propagate to the saved row: the outbound recording is kept
+    (owner decision, 18 November 2026) but marked `unconfirmed`, never
+    `delivered`; inbound (strict_notice) still refuses it. This is the ledger
     honesty guarantee the disclosure-retry fix (agent_first.py) depends
     on: an attempt that didn't finish must never be reported as delivered
     just to keep the recording."""
@@ -643,7 +691,11 @@ async def test_partial_interrupted_notice_never_marks_ledger_spoken_or_retains()
     assert get_disclosure_state(CALL_UUID) != DISCLOSURE_SPOKEN
 
     result, s3 = await _save(_ANNOUNCE)
-    assert result is None, "a call whose notice never finished must not be retained"
+    assert result is not None, "an outbound call whose notice never finished is kept"
+    assert s3.notice_states == ["unconfirmed"]
+
+    result, s3 = await _save(_ANNOUNCE, strict_notice=True)
+    assert result is None, "inbound still refuses it"
     assert s3.uploads == []
 
 
@@ -718,8 +770,9 @@ def test_ordinary_notice_text_is_left_alone():
 
 
 @pytest.mark.asyncio
-async def test_absent_policy_keeps_recording_off():
-    """A missing row is not legal consent and must never enable capture."""
+async def test_absent_policy_records_with_the_spoken_notice():
+    """Owner decision, 18 November 2026: no saved policy means the call is
+    recorded and the agent speaks the (minimum) notice."""
 
     class _NoRowConn:
         async def __aenter__(self):
@@ -744,10 +797,10 @@ async def test_absent_policy_keeps_recording_off():
             return _NoRowConn()
 
     decision = await rps.RecordingPolicyService(_NoRowPool()).decide(tenant_id="11111111-1111-4111-8111-111111111111")
-    assert decision.should_record is False
-    assert decision.announcement_required is False
-    assert spoken_disclosure_text(decision) is None
-    assert decision.reason == "tenant_policy_absent_recording_off"
+    assert decision.should_record is True
+    assert decision.announcement_required is True
+    assert spoken_disclosure_text(decision) == rps.MINIMUM_DISCLOSURE_TEXT
+    assert decision.reason == "tenant_policy_absent_default_announce"
 
 
 def test_dtmf_opt_out_detector_rejects_only_unsupported_promises():

@@ -42,6 +42,10 @@ import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
+from app.domain.services.telephony.transfer_recording import (
+    transfer_max_duration_seconds,
+    transfer_recording_allowed,
+)
 from app.domain.services.telephony.control_backend_identity import (
     ControlBackendIdentityError, asterisk_control_backend, control_backend_error,
 )
@@ -278,6 +282,11 @@ _HANGUP_CAUSE_RETENTION_S = 3600.0
 _DEFINITIVE_ANSWER_REJECTION_STATUSES = frozenset({400, 401, 403, 404, 405})
 
 
+def _transfer_recording_name(parent_id: str) -> str:
+    """Asterisk recording name for a transferred call's bridge recording."""
+    return ("talky-xferrec-" + re.sub(r"[^A-Za-z0-9_-]", "-", str(parent_id)))[:100]
+
+
 class _AriResponseError(RuntimeError):
     """A definitive non-success response received from ARI.
 
@@ -485,6 +494,10 @@ class AsteriskAdapter(CallControlAdapter):
         # no-answer, and timeout outcomes.
         self._transfers_by_parent: Dict[str, _AsteriskTransferLeg] = {}
         self._transfers_by_target: Dict[str, _AsteriskTransferLeg] = {}
+        # parent call id -> name of the live bridge recording started when the
+        # person answered. Deliberately NOT cleared by _drop_transfer_indexes:
+        # the stored file is collected after both legs are gone.
+        self._transfer_recordings: Dict[str, str] = {}
         # The generic telephony dashboard expects terminal attempts and
         # successes from the active adapter. Keep process-local cumulative
         # totals because completed Asterisk legs are deliberately removed from
@@ -1242,6 +1255,38 @@ class AsteriskAdapter(CallControlAdapter):
             except Exception:
                 payload = {}
             return (resp.status, payload) if return_status else payload
+
+    async def _ari_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        ok: tuple = (200,),
+        max_bytes: int = 400 * 1024 * 1024,
+    ) -> bytes:
+        """Like ``_ari`` but returns the raw response body (recording files)."""
+        if not self._session:
+            raise RuntimeError("AsteriskAdapter not connected")
+        async with self._session.request(
+            method,
+            self._ari_url(path),
+            timeout=aiohttp.ClientTimeout(total=60),
+        ) as resp:
+            if resp.status not in ok:
+                body = await resp.text()
+                raise _AriResponseError(method, path, resp.status, body)
+            length = resp.content_length
+            if length is not None and length > max_bytes:
+                raise ValueError("ari_body_too_large")
+            # A reply without a declared length is bounded while it is read.
+            chunks: list = []
+            total = 0
+            async for chunk in resp.content.iter_chunked(1 << 20):
+                total += len(chunk)
+                if total > max_bytes:
+                    raise ValueError("ari_body_too_large")
+                chunks.append(chunk)
+            return b"".join(chunks)
 
     async def list_active_channel_ids(self) -> Optional[set]:
         """Return the set of channel IDs Asterisk currently has up.
@@ -2388,6 +2433,11 @@ class AsteriskAdapter(CallControlAdapter):
                 )
                 leg.target_in_bridge = True
 
+            # Record the person's conversation (outbound legs only; inbound is
+            # unchanged). Never fails, delays (3 s cap) or undoes the handover.
+            if not leg.durable:
+                await self._start_transfer_recording(leg)
+
             # Provider Answer and the live human bridge must become durable
             # before any waiter can observe success. Without this ordering, a
             # process crash after set_result() can leave the child as
@@ -2476,6 +2526,142 @@ class AsteriskAdapter(CallControlAdapter):
                 ),
                 reason="transfer_handoff_failed",
             )
+
+    async def _start_transfer_recording(self, leg: _AsteriskTransferLeg) -> None:
+        if not transfer_recording_allowed(leg.parent_id):
+            # The tenant switched recording off: the person's conversation
+            # is not recorded either.
+            logger.info(
+                "transfer_recording_skipped parent=%s reason=recording_disabled",
+                leg.parent_id[:12],
+            )
+            return
+        name = _transfer_recording_name(leg.parent_id)
+        try:
+            await asyncio.wait_for(
+                self._ari(
+                    "POST",
+                    f"/bridges/{leg.bridge_id}/record",
+                    params={
+                        "name": name,
+                        "format": "wav",
+                        "ifExists": "overwrite",
+                        "beep": "false",
+                        "maxDurationSeconds": transfer_max_duration_seconds(),
+                    },
+                    ok=(200, 201),
+                ),
+                3.0,
+            )
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            # No answer in time is not a refusal: the phone system may have
+            # started recording anyway. Remember the name so the file is asked
+            # for at the end of the call; if it never started, that fetch finds
+            # nothing and the recording is marked as missing its transfer part.
+            self._transfer_recordings[leg.parent_id] = name
+            logger.error(
+                "transfer_recording_start_failed parent=%s err=TimeoutError",
+                leg.parent_id[:12],
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - a recording problem never undoes the handover
+            detail = type(exc).__name__
+            if isinstance(exc, _AriResponseError):
+                detail = f"{detail} status={exc.status}"
+            logger.error(
+                "transfer_recording_start_failed parent=%s err=%s",
+                leg.parent_id[:12],
+                detail,
+            )
+            return
+        if len(self._transfer_recordings) >= 1000:
+            for old in list(self._transfer_recordings)[:500]:
+                self._transfer_recordings.pop(old, None)
+        self._transfer_recordings[leg.parent_id] = name
+        logger.info("transfer_recording_started parent=%s", leg.parent_id[:12])
+
+    def transfer_recording_name(self, parent_id: str) -> Optional[str]:
+        """Name of the bridge recording started for this transferred call."""
+        try:
+            return self._transfer_recordings.get(parent_id)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def forget_transfer_recording(self, parent_id: str) -> None:
+        self._transfer_recordings.pop(parent_id, None)
+
+    async def transfer_recording_is_live(self, name: str) -> Optional[bool]:
+        """True while the phone system is still recording under this name,
+        False when it is not, None when it could not be asked."""
+        try:
+            status, _ = await self._ari(
+                "GET",
+                f"/recordings/live/{quote(name, safe='')}",
+                ok=(200, 404),
+                return_status=True,
+            )
+            return status == 200
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            return None
+
+    async def stop_transfer_recording(self, name: str) -> None:
+        try:
+            await self._ari(
+                "POST",
+                f"/recordings/live/{quote(name, safe='')}/stop",
+                ok=(200, 204, 404),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("transfer_recording_stop_failed err=%s", type(exc).__name__)
+
+    async def fetch_stored_recording(
+        self,
+        name: str,
+        *,
+        attempts: int = 8,
+        delay_s: float = 0.5,
+    ) -> Optional[bytes]:
+        """The stored WAV bytes, or None. 404/403 mean "not there yet"."""
+        path = f"/recordings/stored/{quote(name, safe='')}/file"
+        for attempt in range(max(1, attempts)):
+            try:
+                data = await self._ari_bytes("GET", path)
+                if data:
+                    return data
+            except asyncio.CancelledError:
+                raise
+            except _AriResponseError as exc:
+                if exc.status not in (403, 404):
+                    logger.warning(
+                        "transfer_recording_fetch_failed status=%s", exc.status
+                    )
+                    return None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "transfer_recording_fetch_failed err=%s", type(exc).__name__
+                )
+                return None
+            if attempt + 1 < max(1, attempts):
+                await asyncio.sleep(delay_s)
+        return None
+
+    async def delete_stored_recording(self, name: str) -> None:
+        try:
+            await self._ari(
+                "DELETE",
+                f"/recordings/stored/{quote(name, safe='')}",
+                ok=(200, 204, 404),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("transfer_recording_delete_failed err=%s", type(exc).__name__)
 
     def _mark_transfer_answered(self, leg: _AsteriskTransferLeg) -> None:
         """Atomically publish provider Answer before slow artifact teardown."""

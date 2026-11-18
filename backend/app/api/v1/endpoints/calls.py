@@ -300,6 +300,8 @@ class CallListItem(BaseModel):
     billing_status: Optional[str] = None
     billing_hold_reason: Optional[str] = None
     recording_status: Optional[str] = None
+    recording_notice: Optional[str] = None
+    recording_transfer_part: Optional[str] = None
     transcript_status: Optional[str] = None
     transcript_save_state: str = "unknown"
     media_state: Optional[str] = None
@@ -349,6 +351,8 @@ class CallDetail(BaseModel):
     billing_hold_reason: Optional[str] = None
     reserved_seconds: Optional[int] = None
     recording_status: Optional[str] = None
+    recording_notice: Optional[str] = None
+    recording_transfer_part: Optional[str] = None
     transcript_status: Optional[str] = None
     transcript_save_state: str = "unknown"
     media_state: Optional[str] = None
@@ -1535,6 +1539,14 @@ async def list_calls(
                            (SELECT r.status FROM recordings_s3 r
                              WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_status,
+                           (SELECT r.notice_state FROM recordings_s3 r
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
+                               AND r.status = 'uploaded'
+                             ORDER BY r.created_at DESC LIMIT 1) AS recording_notice,
+                           (SELECT r.transfer_part FROM recordings_s3 r
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
+                               AND r.status = 'uploaded'
+                             ORDER BY r.created_at DESC LIMIT 1) AS recording_transfer_part,
                            ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '')
                              OR EXISTS (SELECT 1 FROM transcripts tr
                                          WHERE tr.call_id = c.id
@@ -1616,6 +1628,8 @@ async def list_calls(
                     billing_status=row["billing_status"],
                     billing_hold_reason=row["billing_hold_reason"],
                     recording_status=_recording_state(row, snapshot),
+                    recording_notice=row.get("recording_notice"),
+                    recording_transfer_part=row.get("recording_transfer_part"),
                     transcript_status=_transcript_state(row),
                     transcript_save_state=row.get("transcript_save_state") or "unknown",
                     media_state=_media_state(row),
@@ -1761,6 +1775,16 @@ async def get_call(
                              WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1)
                                AS recording_status,
+                           (SELECT r.notice_state FROM recordings_s3 r
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
+                               AND r.status = 'uploaded'
+                             ORDER BY r.created_at DESC LIMIT 1)
+                               AS recording_notice,
+                           (SELECT r.transfer_part FROM recordings_s3 r
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
+                               AND r.status = 'uploaded'
+                             ORDER BY r.created_at DESC LIMIT 1)
+                               AS recording_transfer_part,
                            (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int
                              FROM inbound_usage_transactions u
                              WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id
@@ -1872,6 +1896,8 @@ async def get_call(
             billing_hold_reason=call.get("billing_hold_reason"),
             reserved_seconds=call.get("reserved_seconds"),
             recording_status=_recording_state(call, snapshot),
+            recording_notice=call.get("recording_notice"),
+            recording_transfer_part=call.get("recording_transfer_part"),
             transcript_status=_transcript_state(call),
             transcript_save_state=call.get("transcript_save_state") or "unknown",
             media_state=_media_state(call),

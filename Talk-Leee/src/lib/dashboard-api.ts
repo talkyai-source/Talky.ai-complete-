@@ -322,6 +322,8 @@ export interface Call {
      */
     billed_duration_seconds?: number | null;
     recording_status?: string | null;
+    recording_notice?: string | null;
+    recording_transfer_part?: string | null;
     transcript_status?: string | null;
     media_state?: string | null;
     /**
@@ -520,6 +522,8 @@ interface CallListItem {
     billing_status?: string | null;
     billing_hold_reason?: string | null;
     recording_status?: string | null;
+    recording_notice?: string | null;
+    recording_transfer_part?: string | null;
     transcript_status?: string | null;
     media_state?: string | null;
 }
@@ -860,6 +864,8 @@ class DashboardApi {
             billing_status: item.billing_status,
             billing_hold_reason: item.billing_hold_reason,
             recording_status: item.recording_status,
+            recording_notice: item.recording_notice,
+            recording_transfer_part: item.recording_transfer_part,
             transcript_status: item.transcript_status,
             media_state: item.media_state,
         }));
@@ -966,6 +972,8 @@ class DashboardApi {
                     ? response.billed_duration_seconds
                     : undefined,
             recording_status: response.recording_status,
+            recording_notice: response.recording_notice,
+            recording_transfer_part: response.recording_transfer_part,
             transcript_status: response.transcript_status,
             media_state: response.media_state,
             // Passed through untouched. A non-array (absent field, older

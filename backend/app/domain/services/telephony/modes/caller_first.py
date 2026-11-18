@@ -185,6 +185,7 @@ async def prepare_inbound_recording(voice_session) -> bool:
         from app.domain.services.recording_policy_service import (
             RecordingPolicyService,
             disclosure_delivered,
+            is_saved_policy,
         )
         from app.core.container import get_container
 
@@ -227,7 +228,10 @@ async def prepare_inbound_recording(voice_session) -> bool:
         decision = await RecordingPolicyService(db_pool).decide(
             tenant_id=str(tenant_id),
         )
-        if not decision.should_record:
+        # An inbound call is recorded only under a policy the tenant saved.
+        # The defaults for "nothing saved" and "could not be read" were opened
+        # for outbound calls only (18 November 2026); here both stay closed.
+        if not decision.should_record or not is_saved_policy(decision):
             await _set_inbound_consent_status(db_pool, durable_call_id, "not_required")
             voice_session._recording_allowed = False
             return False

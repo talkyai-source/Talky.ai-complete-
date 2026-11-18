@@ -45,7 +45,7 @@ Returning from the payment provider does not by itself activate a subscription. 
 
 ## Invoices
 
-1. Open **Billing & Logs** and select **Invoices**.
+1. Open **Billing & Logs** and select **Recent invoices**.
 2. Review the list of invoices.
 3. Select an invoice to open its detail page.
 4. Download or print the invoice where the action is available.

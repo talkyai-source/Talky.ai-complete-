@@ -441,7 +441,8 @@ class _LookupConn:
 
 
 @pytest.mark.asyncio
-async def test_recording_lookup_cannot_resolve_other_tenant_call():
+async def test_recording_lookup_cannot_resolve_other_tenant_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECORDING_SPOOL_DIR", str(tmp_path))
     from app.domain.services.telephony import recording as rec
 
     call_a = {"id": uuid4(), "tenant_id": ATTACKER, "campaign_id": None}  # older, other tenant
@@ -470,10 +471,12 @@ async def test_recording_lookup_cannot_resolve_other_tenant_call():
         def __init__(self, pool):
             pass
 
-        async def save_and_link(self, call_id, buffer, tenant_id, campaign_id):
+        async def save_and_link_outcome(self, call_id, buffer, tenant_id, campaign_id, **kwargs):
+            from app.domain.services.recording_service import SaveOutcome
+
             captured_save["call_id"] = call_id
             captured_save["tenant_id"] = tenant_id
-            return "rec-id"
+            return SaveOutcome("saved", "rec-id")
 
     container = MagicMock()
     container.is_initialized = True
@@ -497,7 +500,8 @@ async def test_recording_lookup_cannot_resolve_other_tenant_call():
 
 
 @pytest.mark.asyncio
-async def test_recording_lookup_same_tenant_resolves_its_own_call():
+async def test_recording_lookup_same_tenant_resolves_its_own_call(tmp_path, monkeypatch):
+    monkeypatch.setenv("RECORDING_SPOOL_DIR", str(tmp_path))
     from app.domain.services.telephony import recording as rec
 
     call = {"id": uuid4(), "tenant_id": OWNER, "campaign_id": None}
@@ -517,9 +521,11 @@ async def test_recording_lookup_same_tenant_resolves_its_own_call():
         def __init__(self, pool):
             pass
 
-        async def save_and_link(self, call_id, buffer, tenant_id, campaign_id):
+        async def save_and_link_outcome(self, call_id, buffer, tenant_id, campaign_id, **kwargs):
+            from app.domain.services.recording_service import SaveOutcome
+
             captured_save["call_id"] = call_id
-            return "rec-id"
+            return SaveOutcome("saved", "rec-id")
 
     container = MagicMock()
     container.is_initialized = True

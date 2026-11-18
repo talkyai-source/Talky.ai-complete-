@@ -9,7 +9,7 @@ import { renderWithQueryClient } from "@/test-utils/render";
 ensureDom();
 afterEach(() => cleanup());
 
-const ABSENT: RecordingPolicy = { configured: false, effect: "No policy configured: calls are NOT recorded until one is saved." };
+const ABSENT: RecordingPolicy = { configured: false, effect: "No policy saved: calls are recorded and the agent speaks a recording notice first." };
 const ONE_PARTY: RecordingPolicy = {
     configured: true,
     default_consent_mode: "one_party",
@@ -34,9 +34,9 @@ function render(policy: RecordingPolicy, canEdit = true) {
     return saved;
 }
 
-test("an absent policy is shown as recording OFF", () => {
+test("an absent policy is shown as recorded, with a spoken notice", () => {
     render(ABSENT);
-    assert.match(screen.getByTestId("recording-policy-effect").textContent ?? "", /NOT recorded/);
+    assert.match(screen.getByTestId("recording-policy-effect").textContent ?? "", /recorded[\s\S]*notice/);
     assert.equal((screen.getByTestId("recording-policy-save") as HTMLButtonElement).disabled, true);
 });
 

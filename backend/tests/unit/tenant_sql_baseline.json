@@ -1996,7 +1996,7 @@
       "id": "3e931bf97a43ccffec869282e31a38b5857e1236b5097869efef3bb3b6d91594",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._update_call_recording_url",
-      "line": 1109,
+      "line": 1270,
       "method": "execute",
       "tables": [
         "calls"
@@ -2074,10 +2074,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f88d062d6e1d4e2a0bbac996259cf062d175a1c5dc6dcb7fe054240150fbd183",
+      "id": "c79d0040d96b945da01dacbbff8fd111a248adbbb643806ebf9bc99cb8a1cdcb",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1202,
+      "line": 1206,
       "method": "fetch",
       "tables": [
         "calls",
@@ -2258,7 +2258,7 @@
       "id": "4535123439c117fa963d367c1efd7de0d8bb84ff7ec8526fa2000980251f875c",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._mark_upload_failed",
-      "line": 1209,
+      "line": 1370,
       "method": "execute",
       "tables": [
         "recordings_s3"
@@ -2560,10 +2560,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9de64c7348dfec3201bfd1d9e3344ae01b9803b9421bd9b488a3d1fb39e71ec3",
+      "id": "169e79c3676bfd8cdb3cf43a08f11e9a9d88dea1ee75f5ecac1f05767e35eddd",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 352,
+      "line": 353,
       "method": "fetch",
       "tables": [
         "calls",
@@ -2644,7 +2644,7 @@
       "id": "502d10c93e2571d0a6e0f1df533526a8f035419fed97ffed2258c65f4d642c2f",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "put_recording_policy",
-      "line": 279,
+      "line": 281,
       "method": "fetchrow",
       "tables": [
         "tenant_recording_policy"
@@ -3034,10 +3034,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6173be488ae339d776867a9422ad07e80992ad1d3d5db5e6e825d8360c8351d6",
+      "id": "d20a8fbbd1d8afcf1667f7e6e042e8c9832f0636f8eb1c0609b1cc62bcda6c8c",
       "file": "app/domain/services/telephony/recording.py",
-      "function": "_save_call_recording_with_budget",
-      "line": 338,
+      "function": "_process_locked",
+      "line": 489,
       "method": "execute",
       "tables": [
         "calls"
@@ -3069,7 +3069,7 @@
       "id": "632784ea0987d64439a4b2a3b5dde3626e9b48e7fb4bbace1fe17dea1e0ae3fa",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "_recording_storage_row",
-      "line": 560,
+      "line": 551,
       "method": "fetchrow",
       "tables": [
         "recordings_s3",
@@ -3740,7 +3740,7 @@
       "id": "763e98b964ecb1b8370605e159dd56fd770a870ba8e771f9cecd5b382edefc7f",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._discard_unregistered_object",
-      "line": 1135,
+      "line": 1296,
       "method": "fetchval",
       "tables": [
         "recordings_s3"
@@ -5980,10 +5980,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2ac553ce62390f9869d641306805143aaab7e3a0409d1508d5e42cc0418c61d8",
+      "id": "9144b53df49c1ebc4d5709649ffb753794ed480c8c1d03d1b94dd44061d7f9f1",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1074,
+      "line": 1078,
       "method": "fetch",
       "tables": [
         "calls",
@@ -6641,7 +6641,7 @@
       "id": "d370c718fa96490e5215192bcbecee39257ff66b2fa551b8e3b25d665444a6a1",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._resolve_call_uuid",
-      "line": 983,
+      "line": 1140,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -7055,10 +7055,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b2d26f8bfa232ac00b674e988b8fb5f3f2d48e75e994ea10a1356a2f48b9d581",
+      "id": "72ba0c887dcff28542c5b7a978eb194afc3865274f7630867d8f845d44fd3932",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 469,
+      "line": 473,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7494,10 +7494,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "75998af2ab2abe6e2641451f19269eb24425ba195b3b9ceddf0515efbb0506db",
+      "id": "b4c5b6bfa2c98ac667cddc9517a12f5b29c3c2119fd3368cf9de0a6af85f8e02",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 386,
+      "line": 387,
       "method": "fetchval",
       "tables": [
         "recordings_s3"
@@ -7727,10 +7727,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "89ce0826eafebd8f63c91ec17bbc738eb564eff4e78aa037dfeb8bf9408fe139",
+      "id": "690e57fac391f47d7a9fe6dee6d786a690344b859dc066707490f47dad726ed7",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 929,
+      "line": 933,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -8159,10 +8159,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "025746d9e89ce5606f10e299127707af8bceb53e572b018d6673bbfd6a731282",
+      "id": "6eea64baf50ceb3671ee02908334acebbbd4771122a1adeb2882f76ce8d106a1",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4155,
+      "line": 4341,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8174,10 +8174,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1ad660906e43b2236b3b88cfae49df6ca5e44bb8b8ee5a17ca719074e0cf678b",
+      "id": "77aeb54f1700b67ecc9db29abbfe3f514af5875bd3d8b5dd5443d21333aad1b5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5073,
+      "line": 5259,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8189,10 +8189,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "12dcea9f578970b63440c72a188b49aed6cda7271e43747a6e8a059bfd966cb4",
+      "id": "36b112125c1b8516c76f28802dc9718b54a35c7e6b41fd97df2bda2da793c5bc",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3163,
+      "line": 3349,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8204,10 +8204,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "4d4f5b6b40e6f832b96508272dcc930b528fa501d33126df5f2130760ebb444d",
+      "id": "7569c01c5e8aa8a0ba9b51fca597f4588ab3abd0bc7c53450f9abf71200b0de5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5246,
+      "line": 5432,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8219,10 +8219,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "2b4304dbd9b9a2c337a4770d181188f90805b8fd2c68f450cc85e9407caf02c3",
+      "id": "77802a22e2737633610cbf45403bfb170784ae8537c10d88123b11e1649b06c3",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3513,
+      "line": 3699,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8234,10 +8234,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "7080846e5c9b68403cd3967d396ff7defd6da6160a7c1cd7713419e0639bd3a7",
+      "id": "cf1d9f8d72e769877e3f2707869500442ed80beddb301096ecdaaf04fea51864",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 5957,
+      "line": 6143,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8426,7 +8426,7 @@
       "id": "1a86cd90f9bfa993f272674aa2c153a9e4dbbdf0e4a0a7724b836291350087b9",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "get_call",
-      "line": 1627,
+      "line": 1812,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8436,14 +8436,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1627.",
+      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1812.",
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "c2756c4af1ca4793abc5b0da52cb3c9129e78b41dcb53b2bab7f59f15cd278cb",
+      "id": "6dc2986989d36b058b55097ac651bff31f2be9339541c2994edb4c16cba007de",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "get_call",
-      "line": 1741,
+      "line": 1755,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8454,12 +8454,12 @@
         "recordings_s3",
         "transcripts"
       ],
-      "sql": "SELECT c.*, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT tr.full_text FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) ORDER BY tr.created_at DESC LIMIT 1) AS persisted_transcript, EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '') AS has_transcript, (SELECT r.id FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int FROM inbound_usage_transactions u WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id AND u.call_leg_id IS NULL AND u.transaction_type IN ('finalize','release','reverse') ORDER BY u.created_at DESC LIMIT 1) AS billed_duration_seconds, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, to_jsonb(c)->'summary_json' AS persisted_summary_json FROM calls c LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE c.id=$1 AND c.tenant_id=$2",
+      "sql": "SELECT c.*, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT tr.full_text FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) ORDER BY tr.created_at DESC LIMIT 1) AS persisted_transcript, EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id=c.id AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '') AS has_transcript, (SELECT r.id FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, (SELECT r.notice_state FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_notice, (SELECT r.transfer_part FROM recordings_s3 r WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_transfer_part, (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int FROM inbound_usage_transactions u WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id AND u.call_leg_id IS NULL AND u.transaction_type IN ('finalize','release','reverse') ORDER BY u.created_at DESC LIMIT 1) AS billed_duration_seconds, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, to_jsonb(c)->'summary_json' AS persisted_summary_json FROM calls c LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE c.id=$1 AND c.tenant_id=$2",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetchrow; app/api/v1/endpoints/calls.py:1582. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call.",
+      "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetchrow; app/api/v1/endpoints/calls.py:1582. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call. 18 Nov 2026: two more recordings_s3 sub-selects were added (notice_state and transfer_part of the newest uploaded row); each binds r.call_id to c.id and r.tenant_id to c.tenant_id like the existing recording sub-selects.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -11075,10 +11075,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "e9511602e15f80a6777ebc2ebb3047e2c6429aaae424d4320f8fd69e42db1a7f",
+      "id": "ab94d4d8fea15e3b7e5fe2463df2253cbca009b725dc73f7a747f2db5565f5c1",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1557,
+      "line": 1569,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11924,10 +11924,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "4cfe8c47ee5d25ed7a79ff7817300f20528345cf6ce0b13d00571c3e65e960d7",
+      "id": "10ba3bc2ffbf4b1b11ebf5d077b4c7d849140ddf2ad2f1c635755a2c9b0b95a4",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1511,
+      "line": 1515,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -11938,12 +11938,12 @@
         "recordings_s3",
         "transcripts"
       ],
-      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} {IfExp(test=Compare(left=Name(id='changed_since', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=Constant(value='ORDER BY c.updated_at DESC NULLS LAST, c.id DESC'), orelse=Constant(value='ORDER BY c.created_at DESC NULLS FIRST, c.id DESC'))} {IfExp(test=Name(id='cursor_mode', ctx=Load()), body=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1)]), orelse=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1), Constant(value=' OFFSET $'), FormattedValue(value=BinOp(left=Name(id='idx', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]))}",
+      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, ld.best_time_to_call AS best_time_to_call, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, (SELECT r.notice_state FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_notice, (SELECT r.transfer_part FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_transfer_part, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id LEFT JOIN leads ld ON ld.id = c.lead_id AND ld.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} {IfExp(test=Compare(left=Name(id='changed_since', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=Constant(value='ORDER BY c.updated_at DESC NULLS LAST, c.id DESC'), orelse=Constant(value='ORDER BY c.created_at DESC NULLS FIRST, c.id DESC'))} {IfExp(test=Name(id='cursor_mode', ctx=Load()), body=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1)]), orelse=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1), Constant(value=' OFFSET $'), FormattedValue(value=BinOp(left=Name(id='idx', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]))}",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "The conditions builder always starts with c.tenant_id=$1 from authenticated current_user. All tenant-bearing media/campaign/feedback projections bind c.tenant_id; nullable legacy transcripts require the owned call and NULL or matching tenant. _captured_contact_rows_sql binds details to c.tenant_id; tenantless call_legs derives ownership through c.id. The count uses the same mandatory conditions. Parent ran the real-projection route regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1361. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call. Day 5 (D5-6): the leads/issues filter and the captured-contact search read call_lead_details only through EXISTS subqueries bound by call_id = c.id AND tenant_id = c.tenant_id; every search term is one bound parameter; changed_since adds c.updated_at >= $n to the same conditions list that starts with c.tenant_id = $1.",
+      "reason": "The conditions builder always starts with c.tenant_id=$1 from authenticated current_user. All tenant-bearing media/campaign/feedback projections bind c.tenant_id; nullable legacy transcripts require the owned call and NULL or matching tenant. _captured_contact_rows_sql binds details to c.tenant_id; tenantless call_legs derives ownership through c.id. The count uses the same mandatory conditions. Parent ran the real-projection route regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1361. Day 5 (D5-22): the call's own lead is joined on ld.id = c.lead_id AND ld.tenant_id = c.tenant_id, so only a lead of the call's own tenant can supply best_time_to_call. Day 5 (D5-6): the leads/issues filter and the captured-contact search read call_lead_details only through EXISTS subqueries bound by call_id = c.id AND tenant_id = c.tenant_id; every search term is one bound parameter; changed_since adds c.updated_at >= $n to the same conditions list that starts with c.tenant_id = $1. 18 Nov 2026: two more recordings_s3 sub-selects were added (notice_state and transfer_part of the newest uploaded row); each binds r.call_id to c.id and r.tenant_id to c.tenant_id like the existing recording sub-selects.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -13050,6 +13050,21 @@
       "count": 1,
       "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1095.",
       "category": "system_discovery"
+    },
+    {
+      "id": "f07154e019e818e72ce9768ef4a873fb0133aee4bcc536d62eb64e6febabcaa4",
+      "file": "app/infrastructure/telephony/asterisk_adapter.py",
+      "function": "AsteriskAdapter.delete_stored_recording",
+      "line": 2656,
+      "method": "_ari",
+      "tables": [],
+      "sql": "DELETE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2656.",
+      "category": "not_database_sql"
     }
   ]
 }

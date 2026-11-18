@@ -47,7 +47,16 @@ from app.domain.services.telephony.inbound_overrides import apply_qualification_
 from app.domain.services.telephony.adapter_registry import get_adapter
 from app.domain.services.telephony.modes import resolve_first_speaker
 from app.domain.services.telephony.modes.agent_first import _send_outbound_greeting
-from app.domain.services.telephony.recording import _save_call_recording
+from app.domain.services.telephony.recording import (
+    _is_true_inbound_session,
+    _save_call_recording,
+    set_awaiting_finalizer,
+)
+from app.domain.services.telephony.transfer_recording import (
+    finalize_awaiting_entry,
+    finalize_transfer_entry,
+    transfer_max_duration_seconds,
+)
 from app.domain.services.telephony.termination_receipts import (
     persist_termination_receipt as _save_confirmed_termination_receipt,
 )
@@ -5307,6 +5316,25 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
     voice_session._transfer_connected = True
     voice_session._transfer_target_call_id = target_call_id
     voice_session._hangup_reason = "transferred"
+    if not _is_true_inbound_session(voice_session):
+        # The person's conversation is not bound by the AI call cap. The
+        # prepaid-balance deadline is a separate attribute and still applies.
+        _current = getattr(voice_session, "_max_call_duration_seconds", _SESSION_MAX_DURATION_S)
+        if isinstance(_current, bool) or not isinstance(_current, (int, float)) or _current <= 0:
+            _current = _SESSION_MAX_DURATION_S
+        if _current < _SESSION_MAX_DURATION_S:
+            # The account set its own, shorter maximum call length. It limits
+            # what a call may cost, so it stands for a transferred call too.
+            logger.info(
+                "transfer_call_limit_kept call=%s max_s=%d", call_id[:12], int(_current),
+            )
+        else:
+            voice_session._max_call_duration_seconds = max(int(_current), transfer_max_duration_seconds())
+            logger.info(
+                "transfer_call_limit_raised call=%s max_s=%d",
+                call_id[:12],
+                voice_session._max_call_duration_seconds,
+            )
     pipeline = getattr(voice_session, "pipeline", None)
     if pipeline is not None:
         # Same PBX-id vs. pipeline-call_id mismatch as _on_call_ended's
@@ -5347,8 +5375,21 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
         logger.warning("Transfer transcript persist failed for %s: %s", call_id[:12], exc)
 
     try:
-        await _save_call_recording(voice_session, call_id)
-        voice_session._recording_saved_at_transfer = True
+        if _is_true_inbound_session(voice_session):
+            await _save_call_recording(voice_session, call_id)
+            voice_session._recording_saved_at_transfer = True
+        else:
+            _adapter = get_adapter()
+            _name_fn = getattr(_adapter, "transfer_recording_name", None)
+            _rec_name = _name_fn(call_id) if callable(_name_fn) else None
+            await _save_call_recording(
+                voice_session,
+                call_id,
+                awaiting_transfer=True,
+                transfer_recording_name=_rec_name,
+            )
+            voice_session._recording_saved_at_transfer = True
+            voice_session._recording_awaiting_transfer_part = True
     except Exception as exc:
         logger.warning("Transfer recording save failed for %s: %s", call_id[:12], exc)
 
@@ -5357,6 +5398,59 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
         voice_session._transfer_media_quiesced = True
     except Exception as exc:
         logger.warning("Transfer media teardown failed for %s: %s", call_id[:12], exc)
+
+
+# Joins in flight; held here so they are not collected before they finish.
+_TRANSFER_FINALIZE_TASKS: set = set()
+
+
+async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> None:
+    """Start joining the person's conversation onto the parked agent recording.
+
+    Fetching the file, joining, encoding and saving can take many seconds for
+    a long conversation, so they run as their own task and never hold up the
+    rest of the teardown. If that task does not finish (shutdown, an error),
+    the entry stays awaiting and the retry loop finishes it. Never raises
+    (except cancellation).
+    """
+    try:
+        from app.domain.services.recording_spool import list_entries, write_entry
+        from app.domain.services.telephony.recording import _build_spool_entry
+
+        adapter = get_adapter()
+        entries = await asyncio.to_thread(list_entries)
+        session_id = str(getattr(voice_session, "call_id", ""))
+        awaiting = [e for e in entries if e.awaiting == "transfer_part"]
+        # This call's own entry. A PBX channel id can be used again by a later
+        # call, so it is only a fallback, and then the newest entry wins.
+        entry = next((e for e in awaiting if e.session_call_id == session_id), None)
+        if entry is None:
+            same_channel = [e for e in awaiting if e.pbx_call_id == call_id]
+            entry = same_channel[-1] if same_channel else None
+        if entry is None:
+            name_fn = getattr(adapter, "transfer_recording_name", None)
+            name = name_fn(call_id) if callable(name_fn) else None
+            if not name:
+                logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
+                return
+            # The agent's part held no audio, so nothing was parked, but the
+            # person's conversation was recorded: park an empty agent part so
+            # it is joined and saved like any other.
+            entry = _build_spool_entry(
+                voice_session, call_id, sample_rate=8000, duration=0.0,
+                awaiting_transfer=True, transfer_recording_name=name,
+            )
+            await asyncio.to_thread(write_entry, entry, b"")
+        task = asyncio.create_task(
+            finalize_transfer_entry(entry, adapter=adapter, call_ended=True),
+            name=f"transfer-recording-finalize:{call_id[:12]}",
+        )
+        _TRANSFER_FINALIZE_TASKS.add(task)
+        task.add_done_callback(_TRANSFER_FINALIZE_TASKS.discard)
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001
+        logger.warning("transfer_recording_finalize_deferred call=%s", call_id[:12])
 
 
 async def _on_transfer_cleanup_confirmed(
@@ -6073,6 +6167,8 @@ async def _on_call_ended(
                 await _save_call_recording(voice_session, call_id)
             except Exception as rec_err:
                 logger.warning(f"Recording save failed for {call_id[:12]}: {rec_err}")
+        elif getattr(voice_session, "_recording_awaiting_transfer_part", False):
+            await _finalize_transfer_recording_at_end(voice_session, call_id)
 
         if not getattr(voice_session, "_transfer_media_quiesced", False):
             try:
@@ -6441,3 +6537,8 @@ async def _on_ws_session_start(call_id: str) -> None:
             logger.info(f"Voice pipeline started for {call_id[:12]}")
     except Exception as exc:
         logger.error(f"WS session start error: {exc}", exc_info=True)
+
+
+# The spool retry loop calls this for transfer entries whose call has ended but
+# were not finalised at teardown (timeout, restart).
+set_awaiting_finalizer(finalize_awaiting_entry)
