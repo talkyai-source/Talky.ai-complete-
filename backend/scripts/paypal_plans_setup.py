@@ -40,7 +40,14 @@ _MAX_PAGES = 25
 
 
 def plan_matches(plan: Any, *, product_id: str, interval: str, value: str, currency: str) -> bool:
-    """Whether a PayPal plan has exactly the wanted terms."""
+    """Whether a PayPal plan has exactly the wanted terms and nothing that changes the charge.
+
+    The product grants a plan only for a payment of exactly the price, so a plan
+    with a setup fee or a tax line would take money and never grant anything, and
+    one with a fixed number of cycles would stop by itself. All three are refused.
+    """
+    from decimal import Decimal, InvalidOperation
+
     from app.domain.services.paypal_client import minor_units
 
     try:
@@ -59,11 +66,23 @@ def plan_matches(plan: Any, *, product_id: str, interval: str, value: str, curre
         count = frequency.get("interval_count")
         if isinstance(count, bool) or count != 1:
             return False
+        total = cycle.get("total_cycles")
+        if total is not None and (isinstance(total, bool) or total != 0):
+            return False  # 0 means it never runs out
         fixed = cycle["pricing_scheme"]["fixed_price"]
         if fixed.get("currency_code") != code:
             return False
-        return minor_units(fixed.get("value"), code) == minor_units(value, code)
-    except (AttributeError, KeyError, TypeError, ValueError):
+        if minor_units(fixed.get("value"), code) != minor_units(value, code):
+            return False
+        preferences = plan.get("payment_preferences")
+        fee = preferences.get("setup_fee") if preferences is not None else None
+        if fee is not None and minor_units(fee.get("value"), str(fee.get("currency_code")).upper()) != 0:
+            return False
+        taxes = plan.get("taxes")
+        if taxes is not None and Decimal(str(taxes.get("percentage", "0"))) != 0:
+            return False
+        return True
+    except (AttributeError, KeyError, TypeError, ValueError, InvalidOperation):
         return False
 
 
@@ -297,6 +316,10 @@ async def run(args, *, client, store) -> int:
     apply = bool(args.apply)
     if args.self_check and not apply:
         print("self-check needs --apply")
+        return 1
+    if args.enable == "on" and not args.self_check:
+        # Opening to customers needs the proof that the real PayPal answers as expected.
+        print("--enable on needs --self-check; nothing changed")
         return 1
     env = paypal_mode.paypal_env()
     mode = paypal_mode.paypal_provider_mode()

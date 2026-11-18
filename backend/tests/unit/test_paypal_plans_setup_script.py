@@ -204,6 +204,17 @@ def _mut(fn):
         (_mut(lambda p: p["billing_cycles"][0]["pricing_scheme"]["fixed_price"].update(value=99)), False),
         (_mut(lambda p: p["billing_cycles"][0]["pricing_scheme"].pop("fixed_price")), False),
         (_mut(lambda p: p["billing_cycles"][0].pop("frequency")), False),
+        # Nothing may change the charge or end the plan by itself.
+        (_mut(lambda p: p["billing_cycles"][0].update(total_cycles=12)), False),
+        (_mut(lambda p: p["billing_cycles"][0].pop("total_cycles")), True),
+        (_mut(lambda p: p.update(payment_preferences={"auto_bill_outstanding": True, "payment_failure_threshold": 2})), True),
+        (_mut(lambda p: p.update(payment_preferences={"setup_fee": {"currency_code": "USD", "value": "0.0"}})), True),
+        (_mut(lambda p: p.update(payment_preferences={"setup_fee": {"currency_code": "USD", "value": "5.00"}})), False),
+        (_mut(lambda p: p.update(payment_preferences={"setup_fee": {"value": "x"}})), False),
+        (_mut(lambda p: p.update(payment_preferences="x")), False),
+        (_mut(lambda p: p.update(taxes={"percentage": "0", "inclusive": False})), True),
+        (_mut(lambda p: p.update(taxes={"percentage": "7.5", "inclusive": False})), False),
+        (_mut(lambda p: p.update(taxes={"percentage": "x"})), False),
         ({}, False),
         ("x", False),
         (None, False),
@@ -220,14 +231,23 @@ def test_plan_matches_value_compared_in_minor_units():
 
 # ---- run ----------------------------------------------------------------------
 
+async def test_opening_to_customers_needs_the_self_check(settings_file, capsys):
+    client, store = FakeClient(), FakeStore(two_options())
+    for apply in (False, True):
+        assert await ps.run(args_for(settings_file, apply=apply, enable="on"), client=client, store=store) == 1
+    assert "--enable on needs --self-check; nothing changed" in capsys.readouterr().out
+    assert client.calls == [] and client.writes == [] and store.saved == []
+    assert "PAYPAL_PLANS_ENABLED" not in settings_file.read_text()
+
+
 async def test_dry_run_creates_and_writes_nothing(settings_file, capsys):
     store = FakeStore(two_options())
     client = FakeClient()
-    assert await ps.run(args_for(settings_file, enable="on"), client=client, store=store) == 0
+    assert await ps.run(args_for(settings_file, enable="team"), client=client, store=store) == 0
     out = capsys.readouterr().out
     assert "would create PayPal plan: Basic month 99.00 USD" in out
     assert "would create PayPal plan: Business year 990.00 USD" in out
-    assert "would set PAYPAL_PLANS_ENABLED=on" in out
+    assert "would set PAYPAL_PLANS_ENABLED=team" in out
     assert out.rstrip().endswith("dry run complete; nothing changed")
     assert client.writes == []
     assert store.saved == []
@@ -303,7 +323,7 @@ async def test_unsupported_currency_fails_and_blocks_enable(settings_file, capsy
     options = [option(OPT_BASIC, "Basic", "month", 9900), option(OPT_BIZ, "Business", "year", 99000, currency="jpy")]
     store = FakeStore(options)
     client = FakeClient()
-    assert await ps.run(args_for(settings_file, apply=True, enable="on"), client=client, store=store) == 1
+    assert await ps.run(args_for(settings_file, apply=True, enable="team"), client=client, store=store) == 1
     out = capsys.readouterr().out
     assert "skipped: currency not supported by PayPal here" in out
     assert "not enabling PayPal plans" in out
@@ -356,7 +376,7 @@ async def test_missing_settings_name_only_names(settings_file, capsys, monkeypat
 async def test_paypal_error_returns_1_and_enables_nothing(settings_file, capsys):
     store = FakeStore(two_options())
     client = FakeClient(fail_on="create_plan")
-    assert await ps.run(args_for(settings_file, apply=True, enable="on"), client=client, store=store) == 1
+    assert await ps.run(args_for(settings_file, apply=True, enable="team"), client=client, store=store) == 1
     assert "PayPal error: status=400 name=BAD issue=NOPE debug_id=dbg1" in capsys.readouterr().out
     assert "PAYPAL_PLANS_ENABLED" not in settings_file.read_text()
 
