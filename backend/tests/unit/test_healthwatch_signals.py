@@ -247,6 +247,8 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
             reads.append((self.tenant, query, args))
             if "to_regclass" in query:
                 return False
+            if "information_schema.columns" in query:
+                return 2
             assert "processed_webhook_events" in query and "needs_review" in query
             assert "event_payload" not in query
             return 2
@@ -262,6 +264,17 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
             assert "auth_password" not in query and "auth_username" not in query
             return [trunk(status="registered")]
 
+        @asynccontextmanager
+        async def transaction(self):
+            yield
+
+        async def fetchrow(self, query, *args):
+            reads.append((self.tenant, query, args))
+            assert self.tenant == TENANT and "tenant_id = $1::uuid" in query
+            if "FROM calls" in query:
+                return {"answered": 0, "mode": None}
+            return {"recorded": 0, "unconfirmed": 0, "transfer_missing": 0, "matched": 0}
+
     @asynccontextmanager
     async def acquire(pool, tenant_id, **kwargs):
         yield Connection(str(tenant_id) if tenant_id else None)
@@ -271,7 +284,10 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
     assert report["payments"]["status"] == "alert" and report["payments"]["needs_review"] == 2
     assert report["payments"]["paypal_needs_review"] == 0
     assert report["trunks"]["status"] == "ok"
-    assert len(reads) == 4  # payments, the PayPal table probe, tenants, one tenant's trunks
+    assert report["recordings"]["status"] == "ok"
+    # payments, the PayPal table probe, the recording-columns probe, tenants, one tenant's trunks,
+    # and that tenant's two recording statements
+    assert len(reads) == 7
 
 
 @pytest.mark.parametrize("legacy,paypal,status", [(0, 3, "alert"), (2, 3, "alert"), (0, 0, "ok")])

@@ -399,3 +399,20 @@ export function InboundConsentStatePanel({
         </section>
     );
 }
+
+/** Short plain notes under the recording: the notice state and the transfer part. */
+export function RecordingNotes({
+    recordingNotice,
+    recordingTransferPart,
+}: {
+    recordingNotice?: string | null;
+    recordingTransferPart?: string | null;
+}) {
+    return (
+        <>
+            {recordingNotice === "unconfirmed" ? <p className="text-xs text-muted-foreground">The recording notice could not be confirmed on this call.</p> : null}
+            {recordingTransferPart === "included" ? <p className="text-xs text-muted-foreground">Includes the conversation after the transfer.</p> : null}
+            {recordingTransferPart === "missing" ? <p className="text-xs text-muted-foreground">The conversation after the transfer was not recorded.</p> : null}
+        </>
+    );
+}

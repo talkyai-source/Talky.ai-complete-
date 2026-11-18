@@ -66,7 +66,8 @@ class ProjectionConnection:
             CREATE TABLE transcripts (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT,
                                       full_text TEXT, created_at TEXT);
             CREATE TABLE recordings_s3 (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT,
-                                       status TEXT, created_at TEXT);
+                                       status TEXT, created_at TEXT,
+                                       notice_state TEXT, transfer_part TEXT);
             CREATE TABLE call_feedback (id TEXT PRIMARY KEY, tenant_id TEXT, call_id TEXT);
         """)
         self.sql.execute("INSERT INTO calls (id, tenant_id, campaign_id, created_at, status, direction, phone_number) VALUES (?, ?, ?, ?, ?, ?, ?)", (
@@ -111,7 +112,9 @@ class ProjectionConnection:
             "SELECT camp.name FROM calls c LEFT JOIN campaigns camp ON " + join.group(1)
             + " WHERE c.id = ? AND c.tenant_id = ?", (call_id, tenant_id),
         ).fetchone()[0]
-        for field, selected in (("recording_id", r"r\.id"), ("recording_status", r"r\.status")):
+        for field, selected in (("recording_id", r"r\.id"), ("recording_status", r"r\.status"),
+                                ("recording_notice", r"r\.notice_state"),
+                                ("recording_transfer_part", r"r\.transfer_part")):
             row[field] = self._scalar("(" + subquery(query, selected) + ")", call_id, tenant_id)
         row["has_transcript"] = bool(self._scalar(
             "EXISTS (" + subquery(query, r"1\s+FROM\s+transcripts\s+tr") + ")", call_id, tenant_id,
@@ -238,7 +241,7 @@ async def test_legacy_null_tenant_transcript_does_not_grant_parent_access(projec
 
 @pytest.mark.parametrize("detail", [False, True])
 async def test_legacy_mismatched_recording_is_not_projected(projection_db, detail):
-    projection_db.sql.executemany("INSERT INTO recordings_s3 VALUES (?, ?, ?, ?, ?)", [
+    projection_db.sql.executemany("INSERT INTO recordings_s3 (id, tenant_id, call_id, status, created_at) VALUES (?, ?, ?, ?, ?)", [
         (OWN_RECORDING, OWNER, CALL, "uploaded", "2026-11-05"),
         (OTHER_RECORDING, OTHER, CALL, "uploaded", "2026-11-06"),
     ])
@@ -247,6 +250,29 @@ async def test_legacy_mismatched_recording_is_not_projected(projection_db, detai
     item = response.json() if detail else response.json()["items"][0]
     assert item["recording_id"] == OWN_RECORDING
     assert OTHER_RECORDING not in response.text
+
+
+@pytest.mark.parametrize("detail", [False, True])
+async def test_recording_notice_and_transfer_part_come_from_the_newest_uploaded_own_row(projection_db, detail):
+    projection_db.sql.executemany(
+        "INSERT INTO recordings_s3 (id, tenant_id, call_id, status, created_at, notice_state, transfer_part)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)", [
+            (OWN_RECORDING, OWNER, CALL, "uploaded", "2026-11-05", "delivered", "missing"),
+            (OTHER_RECORDING, OTHER, CALL, "uploaded", "2026-11-07", "unconfirmed", "included"),
+            ("failed-newer", OWNER, CALL, "failed", "2026-11-08", "unconfirmed", "included"),
+        ])
+    item = (lambda r: r.json() if detail else r.json()["items"][0])(await request(projection_db, detail=detail))
+    assert item["recording_notice"] == "delivered"
+    assert item["recording_transfer_part"] == "missing"
+
+
+@pytest.mark.parametrize("detail", [False, True])
+async def test_recording_notice_and_transfer_part_are_none_when_the_row_has_none(projection_db, detail):
+    projection_db.sql.execute(
+        "INSERT INTO recordings_s3 (id, tenant_id, call_id, status, created_at) VALUES (?, ?, ?, ?, ?)",
+        (OWN_RECORDING, OWNER, CALL, "uploaded", "2026-11-05"))
+    item = (lambda r: r.json() if detail else r.json()["items"][0])(await request(projection_db, detail=detail))
+    assert item["recording_notice"] is None and item["recording_transfer_part"] is None
 
 
 @pytest.mark.parametrize("detail", [False, True])
@@ -272,7 +298,7 @@ async def test_owning_tenant_keeps_its_media_and_campaign(projection_db, detail)
     projection_db.sql.execute("INSERT INTO transcripts VALUES (?, ?, ?, ?, ?)", (
         "own", OWNER, CALL, "Own transcript", "2026-11-06",
     ))
-    projection_db.sql.execute("INSERT INTO recordings_s3 VALUES (?, ?, ?, ?, ?)", (
+    projection_db.sql.execute("INSERT INTO recordings_s3 (id, tenant_id, call_id, status, created_at) VALUES (?, ?, ?, ?, ?)", (
         OWN_RECORDING, OWNER, CALL, "uploaded", "2026-11-06",
     ))
     projection_db.sql.execute("INSERT INTO call_feedback VALUES (?, ?, ?)", ("own-feedback", OWNER, CALL))

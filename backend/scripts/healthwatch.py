@@ -7,7 +7,7 @@ row, repairs the clock, or reads backup contents. Missing evidence is explicit.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import math
 import os
@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.api.v1.endpoints.health import _WORKER_HEARTBEAT_KEYS, read_worker_heartbeats
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services import recording_spool
 from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
 from app.infrastructure.metrics.email_delivery import ERRORS as EMAIL_ERRORS, read_email_outcome
 from app.infrastructure.metrics.provider_observations import read_recent
@@ -234,10 +235,53 @@ async def check_trunks(rows, redis, *, now):
         return dict(_UNAVAILABLE)
 
 
+# A recording that is not saved yet may wait this long before it counts as stuck;
+# one waiting for the transfer part of the call may wait much longer.
+_PENDING_STUCK_SECONDS = 900
+_PENDING_AWAITING_STUCK_SECONDS = 5400
+
+_CALLS_ANSWERED_SQL = """SELECT count(*) AS answered,
+    (SELECT default_consent_mode FROM tenant_recording_policy WHERE tenant_id = $1::uuid) AS mode
+    FROM calls
+    WHERE tenant_id = $1::uuid AND direction = 'outbound' AND answered_at <= now()
+      AND ended_at >= now() - interval '24 hours' AND ended_at <= now() - interval '15 minutes'
+      AND duration_seconds >= 5"""
+_RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.notice_state = 'unconfirmed') AS unconfirmed,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.transfer_part = 'missing') AS transfer_missing,
+    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.answered_at <= now()
+      AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
+      AND c.duration_seconds >= 5) AS matched
+    FROM recordings_s3 r JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
+    WHERE r.tenant_id = $1::uuid AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours'"""
+# Before migration 0103 the notice/transfer columns do not exist: same shape, zero counts.
+_RECORDINGS_OLD_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
+    0 AS unconfirmed, 0 AS transfer_missing,
+    count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.answered_at <= now()
+      AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
+      AND c.duration_seconds >= 5) AS matched
+    FROM recordings_s3 r JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
+    WHERE r.tenant_id = $1::uuid AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours'"""
+
+
+def _pending_stuck(now):
+    now = now or datetime.now(timezone.utc)
+    stuck = 0
+    for entry in recording_spool.list_entries():
+        created = datetime.fromisoformat(str(entry.created_at).replace("Z", "+00:00"))
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        limit = _PENDING_AWAITING_STUCK_SECONDS if entry.awaiting else _PENDING_STUCK_SECONDS
+        if (now - created).total_seconds() > limit:
+            stuck += 1
+    return stuck
+
+
 async def check_database(pool, redis, *, now, max_tenants=1000):
     if type(max_tenants) is not int or not 1 <= max_tenants <= 10000:
         raise ValueError("Invalid tenant inventory bound")
-    result = {"payments": dict(_UNAVAILABLE), "trunks": dict(_UNAVAILABLE)}
+    result = {"payments": dict(_UNAVAILABLE), "trunks": dict(_UNAVAILABLE),
+              "recordings": dict(_UNAVAILABLE)}
     try:
         async with asyncio.timeout(10):
             # Deliberate platform monitoring aggregates: payment receipts have
@@ -251,6 +295,9 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                         "SELECT count(*) FROM paypal_webhook_events WHERE state = 'needs_review' "
                         "OR (state IN ('failed', 'received') AND received_at < NOW() - INTERVAL '1 hour')")
                 count = (count or 0) + (paypal_count or 0)
+                notice_columns = await conn.fetchval(
+                    "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
+                    "AND table_name = 'recordings_s3' AND column_name IN ('notice_state', 'transfer_part')")
                 tenants = await conn.fetch("SELECT id FROM tenants ORDER BY id LIMIT $1", max_tenants+1)
             result["payments"] = {"status": "alert" if count else "ok", "needs_review": count,
                                 "paypal_needs_review": paypal_count or 0}
@@ -258,6 +305,9 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                 result["trunks"] = {"status": "unavailable", "reason": "tenant_limit_exceeded"}
                 return result
             rows = []
+            missing = unconfirmed = transfer_missing = recorded = 0
+            recordings_read = True
+            recordings_sql = _RECORDINGS_SQL if notice_columns == 2 else _RECORDINGS_OLD_SQL
             for tenant in tenants:
                 tenant_id = str(UUID(str(tenant["id"])))
                 async with acquire_with_tenant(pool, tenant_id, timeout=1) as conn:
@@ -268,6 +318,20 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                         live_registration_status,live_status_checked_at FROM tenant_sip_trunks
                         WHERE tenant_id=$1::uuid
                         ORDER BY id LIMIT $2""", tenant_id, _MAX_TRUNKS+1-len(rows))
+                    # Recording coverage: same tenant-scoped connection, two statements.
+                    # Inside a savepoint: a fault here reports the recording check
+                    # as unavailable and leaves the phone-line read above intact.
+                    try:
+                        async with conn.transaction():
+                            calls = await conn.fetchrow(_CALLS_ANSWERED_SQL, tenant_id)
+                            if calls["mode"] != "disabled":  # that tenant chose not to record
+                                stats = await conn.fetchrow(recordings_sql, tenant_id)
+                                missing += max(0, calls["answered"] - stats["matched"])
+                                unconfirmed += stats["unconfirmed"]
+                                transfer_missing += stats["transfer_missing"]
+                                recorded += stats["recorded"]
+                    except Exception:
+                        recordings_read = False
                 if any(str(row["tenant_id"]) != tenant_id for row in owned):
                     raise ValueError("Trunk ownership did not match")
                 rows.extend(dict(row) for row in owned)
@@ -275,6 +339,16 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                     result["trunks"] = {"status": "unavailable", "reason": "trunk_limit_exceeded"}
                     return result
             result["trunks"] = await check_trunks(rows, redis, now=now)
+            try:
+                pending = await asyncio.to_thread(_pending_stuck, now)
+            except Exception:
+                pending = None
+            alert = (missing > 0 or (pending or 0) > 0 or transfer_missing > 0
+                     or (unconfirmed >= 3 and unconfirmed * 2 >= recorded))
+            if recordings_read:
+                result["recordings"] = {"status": "alert" if alert else "ok", "missing": missing,
+                                        "pending_stuck": pending, "transfer_missing": transfer_missing,
+                                        "unconfirmed": unconfirmed, "recorded": recorded}
     except Exception:
         pass
     return result

@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth-context";
 import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
-import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, TransferLegsPanel } from "@/components/calls/call-panels";
+import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, RecordingNotes, TransferLegsPanel } from "@/components/calls/call-panels";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
 import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
@@ -442,6 +442,7 @@ export default function CallDetailPage() {
                                     </Button> : null}
                                 </div>
                                 {!permissionsSettled ? <p className="text-xs text-muted-foreground">Checking media permissions…</p> : !canPlayMedia ? <p className="text-xs text-muted-foreground">You do not have permission to play this recording.</p> : !canDownloadMedia ? <p className="text-xs text-muted-foreground">Playback is allowed; download requires a separate media permission.</p> : null}
+                                <RecordingNotes recordingNotice={call.recording_notice} recordingTransferPart={call.recording_transfer_part} />
                             </div>
                         </motion.div>
                     )}
