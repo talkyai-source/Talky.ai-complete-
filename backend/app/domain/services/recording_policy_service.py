@@ -84,6 +84,7 @@ class RecordingDecision:
 # minimum notice). These two decisions stay separate so operators can
 # distinguish an unconfigured tenant from a dependency incident.
 POLICY_LOOKUP_FAILED_REASON = "recording_policy_lookup_failed"
+POLICY_ABSENT_REASON = "tenant_policy_absent_default_announce"
 
 _ABSENT_POLICY_DEFAULT = RecordingDecision(
     should_record=True,
@@ -91,7 +92,7 @@ _ABSENT_POLICY_DEFAULT = RecordingDecision(
     announcement_text=None,
     opt_out_dtmf_digit=None,
     retention_days=90,
-    reason="tenant_policy_absent_default_announce",
+    reason=POLICY_ABSENT_REASON,
 )
 
 # On a live call the agent still speaks the notice. At save time this reason
@@ -340,6 +341,18 @@ def notice_state(decision: Any, *call_ids: Optional[str]) -> str:
     if disclosure_delivered(*call_ids):
         return NOTICE_DELIVERED
     return NOTICE_UNCONFIRMED
+
+
+def is_saved_policy(decision: Any) -> bool:
+    """True when the decision comes from a policy the tenant saved.
+
+    False for the two defaults (no saved policy; policy store unreadable).
+    Inbound calls record only under a saved policy, as before 18 November
+    2026: the defaults were opened for outbound calls only.
+    """
+    return getattr(decision, "reason", None) not in {
+        POLICY_ABSENT_REASON, POLICY_LOOKUP_FAILED_REASON,
+    }
 
 
 def notice_proof_required() -> bool:

@@ -264,6 +264,24 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
             tenant_id=tenant_id,
             callee_country_code=callee,
         )
+        if not decision.should_record:
+            # The tenant saved "disabled". Outbound buffers are open from the
+            # start of the media, so close them now: nothing of this call is
+            # held in memory, copied to disk or recorded after a transfer.
+            from app.domain.services.telephony.recording import (
+                _is_true_inbound_session as _is_inbound,
+            )
+
+            if not _is_inbound(voice_session):
+                voice_session._recording_refused_by_policy = True
+                _gateway = getattr(voice_session, "media_gateway", None)
+                _set_gate = getattr(_gateway, "set_recording_enabled", None)
+                if callable(_set_gate):
+                    _set_gate(call_id, False)
+                logger.info(
+                    "recording_disabled_by_policy call_id=%s reason=%s",
+                    call_id[:12], getattr(decision, "reason", "-"),
+                )
         pinned_override = getattr(
             voice_session, "_recording_disclosure_text_override", None
         )

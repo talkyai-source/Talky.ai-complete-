@@ -693,6 +693,7 @@ class RecordingService:
                 POLICY_LOOKUP_FAILED_REASON,
                 RecordingPolicyService,
                 get_callee_country,
+                is_saved_policy,
                 notice_proof_required,
                 notice_state,
             )
@@ -710,6 +711,13 @@ class RecordingService:
                     call_id, decision.reason,
                 )
                 return RetentionVerdict("refuse", None, decision.reason)
+            if strict_notice and not is_saved_policy(decision):
+                # Inbound: recorded only under a policy the tenant saved.
+                logger.info(
+                    "recording_retention_suppressed call=%s policy_reason=%s",
+                    call_id, decision.reason,
+                )
+                return RetentionVerdict("refuse", None, "saved_policy_required")
             state = notice_state(decision, call_id, str(row["id"]))
             if state == NOTICE_NOT_REQUIRED:
                 return RetentionVerdict("keep", state, "not_required")

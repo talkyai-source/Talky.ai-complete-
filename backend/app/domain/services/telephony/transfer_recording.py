@@ -21,12 +21,18 @@ from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
-_ENV_NAME = "TELEPHONY_TRANSFER_MAX_CALL_DURATION_S"
 _DEFAULT_S = 3600
 _MIN_S = 600
 _MAX_S = 14400
 _OUT_RATE = 8000
-_NO_ADAPTER_GRACE_S = 900.0
+# With no phone system to ask, an entry waits this long before its transfer
+# part is given up (the file, if any, is then left for the weekly clean-up).
+_NO_ADAPTER_GIVE_UP_S = 86400.0
+# A transfer part that could not be joined stays in the phone system's own
+# folder this many days, so a person can recover it, and is then removed.
+_LEFTOVER_PREFIX = "talky-xferrec-"
+_LEFTOVER_SWEEP_EVERY_S = 6 * 3600.0
+_last_leftover_sweep = 0.0
 # How many times the stored file is asked for before the transfer part is
 # given up as missing. The live path asks once at the end of the call; the
 # retry loop asks about once a minute after that.
@@ -38,7 +44,7 @@ _FINALIZING: set = set()
 
 def transfer_max_duration_seconds() -> int:
     """Longest a transferred call may run; read at call time, clamped 600..14400."""
-    raw = os.getenv(_ENV_NAME)
+    raw = os.getenv("TELEPHONY_TRANSFER_MAX_CALL_DURATION_S")
     if raw is None or not str(raw).strip():
         return _DEFAULT_S
     try:
@@ -173,10 +179,19 @@ async def _finalize_locked(entry, *, adapter: Any, voice_session: Any, call: str
         except ValueError:
             reason = "unreadable"
 
-    if not joined and reason in ("not_found", "no_adapter"):
-        # The phone system may still be writing the file, or could not be
-        # asked. Leave the entry awaiting and ask again, a few times,
-        # before the transfer part is given up as missing.
+    if not joined and reason == "no_adapter":
+        # The phone system cannot be asked. Nothing is given up for that
+        # until a whole day has passed; the entry simply stays awaiting.
+        age = _entry_age_s(entry)
+        if age is None or age < _NO_ADAPTER_GIVE_UP_S:
+            entry.last_error = "transfer_part_no_adapter"
+            entry.last_attempt_at = spool.utc_now_iso()
+            await asyncio.to_thread(spool.update_entry, entry)
+            return "retry"
+    if not joined and reason == "not_found":
+        # The phone system may still be writing the file. Leave the entry
+        # awaiting and ask again, a few times, before the transfer part is
+        # given up as missing.
         tries = int(getattr(entry, "attempts", 0) or 0) + 1
         if tries < _FETCH_TRIES:
             entry.attempts = tries
@@ -216,9 +231,16 @@ async def _finalize_locked(entry, *, adapter: Any, voice_session: Any, call: str
         if joined:
             # Only now: the pending folder holds the whole conversation.
             await adapter.delete_stored_recording(name)
-        # A part that was never joined stays in the phone system's own
-        # folder, so a person can still recover it.
+        else:
+            # A part that was not joined stays in the phone system's own
+            # folder so a person can recover it; the clean-up below removes
+            # it after a week.
+            logger.error(
+                "transfer_recording_left_in_phone_system call=%s name=%s reason=%s",
+                call, name, reason,
+            )
         adapter.forget_transfer_recording(entry.pbx_call_id)
+    await purge_old_transfer_parts()
 
     return await process_spool_entry(entry, wav_bytes=final_wav, voice_session=voice_session)
 
@@ -251,10 +273,6 @@ async def finalize_awaiting_entry(entry) -> None:
         if adapter is not None and not getattr(adapter, "connected", True):
             # The phone system cannot be asked right now: do not spend a try.
             adapter = None
-        if adapter is None:
-            age = _entry_age_s(entry)
-            if age is None or age < transfer_max_duration_seconds() + _NO_ADAPTER_GRACE_S:
-                return
         await finalize_transfer_entry(entry, adapter=adapter)
     except asyncio.CancelledError:
         raise
@@ -264,3 +282,74 @@ async def finalize_awaiting_entry(entry) -> None:
             str(getattr(entry, "pbx_call_id", ""))[:12],
             type(exc).__name__,
         )
+
+
+def transfer_recording_allowed(pbx_call_id: str) -> bool:
+    """Whether the conversation after a handover may be recorded for this call.
+
+    False only when the live call's tenant saved "disabled" (stamped on the
+    voice session when the notice decision was taken). Any doubt means yes:
+    the save decides again at the end, and a refused part is deleted.
+    """
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        session = _state().get_voice_session(pbx_call_id)
+        return not bool(getattr(session, "_recording_refused_by_policy", False))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _leftover_keep_seconds() -> float:
+    try:
+        days = float(os.getenv("RECORDING_UNJOINED_TRANSFER_KEEP_DAYS", "7"))
+    except (TypeError, ValueError):
+        days = 7.0
+    return max(1.0, days) * 86400.0
+
+
+def _purge_old_transfer_parts_sync(now: float) -> int:
+    """Remove transfer parts nobody joined, once they are older than the limit.
+
+    Works on the phone system's recording folder directly (same server). A
+    missing folder, or one this process cannot read, is simply nothing to do.
+    """
+    folder = os.getenv("ASTERISK_RECORDING_DIR", "/var/spool/asterisk/recording")
+    limit = _leftover_keep_seconds()
+    removed = 0
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return 0
+    for name in names:
+        if not name.startswith(_LEFTOVER_PREFIX):
+            continue
+        path = os.path.join(folder, name)
+        try:
+            if os.path.isfile(path) and now - os.path.getmtime(path) > limit:
+                os.unlink(path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+async def purge_old_transfer_parts(*, force: bool = False) -> int:
+    """At most once every six hours. Never raises (except cancellation)."""
+    global _last_leftover_sweep
+    import time
+
+    now = time.time()
+    if not force and now - _last_leftover_sweep < _LEFTOVER_SWEEP_EVERY_S:
+        return 0
+    _last_leftover_sweep = now
+    try:
+        removed = await asyncio.to_thread(_purge_old_transfer_parts_sync, now)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("transfer_recording_cleanup_failed err=%s", type(exc).__name__)
+        return 0
+    if removed:
+        logger.info("transfer_recording_cleanup removed=%d", removed)
+    return removed

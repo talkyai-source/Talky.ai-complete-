@@ -613,7 +613,10 @@ async def test_awaiting_entry_ended_call_finalised(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_awaiting_entry_no_adapter_waits_until_old(monkeypatch):
+async def test_awaiting_entry_without_a_phone_system_is_handed_on_with_no_adapter(monkeypatch):
+    """The hook no longer decides how long to wait: the finaliser keeps the
+    entry awaiting for a day when the phone system cannot be asked (see
+    test_recording_owner_decision_guards.py)."""
     called = []
 
     async def fin(entry, **kw):
@@ -630,8 +633,8 @@ async def test_awaiting_entry_no_adapter_waits_until_old(monkeypatch):
     young = make_entry()
     young.created_at = (datetime.now(timezone.utc) - timedelta(seconds=100)).isoformat()
     await tr.finalize_awaiting_entry(young)
-    assert called == []
+    assert called == [{"adapter": None}]
     old = make_entry()
     old.created_at = (datetime.now(timezone.utc) - timedelta(seconds=3600 + 901)).isoformat()
     await tr.finalize_awaiting_entry(old)
-    assert called == [{"adapter": None}]
+    assert called == [{"adapter": None}, {"adapter": None}]

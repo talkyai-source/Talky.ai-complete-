@@ -42,7 +42,10 @@ import aiohttp
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
-from app.domain.services.telephony.transfer_recording import transfer_max_duration_seconds
+from app.domain.services.telephony.transfer_recording import (
+    transfer_max_duration_seconds,
+    transfer_recording_allowed,
+)
 from app.domain.services.telephony.control_backend_identity import (
     ControlBackendIdentityError, asterisk_control_backend, control_backend_error,
 )
@@ -2517,6 +2520,14 @@ class AsteriskAdapter(CallControlAdapter):
             )
 
     async def _start_transfer_recording(self, leg: _AsteriskTransferLeg) -> None:
+        if not transfer_recording_allowed(leg.parent_id):
+            # The tenant switched recording off: the person's conversation
+            # is not recorded either.
+            logger.info(
+                "transfer_recording_skipped parent=%s reason=recording_disabled",
+                leg.parent_id[:12],
+            )
+            return
         name = _transfer_recording_name(leg.parent_id)
         try:
             await asyncio.wait_for(
