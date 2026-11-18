@@ -225,8 +225,19 @@ async def _save_call_recording_with_budget(
         if getattr(container, "is_initialized", False)
         else None
     )
+    def _checkpoint_done() -> None:
+        # The live on-disk copy is no longer needed (audio is in the pending
+        # folder, or deliberately not kept). Never raises into the save path.
+        try:
+            from app.domain.services.recording_checkpoint import checkpoint_done
+
+            checkpoint_done(str(voice_session.call_id))
+        except Exception:
+            pass
+
     if not await _inbound_recording_persist_allowed(voice_session, db_pool):
         _discard_recording(voice_session)
+        _checkpoint_done()
         logger.info(
             "Inbound recording discarded before persistence: live retention "
             "permission is absent call=%s",
@@ -238,6 +249,7 @@ async def _save_call_recording_with_budget(
     agent_chunks = getattr(gateway, "get_tts_recording_buffer", lambda _: None)(voice_session.call_id)
 
     if not caller_chunks and not agent_chunks:
+        _checkpoint_done()
         logger.debug(f"No recording data for {call_id[:12]}")
         return
 
@@ -288,6 +300,7 @@ async def _save_call_recording_with_budget(
     duration = caller_bytes / bytes_per_sec if bytes_per_sec else 0.0
 
     if duration < 0.5:
+        _checkpoint_done()
         logger.debug(f"Recording too short ({duration:.1f}s) for {call_id[:12]}, skipping")
         return
 
@@ -307,6 +320,7 @@ async def _save_call_recording_with_budget(
     try:
         await asyncio.to_thread(write_entry, entry, wav_bytes)
         spooled = True
+        _checkpoint_done()
     except Exception as exc:
         logger.error(
             "recording_spool_write_failed call=%s err=%s", call_id[:12], type(exc).__name__,
@@ -325,6 +339,7 @@ async def _save_call_recording_with_budget(
 
     outcome = await process_spool_entry(entry, wav_bytes=wav_bytes, voice_session=voice_session)
     if not spooled and outcome != "retry":
+        _checkpoint_done()
         # Free memory (today's timing when the spool write failed).
         gateway.clear_recording_buffer(voice_session.call_id)
 
@@ -644,6 +659,16 @@ async def recording_spool_loop(stop_event: asyncio.Event) -> None:
             delay = interval
             try:
                 await _spool_pass()
+            except Exception as exc:
+                logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
+            try:
+                # Transfer parts nobody could join are removed after a week
+                # (the function itself runs at most once in six hours).
+                from app.domain.services.telephony.transfer_recording import (
+                    purge_old_transfer_parts,
+                )
+
+                await purge_old_transfer_parts()
             except Exception as exc:
                 logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
     finally:

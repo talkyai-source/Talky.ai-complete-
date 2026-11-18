@@ -661,6 +661,11 @@ async def lifespan(app: FastAPI):
         app.state.redis_listener_tasks.append(
             asyncio.create_task(recording_spool_loop(app.state.redis_listener_stop))
         )
+        from app.domain.services.recording_checkpoint import recording_checkpoint_loop
+
+        app.state.redis_listener_tasks.append(
+            asyncio.create_task(recording_checkpoint_loop(app.state.redis_listener_stop))
+        )
     _is_owner = False
     if _telephony_enabled:
         try:
