@@ -696,7 +696,14 @@ def test_readiness_requires_after_hours_destination_in_explicit_allowlist():
     assert match_check["passed"] is True
 
 
-def test_readiness_requires_bidirectional_trunk_only_when_transfer_requested():
+def test_readiness_requires_bidirectional_trunk_only_when_transfer_requested(monkeypatch):
+    import app.domain.services.telephony.inbound_transfer as _inbound_transfer_module
+
+    # The declaration ships open (owner decision, 19 November 2026). This test is
+    # about the closed declaration, so it closes it.
+    monkeypatch.setattr(
+        _inbound_transfer_module, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False
+    )
     ordinary_inbound = InboundCampaignService._readiness(_ready_bundle())
     ordinary_check = next(
         item for item in ordinary_inbound["checks"] if item["key"] == "transfer_trunk_bidirectional"
@@ -731,7 +738,14 @@ def test_readiness_requires_bidirectional_trunk_only_when_transfer_requested():
     assert "transfer_runtime_supported" in {item["code"] for item in bidirectional["blockers"]}
 
 
-def test_readiness_accepts_safe_actions_and_blocks_unproven_transfer_runtime():
+def test_readiness_accepts_safe_actions_and_blocks_a_closed_transfer_declaration(monkeypatch):
+    import app.domain.services.telephony.inbound_transfer as _inbound_transfer_module
+
+    # The declaration ships open (owner decision, 19 November 2026). This test is
+    # about the closed declaration, so it closes it.
+    monkeypatch.setattr(
+        _inbound_transfer_module, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False
+    )
     for action in ("hangup", "voicemail"):
         assert (
             InboundCampaignService._readiness(_ready_bundle(after_hours_action=action))["ready"]

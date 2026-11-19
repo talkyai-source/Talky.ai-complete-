@@ -320,20 +320,26 @@ async def finalize_awaiting_entry(entry) -> None:
         )
 
 
-def transfer_recording_allowed(pbx_call_id: str) -> bool:
+def transfer_recording_allowed(pbx_call_id: str, *, inbound: bool = False) -> bool:
     """Whether the conversation after a handover may be recorded for this call.
 
-    False only when the live call's tenant saved "disabled" (stamped on the
-    voice session when the notice decision was taken). Any doubt means yes:
-    the save decides again at the end, and a refused part is deleted.
+    Outbound: False only when the live call's tenant saved "disabled" (stamped
+    on the voice session when the notice decision was taken). Any doubt means
+    yes: the save decides again at the end, and a refused part is deleted.
+
+    Inbound keeps its stricter rule: only when this call's own recording gate
+    is open (the campaign and the platform allow recording and the notice was
+    delivered). No voice session, or any doubt, means no.
     """
     try:
         from app.domain.services.telephony.lifecycle import _state
 
         session = _state().get_voice_session(pbx_call_id)
-        return not bool(getattr(session, "_recording_refused_by_policy", False))
     except Exception:  # noqa: BLE001
-        return True
+        return not inbound
+    if inbound:
+        return session is not None and getattr(session, "_recording_allowed", False) is True
+    return not bool(getattr(session, "_recording_refused_by_policy", False))
 
 
 def _leftover_keep_seconds() -> float:

@@ -206,6 +206,24 @@ test('unquarantine accepts the actual partial receipt and restored active status
     assert.match(text(), /masked DID was released from quarantine/);
     assert.doesNotMatch(text(), /result could not be verified/);
 });
+test('a platform admin can switch human transfer on and the server is sent transfer_enabled: true', async () => {
+    state.route = inboundRoute({ route: (request) => {
+        if (request.method !== 'PATCH') return;
+        return response({ ...controls, ...request.body, version: 2 });
+    } });
+    await mountInbound();
+    const transferBox = [...state.host.querySelectorAll('.inbound-switch')].find((label) => /Human transfer/.test(label.textContent)).querySelector('input');
+    assert.equal(transferBox.disabled, false);
+    assert.equal(transferBox.checked, false);
+    assert.match(text(), /Lets the agent transfer incoming calls to a person\. Switching it off stops new transfers at once\./);
+    await act(async () => transferBox.click());
+    assert.equal(transferBox.checked, true);
+    await setInput(find('#control-reason'), 'Synthetic transfer opening');
+    await click('Apply version 2'); await settle();
+    const writes = state.requests.filter((request) => request.method === 'PATCH');
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].body.transfer_enabled, true);
+});
 test('retry after unknown inbound result preserves the exact idempotency key', async () => {
     let attempts = 0;
     state.route = inboundRoute({ route: (request) => {

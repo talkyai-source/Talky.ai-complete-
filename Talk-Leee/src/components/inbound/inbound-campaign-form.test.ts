@@ -51,7 +51,7 @@ test("inbound form enforces recording disclosure and E.164 transfer destinations
     value.transfer_number = "not-a-number";
     const errors = validateInboundCampaign(value);
     assert.ok(errors.consent_message);
-    assert.match(errors.after_hours_action ?? "", /capability gate/i);
+    assert.match(errors.after_hours_action ?? "", /switched off/i);
     assert.ok(errors.transfer_number);
 });
 
@@ -62,7 +62,7 @@ test("after-hours UI exposes only runtime-backed actions", () => {
     assert.equal(options.get("hangup")?.runtimeSupported, true);
     assert.match(options.get("voicemail")?.label ?? "", /message intake/i);
     assert.equal(options.get("voicemail")?.runtimeSupported, true);
-    assert.match(options.get("transfer")?.label ?? "", /not yet available/i);
+    assert.equal(options.get("transfer")?.label, "Transfer to a person");
     assert.equal(options.get("transfer")?.runtimeSupported, false);
 });
 
@@ -79,7 +79,7 @@ test("saved transfer policies can only be disabled while runtime proof is incomp
     const value = initialInboundCampaignInput();
     value.transfer_enabled = true;
     value.transfer_destinations = ["+14155550123"];
-    assert.match(validateInboundCampaign(value).transfer_enabled ?? "", /disable live transfer/i);
+    assert.match(validateInboundCampaign(value).transfer_enabled ?? "", /turn transfer off/i);
     assert.equal(validateInboundCampaign(value).transfer_destinations, undefined);
 
     const approved = validateInboundCampaign(value, { transferConfigurationAvailable: true });
@@ -93,7 +93,7 @@ test("after-hours transfer is accepted only in the server-approved proof window"
     value.transfer_enabled = true;
     value.transfer_destinations = ["+14155550123"];
 
-    assert.match(validateInboundCampaign(value).after_hours_action ?? "", /capability gates/i);
+    assert.match(validateInboundCampaign(value).after_hours_action ?? "", /switched off/i);
     const approved = validateInboundCampaign(value, { transferConfigurationAvailable: true });
     assert.equal(approved.after_hours_action, undefined);
     assert.equal(approved.transfer_enabled, undefined);

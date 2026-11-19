@@ -2433,10 +2433,10 @@ class AsteriskAdapter(CallControlAdapter):
                 )
                 leg.target_in_bridge = True
 
-            # Record the person's conversation (outbound legs only; inbound is
-            # unchanged). Never fails, delays (3 s cap) or undoes the handover.
-            if not leg.durable:
-                await self._start_transfer_recording(leg)
+            # Record the person's conversation, when this call may be recorded
+            # (an inbound call only while its own recording gate is open).
+            # Never fails, delays (3 s cap) or undoes the handover.
+            await self._start_transfer_recording(leg)
 
             # Provider Answer and the live human bridge must become durable
             # before any waiter can observe success. Without this ordering, a
@@ -2528,12 +2528,14 @@ class AsteriskAdapter(CallControlAdapter):
             )
 
     async def _start_transfer_recording(self, leg: _AsteriskTransferLeg) -> None:
-        if not transfer_recording_allowed(leg.parent_id):
-            # The tenant switched recording off: the person's conversation
-            # is not recorded either.
+        if not transfer_recording_allowed(leg.parent_id, inbound=bool(leg.durable)):
+            # This call is not being recorded (the tenant switched recording
+            # off, or an inbound call whose recording gate is closed): the
+            # person's conversation is not recorded either.
             logger.info(
-                "transfer_recording_skipped parent=%s reason=recording_disabled",
+                "transfer_recording_skipped parent=%s reason=%s",
                 leg.parent_id[:12],
+                "inbound_recording_gate_closed" if leg.durable else "recording_disabled",
             )
             return
         name = _transfer_recording_name(leg.parent_id)

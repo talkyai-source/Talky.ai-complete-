@@ -63,7 +63,7 @@ function FAQSection() {
     },
     {
       question: "Can calls be transferred to human agents?",
-      answer: "Yes, on outbound campaign calls: the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available; an agent can collect a request for your team to review, and this does not arrange a callback.",
+      answer: "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is Talk-Lee AI secure and compliant?",

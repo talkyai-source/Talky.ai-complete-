@@ -67,7 +67,7 @@ export default function HealthcareIndustryPage() {
     "Choose a supported voice for your workflow",
     "Use approved answers for routine enquiries",
     "Collect administrative requests for review",
-    "Live transfer to a person on outbound campaign calls, not yet on incoming calls",
+    "Live transfer to a person when it is set up for the campaign",
     "Review available call records with your team",
   ];
 
@@ -86,7 +86,7 @@ export default function HealthcareIndustryPage() {
     {
       title: "Administrative Request Intake",
       description:
-        "Collect the reason for a call and the details your team needs to review it. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "Collect the reason for a call and the details your team needs to review it. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
       title: "Appointment Booking & Reminders",
@@ -177,7 +177,7 @@ export default function HealthcareIndustryPage() {
     {
       title: "Request Review",
       description:
-        "Review captured requests and use only the actions enabled for your workflow. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "Review captured requests and use only the actions enabled for your workflow. Live transfer to a person is available when it is set up for the campaign.",
     },
   ];
 
@@ -213,7 +213,7 @@ export default function HealthcareIndustryPage() {
     {
       question: "What is Talk-Lee AI, exactly?",
       answer:
-        "Talk-Lee AI supports configured call intake, approved answers to routine questions and enabled scheduling actions. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "Talk-Lee AI supports configured call intake, approved answers to routine questions and enabled scheduling actions. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
       question: "Is my patients’ data safe?",

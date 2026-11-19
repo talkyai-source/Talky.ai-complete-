@@ -529,7 +529,10 @@ async def test_a_part_arriving_on_a_later_try_is_joined(spool):
 
 @pytest.mark.asyncio
 async def test_no_phone_system_to_ask_counts_as_not_ready(spool):
+    from datetime import datetime, timezone
+
     entry = make_entry()
+    entry.created_at = datetime.now(timezone.utc).isoformat()  # not a fixed date: the rule is about age
     assert await tr.finalize_transfer_entry(entry, adapter=None) == "retry"
     assert entry.awaiting == "transfer_part"
     assert entry.last_error == "transfer_part_no_adapter"

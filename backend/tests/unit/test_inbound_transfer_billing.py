@@ -24,14 +24,14 @@ def _normalized(source: str) -> str:
     return re.sub(r"\s+", " ", source).strip().lower()
 
 
-def test_0030_is_the_next_single_head_and_runtime_remains_closed() -> None:
+def test_0030_is_the_next_single_head_and_runtime_is_declared_open() -> None:
     module = importlib.import_module("Alembic.versions.0030_inbound_transfer_leg_usage")
     transfer = TRANSFER.read_text(encoding="utf-8")
 
     assert module.revision == "0030_inbound_transfer_leg_usage"
     assert module.down_revision == "0029_trunk_runtime_status"
     assert len(module.revision) <= 32
-    assert "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE = False" in transfer
+    assert "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE = True" in transfer
 
 
 def test_0030_links_each_usage_subject_to_its_exact_parent_and_child() -> None:

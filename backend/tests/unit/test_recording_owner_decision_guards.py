@@ -266,3 +266,141 @@ async def test_the_retry_loop_hook_treats_a_disconnected_phone_system_as_none(mo
     ):
         await tr.finalize_awaiting_entry(_entry(age_seconds=600))
     assert seen == [None]
+
+
+# ── transfer on inbound calls (opened 19 November 2026) ──────────────────────
+
+def _registry(monkeypatch, sessions):
+    from app.domain.services.telephony import lifecycle
+
+    state = SimpleNamespace(get_voice_session=lambda call_id: sessions.get(call_id))
+    monkeypatch.setattr(lifecycle, "_state", lambda: state)
+
+
+def test_the_part_after_an_inbound_transfer_is_recorded_only_while_that_calls_gate_is_open(monkeypatch):
+    """Inbound keeps its stricter rule: the campaign and the platform allow
+    recording and the notice was delivered. Any doubt means no."""
+    _registry(monkeypatch, {
+        "in-open": SimpleNamespace(_recording_allowed=True),
+        "in-closed": SimpleNamespace(_recording_allowed=False),
+        "in-unset": SimpleNamespace(),
+    })
+    assert tr.transfer_recording_allowed("in-open", inbound=True) is True
+    assert tr.transfer_recording_allowed("in-closed", inbound=True) is False
+    assert tr.transfer_recording_allowed("in-unset", inbound=True) is False
+    assert tr.transfer_recording_allowed("no-session", inbound=True) is False, (
+        "an after-hours transfer has no agent session and no notice: it is not recorded"
+    )
+    # An open inbound gate does not change the outbound rule, and the reverse.
+    assert tr.transfer_recording_allowed("in-closed") is True
+
+    def broken():
+        raise RuntimeError("registry unavailable")
+
+    from app.domain.services.telephony import lifecycle
+
+    monkeypatch.setattr(lifecycle, "_state", broken)
+    assert tr.transfer_recording_allowed("in-open", inbound=True) is False
+    assert tr.transfer_recording_allowed("out", inbound=False) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("gate_open,expected", [(True, 1), (False, 0)])
+async def test_the_phone_system_records_an_inbound_handover_only_with_the_gate_open(monkeypatch, gate_open, expected):
+    from app.infrastructure.telephony.asterisk_adapter import AsteriskAdapter
+
+    _registry(monkeypatch, {"pbx-in": SimpleNamespace(_recording_allowed=gate_open)})
+    adapter = AsteriskAdapter()
+    calls = []
+
+    async def fake_ari(method, path, **kwargs):
+        calls.append((method, path))
+        return {"name": "x", "state": "recording"}
+
+    adapter._ari = fake_ari
+    leg = SimpleNamespace(parent_id="pbx-in", bridge_id="bridge-in", durable=True)
+    await adapter._start_transfer_recording(leg)
+    assert len([c for c in calls if c[1].endswith("/record")]) == expected
+    assert (adapter.transfer_recording_name("pbx-in") is not None) is gate_open
+
+
+@pytest.fixture
+def handover(monkeypatch):
+    """lifecycle._on_transfer_connected with its collaborators faked."""
+    from app.domain.services.telephony import lifecycle
+
+    saved = []
+
+    async def fake_save(vs, call_id, **kw):
+        saved.append(kw)
+
+    class _Orchestrator:
+        async def end_session(self, vs):
+            pass
+
+    holder = SimpleNamespace(vs=None, saved=saved, adapter=None, lifecycle=lifecycle)
+    monkeypatch.setattr(lifecycle, "_save_call_recording", fake_save)
+    monkeypatch.setattr(lifecycle, "_get_orchestrator", lambda: _Orchestrator())
+    monkeypatch.setattr(lifecycle, "_state", lambda: SimpleNamespace(get_voice_session=lambda cid: holder.vs))
+    monkeypatch.setattr(lifecycle, "get_adapter", lambda: holder.adapter)
+    return holder
+
+
+def _inbound_session():
+    return SimpleNamespace(
+        call_id="sess-in", call_session=SimpleNamespace(), config=SimpleNamespace(direction="inbound"),
+        _inbound_admission={"call_id": "c"}, _max_call_duration_seconds=1800, pipeline=None,
+        transcript_service=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_inbound_handover_that_is_being_recorded_waits_for_the_persons_part(handover):
+    handover.vs = _inbound_session()
+    handover.adapter = SimpleNamespace(transfer_recording_name=lambda call_id: "talky-xferrec-pbx-in")
+    await handover.lifecycle._on_transfer_connected("pbx-in", "target-in")
+    assert handover.saved == [{"awaiting_transfer": True, "transfer_recording_name": "talky-xferrec-pbx-in"}]
+    assert handover.vs._recording_awaiting_transfer_part is True
+    assert handover.vs._max_call_duration_seconds == 1800, "the inbound call keeps its own pinned limit"
+
+
+@pytest.mark.asyncio
+async def test_an_inbound_handover_that_is_not_recorded_by_the_phone_system_saves_as_before(handover):
+    handover.vs = _inbound_session()
+    handover.adapter = SimpleNamespace(transfer_recording_name=lambda call_id: None)
+    await handover.lifecycle._on_transfer_connected("pbx-in", "target-in")
+    assert handover.saved == [{}], "the agent's part is saved at the handover, with no waiting"
+    assert getattr(handover.vs, "_recording_awaiting_transfer_part", False) is False
+    assert handover.vs._recording_saved_at_transfer is True
+
+
+@pytest.mark.asyncio
+async def test_an_inbound_persons_part_is_never_kept_without_the_agents_part(handover, monkeypatch, caplog):
+    """The agent's part was discarded at the handover because the call's
+    recording gate had closed. The person's part goes the same way."""
+    from app.domain.services import recording_spool
+
+    monkeypatch.setattr(recording_spool, "list_entries", lambda: [])
+    steps = []
+
+    async def stop(name):
+        steps.append(("stop", name))
+
+    async def delete(name):
+        steps.append(("delete", name))
+
+    handover.adapter = SimpleNamespace(
+        transfer_recording_name=lambda call_id: "talky-xferrec-pbx-in",
+        stop_transfer_recording=stop, delete_stored_recording=delete,
+        forget_transfer_recording=lambda call_id: steps.append(("forget", call_id)),
+    )
+    written = []
+    monkeypatch.setattr(recording_spool, "write_entry", lambda entry, wav: written.append(entry))
+    import logging
+
+    with caplog.at_level(logging.INFO):
+        await handover.lifecycle._finalize_transfer_recording_at_end(_inbound_session(), "pbx-in")
+    assert steps == [("stop", "talky-xferrec-pbx-in"), ("delete", "talky-xferrec-pbx-in"), ("forget", "pbx-in")]
+    assert written == [], "nothing is parked for saving"
+    assert not handover.lifecycle._TRANSFER_FINALIZE_TASKS
+    assert "transfer_recording_discarded call=pbx-in reason=inbound_gate_closed" in caplog.text

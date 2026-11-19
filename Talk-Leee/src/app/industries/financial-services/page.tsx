@@ -64,7 +64,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Voice Agents for Finance",
       description:
-        "Use approved information to answer routine questions and collect requests for review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "Use approved information to answer routine questions and collect requests for review. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
       title: "AI Financial Customer Service",
@@ -274,7 +274,7 @@ export default function FinancialServicesIndustryPage() {
     {
       question: "Can AI route customers to the correct department?",
       answer:
-        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
+        "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does it integrate with our existing systems?",

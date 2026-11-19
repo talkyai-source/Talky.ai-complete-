@@ -18,11 +18,16 @@ from app.domain.services.telephony_concurrency_limiter import (
 
 
 # Code-owned capability declaration, intentionally separate from the operator's
-# live kill switch. Keep it closed until the release checklist's live-carrier
-# two-leg, restart, hard-hangup, and settlement proofs are signed off. Policy
-# remains readable for audit; tenant/admin write paths may only disable a
-# legacy enabled value while every execution path fails closed.
-CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE = False
+# live kill switch (platform_runtime_controls.inbound_transfer_enabled), which
+# still decides at every call whether a transfer may run.
+#
+# Opened on 19 November 2026 by the owner's decision ("make the incomming
+# transfer live too"), WITHOUT the release checklist's live-carrier two-leg,
+# restart, hard-hangup and settlement proofs: those have not been run, because
+# inbound calls reach production only rarely. The first real inbound transfer
+# is the proof. To close it again without a release, switch the live kill
+# switch off (scripts/set_inbound_transfer_switch.py --state off --apply).
+CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE = True
 
 _TRUTHY_ENV_VALUES = frozenset({"1", "true", "yes", "on", "enabled"})
 

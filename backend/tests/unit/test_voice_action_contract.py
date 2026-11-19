@@ -153,7 +153,7 @@ def test_cascaded_tools_follow_capabilities_not_keyword_intent(user_text, expect
     assert action_tools_for_turn(ordinary, _ToolCapableGroq(), session=session) == tools
 
 
-def test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated():
+def test_realtime_schema_exposes_each_action_once_and_inbound_transfer_is_declared_open():
     names = [tool["name"] for tool in realtime_voice_action_tools()]
     assert names == ["record_contact", *VOICE_ACTION_NAMES]
     assert len(names) == len(set(names))
@@ -162,7 +162,9 @@ def test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated():
         CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE,
     )
 
-    assert CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is False
+    # Opened by the owner's decision of 19 November 2026; the live platform
+    # switch and each campaign's own policy still decide at every call.
+    assert CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is True
 
 
 @pytest.mark.asyncio
