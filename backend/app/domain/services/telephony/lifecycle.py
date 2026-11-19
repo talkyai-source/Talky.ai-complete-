@@ -5375,13 +5375,16 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
         logger.warning("Transfer transcript persist failed for %s: %s", call_id[:12], exc)
 
     try:
-        if _is_true_inbound_session(voice_session):
+        _adapter = get_adapter()
+        _name_fn = getattr(_adapter, "transfer_recording_name", None)
+        _rec_name = _name_fn(call_id) if callable(_name_fn) else None
+        if _is_true_inbound_session(voice_session) and not _rec_name:
+            # Inbound, and the phone system is not recording the person's part
+            # (this call's recording gate is closed, or the recording did not
+            # start): save the agent's part now, as before.
             await _save_call_recording(voice_session, call_id)
             voice_session._recording_saved_at_transfer = True
         else:
-            _adapter = get_adapter()
-            _name_fn = getattr(_adapter, "transfer_recording_name", None)
-            _rec_name = _name_fn(call_id) if callable(_name_fn) else None
             await _save_call_recording(
                 voice_session,
                 call_id,
@@ -5432,6 +5435,21 @@ async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> No
             name = name_fn(call_id) if callable(name_fn) else None
             if not name:
                 logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
+                return
+            if _is_true_inbound_session(voice_session):
+                # Inbound: the agent's part was discarded at the handover because
+                # this call's recording gate had closed. The person's part goes
+                # the same way; it is never kept without it.
+                for step in ("stop_transfer_recording", "delete_stored_recording"):
+                    fn = getattr(adapter, step, None)
+                    if callable(fn):
+                        await fn(name)
+                forget = getattr(adapter, "forget_transfer_recording", None)
+                if callable(forget):
+                    forget(call_id)
+                logger.info(
+                    "transfer_recording_discarded call=%s reason=inbound_gate_closed", call_id[:12]
+                )
                 return
             # The agent's part held no audio, so nothing was parked, but the
             # person's conversation was recorded: park an empty agent part so
