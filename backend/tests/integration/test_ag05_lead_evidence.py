@@ -89,6 +89,8 @@ async def lead_db(monkeypatch):
         await admin.execute(f'GRANT SELECT,UPDATE ON campaigns TO "{role}"')
         await admin.execute(f'GRANT SELECT ON campaign_lead_fields,crm_deliveries TO "{role}"')
         await admin.execute(f'GRANT SELECT ON call_legs,recordings_s3,call_feedback TO "{role}"')
+        # The single-call answer also reads the billed length of an inbound call.
+        await admin.execute(f'GRANT SELECT ON inbound_usage_transactions TO "{role}"')
         for tenant, campaign, lead, call in zip(tenants, campaigns, leads, calls):
             await admin.execute(
                 "INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic AG05')", tenant
@@ -968,6 +970,16 @@ async def test_durable_revision_invalidates_confirmation_when_contact_revoke_can
         assert len(listed.items) == 1 and listed.items[0].id == str(lead_db.calls[0])
         assert listed.items[0].captured_email == ("operator@example.org" if manual_override else "alex@example.com")
         assert listed.items[0].captured_email_confirmed is manual_override
+        # The single-call answer carries the same contact, chosen by the same rule
+        # (this also runs the single-call query on a real PostgreSQL).
+        single = await calls_api.get_call(
+            call_id=str(lead_db.calls[0]), current_user=reader,
+            db_client=SimpleNamespace(pool=lead_db.pool),
+        )
+        assert single.captured_email == listed.items[0].captured_email
+        assert single.captured_email_confirmed is listed.items[0].captured_email_confirmed
+        assert single.captured_phone == listed.items[0].captured_phone
+        assert single.captured_phone_confirmed is listed.items[0].captured_phone_confirmed
         record_example(lead_db, "manual_revision_immune" if manual_override else "failed_revoke_projection",
                        {"call_api": call_response, "contact_api": contact_response,
                         "call_list_api": listed.model_dump(mode="json"),

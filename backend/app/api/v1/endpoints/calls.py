@@ -330,6 +330,15 @@ class CallDetail(BaseModel):
     summary: Optional[str] = None
     summary_json: Optional[dict] = None
     campaign_name: Optional[str] = None
+    # The contact the CALLER gave during the call, chosen by the same rule as
+    # on CallListItem (_display_captured_contacts), so the call page and the
+    # call list can never disagree. None = the caller gave none.
+    captured_phone: Optional[str] = None
+    captured_email: Optional[str] = None
+    # False = the caller said it but never confirmed the read-back (shown,
+    # labelled unconfirmed); None = no contact captured.
+    captured_phone_confirmed: Optional[bool] = None
+    captured_email_confirmed: Optional[bool] = None
     direction: Literal["inbound", "outbound"] = "outbound"
     provider: Optional[str] = None
     provider_call_id: Optional[str] = None
@@ -1753,10 +1762,11 @@ async def get_call(
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 call_row = await conn.fetchrow(
-                    """
+                    f"""
                     SELECT c.*,
                            camp.name AS campaign_name,
                            ld.best_time_to_call AS best_time_to_call,
+                           {_captured_contact_rows_sql()} AS captured_contact_rows,
                            (SELECT tr.full_text FROM transcripts tr
                              WHERE tr.call_id=c.id
                                AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
@@ -1822,6 +1832,7 @@ async def get_call(
                 )
 
         call = dict(call_row)
+        contacts = _display_captured_contacts(call)
         recording_id = call.get("recording_id")
 
         # Normalize summary_json: asyncpg may return JSONB as str or dict
@@ -1875,6 +1886,10 @@ async def get_call(
             summary=call.get("summary"),
             summary_json=summary_json,
             campaign_name=call.get("campaign_name"),
+            captured_phone=contacts["captured_phone"],
+            captured_email=contacts["captured_email"],
+            captured_phone_confirmed=contacts["captured_phone_confirmed"],
+            captured_email_confirmed=contacts["captured_email_confirmed"],
             direction=direction,
             provider=call.get("provider"),
             provider_call_id=call.get("provider_call_id"),
