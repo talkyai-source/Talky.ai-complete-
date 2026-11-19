@@ -971,6 +971,12 @@ class DashboardApi {
                 typeof response.billed_duration_seconds === "number"
                     ? response.billed_duration_seconds
                     : undefined,
+            // Passed through exactly as sent (no `?? null`): the call page must
+            // tell "the server did not say" (older server) from "none given".
+            captured_phone: response.captured_phone,
+            captured_email: response.captured_email,
+            captured_phone_confirmed: response.captured_phone_confirmed,
+            captured_email_confirmed: response.captured_email_confirmed,
             recording_status: response.recording_status,
             recording_notice: response.recording_notice,
             recording_transfer_part: response.recording_transfer_part,

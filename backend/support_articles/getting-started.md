@@ -107,7 +107,7 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 - **Connectors** — connect supported external services
 - **AI Options** — configure AI, voice, and model settings
 - **Security** — your account security; recovery codes appear once two-factor authentication is on
-- **Team**
+- **Team** — see who is in your account; administrators can invite teammates and change their roles
 - **Billing & Logs** — view plan, usage, and billing information
 - **Settings** — profile, device, telephony, and recording settings
 - **Logout** — sign out of Talk-Lee
@@ -187,6 +187,8 @@ Depending on your account and activity, the Dashboard can show:
 4. Review call-volume charts and operational signals.
 5. Check **Minutes Usage** to understand how much of your included usage has been consumed.
 6. Use campaign links or call-related panels to move to more detailed information.
+
+Figures and charts on the Dashboard use your account's reporting timezone. The zone is shown under the page title as **Reporting: {zone}**, and each chart states the zone it uses as **Timezone: {zone}**. An account administrator can change it under **Settings → Profile → Timezone**.
 
 ### Recommended use
 

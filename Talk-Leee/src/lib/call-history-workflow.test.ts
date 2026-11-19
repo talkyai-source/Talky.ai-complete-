@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 
 import {
+    callerGaveEntries,
     capturedContactParts,
     classifyCall,
     formatPhoneForDisplay,
@@ -117,4 +118,25 @@ test("contact numbers are shown in full, grouped the way people read them", () =
     // Extensions and non-E.164 values pass through untouched.
     assert.equal(formatPhoneForDisplay("940007"), "940007");
     assert.equal(formatPhoneForDisplay(null), "");
+});
+
+test("callerGaveEntries always returns email then number, null where none was given", () => {
+    assert.deepEqual(
+        callerGaveEntries({ captured_phone: "+923085397539", captured_email: "a@b.co" }),
+        [{ kind: "email", value: "a@b.co", confirmed: true }, { kind: "phone", value: "+92 308 5397539", confirmed: true }],
+    );
+    assert.deepEqual(callerGaveEntries({}), [{ kind: "email", value: null, confirmed: true }, { kind: "phone", value: null, confirmed: true }]);
+    assert.deepEqual(
+        callerGaveEntries({ captured_phone: "  ", captured_email: "" }).map((entry) => entry.value),
+        [null, null],
+    );
+});
+
+test("callerGaveEntries marks unconfirmed only when the flag is exactly false", () => {
+    const flag = (confirmed: boolean | null | undefined) =>
+        callerGaveEntries({ captured_email: "a@b.co", captured_email_confirmed: confirmed })[0].confirmed;
+    assert.equal(flag(false), false);
+    assert.equal(flag(true), true);
+    assert.equal(flag(null), true);
+    assert.equal(flag(undefined), true);
 });
