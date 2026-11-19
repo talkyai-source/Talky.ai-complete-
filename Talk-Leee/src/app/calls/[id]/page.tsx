@@ -16,6 +16,7 @@ import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, RecordingNotes, TransferLegsPanel } from "@/components/calls/call-panels";
+import { CallerGave } from "@/components/calls/caller-gave";
 import { VoiceFeedbackRecorder } from "@/components/calls/voice-feedback-recorder";
 import { ConversationReviewPanel } from "@/components/calls/conversation-review-panel";
 import { LeadDetailsPanel } from "@/components/calls/lead-details-panel";
@@ -290,6 +291,7 @@ export default function CallDetailPage() {
 
                         <div className="space-y-3">
                             <CallPartiesPanel direction={call.direction} phoneNumber={call.phone_number} toNumber={call.to_number} />
+                            {call.captured_email !== undefined || call.captured_phone !== undefined ? <CallerGave call={call} variant="tile" /> : null}
 
                             <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                 <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground transition-colors group-hover:bg-background">
