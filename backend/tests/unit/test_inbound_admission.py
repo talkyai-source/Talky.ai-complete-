@@ -922,7 +922,14 @@ async def test_after_hours_hangup_action_is_pinned_before_answer(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_after_hours_transfer_stays_closed_until_runtime_release_gate(monkeypatch):
+async def test_after_hours_transfer_stays_closed_while_the_declaration_is_closed(monkeypatch):
+    import app.domain.services.telephony.inbound_transfer as _inbound_transfer_module
+
+    # The declaration ships open (owner decision, 19 November 2026). This test is
+    # about the closed declaration, so it closes it.
+    monkeypatch.setattr(
+        _inbound_transfer_module, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False
+    )
     closed_week = [
         {"day": day, "enabled": False, "start": "09:00", "end": "17:00"} for day in range(7)
     ]
@@ -2037,3 +2044,36 @@ async def test_watchdog_is_bounded_single_flight_and_stoppable():
     assert watchdog.running is True
     await watchdog.stop()
     assert watchdog.running is False
+
+
+@pytest.mark.asyncio
+async def test_after_hours_transfer_with_the_declaration_open_follows_the_platform_switch(monkeypatch):
+    """Owner decision, 19 November 2026: the declaration is open. The live
+    platform switch still refuses an after-hours transfer when it is off."""
+    import app.domain.services.telephony.inbound_transfer as _inbound_transfer_module
+
+    assert _inbound_transfer_module.CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is True
+    closed_week = [
+        {"day": day, "enabled": False, "start": "09:00", "end": "17:00"} for day in range(7)
+    ]
+    conn = _AllowedConn(
+        route_overrides={
+            "business_hours": {"weekly_schedule": closed_week},
+            "after_hours_action": "transfer",
+            "transfer_number": "+15559876543",
+            "transfer_policy": {"enabled": True, "destinations": ["+15559876543"]},
+            "trunk_direction": "both",
+        },
+        transfer_enabled=False,
+    )
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_args: _acquire(conn))
+    denied = await InboundAdmissionService(object(), _Limiter()).admit(
+        InboundAdmissionRequest(
+            provider="asterisk",
+            provider_call_id="after-hours-transfer-switch-off",
+            called_did="+15551234567",
+        )
+    )
+    assert denied.allowed is False
+    assert denied.reason == "transfer_disabled"
+    assert conn.call_insert_args is None

@@ -5,6 +5,18 @@ Scope: Talky.ai inbound calling, tenant dashboard, backend admission/billing, an
 
 ## Current verdict
 
+> **Owner decision, 19 November 2026: inbound transfer is OPEN in production.** The owner asked for
+> transfer to a person to be live on incoming calls. The code-owned declaration
+> (`CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE`) is `True`, and the release switches the live
+> platform switch on through the audited controls path. **None of the proofs this document asks for
+> (live-carrier two-leg, restart, hard-hangup, settlement) has been run:** inbound calls reach
+> production only rarely (the hourly synthetic call passed 4 times and failed 157 times in the seven
+> days to 18 November 2026). The first real inbound transfer is the proof. The live platform switch,
+> each campaign's own saved transfer policy, the bidirectional-trunk rule, the attempt and hop limits
+> and the billing reservation all still apply at every call. To close it without a release:
+> `venv/bin/python scripts/set_inbound_transfer_switch.py --state off --apply`. The statements below
+> that say transfer is production-disabled describe the state before this decision.
+
 **The transfer-disabled candidate is committed on local branch
 `codex/inbound-hardening-20260831` through implementation head `12991153`, with
 schema head `0036_inbound_rejection_log`. That is not production achievement.
@@ -37,7 +49,8 @@ The safe default remains closed at every layer:
 - non-Redis or unverifiable telephony ownership: rejected
 - unavailable or errored Redis global-concurrency state: rejected for inbound admission
 - absent or unreadable recording policy: recording remains OFF for inbound calls (the outbound default changed on 18 November 2026; inbound did not)
-- controlled inbound transfer: production declaration remains code-owned OFF;
+- controlled inbound transfer: the production declaration was code-owned OFF until 19 November 2026
+  and is ON since the owner's decision of that day (see the note under "Current verdict");
   a proof-only staging path additionally requires one exact UUID-valid
   tenant/config allowlist plus the independent platform switch
 - ambiguous Asterisk Answer outcome: billing is held for evidence-backed adjudication; it is never guessed as answered or unanswered
@@ -85,7 +98,7 @@ The safe default remains closed at every layer:
 | Rollback/restore, paging alerts, and failure drills | **External pending** | Measured RTO/RPO, clean-database restore, compatibility proof, ingress-disable proof, and alerts delivered through the real on-call path. |
 | Canary batches and soak/load | **External pending** | Disjoint 5 + 30 + 10 + 5 controlled-call batches and the 300-call soak with approved thresholds and reconciled evidence. |
 | Legal/privacy, security, operations, billing, support, carrier, and change approval | **External pending** | Named approvers and immutable sign-off records in the final table; no local automated result substitutes for these approvals. |
-| Inbound transfer | **Deferred; production disabled by design** | Production remains closed in code. A staging-only proof path is scoped to one exact tenant/config and still requires the independent platform switch; only rejection is in production release scope until linked-leg live proof and sign-off complete. |
+| Inbound transfer | **Opened by owner decision on 19 November 2026, without the linked-leg live proof** | Until that day production remained closed in code. A staging-only proof path is scoped to one exact tenant/config and still requires the independent platform switch; only rejection is in production release scope until linked-leg live proof and sign-off complete. |
 | Real outbound non-regression baseline | **Not captured; original pre-change point is irrecoverable** | Require a signed deviation/waiver, compare the current candidate with the last known-good release and historical carrier CDR/PBX evidence, then complete one evidenced predeployment call plus daily and frozen-candidate outbound smoke calls. |
 
 Historical verification recorded through 2026-08-29 (superseded where the

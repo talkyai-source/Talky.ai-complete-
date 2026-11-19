@@ -87,9 +87,31 @@ def assert_not_offered(session, actions):
 
 
 @pytest.mark.asyncio
-async def test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy(voice, monkeypatch):
+async def test_production_inbound_is_not_offered_while_the_declaration_is_closed(voice, monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "production")
-    assert inbound_transfer.CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is False
+    # The declaration ships open (owner decision, 19 November 2026). This test is
+    # about the closed declaration, so it closes it.
+    monkeypatch.setattr(
+        inbound_transfer, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False
+    )
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+
+
+@pytest.mark.asyncio
+async def test_production_inbound_is_offered_when_the_platform_switch_and_the_saved_policy_allow_it(voice, monkeypatch):
+    """Owner decision, 19 November 2026. No staging scope applies any more: the
+    live platform switch and the campaign's own saved policy decide."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("INBOUND_TRANSFER_STAGING_PROOF_ENABLED", raising=False)
+    assert inbound_transfer.CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE is True
+    actions = await action_execution.prepare_voice_action_context(voice.session)
+    assert "transfer_call" in actions
+
+
+@pytest.mark.asyncio
+async def test_production_inbound_is_not_offered_when_the_platform_switch_is_off(voice, monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    voice.platform_enabled = False
     assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
 
 
@@ -101,6 +123,9 @@ async def test_production_inbound_is_not_offered_despite_connected_adapter_and_s
 ])
 async def test_each_unavailable_inbound_gate_removes_offer(voice, monkeypatch, missing_gate):
     snapshot = voice.row["route_snapshot"]
+    if missing_gate in {"tenant_scope", "config_scope"}:
+        # The proof-window scope only limits anything while the declaration is closed.
+        monkeypatch.setattr(inbound_transfer, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False)
     if missing_gate == "tenant_scope":
         monkeypatch.setenv("INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID", OTHER)
     elif missing_gate == "config_scope":
@@ -143,6 +168,9 @@ async def test_allowed_staging_scope_can_offer_without_executing_transfer(voice)
 async def test_call_direction_cannot_be_overridden_by_campaign_direction(voice, monkeypatch):
     voice.row["direction"] = "outbound"
     monkeypatch.setenv("ENVIRONMENT", "production")
+    # An inbound gate is closed. If the campaign's direction could turn this
+    # inbound call into an outbound one, the transfer would be offered.
+    voice.platform_enabled = False
     assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
 
 
@@ -171,6 +199,7 @@ async def test_direct_tool_rechecks_policy_despite_cached_offer(voice, monkeypat
     assert "transfer_call" in await action_execution.prepare_voice_action_context(voice.session)
     if closed_gate == "runtime":
         monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setattr(inbound_transfer, "CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE", False)
     else:
         voice.platform_enabled = False
 

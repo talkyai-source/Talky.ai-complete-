@@ -747,6 +747,16 @@ async def lifespan(app: FastAPI):
                 _tb._adapter.set_transfer_answered_persist_callback(
                     _tb._on_transfer_answered_persisted
                 )
+            # Needed when the phone system answers a transfer under another
+            # channel id than the planned one; without it that transfer fails.
+            # telephony_bridge's own connect path registered it; this one did not.
+            if hasattr(
+                _tb._adapter,
+                "set_transfer_provider_identity_persist_callback",
+            ):
+                _tb._adapter.set_transfer_provider_identity_persist_callback(
+                    _tb._on_transfer_provider_identity_persisted
+                )
             if hasattr(
                 _tb._adapter,
                 "set_transfer_cleanup_confirmed_callback",
