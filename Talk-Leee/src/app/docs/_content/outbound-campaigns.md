@@ -33,6 +33,9 @@ Select a column heading to sort by it.
 - **Paused** — calling is stopped and can be resumed
 - **Completed** — the contact list has been worked through
 - **Draft** — the campaign is not finished and cannot call yet
+- **Stopped** — calling has ended; the campaign can be started again
+- **Preparing** — the campaign is getting ready to call after **Start** or **Resume**
+- **Stopping** — a stop request is in progress
 
 Statuses available to you depend on your account configuration.
 
@@ -58,7 +61,7 @@ Use the controls above the table to choose how many rows to show at once and to 
    ![The bulk-action panel with Pause, Resume, Export and Delete, shown after selecting a campaign](/docs/outbound-campaigns-03-bulk-actions.webp)
 3. Choose an action:
    - **Pause Selected** — stop calling on those campaigns
-   - **Resume Selected** — restart calling, where the campaigns are ready
+   - **Resume Selected** — opens the **Start campaign** window for the selected campaigns; any readiness warning is shown there
    - **Export Selected** — open the export and reporting options
    - **Delete Selected** — remove the campaigns after confirming
 
@@ -206,7 +209,7 @@ Guidance shares a 12,000 character limit with the structured brief. The counter 
 
 Set the **Timezone**, the **Start** and **End** times, and the days the campaign may call using the **Mon** to **Sun** toggles. Calls are not placed outside that window.
 
-Tick **Call anytime (ignore these hours)** to let the dialer call regardless of the window above. You will still see warnings.
+Tick **Call anytime (ignore these hours)** to allow calls outside the window above. Calling outside these hours depends on platform settings and is not guaranteed.
 
 ![The calling hours settings, with timezone, start and end times, day selection and a call-anytime option](/docs/outbound-campaigns-10-calling-hours.webp)
 
@@ -242,7 +245,7 @@ Changes normally take effect on the next call rather than on calls already in pr
 1. Open the campaign.
 2. Select **Duplicate**.
 
-![Lead Qualification](/docs/outbound-campaigns-13-duplicate.webp)
+![The campaign page header with the Duplicate button](/docs/outbound-campaigns-13-duplicate.webp)
 
 The copy is a draft with the same settings, knowledge files and lead fields. Contacts, calls and results are not copied.
 
@@ -322,7 +325,7 @@ Never launch a new campaign without testing it first.
 
 ### Choose who speaks first
 
-When you start a test, the **Test this campaign's agent** dialog asks who opens the conversation. This choice applies to the test only; real outbound calls are always agent-first.
+When you start a test, the **Test this campaign's agent** dialog asks who opens the conversation. This choice applies to the test only. For live calls, the choice is made in the **Start campaign** window.
 
 - **AI agent speaks first** — The agent greets you the moment the session connects. Same as an agent-first outbound call.
 - **You say hello first** — The agent waits for your "hello", then introduces itself and why it is calling. Still an outbound call — it will not answer like a receptionist.
@@ -356,3 +359,10 @@ Before a campaign can place calls, Talk-Lee checks that a telephone route is ava
 
 - **AI agent speaks first** — Agent plays a pre-synthesized greeting the instant the callee picks up. Best for cold outreach.
 - **Callee speaks first** — Agent waits for the callee to say “hello” before responding. Feels more natural on warm lists.
+
+When you start a single campaign, the window also offers:
+
+- **Calls at a time (batch size)** — how many calls dial at once; a new call starts only when an earlier one finishes
+- **Wait between calls** — the minimum gap before the next call is dialed; set it to 0 for no wait
+
+While a campaign is running, select **Pause** to stop calling temporarily, then **Resume** to continue; **Resume** opens the same window. Select **Stop** to end calling; a stopped campaign can be started again.

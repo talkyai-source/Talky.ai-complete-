@@ -19,7 +19,7 @@ Verify that the campaign captures the field and that the latest call-state/captu
 
 Talk-Lee shows the reason beside the campaign controls. The most common cause is that the selected telephone trunk is not ready. Select **Check again**, then open **Settings → Telephony** and review the line's live status.
 
-![Appointment Confirmation](/docs/outbound-campaigns-04-readiness-warning.webp)
+![A campaign page showing a telephone readiness warning beside the campaign controls](/docs/outbound-campaigns-04-readiness-warning.webp)
 
 ### A campaign is running but no calls are going out
 

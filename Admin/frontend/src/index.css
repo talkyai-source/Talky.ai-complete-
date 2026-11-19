@@ -3841,8 +3841,12 @@ body {
 }
 
 /* Add/Edit modal */
+/* A user dialog taller than the window stays inside it and scrolls inside itself. */
 .user-modal {
   max-width: 520px;
+  max-height: 90vh;
+  max-height: 90dvh;
+  overflow-y: auto;
 }
 
 .modal-title-row {

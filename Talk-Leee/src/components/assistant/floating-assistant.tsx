@@ -124,6 +124,15 @@ export function FloatingAssistant() {
     const [conversationEpoch, setConversationEpoch] = useState(0);
     const [input, setInput] = useState("");
     const panelRef = useRef<HTMLDivElement>(null);
+    // Escape and the X button close the panel from the keyboard: focus then
+    // returns to the launcher (it is not on the page while the panel is open).
+    const launcherRef = useRef<HTMLButtonElement>(null);
+    const returnFocusRef = useRef(false);
+    useEffect(() => {
+        if (open || !returnFocusRef.current) return;
+        returnFocusRef.current = false;
+        launcherRef.current?.focus();
+    }, [open]);
     const wsRef = useRef<WebSocket | null>(null);
     // The ref is authoritative for the async paths (connect, socket handlers);
     // `conversationId` mirrors it for the two child components that need the
@@ -596,7 +605,7 @@ export function FloatingAssistant() {
         const onKeyDown = (e: KeyboardEvent) => {
             // A popover that consumed its own Escape (the model picker stops
             // propagation / prevents default) must not also close the chat.
-            if (e.key === "Escape" && !e.defaultPrevented) setOpen(false);
+            if (e.key === "Escape" && !e.defaultPrevented) { returnFocusRef.current = true; setOpen(false); }
         };
         window.addEventListener("pointerdown", onPointerDown, { capture: true });
         window.addEventListener("keydown", onKeyDown);
@@ -723,6 +732,7 @@ export function FloatingAssistant() {
                 dark mode; the cyan brand colour is the same in both. */}
             {!open && (
                 <button
+                    ref={launcherRef}
                     type="button"
                     onClick={() => setOpen(true)}
                     aria-label="Open AI assistant"
@@ -801,7 +811,7 @@ export function FloatingAssistant() {
                         )}
                         <button
                             type="button"
-                            onClick={() => setOpen(false)}
+                            onClick={() => { returnFocusRef.current = true; setOpen(false); }}
                             aria-label="Close assistant"
                             className="-order-2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground sm:order-none"
                         >

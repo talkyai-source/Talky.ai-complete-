@@ -49,7 +49,7 @@ export const docsPages: DocsPage[] = [
   {
     slug: "follow-ups",
     title: "Follow-ups",
-    description: "Assistant, meetings, reminders, email, reviews and notifications created by your calls.",
+    description: "Notifications, Agent Reviews and assistant actions that follow up on your calls.",
     file: "follow-ups.md",
   },
   {

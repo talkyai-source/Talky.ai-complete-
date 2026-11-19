@@ -296,6 +296,23 @@ function OwnedCallDetailDrawer({ callId, onClose, session }: CallDetailDrawerPro
     const currentMedia = useRef({ recordings, feedback });
     useLayoutEffect(() => { currentMedia.current = { recordings, feedback }; }, [recordings, feedback]);
 
+    // Escape closes the drawer and focus returns to the control that opened it.
+    // Not while the delete confirmation is open: that dialog has its own Escape.
+    const closeDrawer = useRef(onClose);
+    useEffect(() => { closeDrawer.current = onClose; }, [onClose]);
+    const confirmOpen = Boolean(deleteTarget);
+    useEffect(() => {
+        if (!callId) return;
+        const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        return () => { if (opener?.isConnected) opener.focus(); };
+    }, [callId]);
+    useEffect(() => {
+        if (!callId || confirmOpen) return;
+        const keydown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeDrawer.current(); };
+        document.addEventListener('keydown', keydown);
+        return () => document.removeEventListener('keydown', keydown);
+    }, [callId, confirmOpen]);
+
     useEffect(() => {
         mounted.current = true;
         return () => { mounted.current = false; };
