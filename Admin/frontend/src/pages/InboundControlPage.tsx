@@ -507,9 +507,7 @@ export function InboundControlPage() {
         const payload = {
             inbound_enabled: draftControls.inbound_enabled,
             recording_enabled: draftControls.recording_enabled,
-            // New transfer enablement is intentionally impossible. A legacy
-            // true value can only transition to false.
-            transfer_enabled: controls.transfer_enabled && draftControls.transfer_enabled,
+            transfer_enabled: draftControls.transfer_enabled,
             settlement_enabled: draftControls.settlement_enabled,
             expected_version: draftControls.version,
             reason: controlReason.trim(),
@@ -717,33 +715,22 @@ export function InboundControlPage() {
                                         {([
                                             ['inbound_enabled', 'Inbound admission', 'Accept eligible PSTN calls after deterministic pre-answer routing.'],
                                             ['recording_enabled', 'Recording', 'Permit recording only after disclosure succeeds. Turning this off blocks new recordings, clears locally owned live buffers immediately, and reaches every media worker within 30 seconds. Upload also rechecks the switch.'],
-                                            ['transfer_enabled', 'Human transfer', 'Permit allowlisted transfers within hop and duration limits.'],
+                                            ['transfer_enabled', 'Human transfer', 'Lets the agent transfer incoming calls to a person. Switching it off stops new transfers at once.'],
                                             ['settlement_enabled', 'Billing settlement', 'Finalize reserved usage into the append-only ledger.'],
                                         ] as const).map(([key, label, description]) => {
-                                            const transferControl = key === 'transfer_enabled';
-                                            const transferCanOnlyBeDisabled = transferControl && draftControls.transfer_enabled;
-                                            const disabled = saving || (transferControl && !transferCanOnlyBeDisabled);
-                                            const visibleLabel = transferControl
-                                                ? draftControls.transfer_enabled
-                                                    ? `${label} · disable only`
-                                                    : `${label} · unavailable`
-                                                : label;
-                                            const visibleDescription = transferControl
-                                                ? 'New enablement is blocked. If this legacy switch is on, it can only be turned off.'
-                                                : description;
+                                            const disabled = saving;
                                             return (
-                                                <label className="inbound-switch" key={key} title={transferControl ? visibleDescription : undefined}>
+                                                <label className="inbound-switch" key={key}>
                                                     <input
                                                         type="checkbox"
                                                         checked={draftControls[key]}
                                                         onChange={(event) => {
-                                                            if (transferControl && event.target.checked) return;
                                                             draftDirty.current = true;
                                                             setDraftControls({ ...draftControls, [key]: event.target.checked });
                                                         }}
                                                         disabled={disabled}
                                                     />
-                                                    <span><strong>{visibleLabel}</strong><small>{visibleDescription}</small></span>
+                                                    <span><strong>{label}</strong><small>{description}</small></span>
                                                 </label>
                                             );
                                         })}
