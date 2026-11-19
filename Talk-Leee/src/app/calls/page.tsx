@@ -17,6 +17,7 @@ import { statusPillClass } from "@/lib/status-colors";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
+import { CallerGave } from "@/components/calls/caller-gave";
 import {
     CallHistoryFormButton,
     CallHistoryNotesField,
@@ -33,7 +34,6 @@ import { useCallHistoryWorkflow, type CallWorkflowPatch } from "@/lib/use-call-h
 import {
     defaultCallHistoryWorkflow,
     callHasCapturedContact,
-    capturedContactParts,
     classifyCall,
     isActiveCallStatus,
     type CallHistoryWorkflowEntry,
@@ -102,29 +102,6 @@ function DirectionBadge({ direction }: { direction?: "inbound" | "outbound" }) {
     );
 }
 
-function CapturedContact({ call }: { call: Call }) {
-    // The number / email the caller GAVE during the call — the one to follow
-    // up on. Distinct from the line they rang from (often an extension or a
-    // withheld number).
-    // A contact the caller said but never confirmed is still shown (it is
-    // what they gave), labelled so nobody mistakes it for a verified one.
-    // Each value on its own line and never truncated: a cut-off number
-    // ("+92312075…") is useless for a follow-up (2026-09-28).
-    const parts = capturedContactParts(call);
-    if (parts.length === 0) return null;
-    return (
-        <span className="flex flex-col gap-0.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-            {parts.map((part) => (
-                <span key={part.kind} className="break-all tabular-nums">
-                    <span className="font-normal text-muted-foreground">{part.kind === "phone" ? "Phone " : "Email "}</span>
-                    {part.value}
-                    {part.confirmed ? null : <span className="font-normal text-amber-700 dark:text-amber-300"> (unconfirmed)</span>}
-                </span>
-            ))}
-        </span>
-    );
-}
-
 function CallHighlight({ call }: { call: Call }) {
     // The one-line outcome of the call (what the caller wants next), so the
     // list answers "what happened" without opening the summary.
@@ -139,9 +116,9 @@ function CallHighlight({ call }: { call: Call }) {
 
 function CallParties({ call }: { call: Call }) {
     if (call.direction === "inbound") {
-        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="break-words text-xs text-muted-foreground">to {call.to_number || "assigned phone number"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
+        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="break-words text-xs text-muted-foreground">to {call.to_number || "assigned phone number"}</span><CallHighlight call={call} /></>;
     }
-    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
+    return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CallHighlight call={call} /></>;
 }
 
 // The per-call "best time to call" the panel shows. The `Call` type and the
@@ -259,6 +236,7 @@ function CallRow({
                         callLabel={callLabel}
                     />
                 </div>
+                <CallerGave call={call} variant="card" />
                 <div className="flex flex-wrap items-center gap-2">
                     {call.outcome ? (
                         <span className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`}>
@@ -470,6 +448,7 @@ function CallRow({
                         <ChevronRight className="h-4 w-4" aria-hidden />
                     </Link>
                 </div>
+                <CallerGave call={call} variant="row" />
             </div>
             <audio
                 ref={audioRef}

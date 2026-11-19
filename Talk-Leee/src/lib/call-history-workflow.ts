@@ -158,6 +158,26 @@ export function capturedContactParts(
     return parts;
 }
 
+export interface CallerGaveEntry {
+    kind: "email" | "phone";
+    /** null = the caller gave none on this call. */
+    value: string | null;
+    /** false only when the caller said it but never confirmed the read-back. */
+    confirmed: boolean;
+}
+
+/** Always both entries, email first then number, so a call where nothing was given still says so. */
+export function callerGaveEntries(
+    call: Pick<Call, "captured_phone" | "captured_email" | "captured_phone_confirmed" | "captured_email_confirmed">,
+): CallerGaveEntry[] {
+    const parts = capturedContactParts(call);
+    const pick = (kind: "email" | "phone"): CallerGaveEntry => {
+        const part = parts.find((candidate) => candidate.kind === kind);
+        return part ? { kind, value: part.value, confirmed: part.confirmed } : { kind, value: null, confirmed: true };
+    };
+    return [pick("email"), pick("phone")];
+}
+
 export function inferCallLeadType(
     call: Pick<Call, "lead_outcome" | "outcome" | "status" | "captured_phone" | "captured_email">,
 ): CallHistoryLeadType {
