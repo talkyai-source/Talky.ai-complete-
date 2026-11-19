@@ -44,7 +44,7 @@ Use the Profile tab to review or update information such as:
 
 - Name
 - Business/organization name
-- Timezone
+- Timezone — the zone used for dates on the Dashboard and in Analytics; it does not change campaign calling hours. Only an account administrator can change it.
 - Account/tenant information
 
 ![The profile settings, showing name and business details](/docs/settings-01-profile.webp)
