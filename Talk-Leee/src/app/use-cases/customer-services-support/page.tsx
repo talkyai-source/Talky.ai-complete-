@@ -59,7 +59,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       label: "04",
       title: "Requests for Human Review",
-      description: "Record requests for your team to review. Human handoff for incoming calls is currently unavailable.",
+      description: "Record requests for your team to review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
     },
   ];
 
@@ -154,7 +154,7 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       title: "Human Review",
-      description: "Review saved caller requests. Live handoff for incoming calls is currently unavailable.",
+      description: "Review saved caller requests. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
     },
   ];
 
@@ -229,7 +229,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "Can AI handle customer support calls?",
       answer:
-        "AI agents can answer incoming calls, use approved information, and collect requests for review. Human handoff for incoming calls is currently unavailable.",
+        "AI agents can answer incoming calls, use approved information, and collect requests for review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
     },
     {
       question: "Can AI customer support integrate with our CRM?",
@@ -238,7 +238,7 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       question: "Can customers speak to a human agent?",
-      answer: "Human handoff for incoming calls is currently unavailable. The agent can record a request for your team to review; this does not arrange a callback.",
+      answer: "The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign. Otherwise it can record a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is AI customer support available 24/7?",

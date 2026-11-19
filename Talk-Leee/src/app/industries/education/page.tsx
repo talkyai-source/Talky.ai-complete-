@@ -146,7 +146,7 @@ export default function EducationIndustryPage() {
     {
       title: "Works With Your Team",
       description:
-        "AI can collect routine enquiries and requests for staff review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "AI can collect routine enquiries and requests for staff review. Live transfer to a person is available when it is set up for the campaign.",
     },
   ];
 
@@ -232,7 +232,7 @@ export default function EducationIndustryPage() {
     {
       question: "Can AI route student calls?",
       answer:
-        "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect the reason for a call for staff review; this does not arrange a callback.",
+        "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect the reason for a call for staff review; this does not arrange a callback.",
     },
     {
       question: "Can AI support students after office hours?",

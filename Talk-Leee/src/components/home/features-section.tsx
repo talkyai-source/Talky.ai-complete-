@@ -24,7 +24,7 @@ const services = [
   {
     icon: Settings,
     title: "Requests for Your Team",
-    description: "Collect caller requests for review, or transfer a live outbound campaign call to a person on your list. Live transfer is not yet available on incoming calls.",
+    description: "Collect caller requests for review, or transfer a live call to a person on your list. Live transfer to a person is available when it is set up for the campaign.",
   },
   {
     icon: BarChart3,

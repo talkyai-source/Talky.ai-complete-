@@ -59,7 +59,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "AI Voice Agents for SaaS",
       description:
-        "Use approved answers for routine questions and capture requests for review. Live transfer to a person is available on outbound campaign calls, and not yet on incoming calls.",
+        "Use approved answers for routine questions and capture requests for review. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
       title: "AI Onboarding Support Automation",
@@ -173,7 +173,7 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       question: "Will customers still be able to reach human agents?",
-      answer: "On outbound campaign calls the agent can transfer a live call to a person on your list. On incoming calls live transfer is not yet available: the agent can collect a request for your team to review; this does not arrange a callback.",
+      answer: "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is this suitable for growing SaaS companies?",

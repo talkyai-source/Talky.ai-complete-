@@ -89,7 +89,7 @@ export default function AIVoiceAgentPage() {
     },
     {
       title: "Collects requests",
-      description: "Records requests for your team to review. Human handoff for incoming calls is currently unavailable.",
+      description: "Records requests for your team to review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
     },
   ];
 
@@ -318,7 +318,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can an AI voice agent answer incoming calls?",
       answer:
-        "It can answer incoming calls, use approved information, collect caller details, and use enabled scheduling actions. Human handoff for incoming calls is currently unavailable.",
+        "It can answer incoming calls, use approved information, collect caller details, and use enabled scheduling actions. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
     },
     {
       question: "Can AI voice agents handle sales conversations?",
@@ -333,7 +333,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can the AI transfer calls to a human?",
       answer:
-        "Human handoff for incoming calls is currently unavailable. The agent can record a request for your team to review; this does not arrange a callback.",
+        "The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign. Otherwise it can record a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Can I customize the AI’s voice and behavior?",
