@@ -42,7 +42,7 @@ export function isEligibleInboundTrunk(trunk: Pick<SipTrunkRow, "direction" | "i
 export const INBOUND_AFTER_HOURS_OPTIONS = [
     { value: "hangup", label: "Reject before answer", runtimeSupported: true },
     { value: "voicemail", label: "AI message intake (call history)", runtimeSupported: true },
-    { value: "transfer", label: "Transfer (runtime not yet available)", runtimeSupported: false },
+    { value: "transfer", label: "Transfer to a person", runtimeSupported: false },
 ] as const;
 
 function browserTimezone(): string {
@@ -104,9 +104,9 @@ export function validateInboundCampaign(
     const invalidWindow = value.weekly_schedule.some((day) => day.enabled && (day.windows?.length ? day.windows : [{ start: day.start, end: day.end }]).some((window) => !/^([01]\d|2[0-3]):[0-5]\d$/.test(window.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(window.end) || window.start === window.end));
     if (invalidWindow) errors.weekly_schedule = "Each open business-hours window needs distinct valid start and end times.";
     if (value.after_hours_action === "voicemail" && !value.after_hours_message?.trim()) errors.after_hours_message = "Add the opening message the AI will use for after-hours intake.";
-    if (value.after_hours_action === "transfer" && !transferConfigurationAvailable) errors.after_hours_action = "Choose reject or AI message intake. Inbound transfer remains blocked until the runtime and platform capability gates are enabled.";
+    if (value.after_hours_action === "transfer" && !transferConfigurationAvailable) errors.after_hours_action = "Choose reject or AI message intake. Transfer is switched off for this account right now.";
     if (value.after_hours_action === "transfer" && !isValidE164(value.transfer_number ?? "")) errors.transfer_number = "Enter the transfer destination in E.164 format.";
-    if (value.transfer_enabled && !transferConfigurationAvailable) errors.transfer_enabled = "Disable live transfer until linked-leg ownership, hard-cap teardown, carrier behavior, settlement, and both server gates are verified.";
+    if (value.transfer_enabled && !transferConfigurationAvailable) errors.transfer_enabled = "Turn transfer off. It is switched off for this account right now.";
     if (value.transfer_enabled && ((value.transfer_destinations ?? []).length === 0 || (value.transfer_destinations ?? []).some((destination) => !isValidE164(destination)))) errors.transfer_destinations = "Add at least one approved E.164 transfer destination.";
     if (!Number.isFinite(value.max_transfer_attempts) || !Number.isInteger(value.max_transfer_attempts) || value.max_transfer_attempts < 1 || value.max_transfer_attempts > 5) errors.max_transfer_attempts = "Transfer attempts must be a whole number between 1 and 5.";
     if (!Number.isFinite(value.max_transfer_hops) || !Number.isInteger(value.max_transfer_hops) || value.max_transfer_hops < 1 || value.max_transfer_hops > 5) errors.max_transfer_hops = "Transfer hops must be a whole number between 1 and 5.";

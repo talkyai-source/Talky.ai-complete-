@@ -210,13 +210,13 @@ test("a campaign saved with the list and hours loads them back and re-saves the 
     assert.deepEqual(saved[0]!.transfer_hours, stored.transfer_hours);
 });
 
-test("an inbound campaign says transfers are not switched on yet; an outbound one does not", () => {
+test("an inbound campaign says to also set up transfer in its inbound settings; an outbound one does not", () => {
     const withTransfer: CampaignBriefDraft = { ...base, approved_next_actions: ["transfer"], transfer_destinations: [SALES] };
     const view = render(
         <CampaignBriefFields idPrefix="in" value={withTransfer} onChange={() => undefined} requiredLeadFields={[]} direction="inbound" />,
     );
     const note = screen.getByTestId("in-transfer-inbound-note");
-    assert.match(note.textContent ?? "", /inbound campaigns are not switched on yet/i);
+    assert.match(note.textContent ?? "", /also switch on Transfer in the campaign's inbound settings and put the same number on its allowed list\. The phone line must work in both directions/i);
     view.unmount();
 
     render(

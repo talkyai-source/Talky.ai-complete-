@@ -34,9 +34,9 @@ const NO_ANSWER_OPTIONS: ReadonlyArray<{ value: CampaignTransferIfNoAnswer | "";
 // The same timezone list the calling-schedule editor offers.
 const TRANSFER_TZ_OPTIONS = TZ_OPTIONS;
 
-/** Shown on inbound campaigns: transfers there stay off until they are switched on platform-wide. */
-export const INBOUND_TRANSFER_NOT_ON_TEXT =
-    "Transfers on inbound campaigns are not switched on yet. You can save these settings now; the agent starts using them once inbound transfer is turned on.";
+/** Shown on inbound campaigns: the transfer must also be set up in the inbound campaign's own settings. */
+export const INBOUND_TRANSFER_SETUP_TEXT =
+    "For an inbound campaign, also switch on Transfer in the campaign's inbound settings and put the same number on its allowed list. The phone line must work in both directions.";
 
 const TRANSFER_INPUT_CLASS =
     "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50";
@@ -499,7 +499,7 @@ export function CampaignBriefFields({
                     </p>
                     {direction === "inbound" ? (
                         <p role="note" data-testid={`${idPrefix}-transfer-inbound-note`} className="text-xs font-medium text-foreground">
-                            {INBOUND_TRANSFER_NOT_ON_TEXT}
+                            {INBOUND_TRANSFER_SETUP_TEXT}
                         </p>
                     ) : null}
                 </fieldset>
