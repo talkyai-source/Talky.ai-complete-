@@ -123,7 +123,7 @@ async def _check_key(provider, api_key):
 
 @router.get("/", response_model=List[CredentialResponse])
 async def list_credentials(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> List[CredentialResponse]:
     tenant_id = _require_tenant(current_user)

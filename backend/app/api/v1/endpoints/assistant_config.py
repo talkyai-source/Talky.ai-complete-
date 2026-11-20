@@ -6,7 +6,15 @@ Per-tenant GET/PUT for the dashboard assistant's Groq model selection.
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_client,
+    require_admin_tenant,
+)
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.core.postgres_adapter import Client
 from app.core.security.api_security import rate_limit_dependency
 from app.infrastructure.assistant.model_config import (
@@ -43,8 +51,9 @@ async def get_assistant_model(
 @router.put("/model")
 async def set_assistant_model(
     body: ModelUpdateRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Set the tenant's assistant model. Must be a known Groq function-calling model."""
     tenant_id = current_user.tenant_id
@@ -58,9 +67,24 @@ async def set_assistant_model(
             f"Allowed: {sorted(ALLOWED_ASSISTANT_MODEL_IDS)}",
         )
 
-    db_client.table("tenants").update({"assistant_model": body.model}).eq(
-        "id", tenant_id
-    ).execute()
+    # Change and audit record commit together; an audit failure rolls the change back.
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
+        before = await conn.fetchrow(
+            "SELECT assistant_model FROM tenants WHERE id = $1 FOR UPDATE", tenant_id
+        )
+        if before is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+        await conn.execute(
+            "UPDATE tenants SET assistant_model = $2 WHERE id = $1", tenant_id, body.model
+        )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="assistant.model.update",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+            resource_type="tenant_assistant_model", resource_id=tenant_id,
+            before_state={"assistant_model": before["assistant_model"]},
+            after_state={"assistant_model": body.model},
+        )
 
     return {"current": body.model}
 

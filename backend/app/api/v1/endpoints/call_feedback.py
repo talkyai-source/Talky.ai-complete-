@@ -13,6 +13,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
 )
 from fastapi.responses import RedirectResponse, Response
@@ -26,6 +27,7 @@ from app.domain.services.call_feedback_service import (
     CallNotFoundError,
     FeedbackAlreadyExistsError,
     FeedbackNotFoundError,
+    FeedbackReplaceNotAllowedError,
     FeedbackStorageError,
     FeedbackTranscriptionInProgressError,
     feedback_max_audio_bytes,
@@ -99,6 +101,8 @@ def _expected_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.'))
     if isinstance(exc, FeedbackTranscriptionInProgressError):
         return HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.'))
+    if isinstance(exc, FeedbackReplaceNotAllowedError):
+        return HTTPException(status_code=403, detail=str(exc))
     if isinstance(exc, FeedbackStorageError):
         return HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.'))
     return HTTPException(status_code=500, detail="Call feedback operation failed")
@@ -110,6 +114,7 @@ def _expected_error(exc: Exception) -> HTTPException:
     dependencies=[Depends(require_permission(Permission.CALLS_CREATE))],
 )
 async def submit_call_feedback(
+    request: Request,
     call_id: str,
     audio: UploadFile = File(..., description="MediaRecorder audio blob"),
     # 30s hard cap (was 300). A note about one call is a sentence or two, and
@@ -154,6 +159,15 @@ async def submit_call_feedback(
             detail=f"Feedback audio is too large (max {max_bytes} bytes)",
         )
 
+    can_replace_others = False
+    if replace:
+        # Replacing hard-deletes the old audio: another person's note needs calls:delete.
+        try:
+            await require_permission(Permission.CALLS_DELETE)(request=request, user=current_user)
+            can_replace_others = True
+        except HTTPException:
+            can_replace_others = False
+
     try:
         row = await service.submit(
             tenant_id=tenant_id,
@@ -163,6 +177,7 @@ async def submit_call_feedback(
             mime_type=mime_type,
             duration_seconds=duration_seconds,
             replace=replace,
+            can_replace_others=can_replace_others,
         )
     except Exception as exc:
         if not isinstance(
@@ -170,6 +185,7 @@ async def submit_call_feedback(
             (
                 CallNotFoundError,
                 FeedbackAlreadyExistsError,
+                FeedbackReplaceNotAllowedError,
                 FeedbackStorageError,
             ),
         ):

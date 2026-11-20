@@ -54,6 +54,10 @@ class FeedbackTranscriptionInProgressError(CallFeedbackError):
     pass
 
 
+class FeedbackReplaceNotAllowedError(CallFeedbackError):
+    """Replacing a colleague's note needs calls:delete (administrator)."""
+
+
 class FeedbackStorageError(CallFeedbackError):
     pass
 
@@ -635,6 +639,7 @@ class CallFeedbackService:
         mime_type: str,
         duration_seconds: float | None = None,
         replace: bool = False,
+        can_replace_others: bool = False,
     ) -> dict[str, Any]:
         await self._require_call(tenant_id, call_id)
         digest = hashlib.sha256(audio).hexdigest()
@@ -645,6 +650,10 @@ class CallFeedbackService:
                 return existing
             if not replace:
                 raise FeedbackAlreadyExistsError("This call already has a feedback note")
+            if not can_replace_others and str(existing.get("created_by")) != str(created_by):
+                raise FeedbackReplaceNotAllowedError(
+                    "Only the person who left this voice note, or an administrator, can replace it."
+                )
             return await self._replace_existing(
                 tenant_id=tenant_id,
                 call_id=call_id,

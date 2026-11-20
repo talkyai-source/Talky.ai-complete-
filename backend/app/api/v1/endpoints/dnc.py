@@ -33,6 +33,7 @@ from app.api.v1.dependencies import (
     get_db_pool,
     require_admin,
 )
+from app.core.security.rbac import Permission, UserRole, normalize_role, require_permission
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
@@ -121,7 +122,7 @@ def _to_response(entry: DNCEntry) -> DNCEntryResponse:
 # Endpoints
 # ────────────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=List[DNCEntryResponse])
+@router.get("/", response_model=List[DNCEntryResponse], dependencies=[Depends(require_permission(Permission.CALLS_READ))])
 async def list_dnc_entries(
     include_global: bool = Query(default=False, description="Include cross-tenant DNC entries."),
     limit: int = Query(default=200, ge=1, le=200),
@@ -130,6 +131,10 @@ async def list_dnc_entries(
 ) -> List[DNCEntryResponse]:
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
+    # The platform-wide list is written by platform admins; every other
+    # caller gets their own tenant's rows only (the query omits the global rows).
+    if include_global and normalize_role(current_user.role) != UserRole.PLATFORM_ADMIN:
+        include_global = False
     entries = await svc.list_for_tenant(tenant_id, include_global=include_global, limit=limit)
     return [_to_response(e) for e in entries]
 
@@ -243,7 +248,7 @@ async def caller_opt_out(
     return _to_response(entry)
 
 
-@router.get("/check", response_model=DNCCheckResponse)
+@router.get("/check", response_model=DNCCheckResponse, dependencies=[Depends(require_permission(Permission.CALLS_READ))])
 async def check_dnc(
     e164: str = Query(..., description="Number to check (any format)."),
     current_user: CurrentUser = Depends(get_current_user),

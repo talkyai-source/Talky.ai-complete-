@@ -19,13 +19,37 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_current_user,
+    get_db_client,
+    get_audit_logger,
+    require_admin_tenant,
+)
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+# Abuse alerts raised by the platform against a tenant's own traffic are for
+# the platform admin; a tenant-side acknowledge/resolve is refused.
+_PLATFORM_ONLY_SOURCE = "telephony_rate_limiter"
+_PLATFORM_ALERT_DETAIL = "This alert is handled by the platform and cannot be changed from your account."
+
+
+async def _refuse_if_platform_alert(conn: Any, alert_id: str, tenant_id: Any) -> None:
+    """Failure path only: tell a platform-raised alert (403) from a missing one."""
+    src = await conn.fetchrow(
+        "SELECT detection_source FROM security_events "
+        "WHERE event_id = $1 AND tenant_id = $2 AND alert_type IS NOT NULL",
+        alert_id,
+        tenant_id,
+    )
+    if src is not None and src["detection_source"] == _PLATFORM_ONLY_SOURCE:
+        raise HTTPException(status_code=403, detail=_PLATFORM_ALERT_DETAIL)
 
 
 # ----- shapes --------------------------------------------------------------
@@ -200,11 +224,13 @@ async def list_alerts(
 async def ack_alert(
     alert_id: str,
     body: AckRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AlertOut:
     """Move an alert from 'open' to 'investigating' and stamp the assignee."""
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         row = await conn.fetchrow(
             """
             UPDATE security_events
@@ -214,6 +240,7 @@ async def ack_alert(
               AND tenant_id = $2
               AND alert_type IS NOT NULL
               AND status = 'open'
+              AND detection_source IS DISTINCT FROM 'telephony_rate_limiter'
             RETURNING event_id, created_at, severity, status, title, description,
                       evidence, assigned_to, resolved_at, resolution_notes, alert_type
             """,
@@ -222,6 +249,7 @@ async def ack_alert(
             current_user.id,
         )
         if row is None:
+            await _refuse_if_platform_alert(conn, alert_id, current_user.tenant_id)
             raise HTTPException(status_code=404, detail="Alert not found or not actionable")
         # If a note was supplied, append it to resolution_notes (so the audit
         # trail accumulates rather than overwrites).
@@ -229,18 +257,27 @@ async def ack_alert(
             await conn.execute(
                 "UPDATE security_events SET resolution_notes = "
                 "  COALESCE(resolution_notes || E'\\n', '') || $2 "
-                "WHERE event_id = $1",
+                "WHERE event_id = $1 AND tenant_id = $3",
                 alert_id,
                 f"[ack by {current_user.id}] {body.note}",
+                current_user.tenant_id,
             )
             row = await conn.fetchrow(
                 """
                 SELECT event_id, created_at, severity, status, title, description,
                        evidence, assigned_to, resolved_at, resolution_notes, alert_type
-                FROM security_events WHERE event_id = $1
+                FROM security_events WHERE event_id = $1 AND tenant_id = $2
                 """,
                 alert_id,
+                current_user.tenant_id,
             )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="alert.acknowledge",
+            actor_id=current_user.id, actor_role=current_user.role,
+            tenant_id=current_user.tenant_id,
+            resource_type="security_alert", resource_id=alert_id,
+            before_state={"status": "open"}, after_state={"status": "investigating"},
+        )
 
     return _row_to_alert(dict(row))
 
@@ -249,14 +286,16 @@ async def ack_alert(
 async def resolve_alert(
     alert_id: str,
     body: ResolveRequest,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AlertOut:
     """Mark resolved, stamp resolved_at and resolution_notes."""
     if not body.resolution_notes.strip():
         raise HTTPException(status_code=400, detail="resolution_notes is required")
 
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         row = await conn.fetchrow(
             """
             UPDATE security_events
@@ -267,6 +306,7 @@ async def resolve_alert(
               AND tenant_id = $2
               AND alert_type IS NOT NULL
               AND status <> 'resolved'
+              AND detection_source IS DISTINCT FROM 'telephony_rate_limiter'
             RETURNING event_id, created_at, severity, status, title, description,
                       evidence, assigned_to, resolved_at, resolution_notes, alert_type
             """,
@@ -275,6 +315,14 @@ async def resolve_alert(
             body.resolution_notes,
         )
         if row is None:
+            await _refuse_if_platform_alert(conn, alert_id, current_user.tenant_id)
             raise HTTPException(status_code=404, detail="Alert not found or already resolved")
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="alert.resolve",
+            actor_id=current_user.id, actor_role=current_user.role,
+            tenant_id=current_user.tenant_id,
+            resource_type="security_alert", resource_id=alert_id,
+            after_state={"status": "resolved"},
+        )
 
     return _row_to_alert(dict(row))
