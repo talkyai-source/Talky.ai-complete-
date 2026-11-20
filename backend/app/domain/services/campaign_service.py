@@ -753,6 +753,39 @@ class CampaignService:
                     from_statuses=start_from,
                 )
 
+            # 6b. A RESUME: the dialler parked this campaign's jobs for the long
+            # pause delay. Make them due now so dialling restarts within seconds;
+            # the worker's own resume poll is only the backstop. Never fails the
+            # resume. Tenant-scoped; only the jobs the dialler itself parked for
+            # the pause (failure_reason 'campaign_paused') move.
+            if observed_status == "paused":
+                try:
+                    parked = (
+                        self.db_client.table("dialer_jobs")
+                        .select("id")
+                        .eq("tenant_id", str(tenant_id))
+                        .eq("campaign_id", str(campaign_id))
+                        .eq("status", "retry_scheduled")
+                        .eq("failure_reason", "campaign_paused")
+                        .execute()
+                    )
+                    if getattr(parked, "error", None):
+                        raise RuntimeError("parked jobs could not be read")
+                    parked_ids = [str(r["id"]) for r in (getattr(parked, "data", None) or [])]
+                    if parked_ids:
+                        promote_queue = await self._get_queue_service()
+                        try:
+                            await promote_queue.promote_campaign_parked_jobs(
+                                str(tenant_id), str(campaign_id), parked_ids
+                            )
+                        finally:
+                            await self._cleanup_queue_service()
+                except Exception as exc:  # noqa: BLE001 - the worker poll is the backstop
+                    logger.warning(
+                        "resume: parked jobs of campaign %s not promoted (%s)",
+                        campaign_id, type(exc).__name__,
+                    )
+
             # 7a. D3-14: a large start answers now. Every job is already a
             # durable 'pending' row and the campaign is 'running', so the
             # campaign reads "preparing" until they are queued, and a repeat
