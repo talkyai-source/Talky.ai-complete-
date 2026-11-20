@@ -422,22 +422,25 @@ class BillingService:
         self._require_billing_enabled()
         tenant = (
             self.db_client.table("tenants")
-            .select("stripe_subscription_id")
+            .select("stripe_subscription_id,subscription_status")
             .eq("id", tenant_id)
             .single()
             .execute()
         )
 
         subscription_id = tenant.data.get("stripe_subscription_id") if tenant.data else None
+        # An admin or dispute suspension is never lifted by a cancel call.
+        suspended = bool(tenant.data) and tenant.data.get("subscription_status") == "suspended"
 
         if not subscription_id:
             raise ValueError("No active subscription found")
 
         if self.mock_mode:
             # Update local state in mock mode
-            self.db_client.table("tenants").update(
-                {"subscription_status": SUBSCRIPTION_CANCELLED}
-            ).eq("id", tenant_id).execute()
+            if not suspended:
+                self.db_client.table("tenants").update(
+                    {"subscription_status": SUBSCRIPTION_CANCELLED}
+                ).eq("id", tenant_id).execute()
 
             return {
                 "status": SUBSCRIPTION_CANCELLED,
@@ -452,9 +455,10 @@ class BillingService:
 
         # Update local state. Stripe spells cancellation "canceled"; the call
         # guard blocks on the canonical value, so normalise before storing.
-        self.db_client.table("tenants").update(
-            {"subscription_status": canonical_subscription_status(subscription.status)}
-        ).eq("id", tenant_id).execute()
+        if not suspended:
+            self.db_client.table("tenants").update(
+                {"subscription_status": canonical_subscription_status(subscription.status)}
+            ).eq("id", tenant_id).execute()
 
         self.db_client.table("subscriptions").update(
             {

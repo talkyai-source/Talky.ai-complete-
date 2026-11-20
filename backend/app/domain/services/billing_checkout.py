@@ -130,7 +130,7 @@ class CheckoutAttempts:
         try:
             async with acquire_with_tenant(self.pool, tenant_id) as conn:
                 tenant = await conn.fetchrow(
-                    "SELECT id,status,stripe_customer_id,stripe_subscription_id FROM tenants WHERE id=$1::uuid FOR UPDATE",
+                    "SELECT id,status,subscription_status,stripe_customer_id,stripe_subscription_id FROM tenants WHERE id=$1::uuid FOR UPDATE",
                     str(tenant_id),
                 )
                 # The tenant lock serializes different request IDs; same-ID replays
@@ -142,6 +142,8 @@ class CheckoutAttempts:
                 if not existing:
                     if not tenant or tenant["status"] != "active":
                         raise CheckoutError("tenant_unavailable", "Billing account is unavailable.", 403, request_not_started=True)
+                    if tenant["subscription_status"] == "suspended":
+                        raise CheckoutError("tenant_suspended", "This account is suspended and cannot buy a plan. Contact support.", 403, request_not_started=True)
                     active = await conn.fetchval(
                         """SELECT EXISTS(SELECT 1 FROM subscriptions WHERE tenant_id=$1::uuid
                            AND status NOT IN ('canceled','cancelled','incomplete_expired'))""", str(tenant_id),
@@ -520,7 +522,9 @@ class CheckoutAttempts:
             # grant tenant activation on an early created/updated event alone.
             tenant_status = canonical(subscription["status"]) if (was_completed or activate or not eligible) else INACTIVE
             await conn.execute(
-                "UPDATE tenants SET stripe_subscription_id=$2,subscription_status=$3,plan_id=$4 WHERE id=$1::uuid",
+                """UPDATE tenants SET stripe_subscription_id=$2,
+                     subscription_status=CASE WHEN subscription_status='suspended' THEN subscription_status ELSE $3 END,
+                     plan_id=$4 WHERE id=$1::uuid""",
                 str(tenant_id), subscription["id"], tenant_status, option["plan_id"],
             )
 
