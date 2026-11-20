@@ -407,7 +407,7 @@ class TurnEnder:
                 min_confidence=min_conf,
                 min_alpha_chars=min_chars,
             )
-            if reject_reason is not None:
+            if reject_reason is not None and not contains_dnc(full_transcript):
                 logger.info(
                     "turn_0_transcript_rejected reason=%s call=%s "
                     "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "

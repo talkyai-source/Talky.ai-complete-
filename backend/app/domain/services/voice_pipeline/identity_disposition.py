@@ -56,10 +56,18 @@ _SCHEDULING_AFTER = re.compile(
 )
 
 
+# Only a "don't / do not call me ..." phrase can be a scheduling request. "Stop
+# calling", "take me off", "remove me", "unsubscribe", "never call" and the
+# do-not-call list stay opt-outs whatever follows ("stop calling me right now").
+_SCHEDULABLE_PHRASE = re.compile(r"^(?:don'?t|do\s+not)\b(?!\s+call\s+list\b)", re.I)
+
+
 def dnc_assertion_position(transcript: str) -> int:
     for match in reversed(assertion_matches(transcript, _DNC_PATTERN)):
-        if not _SCHEDULING_AFTER.match(str(transcript or "")[match.end():]):
-            return match.start()
+        if (_SCHEDULABLE_PHRASE.match(match[0])
+                and _SCHEDULING_AFTER.match(str(transcript or "")[match.end():])):
+            continue
+        return match.start()
     return -1
 
 

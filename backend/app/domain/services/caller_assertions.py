@@ -19,7 +19,11 @@ _META = re.compile(
 _REPORTED = re.compile(
     r'\b(?:you|he|she|they|someone|the\s+(?:agent|caller|recording|customer))\b'
     r'[^.!?;]{0,45}\b(?:said|say|says|saying|told|asked|mentioned|wrote|reads?)\b|'
-    r'\b(?:i|we)\s+(?:(?:just|already|previously)\s+)?(?:said|told|heard|read|wrote|asked)\b', re.I)
+    r'\b(?:i|we)\s+(?:(?:just|already|previously)\s+)?(?:heard|read|wrote)\b|'
+    # "I told you, ..." / "I said ..." to the agent is the caller's own request,
+    # not reported speech: it stays an assertion when nothing but "you"/"to" follows.
+    r'\b(?:i|we)\s+(?:(?:just|already|previously)\s+)?(?:said|told|asked)\b'
+    r'(?!\s+(?:you\s+)?(?:to\s+)?[\s,:]*$)', re.I)
 _NEGATED_PREFIX = re.compile(
     r"\b(?:don't|dont|do\s+not|didn't|did\s+not|haven't|have\s+not|won't|will\s+not|never)\s+"
     r"(?:(?:please|you|ever)\s+)*(?:(?:want|need|wish|intend|plan)\s+(?:you\s+)?to\s+|"

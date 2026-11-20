@@ -26,7 +26,10 @@ _CALLER_END_INTENT = re.compile(
         we'?re\s+done | that'?s\s+(?:all|it) | that\s+is\s+all | nothing\s+else |
         no\s+thank(?:s|\s+you) | not\s+interested | hang\s+up |
         end\s+(?:this\s+|the\s+)?call |
-        leave\s+me\s+alone | lose\s+my\s+number
+        leave\s+me\s+alone | lose\s+my\s+number |
+        wrong\s+number | you(?:'?ve|\s+have)(?:\s+got)?\s+the\s+wrong |
+        (?:no\s*one|nobody)\s+(?:here\s+)?(?:by|named|called)\s+(?:that|this)\s+name |
+        there(?:'?s|\s+is)\s+no\s+[a-z]+(?:\s+[a-z]+)?\s+(?:living\s+)?(?:here|at\s+this\s+number)
     )\b""",
     re.IGNORECASE | re.VERBOSE,
 )
@@ -179,9 +182,16 @@ _TEMPORAL = re.compile(
 _WALK_BACK = re.compile(r"\b(?:wait|hold on|hang on|actually|never ?mind|i mean|just kidding|on second thought)\b", re.I)
 
 
+_STOP_TYPE = re.compile(r"\b(?:stop|never|no more|quit|cease)\b")
+_URGENCY = re.compile(r"\b(?:now|today|tonight|moment)\b")
+
+
 def _refuses_contact(quote: object) -> bool:
     text = " ".join(w for w, _ in _quote_tokens(quote))
-    if _TEMPORAL.search(text):
+    # "Stop calling me right now" / "take me off your list today" is urgency, not
+    # scheduling; "don't call me today" stays a scheduling preference.
+    stop_type = _REMOVAL.search(text) or (_STOP_TYPE.search(text) and _CONTACT.search(text))
+    if _TEMPORAL.search(_URGENCY.sub(" ", text) if stop_type else text):
         return False
     return bool(_REMOVAL.search(text) or (_REFUSAL.search(text) and _CONTACT.search(text)))
 
