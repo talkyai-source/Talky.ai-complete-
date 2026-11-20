@@ -4,6 +4,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import type { BillingSubscription } from "@/lib/billing-purchase";
 import { cancelPaypalPlan, formatPlanDate } from "@/lib/paypal-plan-api";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
+
+/** The server needs billing:admin to cancel a plan or open the Stripe portal; "loading" shows neither control. */
+export function useBillingAdmin(): "loading" | "yes" | "no" {
+  const permissions = useEffectivePermissions();
+  if (permissions.isPending) return "loading";
+  return permissions.isSuccess && permissions.data.permissions.includes("billing:admin") ? "yes" : "no";
+}
+export const BILLING_ADMIN_ONLY_TEXT = "Ask the account owner to manage or cancel the subscription.";
 
 /** The "manage" box for a plan paid with PayPal: no Stripe portal, only cancelling (PayPal stops charging at once; the plan runs to the end of the paid period). */
 export function PaypalPlanManage({ subscription }: { subscription: BillingSubscription }) {
@@ -38,7 +47,9 @@ export function PaypalPlanManage({ subscription }: { subscription: BillingSubscr
   }
   return <div className="space-y-3 rounded-xl border p-4">
     <p>Paid with PayPal.</p>
-    {!paidUp && !subscription.cancel_at_period_end && <p className="text-sm">PayPal could not take the last payment, so calling is paused. PayPal tries again by itself. You can also cancel this plan and choose a new one.</p>}
+    {!paidUp && !subscription.cancel_at_period_end && (subscription.status === "unpaid"
+      ? <p className="text-sm">PayPal stopped this plan after failed payments and will not try again. Cancel it here, then buy the plan again.</p>
+      : <p className="text-sm">PayPal could not take the last payment, so calling is paused. PayPal tries again by itself. You can also cancel this plan and choose a new one.</p>)}
     {subscription.cancel_at_period_end
       ? <p>Your plan ends on {endDate}.</p>
       : asking

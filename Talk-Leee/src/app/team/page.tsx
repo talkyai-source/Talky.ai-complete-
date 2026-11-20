@@ -42,7 +42,8 @@ type RowResult = { ok: true } | { ok: false; message: string };
 // A role change and a removal are both asked about first (QA F1-15).
 type PendingChange =
     | { kind: "role"; member: TenantMember; role: string }
-    | { kind: "remove"; member: TenantMember };
+    | { kind: "remove"; member: TenantMember }
+    | { kind: "deactivate"; member: TenantMember };
 
 function confirmCopy(pending: PendingChange | null) {
     if (!pending) return { title: "Remove", description: undefined, warningText: "", confirmLabel: "Remove" };
@@ -53,6 +54,14 @@ function confirmCopy(pending: PendingChange | null) {
             description: `${who} will become ${teamRoleLabel(pending.role)}.`,
             warningText: "The change applies at once, on every device they are signed in on.",
             confirmLabel: "Change role",
+        };
+    }
+    if (pending.kind === "deactivate") {
+        return {
+            title: "Deactivate this team member?",
+            description: "They are signed out and cannot sign in until you reactivate them. Their work stays in the account.",
+            warningText: `${who} (${pending.member.email})`,
+            confirmLabel: "Deactivate",
         };
     }
     return {
@@ -183,10 +192,21 @@ export default function TeamPage() {
                                                                 variant="outline"
                                                                 size="sm"
                                                                 disabled={busy || member.status === "suspended"}
-                                                                onClick={() => void run(member, () => backendApi.team.updateMember({ id: member.id, status: "suspended" }))}
+                                                                onClick={() => setPending({ kind: "deactivate", member })}
                                                             >
                                                                 Deactivate
                                                             </Button>
+                                                            {member.status === "suspended" ? (
+                                                                <Button
+                                                                    type="button"
+                                                                    variant="outline"
+                                                                    size="sm"
+                                                                    disabled={busy}
+                                                                    onClick={() => void run(member, () => backendApi.team.updateMember({ id: member.id, status: "active" }))}
+                                                                >
+                                                                    Reactivate
+                                                                </Button>
+                                                            ) : null}
                                                             <Button
                                                                 type="button"
                                                                 variant="destructive"
@@ -218,7 +238,7 @@ export default function TeamPage() {
                 <ConfirmDialog
                     open={pending !== null}
                     onOpenChange={(open) => { if (!open) setPending(null); }}
-                    intent={pending?.kind === "role" ? "suspend" : "delete"}
+                    intent={pending?.kind === "role" || pending?.kind === "deactivate" ? "suspend" : "delete"}
                     title={copy.title}
                     description={copy.description}
                     warningText={copy.warningText}
@@ -229,7 +249,9 @@ export default function TeamPage() {
                         const result = await run(member, () => (
                             pending.kind === "role"
                                 ? backendApi.team.updateMember({ id: member.id, role_name: pending.role })
-                                : backendApi.team.removeMember({ id: member.id })
+                                : pending.kind === "deactivate"
+                                    ? backendApi.team.updateMember({ id: member.id, status: "suspended" })
+                                    : backendApi.team.removeMember({ id: member.id })
                         ), pending.kind === "role");
                         if (!result.ok) throw new Error(result.message);
                     }}

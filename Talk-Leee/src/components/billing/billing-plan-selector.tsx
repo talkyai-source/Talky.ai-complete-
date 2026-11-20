@@ -8,7 +8,7 @@ import { hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/b
 import { LocalPurchasedPrice, LocalYearlySaving } from "@/components/billing/local-money";
 import { useBillingRefusal } from "@/lib/billing-refusal";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
-import { PaypalPlanManage } from "./paypal-plan-manage";
+import { BILLING_ADMIN_ONLY_TEXT, PaypalPlanManage, useBillingAdmin } from "./paypal-plan-manage";
 import { usePaypalPlansConfig } from "@/lib/paypal-plan-api";
 
 const navigate = (url: string) => window.location.assign(url);
@@ -53,6 +53,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   const subscriptionQuery = useBillingPlan(scope);
   const purchase = useBillingPurchase(scope, onNavigate);
   const refusal = useBillingRefusal("plan");
+  const billingAdmin = useBillingAdmin();
   const paypalOpen = usePaypalPlansConfig().data?.paypal_plans_open === true;
   const [interval, setInterval] = useState<"month" | "year">("month");
   const [portalError, setPortalError] = useState("");
@@ -83,7 +84,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
     {portalError && <p role="alert">{portalError}</p>}
     {plansQuery.isLoading || subscriptionQuery.isLoading ? <p role="status">Loading plans…</p> : plansQuery.isError || subscriptionQuery.isError ?
       <div role="alert" className="space-y-3"><p>Plans could not be verified. Your current subscription is unchanged.</p><Button variant="outline" onClick={() => { void plansQuery.refetch(); void subscriptionQuery.refetch(); }}>Retry</Button></div> : <>
-      {managed && subscription?.billing_provider === "paypal" ? <PaypalPlanManage subscription={subscription} /> : managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
+      {managed && billingAdmin === "loading" ? null : managed && billingAdmin === "no" ? <p className="rounded-xl border p-4 text-sm">{BILLING_ADMIN_ONLY_TEXT}</p> : managed && subscription?.billing_provider === "paypal" ? <PaypalPlanManage subscription={subscription} /> : managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
       {annualAvailable && <fieldset className="flex flex-wrap items-center justify-center gap-4"><legend className="mb-2 text-center font-semibold">Billing interval</legend>{(["month", "year"] as const).map(value => <label key={value} className="inline-flex items-center gap-2"><input type="radio" name="billing-interval" value={value} checked={selectedInterval === value} disabled={Boolean(purchase.saved) || purchase.busy} onChange={() => setInterval(value)} />{value === "month" ? "Monthly" : "Yearly"}</label>)}</fieldset>}
       {plans.length === 0 && <p>No approved plans are currently available.</p>}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{plans.map(plan => {

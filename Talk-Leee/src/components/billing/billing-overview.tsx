@@ -31,7 +31,7 @@ import { LocalMinorAmount, LocalPurchasedPrice } from "@/components/billing/loca
 import { localAmountText, useDisplayCurrency } from "@/components/pricing/local-price";
 import { usdFromMinor } from "@/lib/display-currency";
 import { useCheckoutConfirmationPending, useCheckoutConfirmationProvider } from "@/components/billing/use-billing-purchase";
-import { PaypalPlanManage } from "@/components/billing/paypal-plan-manage";
+import { BILLING_ADMIN_ONLY_TEXT, PaypalPlanManage, useBillingAdmin } from "@/components/billing/paypal-plan-manage";
 import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
   useBillingPlan,
@@ -298,6 +298,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
 
 function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   const balanceQ = useTopupBalance();
+  const billingAdmin = useBillingAdmin();
   // Paid top-up with no subscription row (see usePaygPlanName / GAP G6).
   const prepaidOnly =
     subscription !== null &&
@@ -398,7 +399,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
             <Link href="/billing/plans">Manage plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
         </div>
-        {subscription.billing_provider === "paypal" && hasManagedSubscription(subscription) && <div className="mt-4"><PaypalPlanManage subscription={subscription} /></div>}
+        {subscription.billing_provider === "paypal" && hasManagedSubscription(subscription) && billingAdmin !== "loading" && <div className="mt-4">{billingAdmin === "yes" ? <PaypalPlanManage subscription={subscription} /> : <p className="text-sm">{BILLING_ADMIN_ONLY_TEXT}</p>}</div>}
       </CardContent>
     </Card>
   );

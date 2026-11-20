@@ -295,7 +295,7 @@ test("changing a role asks first, then sends PATCH with role_name and reloads th
     assert.equal(rows().length, 5, "nothing in the list changed");
 });
 
-test("Deactivate sends PATCH with status suspended and reloads the list", async () => {
+test("Deactivate asks first; Confirm sends PATCH with status suspended and reloads the list", async () => {
     currentUser = TENANT_ADMIN;
     const members = mockMembers();
     mockRoles();
@@ -305,6 +305,8 @@ test("Deactivate sends PATCH with status suspended and reloads the list", async 
     const readsBefore = members.mock.callCount();
 
     fireEvent.click(row("tu-2").getByRole("button", { name: "Deactivate" }));
+    const dialog = await screen.findByRole("dialog", {}, { timeout: SLOW });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Deactivate" }));
     await waitFor(() => assert.equal(update.mock.callCount(), 1), { timeout: SLOW });
     assert.deepEqual(update.mock.calls[0]!.arguments[0], { id: "tu-2", status: "suspended" });
     await waitFor(() => assert.equal(members.mock.callCount() > readsBefore, true), { timeout: SLOW });
@@ -378,6 +380,8 @@ test("while a request runs, that row's controls are disabled", async () => {
     await waitFor(() => assert.ok(screen.getByRole("combobox", { name: "Role: casey@example.test" })), { timeout: SLOW });
 
     fireEvent.click(row("tu-2").getByRole("button", { name: "Deactivate" }));
+    const confirmDialog = await screen.findByRole("dialog", {}, { timeout: SLOW });
+    fireEvent.click(within(confirmDialog).getByRole("button", { name: "Deactivate" }));
     await waitFor(() => assert.equal(row("tu-2").getByRole("button", { name: "Deactivate" }).hasAttribute("disabled"), true), { timeout: SLOW });
     assert.equal(row("tu-2").getByRole("button", { name: "Remove" }).hasAttribute("disabled"), true);
     assert.equal(screen.getByRole("combobox", { name: "Role: casey@example.test" }).hasAttribute("disabled"), true);

@@ -4,7 +4,7 @@ import React from "react";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type QueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, sharedHttpClient } from "@/lib/api";
 import { env } from "@/lib/env";
 import { ApiClientError, type HttpRequestOptions } from "@/lib/http-client";
 import { renderWithQueryClient } from "@/test-utils/render";
@@ -24,6 +24,9 @@ const plan = { id: "starter", name: "Starter", minutes: 100, concurrent_calls: 1
 const emptySubscription = { status: "inactive", plan_id: null, plan_name: null, minutes_allocated: 0, minutes_used: 0, minutes_remaining: 0, billing_portal_available: false, purchased_price_option: null };
 const snapshot = (price = monthly) => ({ ...price, plan_id: plan.id, plan_name: plan.name });
 const originalRequest = api.request;
+// The signed-in user is a billing administrator (cancel and portal need billing:admin); the permission read goes through the shared client.
+const permissionsClient = sharedHttpClient(); const originalPermissionsRequest = permissionsClient.request;
+const grantBillingAdmin = () => { permissionsClient.request = (async () => ({ permissions: ["billing:read", "billing:update", "billing:admin"] })) as typeof permissionsClient.request; };
 const oldBackend = env.NEXT_PUBLIC_API_BASE_URL;
 const clients: QueryClient[] = [];
 let catalogue: unknown = [plan];
@@ -42,6 +45,7 @@ function mount(activeScope = scope, statusOnly = false) {
   const view = renderWithQueryClient(ui); clients.push(view.qc); return view;
 }
 beforeEach(() => {
+  grantBillingAdmin();
   env.NEXT_PUBLIC_API_BASE_URL = "https://backend.example/api/v1";
   catalogue = [plan]; subscription = emptySubscription; writes = []; navigations = [];
   handleWrite = async opts => accepted(opts);
@@ -55,7 +59,7 @@ beforeEach(() => {
   }) as typeof api.request;
   window.history.replaceState({}, "", "/billing/plans");
 });
-afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); mock.timers.reset(); resetBillingRefusal(); });
+afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; permissionsClient.request = originalPermissionsRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); mock.timers.reset(); resetBillingRefusal(); });
 // Polling tests fake setTimeout/setInterval and mount the return notice alone
 // (no query observers), flushing React with act() instead of waitFor().
 const flush = () => act(async () => {});
