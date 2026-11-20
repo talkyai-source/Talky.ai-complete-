@@ -233,6 +233,9 @@ const PAGE_MOCKS: ApiMock[] = [
         body: { tags: [], rewards_enabled: false, points_per_review: 0, daily_cap: 0, bare_rating_earns_reward: false },
     },
     { path: "/calls/call-001/lead-details", body: { details: [], missing_required: [] } }, // LeadDetailsResponse (lead-details-api.ts:74)
+    // The call page shows the saved notes and follow-up form (call-edit-panel.tsx via useCallHistoryWorkflow):
+    // "nothing saved yet" is { workflow: null } (use-call-history-workflow.ts responseSchema).
+    { path: "/calls/call-001/workflow", body: { workflow: null } },
     // /recordings (src/app/recordings/page.tsx:44): RecordingListResponse (extended-api.ts:97).
     { path: "/recordings", body: { items: [], page: 1, page_size: 20, total: 0 } },
 
