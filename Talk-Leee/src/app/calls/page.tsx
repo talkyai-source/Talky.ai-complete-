@@ -26,6 +26,9 @@ import {
     LeadAccentIcon,
 } from "@/components/calls/call-history-workflow-controls";
 import { Select } from "@/components/ui/select";
+import { CallHistoryDownload, describeCallHistoryFilters } from "@/components/calls/call-history-download";
+import { CallHistoryTable } from "@/components/calls/call-history-table";
+import { useWhiteLabelBranding } from "@/components/white-label/white-label-branding-provider";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -849,6 +852,8 @@ export default function CallsPage() {
     const [reviewCall, setReviewCall] = useState<Call | null>(null);
     const previousStatusesRef = useRef<Map<string, string> | null>(null);
     const [selectedDid, setSelectedDid] = useState<string | undefined>();
+    const [view, setView] = useState<"list" | "table">("list");
+    const whiteLabel = useWhiteLabelBranding();
 
     // The page and every filter live in the address, so a reload or a shared
     // link shows the same view. Read once after mount, written on each change.
@@ -864,6 +869,7 @@ export default function CallsPage() {
             if (requestedFilter === "leads" || requestedFilter === "issues") setFilter(requestedFilter);
             setSearch(params.get("search") ?? "");
             setSelectedDid(params.get("did") || undefined);
+            if (params.get("view") === "table") setView("table");
             const requestedPage = Number(params.get("page"));
             if (Number.isInteger(requestedPage) && requestedPage > 1) setPage(requestedPage);
             setAddressRead(true);
@@ -884,12 +890,13 @@ export default function CallsPage() {
         put("direction", direction === "all" ? undefined : direction);
         put("inbound_campaign_id", inboundCampaignId);
         put("did", selectedDid);
+        put("view", view === "table" ? "table" : undefined);
         const query = params.toString();
         const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
         if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
             window.history.replaceState(window.history.state, "", next);
         }
-    }, [addressRead, page, search, filter, direction, inboundCampaignId, selectedDid]);
+    }, [addressRead, page, search, filter, direction, inboundCampaignId, selectedDid, view]);
 
     const firstPage = () => setPage(1);
     // Direction and inbound campaign are the server's own filters: they are
@@ -1035,6 +1042,18 @@ export default function CallsPage() {
                             <option value="">All campaigns</option>
                             {campaignOptions.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
                         </Select>
+                        <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Choose how calls are shown">
+                            {(["list", "table"] as const).map((key) => <button key={key} type="button" aria-pressed={view === key} onClick={() => setView(key)} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${view === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key === "list" ? "List" : "Table"}</button>)}
+                        </div>
+                        <CallHistoryDownload
+                            calls={calls}
+                            complete={q.data?.complete === true}
+                            knownWorkflow={workflow}
+                            filters={describeCallHistoryFilters({ direction, filter, search, did: selectedDid, campaignName: inboundCampaignId ? campaignOptions.find((option) => option.id === inboundCampaignId)?.name ?? inboundCampaignId : undefined })}
+                            timeZone={user?.account_timezone}
+                            accountName={user?.business_name}
+                            brand={{ name: whiteLabel?.branding.displayName ?? "Talk-Lee", logoSrc: whiteLabel?.branding.logo.src ?? "/favicon.svg" }}
+                        />
                         </div>
                     </div>
 
@@ -1052,6 +1071,15 @@ export default function CallsPage() {
                                 // A cleared server filter starts its own reading.
                                 if (direction === "all" && !inboundCampaignId) readAllCallsAgain();
                             }}
+                        />
+                    ) : view === "table" ? (
+                        <CallHistoryTable
+                            calls={pageCalls}
+                            workflow={workflow}
+                            timeZone={user?.account_timezone}
+                            canEdit={canEdit}
+                            onWorkflowChange={updateWorkflow}
+                            onContactCorrected={() => void q.refetch()}
                         />
                     ) : (
                         groups.map((g, idx) => (

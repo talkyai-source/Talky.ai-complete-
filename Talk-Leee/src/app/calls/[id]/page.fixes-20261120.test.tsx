@@ -19,6 +19,9 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const nothing = () => null;
 loader._load = function (id, ...args) {
+    // The call page now saves notes through this hook and reads lead details with useQuery; neither is under test here.
+    if (id.endsWith("lib/use-call-history-workflow")) return { useCallHistoryWorkflow: () => ({ workflow: {}, update: () => {}, retry: () => {}, busy: false, failed: false, backupUnavailable: false }) };
+    if (id === "@tanstack/react-query") return { ...(originalLoad.call(this, id, ...args) as object), useQuery: () => ({ data: undefined }) };
     if (id.includes("lib/auth-context")) return { useAuth: () => ({ user }) };
     if (id === "next/navigation") return { useParams: () => ({ id: "call-1" }), useRouter: () => ({ push: () => {}, back: () => {} }) };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
