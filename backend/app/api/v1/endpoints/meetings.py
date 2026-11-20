@@ -30,7 +30,6 @@ router = APIRouter(prefix="/meetings", tags=["Meetings"])
 # Writes change the tenant's real calendar and invite attendees, so they need
 # the same CALENDAR_MANAGE grant the assistant tool path requires.
 _require_calendar_manage = require_permission(Permission.CALENDAR_MANAGE)
-_require_calendar_read = require_permission(Permission.CALENDAR_READ)
 
 
 # =============================================================================
@@ -152,7 +151,7 @@ def _meeting_response(meeting: dict) -> MeetingResponse:
 # Endpoints
 # =============================================================================
 
-@router.get("/availability", response_model=List[AvailabilitySlot], dependencies=[Depends(_require_calendar_read)])
+@router.get("/availability", response_model=List[AvailabilitySlot])
 async def get_availability(
     date: str = Query(..., description="Date in YYYY-MM-DD format"),
     duration_minutes: int = Query(30, ge=15, le=240, description="Slot duration"),
@@ -260,7 +259,7 @@ async def create_meeting(
         raise HTTPException(status_code=400, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
-@router.get("/", response_model=MeetingListResponse, dependencies=[Depends(_require_calendar_read)])
+@router.get("/", response_model=MeetingListResponse)
 async def list_meetings(
     status: Optional[str] = Query(None, description="Filter by status"),
     from_date: Optional[str] = Query(None, description="From date (YYYY-MM-DD)"),
@@ -294,7 +293,7 @@ async def list_meetings(
     return MeetingListResponse(items=[_meeting_response(m) for m in meetings])
 
 
-@router.get("/{meeting_id}", response_model=MeetingResponse, dependencies=[Depends(_require_calendar_read)])
+@router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
     meeting_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),

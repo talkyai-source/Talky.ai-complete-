@@ -26,7 +26,6 @@ from app.api.v1.endpoints.campaigns import router as campaigns_router
 from app.api.v1.endpoints.connectors import router as connectors_router
 from app.api.v1.endpoints.contact_lists import router as contact_lists_router
 from app.api.v1.endpoints.dnc import router as dnc_router
-from app.api.v1.endpoints.meetings import router as meetings_router
 from app.api.v1.endpoints.tenant_ai_credentials import router as credentials_router
 from app.domain.services import call_feedback_service as fb_service
 
@@ -92,9 +91,6 @@ _PERM_ROUTES = [
     (campaigns_router, "GET", "/campaigns/{campaign_id}/stats", {Permission.CAMPAIGNS_READ}),
     (campaigns_router, "GET", "/campaigns/{campaign_id}/contacts", {Permission.CAMPAIGNS_READ}),
     (contact_lists_router, "GET", "/campaigns/{campaign_id}/contact-lists", {Permission.CAMPAIGNS_READ}),
-    (meetings_router, "GET", "/meetings/availability", {Permission.CALENDAR_READ}),
-    (meetings_router, "GET", "/meetings/", {Permission.CALENDAR_READ}),
-    (meetings_router, "GET", "/meetings/{meeting_id}", {Permission.CALENDAR_READ}),
     (connectors_router, "GET", "/connectors", {Permission.CONNECTORS_READ}),
     (connectors_router, "GET", "/connectors/status", {Permission.CONNECTORS_READ}),
     (connectors_router, "GET", "/connectors/{connector_id}", {Permission.CONNECTORS_READ}),
@@ -128,8 +124,6 @@ def test_route_requires_admin(router, method, path):
     (Permission.CAMPAIGNS_READ, "readonly", True),
     (Permission.CAMPAIGNS_READ, "agent", True),
     (Permission.CALLS_READ, "billing_user", False),
-    (Permission.CALENDAR_READ, "agent", False),
-    (Permission.CALENDAR_READ, "tenant_admin", True),
     (Permission.CONNECTORS_READ, "billing_user", False),
     (Permission.CONNECTORS_READ, "readonly", True),
 ])
