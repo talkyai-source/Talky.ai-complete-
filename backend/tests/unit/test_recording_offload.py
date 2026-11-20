@@ -111,7 +111,7 @@ async def test_inbound_emergency_switch_is_rechecked_before_any_mix_or_write():
     with patch(
         "app.core.container.get_container", return_value=container
     ), patch(
-        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_state",
         new=AsyncMock(return_value=False),
     ), patch(
         "app.domain.services.recording_service.mix_stereo_recording"

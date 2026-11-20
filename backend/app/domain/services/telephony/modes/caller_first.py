@@ -8,7 +8,7 @@ True carrier-inbound sessions are excluded and use their admitted prompt.
 from __future__ import annotations
 
 import logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 from app.services.scripts.prompts.direction import (
     INBOUND_DIRECTIVE_SENTINEL,
@@ -107,8 +107,12 @@ def apply_caller_first_inbound_prompt(voice_session) -> None:
     select_inbound_base_prompt(voice_session)
 
 
-async def _live_inbound_recording_enabled(db_pool) -> bool:
-    """Read the live platform kill switch; missing/uncertain is disabled."""
+async def _live_inbound_recording_state(db_pool) -> Optional[bool]:
+    """Read the live platform switch: True, False, or None when unreadable.
+
+    None means "could not read"; callers must not treat it as "off" (a failed
+    read must never destroy audio that was already captured).
+    """
 
     try:
         async with db_pool.acquire() as conn:
@@ -119,9 +123,15 @@ async def _live_inbound_recording_enabled(db_pool) -> bool:
                     "FROM platform_runtime_controls WHERE id=1"
                 )
         return enabled is True
-    except Exception as exc:  # noqa: BLE001 - compliance uncertainty is deny
+    except Exception as exc:  # noqa: BLE001 - unreadable is not "off"
         logger.error("inbound_recording_live_switch_unavailable err=%s", exc)
-        return False
+        return None
+
+
+async def _live_inbound_recording_enabled(db_pool) -> bool:
+    """True only when the live switch was read and is on."""
+
+    return (await _live_inbound_recording_state(db_pool)) is True
 
 
 async def _set_inbound_consent_status(db_pool, call_id: str, status: str) -> None:
@@ -186,6 +196,7 @@ async def prepare_inbound_recording(voice_session) -> bool:
             RecordingPolicyService,
             disclosure_delivered,
             is_saved_policy,
+            notice_proof_required,
         )
         from app.core.container import get_container
 
@@ -205,6 +216,8 @@ async def prepare_inbound_recording(voice_session) -> bool:
             or ""
         )
         if not campaign_enabled or not platform_enabled:
+            # Not recorded: the notice must not be spoken either.
+            voice_session._recording_disclosure_attempted = True
             await _set_inbound_consent_status(db_pool, durable_call_id, "not_required")
             voice_session._recording_allowed = False
             logger.info(
@@ -215,8 +228,10 @@ async def prepare_inbound_recording(voice_session) -> bool:
             return False
 
         # The snapshot proves what was admitted; the live read makes the
-        # platform switch an actual emergency stop during call setup.
-        if not await _live_inbound_recording_enabled(db_pool):
+        # platform switch an actual emergency stop during call setup. An
+        # unreadable switch (None) is not "off": admission just read it on.
+        if (await _live_inbound_recording_state(db_pool)) is False:
+            voice_session._recording_disclosure_attempted = True
             await _set_inbound_consent_status(db_pool, durable_call_id, "not_required")
             voice_session._recording_allowed = False
             logger.info(
@@ -225,13 +240,15 @@ async def prepare_inbound_recording(voice_session) -> bool:
             )
             return False
 
+        strict = notice_proof_required()
         decision = await RecordingPolicyService(db_pool).decide(
             tenant_id=str(tenant_id),
         )
-        # An inbound call is recorded only under a policy the tenant saved.
-        # The defaults for "nothing saved" and "could not be read" were opened
-        # for outbound calls only (18 November 2026); here both stay closed.
-        if not decision.should_record or not is_saved_policy(decision):
+        # Same rule as outbound (owner decision, 18 November 2026): no saved policy is
+        # recorded with the spoken notice; a missing receipt keeps the audio marked unconfirmed.
+        # RECORDING_REQUIRE_NOTICE_PROOF=true restores the strict rule (saved policy + receipt).
+        if not decision.should_record or (strict and not is_saved_policy(decision)):
+            voice_session._recording_disclosure_attempted = True
             await _set_inbound_consent_status(db_pool, durable_call_id, "not_required")
             voice_session._recording_allowed = False
             return False
@@ -247,23 +264,41 @@ async def prepare_inbound_recording(voice_session) -> bool:
         disclosure_spoken = disclosure_delivered(*call_ids)
         # Re-check after speech so a switch flipped during the notice still
         # prevents the buffers from ever opening.
-        live_enabled = await _live_inbound_recording_enabled(db_pool)
-        allowed = bool(decision.should_record and disclosure_spoken and live_enabled)
+        live_state = await _live_inbound_recording_state(db_pool)
+        # A missing receipt is tolerated only when a notice could be spoken at all.
+        # A realtime session has no pipeline: nothing was said, so nothing is recorded.
+        # (The disclosure ledger says FAILED for both cases, so it cannot tell them apart.)
+        can_speak = getattr(voice_session, "pipeline", None) is not None
+        allowed = bool(
+            decision.should_record
+            and live_state is not False
+            and (disclosure_spoken or (not strict and can_speak))
+        )
+        not_spoken = bool(
+            decision.should_record and live_state is not False
+            and not disclosure_spoken and not strict and not can_speak
+        )
         if callable(set_gate):
             set_gate(call_id, allowed)
         voice_session._recording_allowed = allowed
         await _set_inbound_consent_status(
-            db_pool, durable_call_id, "granted" if allowed else "declined"
+            db_pool,
+            durable_call_id,
+            ("granted" if disclosure_spoken else "unknown") if allowed else "declined",
         )
         logger.info(
-            "inbound_recording_gate call=%s enabled=%s reason=%s",
-            call_id[:12], allowed, getattr(decision, "reason", "unknown"),
+            "inbound_recording_gate call=%s enabled=%s reason=%s notice=%s",
+            call_id[:12], allowed,
+            "notice_not_spoken" if not_spoken else getattr(decision, "reason", "unknown"),
+            "delivered" if disclosure_spoken else "unconfirmed",
         )
         return allowed
     except Exception as exc:  # noqa: BLE001 — compliance path fails closed
         if callable(set_gate):
             set_gate(call_id, False)
         voice_session._recording_allowed = False
+        # Not recorded, so no later step may tell the caller that it is.
+        voice_session._recording_disclosure_attempted = True
         if db_pool is not None and durable_call_id:
             await _set_inbound_consent_status(db_pool, durable_call_id, "declined")
         logger.error(

@@ -2,7 +2,7 @@
 recorded at any cost"). The decision opened two defaults for OUTBOUND calls.
 These tests pin what it did not change:
 
-* an inbound call is recorded only under a policy the tenant saved;
+* an inbound call follows the same rule as an outbound one (20 November 2026); the strict setting restores the saved-policy rule;
 * a tenant that saved "disabled" is not buffered, not copied to disk and not
   recorded after a transfer;
 * a transfer part nobody could join is removed after a week, not kept for ever;
@@ -35,7 +35,7 @@ def _ledger():
     so the inbound tests below reach the policy decision itself."""
     rps.clear_disclosure_state(base.CALL_UUID)
     with patch(
-        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_state",
         new=AsyncMock(return_value=True),
     ), patch(
         "app.domain.services.telephony.modes.caller_first._set_inbound_consent_status",
@@ -59,9 +59,9 @@ def test_only_a_decision_from_a_saved_policy_counts_as_saved():
     "decision", [rps._ABSENT_POLICY_DEFAULT, rps._POLICY_LOOKUP_FAILURE_DEFAULT],
     ids=["nothing_saved", "could_not_be_read"],
 )
-async def test_inbound_gate_stays_closed_without_a_saved_policy(decision):
-    """Both defaults now say "record, with the notice". That was opened for
-    outbound calls only: an inbound call still needs a policy the tenant saved."""
+async def test_inbound_gate_stays_closed_without_a_saved_policy_under_strict_setting(decision, monkeypatch):
+    """RECORDING_REQUIRE_NOTICE_PROOF=true: an inbound call needs a saved policy."""
+    monkeypatch.setenv("RECORDING_REQUIRE_NOTICE_PROOF", "true")
     log = []
     voice_session, _ = base._make_voice_session(log)
     gateway = base._GatedInboundMediaGateway(log)
@@ -75,6 +75,28 @@ async def test_inbound_gate_stays_closed_without_a_saved_policy(decision):
     assert gateway.enabled is False
     assert ("recording_gate", True) not in log
     assert not any(kind == "tts" for kind, _ in log), "no notice is spoken for a recording that is not made"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "decision", [rps._ABSENT_POLICY_DEFAULT, rps._POLICY_LOOKUP_FAILURE_DEFAULT],
+    ids=["nothing_saved", "could_not_be_read"],
+)
+async def test_inbound_gate_opens_without_a_saved_policy_by_default(decision, monkeypatch):
+    """Owner decision: incoming calls follow the outbound rule, the notice is spoken."""
+    monkeypatch.delenv("RECORDING_REQUIRE_NOTICE_PROOF", raising=False)
+    log = []
+    voice_session, _ = base._make_voice_session(log)
+    gateway = base._GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    p_container, p_policy = base._patched_policy(decision)
+
+    with p_container, p_policy:
+        allowed = await prepare_inbound_recording(voice_session)
+
+    assert allowed is True
+    assert gateway.enabled is True
+    assert any(kind == "tts" for kind, _ in log), "the notice is spoken"
 
 
 @pytest.mark.asyncio

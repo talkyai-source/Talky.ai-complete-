@@ -46,20 +46,23 @@ def _discard_recording(voice_session) -> None:
     voice_session._recording_allowed = False
 
 
-async def _inbound_recording_persist_allowed(voice_session, db_pool) -> bool:
-    """Fail closed against the live emergency switch at persistence time."""
+async def _inbound_recording_persist_allowed(voice_session, db_pool) -> Optional[bool]:
+    """Live emergency switch at persistence time: True, False, or None.
+
+    None = the switch could not be read; the caller keeps the audio safe.
+    """
 
     if not _is_true_inbound_session(voice_session):
         return True
     if getattr(voice_session, "_recording_allowed", False) is not True:
         return False
     if db_pool is None:
-        return False
+        return None
     from app.domain.services.telephony.modes.caller_first import (
-        _live_inbound_recording_enabled,
+        _live_inbound_recording_state,
     )
 
-    return await _live_inbound_recording_enabled(db_pool)
+    return await _live_inbound_recording_state(db_pool)
 
 
 def _session_tenant_uuid(voice_session) -> UUID | None:
@@ -131,6 +134,7 @@ def _build_spool_entry(
 ):
     from app.domain.services.recording_policy_service import (
         _CALLEE_COUNTRY, get_callee_country, get_disclosure_state,
+        notice_proof_required,
     )
     from app.domain.services.recording_spool import SpoolEntry, utc_now_iso
     from app.domain.services.telephony.modes.agent_first import _disclosure_call_ids
@@ -169,7 +173,7 @@ def _build_spool_entry(
         callee_country=country,
         callee_country_known=bool(country_known),
         inbound=inbound,
-        strict_notice=inbound,
+        strict_notice=bool(inbound and notice_proof_required()),
         awaiting="transfer_part" if awaiting_transfer else None,
         transfer_recording_name=transfer_recording_name,
         transfer_part=None,
@@ -235,7 +239,7 @@ async def _save_call_recording_with_budget(
         except Exception:
             pass
 
-    if not await _inbound_recording_persist_allowed(voice_session, db_pool):
+    if (await _inbound_recording_persist_allowed(voice_session, db_pool)) is False:
         _discard_recording(voice_session)
         _checkpoint_done()
         logger.info(
@@ -524,12 +528,15 @@ async def _process_locked(entry, wav_bytes, voice_session) -> str:
         allowed = await _inbound_recording_persist_allowed(voice_session, db_pool)
     elif entry.inbound:
         from app.domain.services.telephony.modes.caller_first import (
-            _live_inbound_recording_enabled,
+            _live_inbound_recording_state,
         )
 
-        allowed = bool(db_pool is not None and await _live_inbound_recording_enabled(db_pool))
+        allowed = None if db_pool is None else await _live_inbound_recording_state(db_pool)
     else:
         allowed = True
+    if allowed is None:
+        # Switch unreadable: keep the audio for a later attempt, never refuse.
+        return await _mark_retry(entry, "inbound_switch_unreadable")
     if not allowed:
         if voice_session is not None:
             _discard_recording(voice_session)

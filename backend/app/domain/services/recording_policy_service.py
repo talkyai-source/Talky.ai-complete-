@@ -13,9 +13,10 @@ recorded at any cost"):
     recording notice (the most protective mode that still records).
   * A captured recording of an outbound call is never discarded because the
     notice receipt is missing: it is KEPT and MARKED `unconfirmed`
-    (`notice_state`). Only a saved `disabled` policy, an inbound call
-    (`strict_notice=True`) or the platform switch
-    `RECORDING_REQUIRE_NOTICE_PROOF` still refuse a recording.
+    (`notice_state`). Only a saved `disabled` policy or the platform switch
+    `RECORDING_REQUIRE_NOTICE_PROOF` (which also makes inbound strict) still
+    refuse a recording. Incoming calls follow the same rule (from 20
+    November 2026).
   * When the decision cannot be taken (policy store unreadable) the save is
     retried later; nothing is destroyed on an error.
 
@@ -25,7 +26,7 @@ configured notice. It does not certify human hearing or legal consent.
 The ledger is deliberately process-local and in-memory: it records a
 fact about a live call that only this process observed. An unknown call
 reads as "no disclosure", so losing the ledger on restart marks a recording
-`unconfirmed` (outbound) or refuses it (inbound / proof switch).
+`unconfirmed` or refuses it (proof switch).
 """
 from __future__ import annotations
 

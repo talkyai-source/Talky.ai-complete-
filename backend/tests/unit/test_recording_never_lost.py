@@ -261,7 +261,7 @@ async def test_inbound_entry_with_closed_live_gate_is_refused_and_removed(h, mon
         return False
 
     monkeypatch.setattr(
-        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled", closed,
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_state", closed,
     )
     assert await tr.process_spool_entry(_write(_entry(inbound=True, strict_notice=True))) == "refused"
     assert spool.list_entries() == []
