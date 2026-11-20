@@ -75,7 +75,9 @@ Each `readiness.checks[].key` returned with an inbound campaign. Source: `app/do
 | `platform_settlement_enabled` |
 | `platform_transfer_enabled` |
 | `qualification_runtime_supported` |
+| `recording_account_setting` |
 | `recording_consent` |
+| `recording_notice_supported` |
 | `tenant_active` |
 | `tenant_inbound_enabled` |
 | `timezone_valid` |
@@ -212,6 +214,7 @@ The `code` field of an error from the inbound campaign API (`app/domain/services
 | `transfer_runtime_unavailable` |
 | `transfer_staging_scope_mismatch` |
 | `trunk_not_ready` |
+| `unsupported_recording_notice` |
 | `version_conflict` |
 
 ## 4. Dialer block-reason codes
