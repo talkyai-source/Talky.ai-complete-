@@ -87,7 +87,9 @@ export async function buildSingleCallPdf(
     autoTable(doc, {
         ...tableOptions,
         startY: y,
-        body: CALL_EXPORT_COLUMNS.map((column) => [
+        // The seconds column exists so a spreadsheet can add durations up; on a
+        // one-call report it only repeats the line above it.
+        body: CALL_EXPORT_COLUMNS.filter((column) => column.key !== "durationSeconds").map((column) => [
             { content: column.header, styles: { fontStyle: "bold", fillColor: [241, 245, 249], cellWidth: 130 } },
             { content: pdfSafeText(detail.row[column.key]) || "-" },
         ]),

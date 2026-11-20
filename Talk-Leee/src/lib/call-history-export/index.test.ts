@@ -92,6 +92,16 @@ test("aborting while the notes load also saves nothing", async () => {
     assert.equal(saves, 0);
 });
 
+test("exportCallHistory hands the brand to the signature loader", async () => {
+    let seen: unknown = null;
+    const brand = { name: "Partner Co", logoSrc: "/partner.svg" };
+    await exportCallHistory(
+        { format: "pdf", calls: [call], meta, brand },
+        { fetchWorkflow: async () => ({}), save: () => undefined, loadSignature: async (b) => { seen = b; return null; } },
+    );
+    assert.deepEqual(seen, brand);
+});
+
 test("loadLogoPng returns null when there is no document", async () => {
     const g = globalThis as unknown as Record<string, unknown>;
     const original = Object.getOwnPropertyDescriptor(globalThis, "document");

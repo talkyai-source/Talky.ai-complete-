@@ -12,7 +12,7 @@ import {
     type CallExportLogo,
 } from "./columns";
 import { fetchWorkflowForCalls } from "./notes";
-import { loadLogoPng } from "./logo";
+import { loadBrandSignaturePng } from "./logo";
 import { buildCallHistoryWorkbook } from "./xlsx";
 import { buildCallHistoryPdf } from "./pdf";
 import { saveBytes } from "./download";
@@ -27,7 +27,7 @@ export type {
 } from "./columns";
 export { CALL_EXPORT_COLUMNS, buildExportRows, summarizeExport, exportFileName } from "./columns";
 export { fetchWorkflowForCalls } from "./notes";
-export { loadLogoPng } from "./logo";
+export { loadLogoPng, loadBrandSignaturePng } from "./logo";
 export { buildCallHistoryWorkbook } from "./xlsx";
 export { buildCallHistoryPdf } from "./pdf";
 export { buildSingleCallPdf, type SingleCallExport } from "./single-call-pdf";
@@ -43,6 +43,7 @@ export interface ExportInternals {
     fetchWorkflow?: typeof fetchWorkflowForCalls;
     save?: typeof saveBytes;
     loadLogo?: (src: string) => Promise<CallExportLogo | null>;
+    loadSignature?: (brand: CallExportBrand) => Promise<CallExportLogo | null>;
 }
 
 export async function exportCallHistory(
@@ -61,7 +62,6 @@ export async function exportCallHistory(
     const brand = args.brand ?? DEFAULT_BRAND;
     const fetchWorkflow = internals.fetchWorkflow ?? fetchWorkflowForCalls;
     const save = internals.save ?? saveBytes;
-    const loadLogo = internals.loadLogo ?? ((src: string) => loadLogoPng(src));
     const check = () => {
         if (signal?.aborted) throw new DOMException("The export was cancelled.", "AbortError");
     };
@@ -75,7 +75,9 @@ export async function exportCallHistory(
     check();
     onProgress?.({ phase: "file", done: 0, total: 1 });
     const rows: CallExportRow[] = buildExportRows(calls, workflow, args.meta.timeZone);
-    const logo = await loadLogo(brand.logoSrc);
+    const logo = internals.loadLogo
+        ? await internals.loadLogo(brand.logoSrc)
+        : await (internals.loadSignature ?? ((b: CallExportBrand) => loadBrandSignaturePng(b)))(brand);
     check();
     const meta: CallExportMeta = { ...args.meta, generatedAt: new Date() };
     const bytes = format === "xlsx"

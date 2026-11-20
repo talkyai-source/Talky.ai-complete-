@@ -101,6 +101,23 @@ test("workbook has the two sheets, header cells, frozen pane, filter and propert
     assert.ok(sum.includes("1:05:50")); // 125 + 3700 + 125 seconds of talk time
 });
 
+const SIGNATURE = { ...LOGO, width: 400, height: 100, includesName: true };
+
+test("with a signature image the sheet places it at its aspect ratio, leaves the name out and keeps the title clear of it", async () => {
+    const { wb } = await read(meta(), SIGNATURE);
+    const ws = wb.getWorksheet("Call history")!;
+    const images = ws.getImages();
+    assert.equal(images.length, 1);
+    // exceljs returns the image's pixel size here; its type declarations leave the field out.
+    const ext = (images[0].range as unknown as { ext: { width: number; height: number } }).ext;
+    assert.equal(ext.height, 34);
+    assert.equal(ext.width, 136);
+    assert.ok((ws.getRow(1).height ?? 0) * (4 / 3) > 34 + 6, "row 1 is taller than the image");
+    assert.ok(!allText(ws).includes("Talk-Lee"), "the brand name is not printed as text beside the image");
+    // column A is 22 chars (~159 px) so the title starts in column B, right of the 136 px image
+    assert.equal(ws.getCell(1, 2).value, "Call history");
+});
+
 test("the not-complete line appears only when complete is false", async () => {
     const incomplete = allText((await read(meta({ complete: false }))).wb.getWorksheet("Call history")!);
     const complete = allText((await read(meta({ complete: true }))).wb.getWorksheet("Call history")!);

@@ -16,6 +16,8 @@ const HEADER_FILL = "FF1E3A5F";
 const BAND_FILL = "FFF1F5F9";
 const BORDER_COLOR = { argb: "FFCBD5E1" };
 const MAX_CELL_CHARS = 32000;
+/** Height of the signature image in the sheet's header, in pixels. */
+export const SIGNATURE_HEIGHT_PX = 34;
 
 /** Call data is ALWAYS written as a plain string: never a formula, link or rich text. */
 function safeString(value: unknown): string {
@@ -52,8 +54,26 @@ export async function buildCallHistoryWorkbook(
     });
 
     // Header block
-    sheet.getRow(1).height = 40;
-    if (logo) {
+    const signature = logo?.includesName === true ? logo : null;
+    let titleCol = 4;
+    if (signature) {
+        const imageHeight = SIGNATURE_HEIGHT_PX;
+        const imageWidth = Math.round((signature.width / Math.max(1, signature.height)) * imageHeight);
+        sheet.getRow(1).height = 46;
+        const imageId = workbook.addImage({
+            base64: signature.dataUrl.replace(/^data:image\/png;base64,/, ""),
+            extension: "png",
+        });
+        sheet.addImage(imageId, { tl: { col: 0.05, row: 0.1 }, ext: { width: imageWidth, height: imageHeight } });
+        // First column that starts to the right of the image, so the title never sits on it.
+        let used = 0.05 * (CALL_EXPORT_COLUMNS[0].width * 7 + 5);
+        titleCol = CALL_EXPORT_COLUMNS.length;
+        for (let i = 0; i < CALL_EXPORT_COLUMNS.length; i += 1) {
+            used += CALL_EXPORT_COLUMNS[i].width * 7 + 5;
+            if (used > imageWidth + 12) { titleCol = i + 2; break; }
+        }
+    } else sheet.getRow(1).height = 40;
+    if (logo && !signature) {
         const imageId = workbook.addImage({
             base64: logo.dataUrl.replace(/^data:image\/png;base64,/, ""),
             extension: "png",
@@ -65,13 +85,15 @@ export async function buildCallHistoryWorkbook(
             ext: { width: Math.round(logo.width * scale), height: Math.round(logo.height * scale) },
         });
     }
-    const brandCell = sheet.getCell(1, 2);
-    brandCell.value = safeString(brand.name);
-    brandCell.font = { bold: true, size: 18, color: { argb: HEADER_FILL } };
-    brandCell.alignment = { vertical: "middle" };
-    const titleCell = sheet.getCell(1, 4);
+    if (!signature) {
+        const brandCell = sheet.getCell(1, 2);
+        brandCell.value = safeString(brand.name);
+        brandCell.font = { bold: true, size: 18, color: { argb: HEADER_FILL } };
+        brandCell.alignment = { vertical: "middle" };
+    }
+    const titleCell = sheet.getCell(1, titleCol);
     titleCell.value = "Call history";
-    titleCell.font = { bold: true, size: 16 };
+    titleCell.font = { bold: true, size: signature ? 12 : 16 };
     titleCell.alignment = { vertical: "middle" };
 
     const lines: string[] = [];

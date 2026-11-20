@@ -76,6 +76,21 @@ function drawLogo(doc: jsPDF, logo: CallExportLogo, x: number, y: number, box: n
     }
 }
 
+/** The signature (emblem + name in one image): about 9 mm tall, width from its own aspect ratio. */
+export const SIGNATURE_HEIGHT_PT = 25.5;
+const SIGNATURE_Y = 9;
+export function signatureWidthPt(logo: CallExportLogo, heightPt: number = SIGNATURE_HEIGHT_PT): number {
+    return (logo.width / Math.max(1, logo.height)) * heightPt;
+}
+function drawSignature(doc: jsPDF, logo: CallExportLogo, x: number, y: number, heightPt: number): boolean {
+    try {
+        doc.addImage(logo.dataUrl, "PNG", x, y, signatureWidthPt(logo, heightPt), heightPt);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 /** Header, rule and "Page X of Y" footer on every page. Call once, after all content. */
 export function drawChrome(
     doc: jsPDF,
@@ -92,18 +107,26 @@ export function drawChrome(
     for (let page = 1; page <= total; page += 1) {
         doc.setPage(page);
         let textX = margin;
-        if (logo) {
+        let titleY = 40;
+        let signatureDrawn = false;
+        if (logo?.includesName === true) {
+            signatureDrawn = drawSignature(doc, logo, margin, SIGNATURE_Y, SIGNATURE_HEIGHT_PT);
+            if (signatureDrawn) titleY = 48;
+        } else if (logo) {
             const w = drawLogo(doc, logo, margin, 12, 30);
             if (w > 0) textX = margin + w + 8;
         }
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(13);
-        doc.setTextColor(...NAVY);
-        doc.text(pdfSafeText(brand.name), textX, 28);
+        if (!signatureDrawn) {
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(13);
+            doc.setTextColor(...NAVY);
+            doc.text(pdfSafeText(brand.name), textX, 28);
+        }
         doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
+        doc.setFontSize(signatureDrawn ? 8.5 : 9);
         doc.setTextColor(...MUTED);
-        doc.text(title, textX, 40);
+        doc.text(title, textX, titleY);
+        doc.setFontSize(9);
         const rightLines = [account, pdfSafeText(generatedLine(meta))].filter(Boolean);
         rightLines.forEach((line, index) => {
             doc.text(line, width - margin, 26 + index * 12, { align: "right" });

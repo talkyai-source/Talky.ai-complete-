@@ -56,6 +56,30 @@ test("a 30-row list PDF has several pages, a header, the footer 'Page X of Y' an
     assert.ok(raw.includes("/Author (Talk-Lee)"));
 });
 
+const SIGNATURE = { ...LOGO, width: 400, height: 100, includesName: true };
+const nameOperators = (raw: string) => (raw.match(/\(Talk-Lee\) Tj/g) ?? []).length;
+
+test("with a signature image the header does not print the brand name again; the footer still does", async () => {
+    const rows = buildExportRows(Array.from({ length: 30 }, (_, i) => makeCall(i)), {}, "UTC");
+    // compress:false so page text is searchable; the name is drawn as "(Talk-Lee) Tj" text operators.
+    const old = text(await buildCallHistoryPdf(rows, meta(), brand, LOGO, { compress: false }));
+    const bytes = await buildCallHistoryPdf(rows, meta(), brand, SIGNATURE, { compress: false });
+    const withSig = text(bytes);
+    const pages = pageCount(bytes);
+    assert.ok(pages > 1);
+    assert.equal(nameOperators(old), pages * 2, "old header: name in header and footer on every page");
+    assert.equal(nameOperators(withSig), pages, "signature header: only the footer name on every page");
+    assert.ok(withSig.includes("Call history"));
+});
+
+test("the signature is placed at its aspect ratio (400x100 -> 4:1, 25.5 pt tall)", async () => {
+    const raw = text(await buildCallHistoryPdf([], meta(), brand, SIGNATURE, { compress: false }));
+    const match = /([\d.]+) 0 0 ([\d.]+) ([\d.]+) ([\d.]+) cm\s*\/I\d+ Do/.exec(raw);
+    assert.ok(match, "image placement operator found");
+    assert.ok(Math.abs(Number(match[1]) / Number(match[2]) - 4) < 0.01);
+    assert.ok(Math.abs(Number(match[2]) - 25.5) < 0.01);
+});
+
 test("an incomplete list says so in plain words", async () => {
     const rows = buildExportRows([makeCall(1)], {}, "UTC");
     const bytes = await buildCallHistoryPdf(rows, meta({ complete: false, filters: [] }), brand, null, { compress: false });

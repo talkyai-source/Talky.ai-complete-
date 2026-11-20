@@ -10,7 +10,13 @@ import { humanizeOutcome } from "@/lib/call-outcome-label";
 
 export type CallExportFormat = "xlsx" | "pdf";
 export interface CallExportBrand { name: string; logoSrc: string }
-export interface CallExportLogo { dataUrl: string; width: number; height: number }
+export interface CallExportLogo {
+    dataUrl: string;
+    width: number;
+    height: number;
+    /** True when the image already holds the brand name (the whole signature). */
+    includesName?: boolean;
+}
 export interface CallExportMeta {
     accountName?: string | null;
     timeZone?: string | null;
