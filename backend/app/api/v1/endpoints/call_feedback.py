@@ -102,7 +102,10 @@ def _expected_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FeedbackTranscriptionInProgressError):
         return HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.'))
     if isinstance(exc, FeedbackReplaceNotAllowedError):
-        return HTTPException(status_code=403, detail=str(exc))
+        return HTTPException(
+            status_code=403,
+            detail="Only the person who left this voice note, or an administrator, can replace it.",
+        )
     if isinstance(exc, FeedbackStorageError):
         return HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.'))
     return HTTPException(status_code=500, detail="Call feedback operation failed")

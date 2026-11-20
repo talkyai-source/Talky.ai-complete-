@@ -50,15 +50,16 @@ def _calls(log):
     return log.read_text().splitlines() if log.exists() else []
 
 
-def test_failed_publish_still_runs_retention_prints_ok_and_ends_with_the_new_line(tmp_path, env):
+def test_failed_publish_keeps_every_local_copy_prints_ok_and_ends_with_the_new_line(tmp_path, env):
     _seed_previous(tmp_path, 10_000, 1, "talky-20261001T000000Z.dump")
     stale = _seed_previous(tmp_path, 10_000, 45, "talky-20250101T000000Z.dump")
     result = base._run_backup(tmp_path, dump_bytes=9_000)
     assert result.returncode != 0
-    assert not stale.exists(), "retention must run although the off-site copy failed"
+    assert stale.exists(), "local retention waits for a verified off-site copy"
+    assert "local retention skipped" in result.stdout
     assert "db-backup: ok" in result.stdout
     assert result.stderr.rstrip().splitlines()[-1] == NEW_LINE
-    assert len(_published(tmp_path)) == 2, "the new dump must never be deleted"
+    assert len(_published(tmp_path)) == 3, "the stale copy, the previous copy and the new dump are all kept"
 
 
 def test_failed_publish_and_shrunk_dump_reports_the_shrink_line(tmp_path, env):
@@ -99,14 +100,14 @@ def test_failed_recordings_only_keeps_its_own_line(tmp_path, env, monkeypatch):
     assert "FTP recordings sync failed" in result.stderr
 
 
-def test_failed_offhost_publish_also_runs_retention(tmp_path, env, monkeypatch):
+def test_failed_offhost_publish_also_keeps_every_local_copy(tmp_path, env, monkeypatch):
     monkeypatch.delenv("TALKY_FTP_BACKUP_URL")
     monkeypatch.setenv("TALKY_OFFHOST_ROOT", "/mnt/x")
     monkeypatch.setenv("FAKE_OFFHOST_EXIT", "1")
     stale = _seed_previous(tmp_path, 10_000, 45, "talky-20250101T000000Z.dump")
     result = base._run_backup(tmp_path, dump_bytes=9_000)
     assert result.returncode != 0
-    assert not stale.exists()
+    assert stale.exists(), "a failed off-host copy must not age out a local recovery point"
     assert "db-backup: ok" in result.stdout
     assert "off-host copy failed (offhost.py publish)" in result.stderr
 
