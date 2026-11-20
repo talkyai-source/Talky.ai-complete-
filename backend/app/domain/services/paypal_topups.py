@@ -299,6 +299,25 @@ class PayPalTopupService:
 
     # -- webhook ---------------------------------------------------------------
 
+    async def capture_approved_order(self, *, paypal_order_id: str) -> CaptureOutcome | None:
+        """CHECKOUT.ORDER.APPROVED: capture our pending order without the browser.
+
+        The order is found by its PayPal id, then the SAME function the browser
+        return uses runs for that order's own tenant (which re-reads the row
+        with ``tenant_id = $2``), with the same request id and checks.
+        """
+        async with acquire_with_tenant(self._pool, None) as conn:
+            row = await conn.fetchrow(
+                "SELECT id, tenant_id FROM topup_orders "
+                " WHERE provider_session_id = $1 AND provider = 'paypal'",
+                paypal_order_id,
+            )
+        if row is None:
+            return None
+        return await self.capture_for_tenant(
+            tenant_id=str(row["tenant_id"]), order_id=str(row["id"])
+        )
+
     async def settle_paypal_order(self, *, paypal_order_id: str) -> CaptureOutcome | None:
         async with acquire_with_tenant(self._pool, None) as conn:
             row = await conn.fetchrow(

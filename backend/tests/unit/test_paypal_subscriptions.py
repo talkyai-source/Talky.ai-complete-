@@ -526,7 +526,7 @@ async def test_guards_refuse_before_any_row_or_paypal_call(env, case):
     with pytest.raises(CheckoutError) as raised:
         await start(env)
     code = {"no_tenant": "tenant_unavailable", "inactive": "tenant_unavailable",
-            "suspended": "tenant_unavailable"}.get(case, "subscription_exists")
+            "suspended": "tenant_suspended"}.get(case, "subscription_exists")
     assert raised.value.code == code and raised.value.request_not_started
     assert len(env.store["subs"]) == before and env.client.names().count("create") == 0
 
