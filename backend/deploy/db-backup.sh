@@ -103,20 +103,28 @@ sha256sum --check --quiet "${checksum_file}"
 trap - EXIT INT TERM HUP
 
 recordings_failed=0
+offsite_failed=0
+offhost_failed=0
 # Preserve snapshot/principal verification and the flat artifacts. A configured
 # encrypted off-host DB+recordings copy must verify before local retention.
 if [[ -n "${TALKY_OFFHOST_ROOT:-}" ]]; then
-    python3 "${script_dir}/../../scripts/database/offhost.py" publish --dump "${dump}"
+    # A refused/unavailable mount must not skip local retention or the shrink
+    # check: remember it and exit non-zero at the end (the local dump is safe).
+    python3 "${script_dir}/../../scripts/database/offhost.py" publish --dump "${dump}" || offhost_failed=1
 fi
 # An encrypted copy on the owner's FTP server (TLS required), proved to decrypt
 # to this dump and size-checked on the server before local retention runs.
 # Settings live in /etc/talky/db-backup.env (root only); see offsite_ftp.py.
 if [[ -n "${TALKY_FTP_BACKUP_URL:-}" ]]; then
-    python3 "${script_dir}/../../scripts/database/offsite_ftp.py" publish --dump "${dump}"
+    # A refused FTP login must not skip local retention, the shrink check or the
+    # "ok" line: remember it and exit non-zero at the end.
+    if ! python3 "${script_dir}/../../scripts/database/offsite_ftp.py" publish --dump "${dump}"; then
+        offsite_failed=1
     # F8-02, opt-in: encrypted recordings to the same FTP account. Runs AFTER the
     # database copy; a failure is remembered and fails the unit at the end, it
-    # never prevents or undoes the database upload.
-    if [[ "${TALKY_OFFSITE_FTP_RECORDINGS:-}" == "1" ]]; then
+    # never prevents or undoes the database upload. Skipped when the database
+    # publish failed: it needs the same login.
+    elif [[ "${TALKY_OFFSITE_FTP_RECORDINGS:-}" == "1" ]]; then
         python3 "${script_dir}/../../scripts/database/offsite_ftp.py" sync-recordings || recordings_failed=1
     fi
 fi
@@ -129,6 +137,18 @@ echo "db-backup: ok ${dump} size=${size} table_data=${table_data} sha256=${diges
 
 if [[ -n "$shrunk_from" ]]; then
     echo "DB-BACKUP CRITICAL: dump is ${size} bytes, previous good was ${shrunk_from} — published anyway so the baseline moves; confirm the shrink was a legitimate purge (${dump})" >&2
+    exit 1
+fi
+
+# Severity order (the first match decides the exit): shrunk dump > failed
+# off-site copy (FTP, then off-host mount) > failed recordings sync.
+if [[ "$offsite_failed" == "1" ]]; then
+    echo "DB-BACKUP CRITICAL: the database copy on this server is safe, but the off-site copy failed (offsite_ftp.py publish)" >&2
+    exit 1
+fi
+
+if [[ "$offhost_failed" == "1" ]]; then
+    echo "DB-BACKUP CRITICAL: the database copy on this server is safe, but the off-host copy failed (offhost.py publish)" >&2
     exit 1
 fi
 
