@@ -23,7 +23,9 @@ from app.domain.services.audit_logger import AuditEvent, AuditLogger  # noqa: E4
 from app.workers.disposition_policy import DNC_OUTCOMES  # noqa: E402
 
 
-_FAILED_OUTCOMES = {item.value for item in DNC_OUTCOMES} | {"invalid"}
+# "invalid" and "rejected" get one confirming dial a day later, so they are not
+# in DNC_OUTCOMES; once final they still mean "could not reach": failed.
+_FAILED_OUTCOMES = {item.value for item in DNC_OUTCOMES} | {"invalid", "rejected"}
 _KNOWN_OUTCOMES = {item.value for item in CallOutcome}
 _ACTIVE_JOBS = {"pending", "queued", "retry_scheduled", "processing", "calling"}
 _TERMINAL_JOBS = {"completed", "goal_achieved", "non_retryable", "failed"}
