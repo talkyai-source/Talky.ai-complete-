@@ -108,16 +108,16 @@ offhost_failed=0
 # Preserve snapshot/principal verification and the flat artifacts. A configured
 # encrypted off-host DB+recordings copy must verify before local retention.
 if [[ -n "${TALKY_OFFHOST_ROOT:-}" ]]; then
-    # A refused/unavailable mount must not skip local retention or the shrink
-    # check: remember it and exit non-zero at the end (the local dump is safe).
+    # A refused/unavailable mount must not skip the shrink check: remember it
+    # and exit non-zero at the end (the local dump is safe).
     python3 "${script_dir}/../../scripts/database/offhost.py" publish --dump "${dump}" || offhost_failed=1
 fi
 # An encrypted copy on the owner's FTP server (TLS required), proved to decrypt
 # to this dump and size-checked on the server before local retention runs.
 # Settings live in /etc/talky/db-backup.env (root only); see offsite_ftp.py.
 if [[ -n "${TALKY_FTP_BACKUP_URL:-}" ]]; then
-    # A refused FTP login must not skip local retention, the shrink check or the
-    # "ok" line: remember it and exit non-zero at the end.
+    # A refused FTP login must not skip the shrink check or the "ok" line:
+    # remember it and exit non-zero at the end.
     if ! python3 "${script_dir}/../../scripts/database/offsite_ftp.py" publish --dump "${dump}"; then
         offsite_failed=1
     # F8-02, opt-in: encrypted recordings to the same FTP account. Runs AFTER the
@@ -130,8 +130,15 @@ if [[ -n "${TALKY_FTP_BACKUP_URL:-}" ]]; then
 fi
 
 # --- retention ----------------------------------------------------------------
-find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \
-    -mtime "+${keep_days}" -delete
+# Local retention waits for a verified copy elsewhere: while the off-site or
+# off-host copy fails, the copies on this server are the only recovery points,
+# so none of them is aged out.
+if [[ "$offsite_failed" == "0" && "$offhost_failed" == "0" ]]; then
+    find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \
+        -mtime "+${keep_days}" -delete
+else
+    echo "db-backup: local retention skipped, every copy on this server is kept until a copy elsewhere is verified"
+fi
 
 echo "db-backup: ok ${dump} size=${size} table_data=${table_data} sha256=${digest:0:12}… kept_days=${keep_days}"
 
