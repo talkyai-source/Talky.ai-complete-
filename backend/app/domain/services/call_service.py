@@ -723,6 +723,21 @@ class CallService:
                         call_id=call_uuid,
                     )
 
+                # A FINAL carrier rejection (the confirming dial a day later
+                # was refused too) ends the lead 'failed', as REJECTED did when
+                # it was a do-not-call-class outcome; a first one stays in the
+                # normal retry-pending state. Never overrides dnc/deleted.
+                if (lead_id and lead_is_terminal and not caller_opted_out
+                        and effective_outcome == CallOutcome.REJECTED):
+                    await conn.execute(
+                        """
+                        UPDATE leads SET status = 'failed', updated_at = NOW()
+                        WHERE id = $1 AND tenant_id = $2
+                          AND status NOT IN ('deleted', 'dnc')
+                        """,
+                        lead_id, call_tenant_id,
+                    )
+
                 # ---- Step 3: campaign counters ------------------------------
                 if campaign_id and lead_is_terminal:
                     await self._update_campaign_counters_pooled(
@@ -1102,7 +1117,7 @@ class CallService:
         # confirmed dead number is still a lead we could not reach.
         non_reachable = (
             NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
-        ) | {CallOutcome.INVALID}
+        ) | {CallOutcome.INVALID, CallOutcome.REJECTED}
         counter = "calls_failed" if outcome in non_reachable else "calls_completed"
         # `counter` is one of two hard-coded literals above — never
         # interpolated from caller input — so this is not SQL-injectable.
@@ -1178,7 +1193,8 @@ class CallService:
             )
         elif should_retry:
             final_status = JobStatus.RETRY_SCHEDULED
-        elif outcome in NON_RETRYABLE_OUTCOMES:
+        elif outcome in NON_RETRYABLE_OUTCOMES or outcome == CallOutcome.REJECTED:
+            # REJECTED reaches here only once its confirming dial is spent.
             final_status = JobStatus.NON_RETRYABLE
         else:
             final_status = JobStatus.FAILED
@@ -1459,7 +1475,7 @@ class CallService:
         # confirmed dead number is still a lead we could not reach.
         non_reachable = (
             NON_RETRYABLE_OUTCOMES - {CallOutcome.GOAL_ACHIEVED}
-        ) | {CallOutcome.INVALID}
+        ) | {CallOutcome.INVALID, CallOutcome.REJECTED}
         try:
             if outcome in non_reachable:
                 counter = "calls_failed"
@@ -1539,7 +1555,7 @@ class CallService:
                 )
             elif decision.should_retry:
                 final_status = JobStatus.RETRY_SCHEDULED
-            elif outcome in NON_RETRYABLE_OUTCOMES:
+            elif outcome in NON_RETRYABLE_OUTCOMES or outcome == CallOutcome.REJECTED:
                 final_status = JobStatus.NON_RETRYABLE
             else:
                 final_status = JobStatus.FAILED

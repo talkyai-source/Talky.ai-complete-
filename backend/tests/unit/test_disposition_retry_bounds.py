@@ -125,7 +125,7 @@ class _FakeConn:
         if q.startswith("UPDATE calls SET campaign_alert_processed_at=now()"):
             assert "WHERE id=$1 AND tenant_id=$2::uuid" in q
             assert "campaign_alert_processed_at IS NULL" in q
-            assert "status='completed' AND direction='outbound' AND is_test IS NOT TRUE" in q
+            assert "status IN ('completed','ended') AND direction='outbound' AND is_test IS NOT TRUE" in q
             assert "p.id=calls.campaign_id AND p.tenant_id=$2::uuid" in q
             assert q.endswith("RETURNING campaign_id,outcome")
             call_id, tenant_id = args
@@ -354,7 +354,6 @@ async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
 @pytest.mark.asyncio
 async def test_terminal_dispositions_are_never_redialled():
     for outcome in (
-        CallOutcome.REJECTED,
         CallOutcome.ANSWERED,
         CallOutcome.GOAL_ACHIEVED,
         CallOutcome.GOAL_NOT_ACHIEVED,
@@ -610,7 +609,7 @@ async def test_non_reachable_terminal_outcome_bumps_calls_failed():
     conn.dialer_jobs_row["status"] = "processing"
 
     await service._handle_call_status_pooled(
-        "call-1", CallOutcome.REJECTED, "rejected", duration=0,
+        "call-1", CallOutcome.SPAM, "spam", duration=0,
     )
 
     assert conn.campaigns_row["calls_failed"] == 1

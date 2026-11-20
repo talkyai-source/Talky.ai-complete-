@@ -118,6 +118,15 @@ SCHEDULE_BLOCK_CODES: frozenset[BlockCode] = frozenset({
     BlockCode.SCHEDULE_OUTSIDE_WINDOW,
 })
 
+def is_legal_hours_refusal(raw_reason: Optional[str]) -> bool:
+    """True for a refusal from the legal calling-hours floor (legal_hours.py).
+
+    No campaign setting, and not the testing override, may widen that floor, so
+    the override sites must never treat such a refusal as bypassable even though
+    it is classified under SCHEDULE_OUTSIDE_WINDOW."""
+    return "legal_hours" in (raw_reason or "").lower()
+
+
 #: Pacing/capacity codes that clear on their own within seconds or minutes and
 #: never need operator action. The Call Issues panel already filters these out
 #: at the SQL level; listed here so any other surface can too.
@@ -519,7 +528,7 @@ def classify(
             "the same request will be checked again when metering recovers.",
             severity="warning", stage="quota", details=extra,
         )
-    if "out_of_minutes" in low:
+    if "out_of_minutes" in low or "minutes_quota" in low:
         return BlockReason(
             BlockCode.OUT_OF_MINUTES,
             "This account has used all of this month's plan minutes, so calls are "

@@ -78,7 +78,7 @@ async def record_terminal_call(conn, tenant_id, call_id, *, threshold=FAILURE_TH
     row = await conn.fetchrow(
         """UPDATE calls SET campaign_alert_processed_at=now()
            WHERE id=$1 AND tenant_id=$2::uuid AND campaign_alert_processed_at IS NULL
-             AND status='completed' AND direction='outbound' AND is_test IS NOT TRUE
+             AND status IN ('completed','ended') AND direction='outbound' AND is_test IS NOT TRUE
              AND campaign_id IS NOT NULL
              AND EXISTS (SELECT 1 FROM campaigns p WHERE p.id=calls.campaign_id AND p.tenant_id=$2::uuid)
            RETURNING campaign_id,outcome""", call_id, tenant_id,

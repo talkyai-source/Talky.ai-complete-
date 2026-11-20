@@ -64,6 +64,9 @@ TRANSIENT = [
     # A fail-closed check whose query raised is an infrastructure blip.
     (cg.GuardCheck.PLATFORM_CALLS_ENABLED, "check_error_blocked: pool timeout"),
     (cg.GuardCheck.DNC_CHECK, "dnc_check_unavailable: pool timeout"),
+    # An exhausted allowance / spend cap waits for a top-up (2026-11-20).
+    (cg.GuardCheck.MINUTES_QUOTA, "minutes_quota_exhausted: 100/100 used"),
+    (cg.GuardCheck.SPEND_LIMIT, "spend_cap_exceeded: $10.00/$10.00"),
 ]
 
 PERMANENT = [
@@ -76,7 +79,6 @@ PERMANENT = [
     (cg.GuardCheck.TENANT_ACTIVE, "tenant_cancelled"),
     (cg.GuardCheck.SUBSCRIPTION_VALID, "subscription_canceled"),
     (cg.GuardCheck.SUBSCRIPTION_VALID, "tenant_not_found"),
-    (cg.GuardCheck.SPEND_LIMIT, "spend_cap_exceeded: $10.00/$10.00"),
 ]
 
 

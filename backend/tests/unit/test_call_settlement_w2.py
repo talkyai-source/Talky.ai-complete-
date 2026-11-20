@@ -59,9 +59,9 @@ def _conn(
     )
 
 
-async def _settle(conn: _FakeConn, outcome: CallOutcome):
+async def _settle(conn: _FakeConn, outcome: CallOutcome, attempt: int = 1):
     service = _service(conn)
-    service._effective_attempt_number = AsyncMock(return_value=1)
+    service._effective_attempt_number = AsyncMock(return_value=attempt)
     return await service._handle_call_status_pooled(
         "call-1", outcome, outcome.value, 0
     )
@@ -113,14 +113,37 @@ async def test_every_lead_campaign_and_job_statement_is_tenant_scoped(outcome):
 
 @pytest.mark.asyncio
 async def test_carrier_rejection_does_not_mark_the_lead_do_not_call():
+    # REJECTED gets one confirming dial a day later (2026-11-20); the second
+    # rejection is the final one and is what settles the lead.
     conn = _conn()
-    execution = await _settle(conn, CallOutcome.REJECTED)
+    execution = await _settle(conn, CallOutcome.REJECTED, attempt=2)
 
     assert conn.leads_row["status"] == "failed"
     assert conn.leads_row["status"] != "dnc"
     assert conn.leads_row["last_call_result"] == "rejected"
     # Still non-retryable inside the campaign and counted as unreachable.
     assert execution.retry_args is None
+    assert conn.dialer_jobs_row["status"] == "non_retryable"
+    assert conn.campaigns_row == {"calls_completed": 0, "calls_failed": 1}
+
+
+@pytest.mark.asyncio
+async def test_first_carrier_rejection_leaves_lead_and_job_retry_pending():
+    conn = _conn()
+    execution = await _settle(conn, CallOutcome.REJECTED, attempt=1)
+
+    assert conn.leads_row["status"] == "called"
+    assert conn.dialer_jobs_row["status"] == "retry_scheduled"
+    assert execution.retry_args is not None
+    assert conn.campaigns_row == {"calls_completed": 0, "calls_failed": 0}
+
+
+@pytest.mark.asyncio
+async def test_final_carrier_rejection_still_settles_as_failed_unreachable():
+    conn = _conn()
+    await _settle(conn, CallOutcome.REJECTED, attempt=2)
+
+    assert conn.leads_row["status"] == "failed"
     assert conn.dialer_jobs_row["status"] == "non_retryable"
     assert conn.campaigns_row == {"calls_completed": 0, "calls_failed": 1}
 
@@ -142,7 +165,7 @@ async def test_no_call_outcome_ever_sets_lead_status_dnc(outcome):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("outcome", [CallOutcome.SPAM, CallOutcome.UNAVAILABLE, CallOutcome.REJECTED])
+@pytest.mark.parametrize("outcome", [CallOutcome.SPAM, CallOutcome.UNAVAILABLE])
 async def test_existing_dnc_on_the_lead_is_never_downgraded_by_a_terminal_outcome(outcome):
     # Operator spam-marking (and the opt-out purge) write 'dnc' themselves;
     # settlement must not overwrite that with 'failed'.
@@ -193,10 +216,11 @@ def test_failed_lead_is_reset_by_campaign_restart():
     assert '"failed"' in source and '"dnc"' not in source
 
 
-def test_rejected_is_terminal_without_retry_in_the_policy():
-    decision = disposition_policy.decide(CallOutcome.REJECTED, 1)
-    assert decision.should_retry is False
-    assert CallOutcome.REJECTED in call_service_module.NON_RETRYABLE_OUTCOMES
+def test_rejected_is_confirmed_once_then_terminal_in_the_policy():
+    first = disposition_policy.decide(CallOutcome.REJECTED, 1)
+    assert first.should_retry is True and first.delay_seconds == 24 * 3600
+    assert disposition_policy.decide(CallOutcome.REJECTED, 2).should_retry is False
+    assert CallOutcome.REJECTED not in call_service_module.NON_RETRYABLE_OUTCOMES
 
 
 # ───────────────────── item 6: short destinations do not wedge settlement ────

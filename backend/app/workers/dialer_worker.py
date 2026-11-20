@@ -126,6 +126,9 @@ _GUARD_TRANSIENT_CHECKS = frozenset(
         "velocity_check",
         "concurrency_limit",
         "rate_limit",
+        # Allowance / spend cap used up: a top-up or the next cycle resumes it.
+        "minutes_quota",
+        "spend_limit",
     }
 )
 # Account-state checks: transient unless the tenant is gone or its
@@ -617,6 +620,7 @@ class DialerWorker:
                     BlockCode,
                     classify,
                     describe_schedule,
+                    is_legal_hours_refusal,
                     testing_override_notice,
                 )
                 from app.domain.services.dialer.testing_override import (
@@ -628,6 +632,7 @@ class DialerWorker:
                 override_source = (
                     schedule_override_source(campaign_cfg)
                     if blocked.code in SCHEDULE_BLOCK_CODES
+                    and not is_legal_hours_refusal(reason)
                     else None
                 )
                 if override_source:
@@ -3168,7 +3173,12 @@ class DialerWorker:
             schedule_override_source,
         )
 
-        override_source = schedule_override_source(campaign_cfg)
+        from app.domain.services.dialer.block_reasons import is_legal_hours_refusal
+
+        override_source = (
+            None if is_legal_hours_refusal(window_reason)
+            else schedule_override_source(campaign_cfg)
+        )
         if override_source:
             from app.domain.services.dialer.block_reasons import describe_schedule
 

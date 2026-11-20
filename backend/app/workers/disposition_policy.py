@@ -32,7 +32,7 @@ next-day-only 2026-07-07):
     No-answer     24h → 24h                   3
     Voicemail     24h (once)                  2
     Unavailable   no retry (operator-marked)  1
-    Rejected      no retry, NOT do-not-call   1
+    Rejected      24h (once), NOT do-not-call 2
     Invalid       no retry, NOT do-not-call   1
     Failed        30s → 2m                    3
     Timeout       30s → 2m                    3
@@ -127,6 +127,11 @@ _RETRY_SCHEDULES: dict[CallOutcome, list[int]] = {
     # second is final. One misconfigured line must not finish a whole list
     # in one pass (review 2026-10-20).
     CallOutcome.INVALID: [_DAY],
+    # Rejected (Q.850 21: the callee declined OR the carrier refused the call).
+    # A line the carrier refuses (403) returns it for EVERY number, so the first
+    # is confirmed by one dial a day later and the second is final: one refused
+    # line must not fail a whole list in one pass (same rule as INVALID).
+    CallOutcome.REJECTED: [_DAY],
 }
 
 # Maximum *total* attempts per lead for each retryable disposition. This
@@ -139,6 +144,7 @@ _ATTEMPT_CAPS: dict[CallOutcome, int] = {
     CallOutcome.FAILED: 3,
     CallOutcome.TIMEOUT: 3,
     CallOutcome.INVALID: 2,
+    CallOutcome.REJECTED: 2,
 }
 
 # Outcomes that mean the lead is done and must never be redialled.
@@ -147,9 +153,10 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 )
 
 # Outcomes that are terminal failures — record the result, never retry.
-# REJECTED: the callee declined OR the carrier refused the call (both
-# arrive as Q.850 21) — never auto-redialled, and never do-not-call (see
-# the module docstring). GOAL_NOT_ACHIEVED: a real
+# REJECTED (Q.850 21: callee declined OR carrier refused) is NOT here: like
+# INVALID it gets one confirming dial a day later (see _RETRY_SCHEDULES), is
+# then final, and is never do-not-call (see the module docstring).
+# GOAL_NOT_ACHIEVED: a real
 # conversation that didn't convert — redialing is a human decision, not
 # an automatic one. SPAM/DISCONNECTED: dead input — the number is not
 # active, so redialing it is pointless. INVALID (Q.850 1/22/28) is NOT
@@ -169,7 +176,6 @@ _SUCCESS_OUTCOMES: frozenset[CallOutcome] = frozenset(
 # DNC, so UNAVAILABLE is terminal here and the two tables now agree.
 _TERMINAL_NO_RETRY: frozenset[CallOutcome] = frozenset(
     {
-        CallOutcome.REJECTED,
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
         CallOutcome.DISCONNECTED,

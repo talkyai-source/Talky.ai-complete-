@@ -212,11 +212,24 @@ async def test_the_real_query_builder_puts_the_tenant_and_status_in_the_sql(monk
                          ["campaign-1", "tenant-1", ["paused"], "outbound"])]
 
 
-async def test_a_list_start_on_a_campaign_that_turns_running_is_not_a_start_to_win():
-    # allow_running (call this list) re-enters a running campaign on purpose.
+async def test_a_list_start_on_a_campaign_read_as_not_running_is_still_a_start_to_win():
+    # Only a campaign READ as running keeps the plain write (2026-11-20): a list
+    # start on a draft that another request turns running meanwhile loses the
+    # compare-and-set like any other start, and dispatches nothing.
     db, queue = _DB(lead_count=2), _Queue([True, True])
     service = CampaignService(db, queue_service=queue)
     _change_after_reading(service, _set_campaign(db, status="running"))
+
+    with pytest.raises(CampaignStateError):
+        await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True)
+
+    assert queue.enqueued == []
+
+
+async def test_a_list_start_on_a_campaign_read_as_running_re_enters_it_on_purpose():
+    db, queue = _DB(lead_count=2), _Queue([True, True])
+    db.tables["campaigns"][0]["status"] = "running"
+    service = CampaignService(db, queue_service=queue)
 
     result = await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True)
 
