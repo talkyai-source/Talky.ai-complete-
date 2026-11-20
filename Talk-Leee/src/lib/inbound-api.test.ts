@@ -93,7 +93,10 @@ test("transfer capability parsing requires all explicit server gates", () => {
         transfer_runtime_available: true,
         transfer_platform_enabled: true,
         transfer_configuration_available: true,
+        recording_platform_enabled: false,
     });
+    assert.equal(parseInboundRuntimeCapabilities({ recording_platform_enabled: true }).recording_platform_enabled, true);
+    assert.equal(parseInboundRuntimeCapabilities({ recording_platform_enabled: "true" }).recording_platform_enabled, false);
     assert.equal(parseInboundRuntimeCapabilities({
         transfer_runtime_available: "true",
         transfer_platform_enabled: true,

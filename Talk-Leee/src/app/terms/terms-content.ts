@@ -139,7 +139,7 @@ export const termsBlocks: LegalBlock[] = [
   { type: "h3", text: "5.2 Call Recording" },
   {
     type: "p",
-    text: `Calls are recorded only when your account's recording policy turns recording on; until you set a policy, calls are not recorded. You must ensure that your use of call recording complies with all applicable laws in all jurisdictions where calls are made and received. Many jurisdictions require all-party consent to recording. You are solely responsible for obtaining required recording consent from all parties.`,
+    text: `Calls are recorded with a spoken recording notice unless your account's recording setting is "disabled"; for incoming calls, each campaign also has its own recording switch. You must ensure that your use of call recording complies with all applicable laws in all jurisdictions where calls are made and received. Many jurisdictions require all-party consent to recording. You are solely responsible for obtaining required recording consent from all parties.`,
   },
   { type: "h3", text: "5.3 Voicemail Messages" },
   {

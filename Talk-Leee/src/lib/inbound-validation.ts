@@ -18,6 +18,10 @@ export function verifiedTransferConfigurationAvailable(state: {
         && state.data?.transfer_configuration_available === true;
 }
 
+// Mirrors _OPT_OUT_SENTENCE in backend/app/domain/services/recording_policy_service.py
+// (the server refuses a notice that offers callers an opt-out, by a key press or in any other words).
+export const RECORDING_NOTICE_OPT_OUT_PATTERN = /(?:\bopt[\s-]?out\b|\b(?:press|dial|key)\b\s+(?:the\s+)?[0-9*#])/i;
+
 const E164_PATTERN = /^\+[1-9]\d{6,14}$/;
 
 export function isValidE164(value: string): boolean {
@@ -112,5 +116,6 @@ export function validateInboundCampaign(
     if (!Number.isFinite(value.max_transfer_hops) || !Number.isInteger(value.max_transfer_hops) || value.max_transfer_hops < 1 || value.max_transfer_hops > 5) errors.max_transfer_hops = "Transfer hops must be a whole number between 1 and 5.";
     if (!Number.isFinite(value.max_call_duration_seconds) || !Number.isInteger(value.max_call_duration_seconds) || value.max_call_duration_seconds < 60 || value.max_call_duration_seconds > 14400) errors.max_call_duration_seconds = "Maximum call duration must be a whole number between 60 and 14,400 seconds.";
     if (value.recording_enabled && !value.consent_message?.trim()) errors.consent_message = "Add the disclosure callers must hear before recording.";
+    else if (value.recording_enabled && RECORDING_NOTICE_OPT_OUT_PATTERN.test(value.consent_message ?? "")) errors.consent_message = "The recording notice cannot offer callers a way to opt out, such as pressing a key: this service cannot do that during a call. Remove that sentence.";
     return errors;
 }
