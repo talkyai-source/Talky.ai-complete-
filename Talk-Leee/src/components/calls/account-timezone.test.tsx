@@ -36,6 +36,8 @@ loader._load = function (id, ...args) {
     if (id.endsWith("lib/use-call-history-workflow")) return {
         useCallHistoryWorkflow: () => ({ workflow: {}, update() {}, retry() {}, busy: false, failed: false, backupUnavailable: false }),
     };
+    // The call page reads lead details with useQuery for its download button; not under test here.
+    if (id === "@tanstack/react-query") return { ...(originalLoad.call(this, id, ...args) as object), useQuery: () => ({ data: undefined }) };
     if (id.endsWith("lib/api-hooks")) return {
         useCalls: () => ({ data: callsData, isLoading: false, isError: false, refetch: async () => undefined }),
         useCall: () => ({ data: call, isLoading: false, isError: false, refetch: async () => undefined }),

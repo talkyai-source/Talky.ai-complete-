@@ -12,6 +12,12 @@ import { motion } from "framer-motion";
 import { LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
 import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import { CallEditPanel } from "@/components/calls/call-edit-panel";
+import { CallDownloadButton, capturedFieldsFromDetails, transcriptForExport } from "@/components/calls/call-download-button";
+import { useWhiteLabelBranding } from "@/components/white-label/white-label-branding-provider";
+import { useCallHistoryWorkflow } from "@/lib/use-call-history-workflow";
+import { leadDetailsApi } from "@/lib/lead-details-api";
 import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
@@ -85,6 +91,21 @@ export default function CallDetailPage() {
     ).canView;
     const transcript = useMemo(() => (transcriptQuery.data?.turns ?? []) as TranscriptTurn[], [transcriptQuery.data?.turns]);
     const error = callQuery.isError ? failedReadMessage(callQuery.error, "Failed to load call details") : "";
+    // Notes, lead type and follow-up form: the same saved values the call list edits.
+    const effectivePermissions = permissions.isSuccess ? permissions.data.permissions.map((permission) => permission.trim().toLowerCase()) : [];
+    const canEditCall = effectivePermissions.includes("calls:create") || effectivePermissions.includes("platform:admin");
+    const workflowCalls = useMemo(() => (call ? [call] : []), [call]);
+    const workflowSync = useCallHistoryWorkflow(workflowCalls, user?.tenant_id, user?.id);
+    const leadDetailsQuery = useQuery({
+        queryKey: ["leadDetails", callId], // the same key the Lead details panel reads, so both share one request
+        queryFn: () => leadDetailsApi.detailsForCall(callId, call?.campaign_id ?? undefined),
+        enabled: Boolean(callId),
+    });
+    const whiteLabel = useWhiteLabelBranding();
+    const downloadBrand = {
+        name: whiteLabel?.branding.displayName ?? "Talk-Lee",
+        logoSrc: whiteLabel?.branding.logo.src ?? "/favicon.svg",
+    };
 
     const [recordingLoading, setRecordingLoading] = useState(false);
     const [recordingDownloading, setRecordingDownloading] = useState(false);
@@ -270,7 +291,20 @@ export default function CallDetailPage() {
                     Back to Call History
                 </Button>
                 {/* QA F1-24: print this call's details. */}
-                {call ? <PrintButton /> : null}
+                {call ? <div className="flex items-start gap-2">
+                    <CallDownloadButton
+                        call={call}
+                        entry={workflowSync.workflow[call.id]}
+                        capturedFields={capturedFieldsFromDetails(leadDetailsQuery.data?.details ?? [])}
+                        transcript={transcriptForExport(transcript, (ts) => formatTurnTimestamp(ts, user?.account_timezone))}
+                        transcriptState={transcriptQuery.isError ? "failed" : transcriptQuery.isLoading ? "loading" : "ready"}
+                        summaryText={call.summary}
+                        timeZone={user?.account_timezone}
+                        accountName={user?.business_name}
+                        brand={downloadBrand}
+                    />
+                    <PrintButton />
+                </div> : null}
             </motion.div>
 
             {callQuery.isLoading ? (
@@ -323,6 +357,19 @@ export default function CallDetailPage() {
                             </div>
                         </div>
                     </motion.div>
+
+                    <div className={CARD_SLOT}>
+                        <CallEditPanel
+                            call={call}
+                            entry={workflowSync.workflow[call.id]}
+                            canEdit={canEditCall}
+                            busy={workflowSync.busy}
+                            failed={workflowSync.failed}
+                            onRetry={workflowSync.retry}
+                            onWorkflowChange={workflowSync.update}
+                            onSaved={() => void callQuery.refetch()}
+                        />
+                    </div>
 
                     {/* Transcript */}
                     <motion.div
