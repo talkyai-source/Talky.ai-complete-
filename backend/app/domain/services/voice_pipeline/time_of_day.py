@@ -52,6 +52,88 @@ def local_hour(tz_name: Optional[str], *, _now: Optional[datetime] = None) -> Op
         return None
 
 
+UNKNOWN_TIME_LINE = (
+    "You do not know the local time of the person you are speaking with. "
+    "Use greetings and goodbyes that do not depend on the time of day."
+)
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _person_phone(session) -> Optional[str]:
+    """The number of the PERSON on the phone: the dialled number (outbound) or
+    the caller's ANI (inbound). ``bind_telephony_call`` / the pre-originate
+    stamp / ``bind_inbound_call`` put it on the telephony VoiceSession as
+    ``_dialer_phone``; the CallSession the streamer holds is found through
+    that VoiceSession (same walk as ``resolve_call_binding``)."""
+    phone = getattr(session, "_dialer_phone", None)
+    if phone:
+        return str(phone)
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        for _chan, vs in _state().iter_voice_session_items():
+            if getattr(vs, "call_session", None) is session:
+                phone = getattr(vs, "_dialer_phone", None)
+                return str(phone) if phone else None
+    except Exception:  # noqa: BLE001 - non-telephony session / teardown
+        pass
+    return None
+
+
+def person_zone(session) -> tuple[Optional[str], str]:
+    """(zone, source) for the person on the phone. Never the account's zone.
+
+    Order: a zone stamped on the session for this lead (``_dialer_lead_timezone``)
+    -> the dialler's own number-to-zone function on the person's number ->
+    (None, "none"). Same function as the dialler's calling window, so the
+    clock the agent talks about is the clock the window was judged on.
+    """
+    from app.domain.services.dialer.lead_timezone import (
+        normalize_lead_timezone,
+        resolve_lead_timezone,
+    )
+
+    lead_zone = normalize_lead_timezone(getattr(session, "_dialer_lead_timezone", None))
+    if lead_zone:
+        return lead_zone, "lead"
+    zone = resolve_lead_timezone(_person_phone(session))
+    if zone:
+        return zone, "number"
+    return None, "none"
+
+
+def person_time_of_day_line(session, *, _now: Optional[datetime] = None) -> str:
+    """The time-of-day prompt line for the person on this call (when their zone
+    is unknown, ``UNKNOWN_TIME_LINE``: no clock, a neutral instruction). Logs one
+    ``time_of_day_hint`` line per call."""
+    cached = getattr(session, "_tod_person_zone", None)
+    if cached is None:
+        cached = person_zone(session)
+        try:
+            session._tod_person_zone = cached
+        except Exception:  # noqa: BLE001
+            pass
+    zone, source = cached
+    now = _now or _utcnow()
+    known = time_of_day_line(zone, _now=now)
+    if not getattr(session, "_tod_hint_logged", False):
+        hour = local_hour(zone, _now=now)
+        part = greeting_for_hour(hour) if (known and hour is not None) else "none"
+        logger.info(
+            "time_of_day_hint call=%s zone=%s source=%s part=%s",
+            getattr(session, "call_id", None), zone if known else None,
+            source if known else "none", part,
+        )
+        try:
+            session._tod_hint_logged = True
+        except Exception:  # noqa: BLE001
+            pass
+    return known or UNKNOWN_TIME_LINE
+
+
 def time_of_day_line(tz_name: Optional[str], *, _now: Optional[datetime] = None) -> str:
     """One prompt line telling the agent the callee's local time-of-day, so a
     greeting matches the hour. Empty string if the timezone is unknown (the

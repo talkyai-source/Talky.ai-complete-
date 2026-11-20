@@ -1,10 +1,8 @@
-"""voice-pipeline-6: the live-state time-of-day line must use the callee's
-campaign timezone, not a hard-coded Europe/London.
+"""The live-state time-of-day line is the PERSON's clock (20 Nov 2026 rule).
 
-Nothing ever wrote session._campaign_timezone and AgentConfig has no timezone
-field, so every call was told the London hour/date. The streamer now loads
-campaigns.calling_config.timezone (tenant-scoped, once per call) and, with no
-campaign timezone, only assumes London for a UK (GB) contact region.
+It comes from the dialler's number-to-zone function on the dialled / caller
+number, never from campaigns.calling_config.timezone and never an assumed
+London for region GB. No usable number = no part-of-day hint.
 """
 from __future__ import annotations
 
@@ -75,34 +73,40 @@ async def _run(session):
     await TurnStreamer(pipeline).stream(session, websocket=None)
 
 
-async def test_campaign_timezone_is_loaded_tenant_scoped_and_used(tz_calls, monkeypatch):
+UK_NUMBER = "+442071838750"
+
+
+async def test_uk_number_with_karachi_campaign_gets_the_uk_zone_not_the_campaign_zone(tz_calls, monkeypatch):
     log = {}
     _db(monkeypatch, '{"timezone": "Asia/Karachi", "time_window_start": "09:00"}', log)
     session = _make_session()
     session._dialer_tenant_id = TENANT
     session._dialer_campaign_id = CAMPAIGN
+    session._dialer_phone = UK_NUMBER
 
     await _run(session)
 
-    assert tz_calls == ["Asia/Karachi"]
-    assert log["tenant"] == TENANT
-    assert log["args"] == (CAMPAIGN, TENANT)
-    assert "tenant_id" in log["sql"]
+    assert tz_calls == ["Europe/London"]
+    assert "Asia/Karachi" not in tz_calls
 
 
-async def test_timezone_is_looked_up_once_per_call(tz_calls, monkeypatch):
+async def test_hint_never_reads_the_campaign_timezone_and_resolves_the_person_once(tz_calls, monkeypatch):
     log = {}
     _db(monkeypatch, {"timezone": "America/Chicago"}, log)
+    resolved = []
+    real = time_of_day.person_zone
+    monkeypatch.setattr(time_of_day, "person_zone", lambda s: (resolved.append(1), real(s))[1])
     session = _make_session()
     session._dialer_tenant_id = TENANT
     session._dialer_campaign_id = CAMPAIGN
+    session._dialer_phone = UK_NUMBER
 
     await _run(session)
-    log.clear()
     await _run(session)
 
-    assert tz_calls == ["America/Chicago", "America/Chicago"]
-    assert log == {}, "second turn must reuse the cached zone, not query again"
+    assert tz_calls == ["Europe/London", "Europe/London"]
+    assert log == {}, "building the hint must not query the campaign calling_config at all"
+    assert len(resolved) == 1, "the person's zone is resolved once per call, then cached"
 
 
 async def test_no_campaign_timezone_does_not_assume_london_for_a_non_uk_callee(tz_calls, monkeypatch):
@@ -117,8 +121,9 @@ async def test_no_campaign_timezone_does_not_assume_london_for_a_non_uk_callee(t
     assert tz_calls == [None]
 
 
-async def test_no_campaign_timezone_keeps_london_for_an_explicit_uk_region(tz_calls, monkeypatch):
-    _db(monkeypatch, None, {})
+async def test_no_number_and_explicit_gb_region_gets_no_part_of_day_hint(tz_calls, monkeypatch):
+    log = {}
+    _db(monkeypatch, None, log)
     session = _make_session()
     session.contact_phone_region = "GB"
     session._dialer_tenant_id = TENANT
@@ -126,16 +131,18 @@ async def test_no_campaign_timezone_keeps_london_for_an_explicit_uk_region(tz_ca
 
     await _run(session)
 
-    assert tz_calls == ["Europe/London"]
+    assert tz_calls == [None], "region GB alone no longer assumes London"
+    assert log == {}
 
 
-async def test_session_already_carrying_a_timezone_skips_the_lookup(tz_calls, monkeypatch):
+async def test_session_carrying_a_campaign_timezone_still_gets_the_persons_zone(tz_calls, monkeypatch):
     log = {}
     _db(monkeypatch, {"timezone": "Asia/Dubai"}, log)
     session = _make_session()
     session._campaign_timezone = "America/New_York"
+    session._dialer_phone = UK_NUMBER
 
     await _run(session)
 
-    assert tz_calls == ["America/New_York"]
+    assert tz_calls == ["Europe/London"]
     assert log == {}
