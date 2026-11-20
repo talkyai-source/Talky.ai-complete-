@@ -27,7 +27,7 @@ from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.security.rbac import require_permission, Permission
 from app.core.security.cookies import _cookie_secure
 from app.infrastructure.connectors.base import ConnectorFactory
-from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError
+from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError, OAuthStateManager
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.services.connector_lifecycle import (
     ConnectorActor, ConnectorLifecycle, ConnectorLifecycleError, revoke_token_at_provider as _revoke_token_at_provider,
@@ -656,7 +656,7 @@ async def _start_connector_authorization(*, connector_type, provider, name,
         if response is not None:
             response.set_cookie(
                 key=_nonce_cookie_name(state_data["state"]), value=browser_nonce,
-                max_age=oauth_manager.STATE_TTL_SECONDS, path=_OAUTH_CALLBACK_COOKIE_PATH,
+                max_age=OAuthStateManager.STATE_TTL_SECONDS, path=_OAUTH_CALLBACK_COOKIE_PATH,
                 httponly=True, secure=_cookie_secure(), samesite="lax")
         return {"authorization_url": auth_url, "state": state_data["state"]}
     except (Exception, asyncio.CancelledError) as exc:

@@ -180,3 +180,23 @@ async def test_state_is_still_single_use(world):
     second = await world.callback(state, bound_request(state, nonce))
     assert _location_query(second)["error"] == "invalid_state"
     world.connector.exchange_code.assert_awaited_once()
+
+
+async def test_the_cookie_lifetime_does_not_depend_on_the_state_store_instance(world, monkeypatch):
+    # The start is handed a state store by get_oauth_state_manager(); a store
+    # that only implements create_state/delete_state (as the real-database
+    # contract test's does) must not turn the start into a 503.
+    class MinimalStore:
+        async def create_state(self, **kwargs):
+            return {"state": "state-" + uuid4().hex, "code_verifier": "v", "code_challenge": "c",
+                    "code_challenge_method": "S256"}
+
+        async def delete_state(self, state):
+            return True
+
+    monkeypatch.setattr(ce, "get_oauth_state_manager", lambda: MinimalStore())
+    state, response = await world.start()
+    cookie = next(c for c in response.headers.getlist("set-cookie")
+                  if c.startswith(ce._nonce_cookie_name(state) + "="))
+    assert f"max-age={oauth_mod.OAuthStateManager.STATE_TTL_SECONDS}" in cookie.lower()
+    world.lifecycle.reject_pending.assert_not_awaited()
