@@ -20,7 +20,30 @@ class WorkflowBatchRequest(BaseModel):
     call_ids: list[UUID] = Field(min_length=1, max_length=200)
 
 
-@router.post("/workflow/batch", dependencies=[Depends(require_permission(Permission.CALLS_READ))])
+class SavedWorkflowForm(BaseModel):
+    contact: str
+    interest: str
+    nextStep: str
+    completed: bool
+
+
+class SavedWorkflow(BaseModel):
+    """The same object the single read returns inside "workflow"."""
+    leadType: str
+    notes: str
+    form: SavedWorkflowForm
+    updatedAt: str
+
+
+class WorkflowBatchResponse(BaseModel):
+    items: dict[str, SavedWorkflow]
+
+
+@router.post(
+    "/workflow/batch",
+    response_model=WorkflowBatchResponse,
+    dependencies=[Depends(require_permission(Permission.CALLS_READ))],
+)
 async def get_call_workflows_batch(
     body: WorkflowBatchRequest,
     current_user: CurrentUser = Depends(get_current_user),

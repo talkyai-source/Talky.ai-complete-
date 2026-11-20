@@ -5,7 +5,13 @@ from typing import Iterable
 from uuid import UUID
 
 from app.core.db_utils import acquire_with_tenant
-from app.domain.services.call_workflow_service import _COLUMNS, _public
+from app.domain.services.call_workflow_service import _public
+
+# The same columns the single read selects (call_workflow_service._COLUMNS);
+# a test keeps the two equal. Spelled out here so the statement below is a
+# plain literal the tenant-SQL scanner can read.
+_COLUMNS = """tenant_id, call_id, lead_type, notes, contact, interest,
+              next_step, completed, updated_by, created_at, updated_at"""
 
 
 async def read_workflows(pool, *, tenant_id: str, call_ids: Iterable[UUID]) -> dict[str, dict]:

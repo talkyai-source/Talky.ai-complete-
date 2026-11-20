@@ -182,3 +182,8 @@ async def test_path_resolves_to_batch_handler_through_the_real_api_router(harnes
     assert response.status_code == 200, response.text
     assert set(response.json()["items"]) == {C1}
     assert len(store.fetches) == 1
+
+
+def test_the_bulk_read_selects_the_same_columns_as_the_single_read():
+    from app.domain.services import call_workflow_batch, call_workflow_service
+    assert call_workflow_batch._COLUMNS.split() == call_workflow_service._COLUMNS.split()
