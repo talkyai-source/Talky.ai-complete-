@@ -20,9 +20,73 @@ _UNIT = re.compile(r"[A-Za-z0-9_.@:-]{1,200}\Z")
 # health watch runs every minute, so one stuck check used to mean an alert a
 # minute. A different set of failing health checks alerts at once.
 REPEAT_LIMIT_SECONDS = 3600
+# The health watch's failing set, when unchanged, repeats once a day; a changed
+# fingerprint has another slot key and alerts at once.
+HEALTHWATCH_REPEAT_LIMIT_SECONDS = 24 * 3600
 HEALTHWATCH_FAILING_KEY = "talky:healthwatch:failing"
 HEALTHWATCH_LAST_RUN_KEY = "talky:healthwatch:last_run"
-_DETAIL = re.compile(r"[a-z_]{1,40}(?:,[a-z_]{1,40}){0,15}\Z")
+# One entry per failing check: name, or name:status, or name:status:evidence
+# (digits, unit names, "+"). No free text.
+_ITEM = r"[a-z_]{1,40}(?::[a-z_]{1,40}(?::[A-Za-z0-9_.@+-]{1,600})?)?"
+_DETAIL = re.compile(rf"{_ITEM}(?:,{_ITEM}){{0,15}}\Z")
+
+
+def _n(evidence, index):
+    parts = (evidence or "").split("+")
+    return parts[index] if index < len(parts) and parts[index].isdigit() else "0"
+
+
+def _plural(count, one, many):
+    return one if count == "1" else many
+
+
+# Fixed sentences per check, filled only from the fingerprint's numbers.
+_SENTENCES = {
+    "trunks": lambda status, ev: (
+        f"{_n(ev, 0)} {_plural(_n(ev, 0), 'phone line is', 'phone lines are')} not connected."
+        if status == "alert" else "The phone line status could not be read."),
+    "payments": lambda status, ev: (
+        f"{_n(ev, 0)} {_plural(_n(ev, 0), 'payment needs', 'payments need')} a review. "
+        f"{_n(ev, 1)} {_plural(_n(ev, 1), 'payment has', 'payments have')} been stuck for more than 6 hours."
+        if status == "alert" else "The payment records could not be checked."),
+    "units": lambda status, ev: (
+        f"These scheduled jobs failed: {', '.join(ev.split('+'))}."
+        if status == "alert" and ev else "Some scheduled jobs have failed."),
+    "recordings": lambda status, ev: (
+        f"{_n(ev, 0)} answered {_plural(_n(ev, 0), 'call has', 'calls have')} no recording. "
+        f"{_n(ev, 1)} {_plural(_n(ev, 1), 'recording is', 'recordings are')} waiting too long to be saved. "
+        f"{_n(ev, 2)} {_plural(_n(ev, 2), 'transferred call is', 'transferred calls are')} missing "
+        f"the part after the transfer. "
+        f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording was', 'recordings were')} saved without a confirmed notice."
+        if status == "alert" and ev else "The call recordings could not be checked."),
+    "email": lambda status, ev: (
+        "No email has been confirmed sent for more than 3 days." if status == "stale"
+        else "The mailbox is failing to send email." if status == "alert"
+        else "The mailbox could not be checked."),
+    "disk": lambda status, ev: "The server disk is nearly full." if status == "alert"
+    else "The server disk could not be checked.",
+    "memory": lambda status, ev: "The server memory is nearly full." if status == "alert"
+    else "The server memory could not be checked.",
+    "certificates": lambda status, ev: "A security certificate expires in less than 14 days." if status == "alert"
+    else "The security certificates could not be checked.",
+    "redis": lambda status, ev: "The fast data store is nearly full." if status == "alert"
+    else "The fast data store could not be checked.",
+    "workers": lambda status, ev: "A background worker is not running." if status == "alert"
+    else "The background workers could not be checked.",
+    "ntp": lambda status, ev: "The server clock is not in sync." if status == "alert"
+    else "The server clock could not be checked.",
+}
+
+
+def _sentences(detail):
+    """One plain sentence per failing check; an unknown check is only named."""
+    out = []
+    for item in detail.split(","):
+        name, _, rest = item.partition(":")
+        status, _, evidence = rest.partition(":")
+        builder = _SENTENCES.get(name)
+        out.append(builder(status or "alert", evidence) if builder else f"{name} is failing.")
+    return out
 
 
 def _destinations(settings):
@@ -98,7 +162,8 @@ async def claim_alert_slot(unit, *, client_factory=None):
             if unit.startswith("talky-healthwatch"):
                 detail = await client.get(HEALTHWATCH_FAILING_KEY) or ""
                 detail = detail if _DETAIL.fullmatch(detail) else ""
-            claimed = await client.set(_slot_key(unit, detail), "1", nx=True, ex=REPEAT_LIMIT_SECONDS)
+            limit = HEALTHWATCH_REPEAT_LIMIT_SECONDS if detail else REPEAT_LIMIT_SECONDS
+            claimed = await client.set(_slot_key(unit, detail), "1", nx=True, ex=limit)
             return bool(claimed), detail
     except Exception as exc:
         logger.warning("alert repeat limit unavailable (%s); sending anyway", type(exc).__name__)
@@ -129,8 +194,11 @@ async def send_alert(unit, *, settings=None, synthetic=False, detail=""):
         logger.error("alert not delivered: no destination")
         return result
     subject = "Talky synthetic alert test" if synthetic else "Talky service failure"
-    checks = f" (failing checks: {detail.replace(',', ', ')})" if _DETAIL.fullmatch(detail or "") else ""
-    message = f"{subject}: {unit}{checks}. Inspect the service journal on the host."
+    valid = bool(_DETAIL.fullmatch(detail or ""))
+    names = ", ".join(dict.fromkeys(item.split(":")[0] for item in detail.split(","))) if valid else ""
+    checks = f" (failing checks: {names})" if valid else ""
+    said = (" " + " ".join(_sentences(detail))) if valid else ""
+    message = f"{subject}: {unit}{checks}.{said} Details are in the server's log for this job."
     # Never attach journal output, customer data, credentials or destination URLs.
     if webhook:
         try:

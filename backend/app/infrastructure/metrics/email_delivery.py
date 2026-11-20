@@ -87,6 +87,22 @@ def _redis_client() -> Any:
         return None
 
 
+async def _fallback_client() -> Any:
+    """A short-lived client for processes without an initialised container
+    (alert mail, reminders, receipts); built like the health watch builds its own."""
+    import os
+    from app.core.container import _build_cluster_client, _build_redis_url, _build_sentinel_client
+    import redis.asyncio as redis
+
+    mode = (os.getenv("REDIS_MODE") or "single").strip().lower()
+    if mode == "sentinel":
+        return await _build_sentinel_client()
+    if mode == "cluster":
+        return await _build_cluster_client()
+    return redis.from_url(_build_redis_url(), decode_responses=True,
+                          socket_timeout=1, socket_connect_timeout=1, max_connections=1)
+
+
 async def record_email_outcome(outcome: str, error: str | None = None, *,
                                client: Any = None, now: float | None = None) -> None:
     """Keep the outcome of one send. ``outcome`` is "ok" or "failed"; a failure
@@ -94,8 +110,14 @@ async def record_email_outcome(outcome: str, error: str | None = None, *,
     if outcome not in {"ok", "failed"} or (outcome == "failed" and error not in ERRORS):
         return
     client = client if client is not None else _redis_client()
+    owned = False
     if client is None:
-        return
+        try:
+            client = await asyncio.wait_for(_fallback_client(), 2)
+            owned = True
+        except Exception as exc:
+            logger.warning("email delivery outcome not recorded (%s)", type(exc).__name__)
+            return
     stamp = repr(float(now if now is not None else time.time()))
     try:
         await asyncio.wait_for(
@@ -104,6 +126,12 @@ async def record_email_outcome(outcome: str, error: str | None = None, *,
         )
     except Exception as exc:
         logger.warning("email delivery outcome not recorded (%s)", type(exc).__name__)
+    finally:
+        if owned:
+            try:
+                await asyncio.wait_for(client.aclose(), 1)
+            except Exception:
+                pass
 
 
 async def record_send_failure(exc: BaseException, **kwargs: Any) -> None:

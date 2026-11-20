@@ -158,7 +158,7 @@ async def test_the_alert_names_the_failing_checks(alerts, monkeypatch, detail, e
         assert "failing checks" not in text and "Bcc" not in text
 
 
-async def test_the_health_watch_records_only_failing_check_names(server):
+async def test_the_health_watch_records_a_fingerprint_of_each_failing_check(server):
     watch = _load("qa_healthwatch_repeat", "scripts/healthwatch.py")
     redis = fakeredis.aioredis.FakeRedis(server=server, decode_responses=True)
     result = {
@@ -169,7 +169,7 @@ async def test_the_health_watch_records_only_failing_check_names(server):
     }
 
     await watch._record_failing_checks(redis, result)
-    assert await redis.get(watch.FAILING_KEY) == "certificates,trunks"
+    assert await redis.get(watch.FAILING_KEY) == "certificates:unconfigured,trunks:alert:1"
     assert 0 < await redis.ttl(watch.FAILING_KEY) <= 600
 
     await watch._record_failing_checks(redis, {"disk": {"status": "ok"}})
