@@ -49,7 +49,7 @@ export function DialAgainButton({ call, compact = false }: { call: Call; compact
 
     // The server owns DNC, campaign, current route, and duplicate-job checks.
     // Do not initiate previews for inbound or ongoing calls.
-    if (call.direction === "inbound" || isActiveCallStatus(call.status) || !call.campaign_id || !call.lead_id) return null;
+    if (call.direction === "inbound" || isActiveCallStatus(call.status) || !call.campaign_id) return null;
 
     async function dial() {
         if (submitting.current || (!retrySavedRequest && (!preview.data?.eligible || preview.isFetching || receipt))) return;

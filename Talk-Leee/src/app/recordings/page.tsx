@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { formatTimestamp } from "@/lib/timestamps";
 import { Clock } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -22,6 +24,7 @@ function formatDuration(seconds?: number | null) {
 }
 
 export default function RecordingsPage() {
+    const { user } = useAuth();
     const permissions = useEffectivePermissions();
     const capabilities = getRecordingCapabilities(
         permissions.isSuccess ? permissions.data.permissions : undefined,
@@ -111,7 +114,7 @@ export default function RecordingsPage() {
                                         </span>
                                     </div>
                                     <span className="text-sm text-foreground/70">
-                                        {new Date(recording.created_at).toLocaleString()}
+                                        {formatTimestamp(recording.created_at, user?.account_timezone).label}
                                     </span>
                                 </div>
 

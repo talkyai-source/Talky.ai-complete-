@@ -22,6 +22,7 @@ loader._load = function (id, ...args) {
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/recordings/recording-media-controls")) return { RecordingMediaControls: nothing };
     if (id.includes("components/calls/recording-feedback-bar")) return { RecordingFeedbackBar: nothing };
+    if (id.includes("lib/auth-context")) return { useAuth: () => ({ user: { id: "user-1", tenant_id: "tenant-1" } }) };
     if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => permissions };
     return originalLoad.call(this, id, ...args);
 };

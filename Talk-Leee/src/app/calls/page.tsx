@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
 import { formatTimestamp } from "@/lib/timestamps";
@@ -121,20 +121,28 @@ function CallParties({ call }: { call: Call }) {
     return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CallHighlight call={call} /></>;
 }
 
-// The per-call "best time to call" the panel shows. The `Call` type and the
-// list mapper do not carry this field yet, so today it is always null and the
-// panel shows its empty state. Once the backend sends `best_time_to_call` on
-// the call and `Call` / `listCalls` (dashboard-api.ts) carry it through, this
-// reader is the only place that needs to change (drop the cast).
+// The per-call "best time to call" the panel shows. The server sends it on the
+// list item and the list mapper (dashboard-api.ts) carries it on `Call`.
 function callBestTimeToCall(call: Call): string | null {
-    const value = (call as Call & { best_time_to_call?: string | null }).best_time_to_call;
+    const value = call.best_time_to_call;
     return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+// Read-only members never reach the save path, even by a synthetic change event.
+function ignoreWorkflowChange() {}
+
+// Saving lead type, notes, the form and a review needs calls:create on the
+// server. The workflow controls have no disabled prop, so a disabled fieldset
+// (display: contents, no box) switches off everything inside it.
+function EditLock({ canEdit, children }: { canEdit: boolean; children: ReactNode }) {
+    return <fieldset disabled={!canEdit} className="contents m-0 min-w-0 border-0 p-0">{children}</fieldset>;
 }
 
 function CallRow({
     call,
     timeZone,
     canPlayMedia,
+    canEdit,
     workflow,
     onWorkflowChange,
     onReview,
@@ -142,6 +150,7 @@ function CallRow({
     call: Call;
     timeZone?: string;
     canPlayMedia: boolean;
+    canEdit: boolean;
     workflow: CallHistoryWorkflowEntry;
     onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
     onReview: (call: Call) => void;
@@ -230,11 +239,11 @@ function CallRow({
                             </div>
                         </div>
                     </div>
-                    <LeadTypeSelect
+                    <EditLock canEdit={canEdit}><LeadTypeSelect
                         value={workflow.leadType}
                         onChange={(leadType) => onWorkflowChange(call, { leadType })}
                         callLabel={callLabel}
-                    />
+                    /></EditLock>
                 </div>
                 <CallerGave call={call} variant="card" />
                 <div className="flex flex-wrap items-center gap-2">
@@ -248,11 +257,11 @@ function CallRow({
                         {formatTimestamp(call.created_at, timeZone).label}
                     </time>
                 </div>
-                <CallHistoryNotesField
+                <EditLock canEdit={canEdit}><CallHistoryNotesField
                     value={workflow.notes}
                     onChange={(notes) => onWorkflowChange(call, { notes })}
                     callLabel={callLabel}
-                />
+                /></EditLock>
                 <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
                     <DialAgainButton call={call} />
                     <TooltipProvider delayDuration={250}>
@@ -282,19 +291,19 @@ function CallRow({
                         <FileText className="h-4 w-4" aria-hidden />
                         Transcript
                     </button>
-                    <CallHistoryFormButton
+                    <EditLock canEdit={canEdit}><CallHistoryFormButton
                         value={workflow.form}
                         onChange={(form) => onWorkflowChange(call, { form })}
                         callLabel={callLabel}
                         showLabel
-                    />
+                    /></EditLock>
                     {call.recording_id && canPlayMedia ? (
                         <button type="button" onClick={togglePlay} aria-label={playing ? "Pause recording" : "Play recording"} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
                             {audioLoading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : playing ? <Pause className="h-4 w-4" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}
                             Recording
                         </button>
                     ) : null}
-                    <button type="button" onClick={() => onReview(call)} className="inline-flex h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
+                    <button type="button" onClick={() => onReview(call)} disabled={!canEdit} className="inline-flex disabled:cursor-not-allowed disabled:opacity-50 h-11 items-center gap-1.5 rounded-lg border border-border px-3 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">
                         <ThumbsUp className="h-4 w-4" aria-hidden />
                         Review
                     </button>
@@ -331,11 +340,11 @@ function CallRow({
                         </span>
                     </div>
                 </div>
-                <LeadTypeSelect
+                <EditLock canEdit={canEdit}><LeadTypeSelect
                     value={workflow.leadType}
                     onChange={(leadType) => onWorkflowChange(call, { leadType })}
                     callLabel={callLabel}
-                />
+                /></EditLock>
                 <div className="min-w-0">
                     {call.outcome ? (
                         <span className={`inline-flex max-w-full items-center truncate rounded-full px-2 py-1 text-xs font-semibold ${statusPillClass(call.outcome)}`} title={humanizeOutcome(call.outcome)}>
@@ -345,11 +354,11 @@ function CallRow({
                         <span className="text-sm text-muted-foreground">--</span>
                     )}
                 </div>
-                <CallHistoryNotesField
+                <EditLock canEdit={canEdit}><CallHistoryNotesField
                     value={workflow.notes}
                     onChange={(notes) => onWorkflowChange(call, { notes })}
                     callLabel={callLabel}
-                />
+                /></EditLock>
                 <div className="flex justify-center">
                     <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} timeZone={timeZone} />
                 </div>
@@ -403,11 +412,11 @@ function CallRow({
                     >
                         <FileText className="h-4 w-4" aria-hidden />
                     </button>
-                    <CallHistoryFormButton
+                    <EditLock canEdit={canEdit}><CallHistoryFormButton
                         value={workflow.form}
                         onChange={(form) => onWorkflowChange(call, { form })}
                         callLabel={callLabel}
-                    />
+                    /></EditLock>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-1">
                     <DialAgainButton call={call} compact />
@@ -425,6 +434,7 @@ function CallRow({
                     <button
                         type="button"
                         onClick={() => onReview(call)}
+                        disabled={!canEdit}
                         aria-label={`Review call with ${callLabel}`}
                         title="Review call"
                         className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -608,6 +618,7 @@ function CampaignSection({
     timeZone,
     defaultOpen,
     canPlayMedia,
+    canEdit,
     workflow,
     onWorkflowChange,
     onReview,
@@ -616,6 +627,7 @@ function CampaignSection({
     timeZone?: string;
     defaultOpen: boolean;
     canPlayMedia: boolean;
+    canEdit: boolean;
     workflow: CallHistoryWorkflowMap;
     onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
     onReview: (call: Call) => void;
@@ -798,6 +810,7 @@ function CampaignSection({
                                             call={call}
                                             timeZone={timeZone}
                                             canPlayMedia={canPlayMedia}
+                                            canEdit={canEdit}
                                             workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
                                             onWorkflowChange={onWorkflowChange}
                                             onReview={onReview}
@@ -820,6 +833,9 @@ export default function CallsPage() {
         permissions.isSuccess ? permissions.data.permissions : undefined,
     );
     const canPlayMedia = permissions.isSuccess && recordingCapabilities.canRead;
+    // The server saves lead type, notes, the form and reviews only with calls:create.
+    const effective = permissions.isSuccess ? permissions.data.permissions.map((permission) => permission.trim().toLowerCase()) : [];
+    const canEdit = effective.includes("calls:create") || effective.includes("platform:admin");
     // Call history is read with the server's cursor, not offsets (QA F6-03),
     // one cursor page after another until every call is loaded (useCalls),
     // so the search and the filters below cover all calls. The list then shows
@@ -1045,8 +1061,9 @@ export default function CallsPage() {
                                 timeZone={user?.account_timezone}
                                 defaultOpen={idx === 0}
                                 canPlayMedia={canPlayMedia}
+                                canEdit={canEdit}
                                 workflow={workflow}
-                                onWorkflowChange={updateWorkflow}
+                                onWorkflowChange={canEdit ? updateWorkflow : ignoreWorkflowChange}
                                 onReview={setReviewCall}
                             />
                         ))
