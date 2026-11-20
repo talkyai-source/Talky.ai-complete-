@@ -399,8 +399,9 @@ async def test_inbound_unchanged_with_switch_on(switch_on):
         "appArgs": f"transfer_target,{parent}",
         "channelId": "talky-xfer-00000000000000000009",
         "originator": parent,
-        "formats": "ulaw",
     }
+    # Asterisk 20 rejects originator + formats together (400).
+    assert "formats" not in create
     assert rig.calls(f"/channels/{leg.target_id}/dial")[0][2]["timeout"] == int(
         adapter._transfer_answer_timeout_s
     )

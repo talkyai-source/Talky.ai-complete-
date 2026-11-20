@@ -142,7 +142,14 @@ def _matches_schema(value, schema):
     return True
 
 
-async def execute_tool_call(call, tools, runner, *, timeout_seconds=8.0):
+DEFAULT_TOOL_TIMEOUT_SECONDS = 8.0
+# transfer_call waits for a person to answer: the campaign ring time (5-120 s)
+# plus 15 s, capped at 135 s. The ring time is not visible at this layer, so
+# the cap is used. Cancelling it earlier hangs up the still-ringing leg.
+TOOL_TIMEOUT_SECONDS = {"transfer_call": 135.0}
+
+
+async def execute_tool_call(call, tools, runner, *, timeout_seconds=None):
     """Reject unoffered/invalid requests; domain executors own authorization."""
     specs = {s.get("function", s).get("name"): s.get("function", s) for s in tools}
     name, args = call.get("name"), call.get("arguments")
@@ -157,6 +164,8 @@ async def execute_tool_call(call, tools, runner, *, timeout_seconds=8.0):
         if not _matches_schema(args, schema):
             status = "invalid_arguments"
     if status is None:
+        if timeout_seconds is None:
+            timeout_seconds = TOOL_TIMEOUT_SECONDS.get(name, DEFAULT_TOOL_TIMEOUT_SECONDS)
         try:
             result = await asyncio.wait_for(runner(name, args), timeout_seconds)
             return result if isinstance(result, str) else json.dumps(result)

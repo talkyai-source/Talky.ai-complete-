@@ -2382,14 +2382,21 @@ class AsteriskAdapter(CallControlAdapter):
             # proof that AI media can no longer reach the human bridge. Reuse
             # the bounded ARI inventory proof and retain every identity/map if
             # it cannot establish absence.
+            # Unmap BEFORE the DELETE: Asterisk's StasisEnd/ChannelDestroyed for
+            # this ExternalMedia channel would otherwise be read as the call's
+            # media ending and hang up the caller and the person. Restore the
+            # entry if absence cannot be confirmed.
+            unmapped = self._ext_channels.get(parent_id) == ext_channel_id
+            if unmapped:
+                self._ext_channels.pop(parent_id, None)
             if not await self.hangup_many_confirmed(
                 (ext_channel_id,),
                 fence_root=False,
             ):
+                if unmapped:
+                    self._ext_channels.setdefault(parent_id, ext_channel_id)
                 raise RuntimeError("transfer_ai_media_detach_unconfirmed")
             self._drop_channel_varset_cache(ext_channel_id)
-            if self._ext_channels.get(parent_id) == ext_channel_id:
-                self._ext_channels.pop(parent_id, None)
 
         # A failed gateway stop is not a confirmed teardown. Keep the session
         # identity and RTP-port ownership intact so terminal cleanup (or a
@@ -6569,8 +6576,10 @@ class AsteriskAdapter(CallControlAdapter):
                     "app": self._app_name,
                     "appArgs": f"transfer_target,{call_id}",
                     "channelId": target_id,
+                    # Asterisk 20 answers 400 when originator and formats are
+                    # both sent; with an originator it takes the formats from
+                    # the originating channel.
                     "originator": call_id,
-                    "formats": "ulaw",
                 }
                 if outbound_caller_id:
                     create_params["callerId"] = outbound_caller_id

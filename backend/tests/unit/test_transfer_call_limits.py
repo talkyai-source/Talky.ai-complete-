@@ -449,8 +449,10 @@ async def test_teardown_helper_never_raises(monkeypatch, caplog):
 
     monkeypatch.setattr(recording_spool, "list_entries", lambda: [])
     monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
+    expecting = make_vs()
+    expecting._recording_awaiting_transfer_part = True  # an entry was expected: its absence is an error
     with caplog.at_level(logging.WARNING):
-        await lifecycle._finalize_transfer_recording_at_end(make_vs(), "pbx-1")
+        await lifecycle._finalize_transfer_recording_at_end(expecting, "pbx-1")
     assert "transfer_recording_entry_missing call=pbx-1" in caplog.text
 
     def broken():

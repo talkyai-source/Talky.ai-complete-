@@ -198,6 +198,7 @@ class _Phone:
 
     async def stop_transfer_recording(self, name):
         self.calls.append("stop")
+        self.live = False  # the phone system closes the file once told to stop
 
     async def fetch_stored_recording(self, name, **kw):
         self.calls.append("fetch")
@@ -237,7 +238,7 @@ async def test_at_the_end_of_the_call_the_recording_is_stopped_and_joined(folder
 
     assert await tr.finalize_transfer_entry(entry, adapter=phone, call_ended=True) == "saved"
 
-    assert phone.calls == ["stop", "fetch", "delete", "forget"]
+    assert phone.calls == ["stop", "is_live", "fetch", "delete", "forget"]  # fetch only once it is closed
     assert saves == ["k-xfer"]
     stored = spool.read_entry("k-xfer")
     assert stored.transfer_part == "included" and stored.awaiting is None and stored.sample_rate == 8000

@@ -37,6 +37,23 @@ _last_leftover_sweep = 0.0
 # given up as missing. The live path asks once at the end of the call; the
 # retry loop asks about once a minute after that.
 _FETCH_TRIES = 6
+# After the stop, Asterisk closes the file (and writes the WAV header's size)
+# asynchronously: ask a few times, briefly, whether it is still recording, and
+# fetch again when the header still says "no audio". Short, because this runs
+# in the end-of-call background task.
+_LIVE_POLLS = 6
+_LIVE_POLL_DELAY_S = 0.25
+_NOT_READY_FETCHES = 3
+_NOT_READY_REFETCH_DELAY_S = 0.5
+_WAV_HEADER_BYTES = 44
+# Entries whose phone-system copy must not be deleted after the join (the
+# handover could not park the agent's part, so the save may already exist).
+_KEEP_STORED_COPY: set = set()
+
+
+def keep_stored_copy(key) -> None:
+    """Mark an entry: its phone-system copy is left for the weekly clean-up."""
+    _KEEP_STORED_COPY.add(key)
 # Keys being finalised right now, so the end of the call and the retry loop
 # never join the same entry twice.
 _FINALIZING: set = set()
@@ -52,6 +69,9 @@ def transfer_max_duration_seconds() -> int:
     except (TypeError, ValueError, OverflowError):
         return _DEFAULT_S
     return max(_MIN_S, min(_MAX_S, value))
+
+
+_ZERO4 = bytes(4)
 
 
 def _read_wav(data: bytes):
@@ -71,6 +91,16 @@ def _read_wav(data: bytes):
     usable = len(frames) - (len(frames) % (2 * channels))
     arr = np.frombuffer(frames[:usable], dtype="<i2").reshape(-1, channels)
     return arr, int(rate)
+
+
+def _header_says_empty_but_audio_follows(data: bytes) -> bool:
+    """A WAV Asterisk has not closed yet: the header counts 0 frames while
+    audio bytes follow it."""
+    # Raw bytes, not wave.open: Asterisk leaves BOTH the RIFF size (4-8) and the
+    # data size (40-44) at zero while the file is open, and wave rejects that.
+    if len(data) <= _WAV_HEADER_BYTES or data[:4] != b"RIFF":
+        return False
+    return data[4:8] == _ZERO4 or data[40:44] == _ZERO4
 
 
 def _to_rate(arr, rate: int):
@@ -182,6 +212,7 @@ async def _finalize_locked(
     name = entry.transfer_recording_name
     part_wav: Optional[bytes] = None
     reason = "not_started"
+    retryable = False
     if name and adapter is None:
         reason = "no_adapter"
     elif name:
@@ -193,8 +224,24 @@ async def _finalize_locked(
             if callable(is_live) and await is_live(name) is True:
                 return "retry"
         await adapter.stop_transfer_recording(name)
+        is_live = getattr(adapter, "transfer_recording_is_live", None)
+        if callable(is_live):
+            for _ in range(_LIVE_POLLS):
+                if await is_live(name) is not True:
+                    break
+                await asyncio.sleep(_LIVE_POLL_DELAY_S)
         part_wav = await adapter.fetch_stored_recording(name)
         reason = "not_found"
+        for fetch_no in range(_NOT_READY_FETCHES):
+            if not part_wav or not _header_says_empty_but_audio_follows(part_wav):
+                break
+            if fetch_no + 1 < _NOT_READY_FETCHES:
+                await asyncio.sleep(_NOT_READY_REFETCH_DELAY_S)
+                part_wav = await adapter.fetch_stored_recording(name)
+            else:
+                part_wav = None
+                reason = "unreadable"
+        retryable = part_wav is None
 
     ai_wav = await asyncio.to_thread(spool.read_wav, entry.key)
 
@@ -224,7 +271,7 @@ async def _finalize_locked(
             entry.last_attempt_at = spool.utc_now_iso()
             await asyncio.to_thread(spool.update_entry, entry)
             return "retry"
-    if not joined and reason == "not_found":
+    if not joined and retryable and reason in ("not_found", "unreadable"):
         # The phone system may still be writing the file. Leave the entry
         # awaiting and ask again, a few times, before the transfer part is
         # given up as missing.
@@ -256,6 +303,8 @@ async def _finalize_locked(
         entry.transfer_part = "missing"
         logger.error("transfer_recording_missing call=%s reason=%s", call, reason)
     entry.awaiting = None
+    keep_copy = entry.key in _KEEP_STORED_COPY
+    _KEEP_STORED_COPY.discard(entry.key)
 
     if final_wav is None:
         # No AI audio at all and no transfer part: nothing to write back.
@@ -264,9 +313,16 @@ async def _finalize_locked(
         await asyncio.to_thread(spool.write_entry, entry, final_wav)
 
     if name and adapter is not None:
-        if joined:
+        if joined and part_seconds > 0 and not keep_copy:
             # Only now: the pending folder holds the whole conversation.
             await adapter.delete_stored_recording(name)
+        elif joined:
+            # An empty part, or a call whose handover could not park its agent
+            # part (the save may already exist): never delete the only copy.
+            logger.warning(
+                "transfer_recording_copy_kept call=%s reason=%s",
+                call, "no_entry_at_handover" if keep_copy else "empty_part",
+            )
         else:
             # A part that was not joined stays in the phone system's own
             # folder so a person can recover it; the clean-up below removes

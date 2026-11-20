@@ -572,6 +572,11 @@ class AudioIngest:
                             was_active = False
                             continue
 
+                        from app.domain.services.voice_pipeline.action_execution import transfer_in_progress
+                        if transfer_in_progress(session, getattr(session, "_voice_session_ref", None)):
+                            # A transfer is ringing: the line is not idle.
+                            last_caller_at = now()
+                            continue
                         barge = self._p._barge_in_events.get(call_id)
                         turn_open_since = getattr(session, "_caller_turn_open_since", None)
                         last_text_at = getattr(session, "_caller_last_text_at", None)

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import asyncio
 import json
+import logging
 import re
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
@@ -16,6 +17,73 @@ from zoneinfo import ZoneInfo
 
 from app.core.db_utils import acquire_with_tenant
 from app.services.action_execution import DurableActionExecutor, public_action_receipt
+
+
+logger = logging.getLogger(__name__)
+
+# Strong references: the loop keeps only weak ones, and a detached transfer
+# must outlive the LLM turn task that started it.
+_DETACHED_TASKS: set = set()
+
+
+def _log_detached_failure(task):
+    _DETACHED_TASKS.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.error("voice_action_detached_task_failed", exc_info=task.exception())
+
+
+TRANSFER_MARKER = "_transfer_ringing_since"
+TRANSFER_MARKER_MAX_AGE_S = 150.0
+
+
+def transfer_in_progress(*holders) -> bool:
+    """True while a transfer started under 150 s ago may still be ringing.
+
+    The start time (monotonic) is kept, not a flag, so a lost clear cannot
+    keep a call alive for ever. Read by the duration caps and silence monitor.
+    """
+    import time
+
+    for holder in holders:
+        started = getattr(holder, TRANSFER_MARKER, None)
+        if isinstance(started, (int, float)) and not isinstance(started, bool):
+            if 0 <= time.monotonic() - started < TRANSFER_MARKER_MAX_AGE_S:
+                return True
+    return False
+
+
+def _transfer_holders(session):
+    return [session, getattr(session, "_voice_session_ref", None)]
+
+
+async def _tracked_transfer(session, awaitable):
+    """Mark the call as having a transfer in progress for exactly its duration."""
+    import time
+
+    holders = [h for h in _transfer_holders(session) if h is not None]
+    started = time.monotonic()
+    for holder in holders:
+        try:
+            setattr(holder, TRANSFER_MARKER, started)
+        except Exception:  # noqa: BLE001 - a marker must never break the transfer
+            pass
+    try:
+        return await awaitable
+    finally:
+        for holder in holders:
+            try:
+                if getattr(holder, TRANSFER_MARKER, None) == started:
+                    setattr(holder, TRANSFER_MARKER, None)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+async def _run_detached(awaitable):
+    """Run ``awaitable`` as its own task; cancelling the caller only stops the wait."""
+    task = asyncio.ensure_future(awaitable)
+    _DETACHED_TASKS.add(task)
+    task.add_done_callback(_log_detached_failure)
+    return await asyncio.shield(task)
 
 
 def _object(value):
@@ -488,7 +556,14 @@ async def execute_connected_voice_action(session, action, arguments, user_text):
                            success=True, confirmation_allowed=True, scheduled_at=payload["scheduled_at"], timezone=payload["timezone"])
         return _result(action, "unavailable", "No executor exists for this action.")
 
-    return await DurableActionExecutor(pool).execute(tenant_id=str(_call_ids(session)[0]),
+    execution = DurableActionExecutor(pool).execute(tenant_id=str(_call_ids(session)[0]),
         idempotency_key="voice-" + proposal["id"], action=action, payload=request, executor=perform,
         call_id=str(context["call_id"]), lead_id=str(context["lead_id"]) if context.get("lead_id") else None,
         campaign_id=str(context["campaign_id"]), triggered_by="voice")
+    if action == "transfer_call":
+        # The transfer (ringing, bridging) and the receipt save that follows it
+        # must not die with the LLM turn: barge-in and the connect handoff both
+        # cancel the turn task. Only the wait is cancelled; the executor's own
+        # save of the real outcome runs inside the detached task.
+        return await _run_detached(_tracked_transfer(session, execution))
+    return await execution
