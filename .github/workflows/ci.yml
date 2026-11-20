@@ -335,6 +335,7 @@ jobs:
             tests/integration/test_dnc_settlement_truth.py \
             tests/integration/test_touch_trigger_repair_pg.py \
             tests/integration/test_abuse_event_columns_pg.py \
+            tests/integration/test_abuse_observer_pg.py \
             tests/integration/test_legacy_object_hardening_pg.py \
             tests/integration/test_clean_install.py \
             -q
