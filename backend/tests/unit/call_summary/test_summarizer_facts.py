@@ -272,4 +272,5 @@ async def test_generate_and_store_passes_confirmed_contact_and_executed_action_t
         "Agent: Hi\nCaller: Hi",
         confirmed_contacts={"phone": "+15551234567"},
         executed_actions=["schedule_callback"],
+        call_id=_CALL_ID,
     )

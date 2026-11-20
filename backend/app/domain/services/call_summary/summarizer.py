@@ -161,6 +161,34 @@ _SUMMARY_SCHEMA_PROPERTIES = {
     for key, default in EMPTY_SUMMARY.items()
 }
 
+# Production 2026-11-20: 400 json_validate_failed, "missing properties:
+# 'business_details'", a callback request was lost. The request is unchanged
+# (strict, every key required); the provider's failed_generation is salvaged
+# locally when it carries what the consumers cannot work without:
+#   headline -> calls.summary column and the call list (store.generate_and_store)
+#   outcome  -> store._outcome_is_lead / _summary_supports_lead (lead marking)
+# _coerce() fills every other key from EMPTY_SUMMARY.
+_REQUIRED_KEYS = ("headline", "outcome")
+
+
+def _locally_valid(parsed: object) -> bool:
+    """Relaxed local validation: a JSON object whose required keys are non-empty strings."""
+    return isinstance(parsed, dict) and all(
+        isinstance(parsed.get(k), str) and parsed[k].strip() for k in _REQUIRED_KEYS
+    )
+
+
+def _provider_validation_failure(exc: Exception) -> Optional[tuple[str, str]]:
+    """(validator message, failed_generation) when *exc* is a json_validate_failed 400."""
+    body = getattr(exc, "body", None)
+    err = body.get("error", body) if isinstance(body, dict) else None
+    if isinstance(err, dict) and err.get("code") == "json_validate_failed":
+        return str(err.get("message") or ""), str(err.get("failed_generation") or "")
+    if "json_validate_failed" in str(exc):
+        return str(exc), ""
+    return None
+
+
 # Keys whose values must be lists (coerce scalars → single-element list)
 _LIST_KEYS = {"key_points", "objections", "commitments", "action_items", "follow_up_tips", "notable_quotes", "business_details"}
 
@@ -320,6 +348,7 @@ async def summarize_transcript(
     confirmed_contacts: Optional[Mapping[str, str]] = None,
     executed_actions: Optional[Sequence[str]] = None,
     campaign_fields: Optional[Sequence[Mapping]] = None,
+    call_id: Optional[str] = None,
 ) -> dict:
     """Summarize *transcript_text* into a structured dict.
 
@@ -346,6 +375,12 @@ async def summarize_transcript(
     document = f"{_facts_block(confirmed_contacts, executed_actions)}\n\n{transcript_text}"
     fields = extractable_campaign_fields(campaign_fields)
     system_prompt = _SYSTEM_PROMPT + _campaign_fields_prompt(fields)
+
+    def _failed(reason: str) -> dict:
+        logger.warning("call_summary_failed_final call=%s reason=%s", call_id, reason)
+        result = deepcopy(EMPTY_SUMMARY)
+        result["headline"] = SUMMARY_UNAVAILABLE_HEADLINE
+        return result
 
     try:
         client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
@@ -378,22 +413,53 @@ async def summarize_transcript(
             _SUMMARY_MAX_TOKENS,
             _summary_token_budget(transcript_text) + _TOKENS_PER_CAMPAIGN_FIELD * len(fields),
         )
+        # ONE format retry in total, never a loop: either the provider's own
+        # failed_generation salvaged locally (no LLM call), or a single second
+        # LLM call carrying the validator's message.
+        async def _second_call(note: str) -> dict:
+            try:
+                parsed2 = json.loads(await _call(document + note, _SUMMARY_MAX_TOKENS))
+            except Exception as exc2:  # noqa: BLE001
+                return _failed(f"second_attempt_error: {str(exc2)[:300]}")
+            if not _locally_valid(parsed2):
+                return _failed("second_attempt_invalid_summary")
+            return _coerce(parsed2)
+
         try:
-            raw_content = await _call(document, _budget)
-        except Exception as exc:  # noqa: BLE001 - re-raised below unless it is the budget
-            if _TOKENS_EXHAUSTED not in str(exc) or _budget >= _SUMMARY_MAX_TOKENS:
+            try:
+                raw_content = await _call(document, _budget)
+            except Exception as exc:  # noqa: BLE001 - re-raised below unless it is the budget
+                if _TOKENS_EXHAUSTED not in str(exc) or _budget >= _SUMMARY_MAX_TOKENS:
+                    raise
+                # Losing an entire summary because the estimate was low is not worth
+                # it; one retry at the ceiling costs a few seconds after the call
+                # has already ended.
+                logger.warning(
+                    "call_summarizer: %d output tokens were not enough for a "
+                    "%d-char transcript — retrying at %d",
+                    _budget,
+                    len(transcript_text),
+                    _SUMMARY_MAX_TOKENS,
+                )
+                raw_content = await _call(document, _SUMMARY_MAX_TOKENS)
+        except Exception as exc:  # noqa: BLE001
+            failure = _provider_validation_failure(exc)
+            if failure is None:
                 raise
-            # Losing an entire summary because the estimate was low is not worth
-            # it; one retry at the ceiling costs a few seconds after the call
-            # has already ended.
-            logger.warning(
-                "call_summarizer: %d output tokens were not enough for a "
-                "%d-char transcript — retrying at %d",
-                _budget,
-                len(transcript_text),
-                _SUMMARY_MAX_TOKENS,
+            message, failed_generation = failure
+            logger.warning("call_summarizer: provider rejected the output — %s", message[:300])
+            try:
+                salvaged = json.loads(failed_generation)
+            except (TypeError, ValueError):
+                salvaged = None
+            if _locally_valid(salvaged):
+                logger.info("call_summarizer: salvaged the provider's failed_generation (no second call)")
+                return _coerce(salvaged)
+            return await _second_call(
+                "\n\nYour previous answer was rejected by the validator: "
+                f"{message[:500]}\nReturn the complete JSON object again, every key present "
+                '(use [] or "none" for empty dimensions).'
             )
-            raw_content = await _call(document, _SUMMARY_MAX_TOKENS)
 
         try:
             parsed = json.loads(raw_content)
@@ -433,6 +499,4 @@ async def summarize_transcript(
 
     except Exception as exc:
         logger.warning("call_summarizer: unexpected error — %s", exc)
-        result = deepcopy(EMPTY_SUMMARY)
-        result["headline"] = SUMMARY_UNAVAILABLE_HEADLINE
-        return result
+        return _failed(f"error: {str(exc)[:300]}")
