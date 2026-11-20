@@ -14,9 +14,11 @@ import pytest
 
 from app.api.v1.endpoints import connectors as ce
 from tests.unit.test_connectors_card_keys import TENANT, FakeDB, _resp
+from tests.unit.test_connector_oauth_browser_binding_20261120 import NONCE_HASH, bound_request
 
 STATE = {"tenant_id": TENANT, "provider": "google_calendar", "connector_id": "c-1", "user_id": "u-1",
-         "redirect_uri": "http://api/callback", "code_verifier": "V"}
+         "redirect_uri": "http://api/callback", "code_verifier": "V",
+         "browser_nonce_hash": NONCE_HASH}
 
 
 @pytest.fixture
@@ -74,7 +76,7 @@ async def test_an_unreadable_state_on_a_denied_return_still_answers_without_gues
 async def test_errors_after_the_state_is_read_carry_the_card_type(oauth):
     oauth["use_state"](STATE)
     db = FakeDB({("connectors", "select"): [_resp(None)]})  # connector row not found
-    response = await ce.oauth_callback(request=None, state="S", code="CODE", error=None, db_client=db)
+    response = await ce.oauth_callback(request=bound_request("S"), state="S", code="CODE", error=None, db_client=db)
     query = _query(response)
     assert query["error"] == "connector_not_found" and query["type"] == "calendar"
 
@@ -86,6 +88,6 @@ async def test_an_unexpected_failure_after_the_state_is_read_still_names_the_car
         def table(self, _name):
             raise RuntimeError("synthetic failure")
 
-    response = await ce.oauth_callback(request=None, state="S", code="CODE", error=None, db_client=Boom())
+    response = await ce.oauth_callback(request=bound_request("S"), state="S", code="CODE", error=None, db_client=Boom())
     query = _query(response)
     assert query["error"] == "callback_failed" and query["type"] == "calendar"

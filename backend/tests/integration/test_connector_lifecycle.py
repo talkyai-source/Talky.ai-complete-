@@ -446,9 +446,11 @@ async def test_actual_callback_and_resolver_refresh_use_the_durable_lifecycle(co
     monkeypatch.setattr(endpoint, "get_encryption_service", lifecycle.get_encryption_service)
     monkeypatch.setattr(endpoint, "get_oauth_state_manager", lambda: NS(validate_state=AsyncMock(return_value={
         "tenant_id": db.tenant, "user_id": db.actor.id, "provider": "gmail", "redirect_uri": "https://example.invalid/cb",
-        "code_verifier": "synthetic", "connector_id": cid})))
+        "code_verifier": "synthetic", "connector_id": cid,
+        "browser_nonce_hash": __import__("hashlib").sha256(b"fixture-nonce").hexdigest()})))
     monkeypatch.setattr("app.core.security.tenant_isolation.set_current_tenant_id", lambda _: None)
-    response = await endpoint.oauth_callback(Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+    response = await endpoint.oauth_callback(Request({"type": "http", "method": "GET", "path": "/", "headers": [
+                                                (b"cookie", f"{endpoint._nonce_cookie_name('synthetic')}=fixture-nonce".encode())]}),
                                             state="synthetic", code="synthetic", error=None, db_client=client)
     assert "status=success" in response.headers["location"]
     parent, accounts = await db.state(cid)

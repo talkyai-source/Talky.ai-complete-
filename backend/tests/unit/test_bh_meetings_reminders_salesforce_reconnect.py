@@ -10,6 +10,7 @@ from app.api.v1.endpoints import connectors as ce
 from app.infrastructure.connectors.base import OAuthTokens
 from app.infrastructure.connectors.crm.salesforce import SalesforceConnector
 from tests.unit.test_inbox_original_account import _Rows
+from tests.unit.test_connector_oauth_browser_binding_20261120 import NONCE_HASH, bound_request
 
 TENANT = 'tenant-a'
 OLD_CONFIG = {
@@ -36,7 +37,8 @@ def callback_world(monkeypatch, *, old_status='active'):
     monkeypatch.setattr('app.core.security.tenant_isolation.set_current_tenant_id', lambda _: None)
     monkeypatch.setattr(ce, 'get_oauth_state_manager', lambda: NS(validate_state=AsyncMock(return_value={
         'tenant_id': TENANT, 'user_id': 'u', 'provider': 'salesforce',
-        'redirect_uri': 'https://example.invalid/cb', 'code_verifier': 'v', 'connector_id': 'sf-new'})))
+        'redirect_uri': 'https://example.invalid/cb', 'code_verifier': 'v', 'connector_id': 'sf-new',
+        'browser_nonce_hash': NONCE_HASH})))
     tokens = OAuthTokens(access_token='new-access', refresh_token='new-refresh',
                          expires_at=datetime.now(timezone.utc) + timedelta(hours=1), scope=None)
     monkeypatch.setattr(SalesforceConnector, 'exchange_code', AsyncMock(return_value=tokens))
@@ -50,7 +52,7 @@ def callback_world(monkeypatch, *, old_status='active'):
 
 async def run_callback(db):
     return await ce.oauth_callback(
-        Request({'type': 'http', 'method': 'GET', 'path': '/', 'headers': []}),
+        bound_request('s'),
         state='s', code='c', error=None, db_client=db)
 
 
