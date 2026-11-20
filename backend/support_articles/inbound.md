@@ -20,6 +20,18 @@ Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound c
 
 The inbound list works like the outbound campaign list. You can open an inbound campaign to review it, edit its configuration, or create a new one.
 
+## Recording incoming calls
+
+Each inbound campaign has its own **Record inbound calls** switch and a recording notice.
+
+- The agent says the notice first on every call. The recording starts after the notice.
+- If the service cannot confirm that the notice played in full, the recording is still kept and the call is marked "notice not confirmed".
+- Calls are not recorded if your account's recording setting is "disabled".
+- The notice cannot offer callers a way to opt out, such as pressing a key. The service cannot do that during a call.
+- A new inbound campaign starts with recording switched on. You can switch it off before you activate the campaign.
+
+You are responsible for making sure your use of call recording follows the law where your callers are.
+
 ## Recommended inbound testing
 
 Test:
