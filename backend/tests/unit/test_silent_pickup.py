@@ -94,8 +94,18 @@ def test_skips_agent_first(greeted):
     assert greeted == []
 
 
-def test_skips_true_inbound(greeted):
-    assert _run(_vs(direction="inbound")) is False
+def test_skips_true_inbound_without_a_cascaded_pipeline(greeted, caplog):
+    # 2026-11-21: an incoming call is now greeted when silent (see
+    # test_inbound_silent_pickup_20261121.py), but a Realtime session (no
+    # cascaded pipeline) is still never greeted by this path.
+    import logging
+
+    vs = _vs(direction="inbound")
+    vs.pipeline = None
+    vs.pipeline_task = object()  # setup finished: the skip is about Realtime
+    with caplog.at_level(logging.INFO):
+        assert _run(vs) is False
+    assert "reason=realtime_session" in caplog.text
     assert greeted == []
 
 

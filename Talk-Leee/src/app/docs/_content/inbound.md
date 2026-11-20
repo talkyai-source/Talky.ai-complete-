@@ -20,6 +20,15 @@ Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound c
 
 The inbound list works like the outbound campaign list. You can open an inbound campaign to review it, edit its configuration, or create a new one.
 
+## Who speaks first
+
+Each inbound campaign has an opening mode.
+
+- **Agent speaks first**: the agent greets the caller as soon as the call is answered, with the greeting you saved.
+- **Caller speaks first**: the agent waits for the caller. If the caller says nothing for about two seconds, the agent greets them, so a caller never sits in silence. It uses your saved greeting. Without one it says: "Hello, thank you for calling", your company name, then "This is", the agent's name, "an AI assistant. How can I help you?"
+
+On a recorded call the recording notice comes first, and the two seconds are counted after it.
+
 ## Recording incoming calls
 
 Each inbound campaign has its own **Record inbound calls** switch and a recording notice.
