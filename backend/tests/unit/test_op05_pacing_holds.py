@@ -6,9 +6,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from tests.unit.test_op05_pre_attempt_holds import held_worker
+from app.workers.dialer_worker import DialerWorker
 
 
-CASES = [("batch_capacity", 5), ("call_gap", 17), ("tenant_gap", 23),
+# The wait after a full call slot is the worker's own constant (1 s since
+# 21 Nov 2026, so a freed slot is used at once; it was 5 s).
+CASES = [("batch_capacity", DialerWorker.CAPACITY_RECHECK_S), ("call_gap", 17), ("tenant_gap", 23),
          ("call_guard_throttled", 60), ("call_guard_queued", 30)]
 
 
