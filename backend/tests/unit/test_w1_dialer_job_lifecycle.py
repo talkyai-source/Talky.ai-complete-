@@ -123,8 +123,10 @@ async def test_paused_campaign_job_is_redeferred_and_stays_active():
     # SKIPPED: a resume must find the SAME active job, not mint a second one.
     w.queue_service.mark_skipped.assert_not_awaited()
     w.queue_service._redefer_inflight.assert_awaited_once()
-    assert w.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 120
-    statuses = [c.args[1] for c in w._update_job_status.call_args_list]
+    # A paused campaign's job is parked for DIALER_PAUSE_REDEFER_S (default 900:
+    # a resume promotes the parked jobs itself, see test_dialer_recheck_loop_20261121).
+    assert w.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 900
+    statuses =[c.args[1] for c in w._update_job_status.call_args_list]
     assert JobStatus.SKIPPED not in statuses
     assert statuses == [JobStatus.RETRY_SCHEDULED]
     assert w._update_job_status.call_args.kwargs["reason"] == "campaign_paused"

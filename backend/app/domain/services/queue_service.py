@@ -79,7 +79,78 @@ class DialerQueueService:
             return max(5, int(os.getenv("DIALER_PAUSE_REDEFER_S", "120")))
         except (TypeError, ValueError):
             return 120
-    
+
+    @staticmethod
+    def _paused_park_seconds() -> int:
+        """How long a PAUSED campaign's job is parked before it is looked at
+        again. Long, because a resume promotes the parked jobs itself
+        (``promote_campaign_parked_jobs``) instead of waiting this out.
+        ``DIALER_PAUSE_REDEFER_S`` still overrides it."""
+        import os
+        try:
+            return max(5, int(os.getenv("DIALER_PAUSE_REDEFER_S", "900")))
+        except (TypeError, ValueError):
+            return 900
+
+    async def promote_campaign_parked_jobs(
+        self, tenant_id: str, campaign_id: str, job_ids
+    ) -> int:
+        """Make the listed parked (scheduled) jobs of one campaign due now.
+
+        ``job_ids`` are the jobs the worker itself parked for the pause: the
+        scheduled set also holds retries with real future times, which a resume
+        must not pull forward.
+
+        Called when a paused campaign is seen running again, so a resume starts
+        dialling within seconds instead of after the long pause park. Matches
+        on BOTH tenant and campaign. Only the score moves (``xx``: an entry that
+        another worker already promoted is not re-created); nothing is dialled
+        here, every promoted job still goes through every gate.
+        Returns the number promoted.
+        """
+        if not self._initialized:
+            await self.initialize()
+        wanted = {str(j) for j in job_ids}
+        if not wanted:
+            return 0
+        now = datetime.now(timezone.utc).timestamp()
+        promoted = 0
+        batch: dict = {}
+
+        async def flush() -> int:
+            if not batch:
+                return 0
+            n = int(await self._redis.zadd(self.SCHEDULED_ZSET, dict(batch), xx=True, ch=True) or 0)
+            batch.clear()
+            return n
+
+        # ZSCAN with a server-side MATCH on the campaign id: only this
+        # campaign's entries cross the wire (never every tenant's set), and the
+        # score updates go out in batched ZADDs, not one round trip per job.
+        async for raw, _score in self._redis.zscan_iter(
+            self.SCHEDULED_ZSET, match=f"*{campaign_id}*", count=1000
+        ):
+            try:
+                data = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                continue
+            if (
+                str(data.get("tenant_id")) != str(tenant_id)
+                or str(data.get("campaign_id")) != str(campaign_id)
+                or str(data.get("job_id")) not in wanted
+            ):
+                continue
+            batch[raw] = now
+            if len(batch) >= 500:
+                promoted += await flush()
+        promoted += await flush()
+        if promoted:
+            logger.info(
+                "dialer_parked_jobs_promoted campaign=%s tenant=%s count=%d",
+                campaign_id, tenant_id, promoted,
+            )
+        return promoted
+
     def __init__(self, redis_client=None):
         """
         Initialize queue service.
@@ -639,7 +710,7 @@ class DialerQueueService:
                 count += 1
             
             if count > 0:
-                logger.info(f"Moved {count} scheduled jobs to queues")
+                logger.debug(f"Moved {count} scheduled jobs to queues")
             
             return count
             
@@ -745,7 +816,10 @@ class DialerQueueService:
             await self._redis.lrem(self.INFLIGHT_LIST, 0, payload)
             await self._redis.hdel(self.INFLIGHT_HASH, job_id)
             await self._redis.zrem(self.PROCESSING_ZSET, job_id)
-            logger.info(
+            # DEBUG: this fires on every cycle of every waiting job (192k+
+            # lines in 10 h for one paused campaign). The worker's 60 s
+            # dialer_cycle_summary line carries the counts at INFO.
+            logger.debug(
                 "re-deferred job %s (%s) for %ss — lead preserved, NOT "
                 "terminal-skipped", job_id, reason, delay,
             )

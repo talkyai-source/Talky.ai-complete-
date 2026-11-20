@@ -325,25 +325,15 @@ class TurnStreamer:
 
         _structured = reduce_cascaded_session_live_state(session)
         # Callee-local time-of-day so "morning/afternoon/evening" matches the
-        # hour where the phone rang (was always "Morning"). Timezone comes from
-        # the campaign (calling_config.timezone), loaded onto the session. With
-        # no zone the line is omitted; London is assumed only for an explicit
-        # UK contact region, never for every callee.
-        await _ensure_campaign_timezone(session)
-        _tz_name = (
-            getattr(session, "_campaign_timezone", None)
-            or getattr(_agent_cfg, "timezone", None)
-            or (
-                "Europe/London"
-                if str(getattr(session, "contact_phone_region", "") or "").upper() in {"GB", "UK"}
-                else None
-            )
-        )
+        # hour where the phone rang. The zone is the PERSON's (the dialler's
+        # number-to-zone function on the dialled / caller number), never the
+        # account's or campaign's: 20 Nov 2026 UK people were told "good
+        # evening" at 14:00 from a Karachi account. Unknown zone = no line.
         try:
             from app.domain.services.voice_pipeline.time_of_day import (
-                time_of_day_line as _tod_line,
+                person_time_of_day_line as _tod_line,
             )
-            _tod = _tod_line(_tz_name)
+            _tod = _tod_line(session)
         except Exception:
             _tod = ""
         live_state_block = build_live_state_block(

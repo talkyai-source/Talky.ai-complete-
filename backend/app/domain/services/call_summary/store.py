@@ -220,6 +220,7 @@ async def generate_and_store(
         transcript_text,
         confirmed_contacts=confirmed_contacts,
         executed_actions=executed_actions,
+        call_id=call_id,
         **({"campaign_fields": campaign_fields} if campaign_fields else {}),
     )
 

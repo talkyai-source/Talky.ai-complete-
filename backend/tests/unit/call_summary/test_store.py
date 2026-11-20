@@ -244,6 +244,7 @@ class TestGenerateAndStore:
             "Agent: Hello there!\nCaller: Hi, I'm interested.",
             confirmed_contacts={},
             executed_actions=[],
+            call_id=_CALL_ID,  # 2026-11-21: for the call_summary_failed_final log line
         )
         # The summary UPDATE is one of the execute calls (lead-marking may add a
         # second UPDATE leads). Find the summary write specifically.

@@ -35,6 +35,12 @@ from app.domain.models.dialer_job import DialerJob, JobStatus, CallOutcome
 from app.domain.models.calling_rules import CallingRules
 from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.queue_service import DialerQueueService, QueueUnavailableError
+from app.workers.dialer_campaign_gate_memo import (
+    REASON_CALL_GAP,
+    REASON_CAPACITY,
+    REASON_PAUSED,
+    CampaignGateMemo,
+)
 from app.domain.services.scheduling_rules import SchedulingRuleEngine
 from app.domain.services.phone_number_normalizer import is_strict_e164
 from app.core.db import init_db_pool, close_db_pool, Database
@@ -245,6 +251,72 @@ class DialerWorker:
         self._last_reap_check = datetime(2000, 1, 1, tzinfo=timezone.utc)
         # campaign_id -> monotonic time of its last persistent-outage ERROR.
         self._line_outage_alerted_at: dict[str, float] = {}
+        # Campaign-wide gates decided once (see dialer_campaign_gate_memo).
+        self._gate_memo = CampaignGateMemo()
+        self._last_resume_poll = 0.0
+        # 60 s activity window for the dialer_cycle_summary line.
+        self._cycle_started = time.monotonic()
+        self._cycle = self._new_cycle_counts()
+
+    #: A paused campaign's memo is trusted this long without a fresh status read.
+    PAUSED_MEMO_FRESH_S = 15
+    #: How often the worker looks at paused campaigns to see a resume.
+    RESUME_POLL_S = 10
+    #: In-flight cap: re-check delay and memo freshness.
+    CAPACITY_RECHECK_S = 1
+    #: How often due scheduled jobs are moved back into the queue (one cheap
+    #: range read; was 10 s, which alone could delay a freed slot by 10 s).
+    SCHEDULED_MOVE_INTERVAL_S = 1
+    CYCLE_SUMMARY_S = 60
+
+    @staticmethod
+    def _new_cycle_counts() -> dict[str, int]:
+        return {
+            "popped": 0, "placed": 0, "redeferred_paused": 0,
+            "redeferred_call_gap": 0, "redeferred_capacity": 0, "other": 0,
+        }
+
+    def _log_cycle_summary_if_due(self) -> None:
+        """One INFO line per 60 s: the worker is alive and what it did."""
+        now = time.monotonic()
+        if now - self._cycle_started < self.CYCLE_SUMMARY_S:
+            return
+        c = self._cycle
+        logger.info(
+            "dialer_cycle_summary window_s=%d popped=%d placed=%d "
+            "redeferred_paused=%d redeferred_call_gap=%d redeferred_capacity=%d other=%d",
+            self.CYCLE_SUMMARY_S, c["popped"], c["placed"], c["redeferred_paused"],
+            c["redeferred_call_gap"], c["redeferred_capacity"], c["other"],
+        )
+        self._cycle = self._new_cycle_counts()
+        self._cycle_started = now
+
+    async def _promote_resumed_campaigns(self) -> None:
+        """A paused campaign seen running again: drop its memo and make the
+        jobs this worker parked for the pause due now (a resume must dial
+        within seconds, not after the long pause park). Best effort: a failure
+        only leaves the jobs parked until their own time."""
+        for tenant_id, campaign_id in self._gate_memo.parked_campaigns():
+            try:
+                status = await self._get_campaign_status(campaign_id, tenant_id)
+            except CampaignStatusUnavailable:
+                continue
+            if status == "paused":
+                continue
+            self._gate_memo.clear(tenant_id, campaign_id)
+            parked = self._gate_memo.take_parked(tenant_id, campaign_id)
+            if status in {"running", "active"}:
+                try:
+                    await self.queue_service.promote_campaign_parked_jobs(
+                        tenant_id, campaign_id, parked
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "dialer_resume_promote_failed campaign=%s error_type=%s",
+                        campaign_id, type(exc).__name__,
+                    )
+            # any other state (stopped, deleted, ...): the jobs end through the
+            # normal path when popped; nothing to promote, nothing to remember.
 
     async def initialize(self) -> None:
         """Initialize connections to Redis and PostgreSQL."""
@@ -323,10 +395,11 @@ class DialerWorker:
                     self._last_scheduled_check = self._last_scheduled_check.replace(
                         tzinfo=timezone.utc
                     )
-                if (now_utc - self._last_scheduled_check).total_seconds() > 10:
+                if (now_utc - self._last_scheduled_check).total_seconds() >= self.SCHEDULED_MOVE_INTERVAL_S:
                     moved = await self.queue_service.process_scheduled_jobs()
                     if moved > 0:
-                        logger.info(f"Moved {moved} scheduled jobs to queue")
+                        # DEBUG: now fires up to once a second while jobs wait.
+                        logger.debug(f"Moved {moved} scheduled jobs to queue")
                     self._last_scheduled_check = now_utc
 
                 # 1b. Reap stuck in-flight jobs (zombies) every 30s so they
@@ -336,6 +409,11 @@ class DialerWorker:
                 if (now_utc - self._last_reap_check).total_seconds() > 30:
                     await self._reap_stuck_jobs_tick()
                     self._last_reap_check = now_utc
+
+                self._log_cycle_summary_if_due()
+                if time.monotonic() - self._last_resume_poll >= self.RESUME_POLL_S:
+                    self._last_resume_poll = time.monotonic()
+                    await self._promote_resumed_campaigns()
 
                 # 2. Get active tenants
                 tenant_ids = await self._get_active_tenant_ids()
@@ -387,9 +465,11 @@ class DialerWorker:
         3. Initiate the call
         4. Create call record in database
         """
-        logger.info(
+        # DEBUG: fires on every cycle of every waiting job (536k lines in 10 h).
+        logger.debug(
             f"Processing job {job.job_id} for lead {job.lead_id} (attempt {job.attempt_number})"
         )
+        self._cycle["popped"] += 1
 
         # Reset bridge-response state captured by `_make_call` — must be
         # cleared per-job so a previous failure doesn't classify the
@@ -424,6 +504,26 @@ class DialerWorker:
                 )
                 return
 
+            # A campaign-wide gate (paused / in-flight cap / call gap) already
+            # decided for this campaign: re-schedule without the remaining
+            # checks. Consulted ONLY for a job with no existing call intent: an
+            # intent (a held or ambiguous attempt) must always be resolved by
+            # the full path below, never pushed back by the memo. Only ever
+            # re-schedules; never places a call.
+            if call_intent is None:
+                blocked = self._gate_memo.lookup(job.tenant_id, job.campaign_id)
+                if blocked is not None:
+                    if blocked.reason == REASON_PAUSED:
+                        self._gate_memo.note_parked(
+                            job.tenant_id, job.campaign_id, job.job_id
+                        )
+                    await self._redefer_before_intent_resolution(
+                        job,
+                        reason=blocked.reason,
+                        delay_seconds=self._gate_memo.follower_delay(blocked),
+                    )
+                    return
+
             if call_intent is not None and self._call_status_is_terminal(
                 call_intent.status
             ):
@@ -446,7 +546,7 @@ class DialerWorker:
                 return
             if campaign_status not in {"running", "active"}:
                 reason = f"campaign_not_runnable:{campaign_status or 'missing'}"
-                logger.info(
+                (logger.debug if campaign_status == "paused" else logger.info)(
                     "Skipping job %s because campaign %s is %s",
                     job.job_id,
                     job.campaign_id,
@@ -848,8 +948,16 @@ class DialerWorker:
                         rules=rules,
                         retry_after_seconds=5,
                     )
+                    # 1 s, not 5: a slot frees when a call ends and the next call
+                    # must start within ~2 s. One job per campaign is checked per
+                    # window; the rest are re-scheduled without checks.
+                    self._gate_memo.block(
+                        job.tenant_id, job.campaign_id, REASON_CAPACITY,
+                        self.CAPACITY_RECHECK_S,
+                    )
                     await self._redefer_before_intent_resolution(
-                        job, reason="batch_capacity", delay_seconds=5,
+                        job, reason="batch_capacity",
+                        delay_seconds=self.CAPACITY_RECHECK_S,
                     )
                     return
 
@@ -878,6 +986,9 @@ class DialerWorker:
                         "call_gap",
                         rules=rules,
                         retry_after_seconds=wait,
+                    )
+                    self._gate_memo.block(
+                        job.tenant_id, job.campaign_id, REASON_CALL_GAP, wait,
                     )
                     await self._redefer_before_intent_resolution(
                         job, reason="call_gap", delay_seconds=wait,
@@ -1236,6 +1347,9 @@ class DialerWorker:
                     # await self._publish_call_event(internal_call_id, job, talklee_call_id, provider_call_id)
 
                     self._jobs_processed += 1
+                    self._cycle["placed"] += 1
+                    # The campaign's state changed (a call is now in flight).
+                    self._gate_memo.clear(job.tenant_id, job.campaign_id)
                     # Stamp the campaign's last-dial time for the inter-call gap.
                     # Tracked in Redis (not the calls table) so it only reflects
                     # dials from the CURRENT run — start_campaign clears the key,
@@ -2116,8 +2230,14 @@ class DialerWorker:
                 await self._drop_stale_payload(job, stale_reason)
                 return
             await self._publish_block(job, "campaign_paused")
+            park = DialerQueueService._paused_park_seconds()
+            self._gate_memo.block(
+                job.tenant_id, job.campaign_id, REASON_PAUSED, park,
+                fresh_s=self.PAUSED_MEMO_FRESH_S,
+            )
+            self._gate_memo.note_parked(job.tenant_id, job.campaign_id, job.job_id)
             await self._redefer_before_intent_resolution(
-                job, reason="campaign_paused",
+                job, reason="campaign_paused", delay_seconds=park,
             )
             return
         await self._publish_block(job, block_reason)
@@ -3911,7 +4031,14 @@ class DialerWorker:
                 "dialer_redefer_projection_failed job=%s attempt=%s error_type=%s",
                 job.job_id, job.attempt_number, type(exc).__name__,
             )
-        logger.info(
+        bucket = {
+            "campaign_paused": "redeferred_paused",
+            "call_gap": "redeferred_call_gap",
+            "batch_capacity": "redeferred_capacity",
+        }.get(reason, "other")
+        self._cycle[bucket] += 1
+        # DEBUG: per job per cycle; the 60 s dialer_cycle_summary counts them.
+        logger.debug(
             "dialer_pre_intent_redeferred job=%s attempt=%s reason=%s",
             job.job_id,
             job.attempt_number,
