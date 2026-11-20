@@ -97,7 +97,7 @@ async def test_a_refused_mailbox_login_fails_the_email_check_at_once(watch, redi
     assert result["consecutive_failures"] == 1
 
     await watch._record_failing_checks(redis, {"email": result})
-    assert await redis.get(watch.FAILING_KEY) == "email"
+    assert await redis.get(watch.FAILING_KEY) == "email:alert"
 
 
 async def test_one_successful_send_clears_the_failure(watch, redis, settings, smtp):

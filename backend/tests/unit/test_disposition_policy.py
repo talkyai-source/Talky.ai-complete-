@@ -47,12 +47,14 @@ def test_voicemail_one_retry_then_stop():
     assert decide(CallOutcome.VOICEMAIL, 2).should_retry is False
 
 
-# ── rejected: never retry ─────────────────────────────────────────
-def test_rejected_never_retries():
-    d = decide(CallOutcome.REJECTED, 1)
+# ── rejected: one confirming dial a day later, then final ─────────
+def test_rejected_is_confirmed_once_then_final():
+    first = decide(CallOutcome.REJECTED, 1)
+    assert first.should_retry is True and first.delay_seconds == 24 * 3600
+    d = decide(CallOutcome.REJECTED, 2)
     assert d.should_retry is False
     assert d.is_success is False
-    assert d.reason == "rejected"
+    assert d.reason == "rejected_max_attempts"
 
 
 # ── failed / timeout: fast geometric backoff, cap 3 (2 retries) ───

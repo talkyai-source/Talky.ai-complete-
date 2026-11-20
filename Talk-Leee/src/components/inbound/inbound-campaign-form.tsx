@@ -124,6 +124,8 @@ function clearInboundCampaignDraftsOnExit(campaignId: string | null | undefined)
     }
 }
 
+const DEFAULT_RECORDING_NOTICE = "This call may be recorded for quality and training purposes.";
+
 export function InboundCampaignForm({ mode, initialValue, initialCampaignId, lockCampaign = false, pending, canAssignNumber, onSubmit }: {
     mode: "create" | "edit";
     initialValue?: InboundCampaign;
@@ -148,6 +150,18 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
     });
     const [errors, setErrors] = useState<InboundFormErrors>({});
     const errorSummaryRef = useRef<HTMLDivElement | null>(null);
+    // New campaigns record by default once the server says the platform allows
+    // it. State, not a ref: applied once, and never over the customer's input.
+    const [recordingEdited, setRecordingEdited] = useState(false);
+    const [recordingDefaultApplied, setRecordingDefaultApplied] = useState(false);
+    const recordingPlatformLoaded = runtimeCapabilitiesQuery.isSuccess && !runtimeCapabilitiesQuery.isError;
+    const recordingPlatformEnabled = recordingPlatformLoaded && runtimeCapabilitiesQuery.data?.recording_platform_enabled === true;
+    if (mode === "create" && recordingPlatformEnabled && !recordingDefaultApplied) {
+        setRecordingDefaultApplied(true);
+        if (!recordingEdited && !value.recording_enabled && !(value.consent_message ?? "").trim()) {
+            setValue((current) => ({ ...current, recording_enabled: true, consent_message: DEFAULT_RECORDING_NOTICE }));
+        }
+    }
 
     // Mirrors the current draft to sessionStorage on every change so a real
     // navigation away and back (not just an in-place retry, which already
@@ -204,6 +218,7 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
     const transferConfigurationAvailable = verifiedTransferConfigurationAvailable(runtimeCapabilitiesQuery);
 
     function update<K extends keyof InboundCampaignInput>(key: K, next: InboundCampaignInput[K]) {
+        if (key === "recording_enabled" || key === "consent_message") setRecordingEdited(true);
         setValue((current) => ({ ...current, [key]: next }));
         setErrors((current) => ({ ...current, [key]: undefined, form: undefined }));
     }
@@ -457,7 +472,8 @@ export function InboundCampaignForm({ mode, initialValue, initialCampaignId, loc
 
             <section className="content-card space-y-6" aria-labelledby="inbound-recording-heading">
                 <div><h2 id="inbound-recording-heading" className="text-lg font-semibold text-foreground">Recording safety</h2><p className="mt-1 text-sm text-muted-foreground">Recording remains fail-closed unless campaign, tenant, platform, and disclosure gates all permit it.</p></div>
-                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-muted/30 p-4"><input type="checkbox" checked={value.recording_enabled} onChange={(event) => update("recording_enabled", event.target.checked)} className="mt-1 h-4 w-4 rounded border-input accent-primary" /><span><span className="block text-sm font-semibold text-foreground">Record inbound calls</span><span className="mt-0.5 block text-sm text-muted-foreground">Enable only after approving consent, retention, and access rules for every served jurisdiction.</span></span></label>
+                <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-muted/30 p-4"><input type="checkbox" checked={value.recording_enabled} onChange={(event) => update("recording_enabled", event.target.checked)} className="mt-1 h-4 w-4 rounded border-input accent-primary" /><span><span className="block text-sm font-semibold text-foreground">Record inbound calls</span><span className="mt-0.5 block text-sm text-muted-foreground">{`The agent says this notice first on every call, and the recording starts after it. If the service cannot confirm the notice was played in full, the recording is still kept and the call is marked "notice not confirmed". Calls are not recorded if your account's recording setting is "disabled".`}</span></span></label>
+                {recordingPlatformLoaded && !recordingPlatformEnabled ? <p className="text-sm text-muted-foreground" role="status">Recording of incoming calls is switched off for the whole service right now. A campaign with recording ticked cannot be activated until it is switched on.</p> : null}
                 {value.recording_enabled ? <Field label="Recording disclosure" htmlFor="inbound-consent_message" error={errors.consent_message} hint="This text must be played before recording begins."><textarea id="inbound-consent_message" value={value.consent_message ?? ""} onChange={(event) => update("consent_message", event.target.value)} rows={3} placeholder="This call may be recorded for quality and training purposes." aria-invalid={Boolean(errors.consent_message)} className={textareaClass} /></Field> : null}
             </section>
 

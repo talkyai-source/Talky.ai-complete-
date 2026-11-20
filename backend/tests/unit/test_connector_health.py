@@ -19,6 +19,7 @@ from app.infrastructure.connectors.email.base import EmailMessage
 from app.infrastructure.connectors.email.gmail import _gmail_error_from_response
 from app.infrastructure.connectors.email.gmail import GmailConnector
 from app.services import connector_resolver
+from tests.unit.test_connector_oauth_browser_binding_20261120 import NONCE_HASH, bound_request
 
 
 def _response(data=None, error=None):
@@ -529,6 +530,7 @@ async def test_oauth_callback_refuses_missing_gmail_scope_before_token_store(mon
         "redirect_uri": "https://api.example.test/api/v1/connectors/callback",
         "code_verifier": "verifier",
         "connector_id": "connector-1",
+        "browser_nonce_hash": NONCE_HASH,
     }
     manager = SimpleNamespace(validate_state=AsyncMock(return_value=state_data))
     connector = _CallbackConnector(
@@ -561,7 +563,7 @@ async def test_oauth_callback_refuses_missing_gmail_scope_before_token_store(mon
     lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
     monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
-        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+        bound_request("state"),
         state="state",
         code="code",
         error=None,
@@ -582,6 +584,7 @@ async def test_oauth_callback_refuses_gmail_when_live_capability_probe_fails(mon
         "redirect_uri": "https://api.example.test/api/v1/connectors/callback",
         "code_verifier": "verifier",
         "connector_id": "connector-1",
+        "browser_nonce_hash": NONCE_HASH,
     }
     manager = SimpleNamespace(validate_state=AsyncMock(return_value=state_data))
     connector = _CallbackConnector(
@@ -621,7 +624,7 @@ async def test_oauth_callback_refuses_gmail_when_live_capability_probe_fails(mon
     lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
     monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
-        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+        bound_request("state"),
         state="state",
         code="code",
         error=None,
@@ -641,6 +644,7 @@ async def test_oauth_callback_delegates_verified_grant_to_atomic_activation(monk
         "redirect_uri": "https://api.example.test/api/v1/connectors/callback",
         "code_verifier": "verifier",
         "connector_id": "connector-new",
+        "browser_nonce_hash": NONCE_HASH,
     }
     manager = SimpleNamespace(validate_state=AsyncMock(return_value=state_data))
     connector = _CallbackConnector(
@@ -688,7 +692,7 @@ async def test_oauth_callback_delegates_verified_grant_to_atomic_activation(monk
     lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
     monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
-        Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
+        bound_request("state"),
         state="state",
         code="code",
         error=None,

@@ -494,6 +494,18 @@ class CampaignService:
             # dedup below prevents double-dialing, so re-entry is safe.
             campaign_was_running = campaign.get("status") == "running"
 
+            # A deleted campaign is gone (delete only sets status='deleted'): it
+            # answers like an unknown id and nothing is written. "Call this list"
+            # must not un-pause a paused campaign, which would release every
+            # list's held jobs; the owner resumes first.
+            if campaign.get("status") == "deleted":
+                raise CampaignNotFoundError(campaign_id)
+            if allow_running and campaign.get("status") == "paused":
+                raise CampaignError(
+                    "This campaign is paused. Resume it first, then call the list.",
+                    status_code=409,
+                )
+
             # The write that flips the campaign to running is a compare-and-set
             # against the status read here: of two overlapping starts exactly one
             # wins it, and the other is "already running" before it can dispatch
@@ -503,7 +515,7 @@ class CampaignService:
             observed_status = campaign.get("status")
             start_from = (
                 (observed_status,)
-                if observed_status and not (campaign_was_running or allow_running)
+                if observed_status and not campaign_was_running
                 else None
             )
 

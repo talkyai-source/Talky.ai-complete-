@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import React from "react";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { type QueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api";
+import { api, sharedHttpClient } from "@/lib/api";
 import { env } from "@/lib/env";
 import { ApiClientError, type HttpRequestOptions } from "@/lib/http-client";
 import { renderWithQueryClient } from "@/test-utils/render";
@@ -22,6 +22,9 @@ const emptySubscription = { status: "inactive", plan_id: null, plan_name: null, 
 const paypalSubscription = { status: "active", plan_id: "starter", plan_name: "Starter", current_period_start: "2026-11-15T12:00:00Z", current_period_end: "2026-12-15T12:00:00Z", cancel_at_period_end: false, minutes_allocated: 100, minutes_used: 0, minutes_remaining: 100, billing_portal_available: false, billing_provider: "paypal", purchased_price_option: { ...monthly, plan_id: plan.id, plan_name: plan.name } };
 const snapshot = { ...monthly, plan_id: plan.id, plan_name: plan.name };
 const originalRequest = api.request;
+// The signed-in user is a billing administrator (cancel and portal need billing:admin); the permission read goes through the shared client.
+const permissionsClient = sharedHttpClient(); const originalPermissionsRequest = permissionsClient.request;
+const grantBillingAdmin = () => { permissionsClient.request = (async () => ({ permissions: ["billing:read", "billing:update", "billing:admin"] })) as typeof permissionsClient.request; };
 const oldBackend = env.NEXT_PUBLIC_API_BASE_URL;
 const clients: QueryClient[] = [];
 let catalogue: unknown = [plan];
@@ -39,6 +42,7 @@ function mount(statusOnly = false) {
 }
 const paths = () => calls.map(call => call.path);
 beforeEach(() => {
+  grantBillingAdmin();
   env.NEXT_PUBLIC_API_BASE_URL = "https://backend.example/api/v1";
   catalogue = [plan]; subscription = emptySubscription; calls = []; navigations = [];
   config = { topups_open: true, paypal_plans_open: true, paypal_plans_unavailable_reason: null };
@@ -58,7 +62,7 @@ beforeEach(() => {
   }) as typeof api.request;
   window.history.replaceState({}, "", "/billing/plans");
 });
-afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); mock.timers.reset(); resetBillingRefusal(); setCheckoutConfirmationPending(false); });
+afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; permissionsClient.request = originalPermissionsRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); mock.timers.reset(); resetBillingRefusal(); setCheckoutConfirmationPending(false); });
 const flush = () => act(async () => {});
 const tick = (ms: number) => act(async () => { mock.timers.tick(ms); });
 const RETURN = (outcome: string) => `/billing?checkout=${outcome}&provider=paypal&request_id=${REQUEST}&subscription_id=I-1&ba_token=BA-1&token=T`;

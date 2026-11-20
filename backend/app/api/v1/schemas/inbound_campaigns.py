@@ -9,6 +9,9 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.services.recording_policy_service import (
+    contains_unsupported_dtmf_opt_out,
+)
 from app.domain.services.telephony.inbound_address import (
     canonical_extension,
     parse_extension,
@@ -16,6 +19,12 @@ from app.domain.services.telephony.inbound_address import (
 
 
 _E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
+
+
+RECORDING_NOTICE_UNSUPPORTED_MESSAGE = (
+    "The recording notice cannot offer callers a way to opt out, such as pressing "
+    "a key: this service cannot do that during a call. Remove that sentence."
+)
 
 
 class _StrictModel(BaseModel):
@@ -92,6 +101,8 @@ class InboundCampaignCreateRequest(_StrictModel):
             raise ValueError("transfer_number is required for after-hours transfer")
         if self.recording_enabled and not (self.consent_message or "").strip():
             raise ValueError("consent_message is required when recording is enabled")
+        if self.recording_enabled and contains_unsupported_dtmf_opt_out(self.consent_message):
+            raise ValueError(RECORDING_NOTICE_UNSUPPORTED_MESSAGE)
         return self
 
 
@@ -118,6 +129,16 @@ class InboundCampaignUpdateRequest(_StrictModel):
     @classmethod
     def _optional_did(cls, value: Optional[str]) -> Optional[str]:
         return _normalize_e164(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def _recording_notice_supported(self):
+        # Only the explicit "recording on" case is decidable here; the service
+        # checks the merged final state when recording_enabled is not sent.
+        if self.recording_enabled is True and contains_unsupported_dtmf_opt_out(
+            self.consent_message
+        ):
+            raise ValueError(RECORDING_NOTICE_UNSUPPORTED_MESSAGE)
+        return self
 
     @field_validator("transfer_number")
     @classmethod
@@ -235,6 +256,7 @@ class InboundRuntimeCapabilitiesResponse(BaseModel):
     transfer_runtime_available: bool
     transfer_platform_enabled: bool
     transfer_configuration_available: bool
+    recording_platform_enabled: bool
 
 
 class PlatformInboundControlsPatch(_StrictModel):

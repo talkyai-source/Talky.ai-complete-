@@ -2,6 +2,7 @@
 from __future__ import annotations
 from app.core.error_handlers import safe_exception_message
 
+import hashlib
 from typing import Optional
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
@@ -20,6 +21,7 @@ from app.core.security.password import (
     validate_password_strength,
     verify_password,
 )
+from app.core.security.cookies import REFRESH_COOKIE_NAME
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
@@ -43,6 +45,7 @@ async def change_password(
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
     talky_sid: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    talky_rt: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
 ) -> dict[str, str]:
     """
     Change the current user's password.
@@ -124,18 +127,29 @@ async def change_password(
                 exclude_token_hash=current_token_hash,
             )
 
+            # The current device's refresh family (from its own talky_rt
+            # cookie) stays alive; with no determinable family, revoke all.
+            current_family_id = None
+            if isinstance(talky_rt, str) and talky_rt:
+                family = await conn.fetchrow(
+                    "SELECT family_id FROM refresh_tokens "
+                    "WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL",
+                    hashlib.sha256(talky_rt.encode()).hexdigest(),
+                    current_user.id,
+                )
+                if family and family["family_id"]:
+                    current_family_id = str(family["family_id"])
+
             # --- ALSO revoke every refresh token for the user -----------------
             # Without this, a stolen `talky_rt` cookie issued before the
             # password change would silently keep minting fresh 15-min
-            # access JWTs forever. Revoking the refresh-token family
-            # forces every device — including the legitimate current
-            # session — to re-authenticate the next time their JWT
-            # expires (≤15 min). That's the OWASP-recommended posture
-            # after a credential change.
+            # access JWTs forever. Every OTHER device's family is revoked and
+            # must re-authenticate; the current device keeps its own family.
             await revoke_all_user_refresh_tokens(
                 conn,
                 current_user.id,
                 reason="password_change",
+                exclude_family_id=current_family_id,
             )
 
     # --- log password change event (Day 8) -------------------------------------

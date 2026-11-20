@@ -105,7 +105,7 @@ test("a finished answered call counts as answered (status ended, outcome answere
     assert.deepEqual(classifyCall({ status: "ended", outcome: "answered" }), { answered: true, failed: false });
     assert.deepEqual(classifyCall({ status: "ended", outcome: "customer_hung_up" }), { answered: true, failed: false });
     assert.deepEqual(classifyCall({ status: "ended", outcome: "no_answer" }), { answered: false, failed: true });
-    assert.deepEqual(classifyCall({ status: "ended", outcome: "voicemail" }), { answered: false, failed: false });
+    assert.deepEqual(classifyCall({ status: "ended", outcome: "voicemail" }), { answered: false, failed: true });
     assert.deepEqual(classifyCall({ status: "completed" }), { answered: true, failed: false });
 });
 

@@ -280,6 +280,8 @@ export interface Call {
     recording_id?: string | null;
     /** AI per-call verdict ("qualified | …", "callback | …", "no_interest | …") — the "was this call a success" answer. */
     lead_outcome?: string | null;
+    /** The contact's best time to call, as the server sends it on the list. */
+    best_time_to_call?: string | null;
     /** Contact the caller GAVE during the call (not the line they rang from). */
     captured_phone?: string | null;
     captured_email?: string | null;
@@ -500,6 +502,7 @@ interface CallListItem {
     campaign_name?: string;
     recording_id?: string | null;
     lead_outcome?: string | null;
+    best_time_to_call?: string | null;
     captured_phone?: string | null;
     captured_email?: string | null;
     captured_phone_confirmed?: boolean | null;
@@ -841,6 +844,7 @@ class DashboardApi {
             summary: item.summary,
             recording_id: item.recording_id,
             lead_outcome: item.lead_outcome,
+            best_time_to_call: item.best_time_to_call ?? null,
             captured_phone: item.captured_phone ?? null,
             captured_email: item.captured_email ?? null,
             captured_phone_confirmed: item.captured_phone_confirmed ?? null,
@@ -926,6 +930,7 @@ class DashboardApi {
             summary?: string;
             billed_duration_seconds?: number | null;
             transfer_legs?: TransferLeg[];
+            summary_json?: { outcome?: unknown } | null;
         }>({
             path: `/calls/${id}`,
             method: "GET",
@@ -946,6 +951,8 @@ class DashboardApi {
             created_at: response.timestamp,
             summary: response.summary,
             recording_id: response.recording_id,
+            // The verdict the list shows as lead_outcome lives in summary_json.outcome here.
+            lead_outcome: typeof response.summary_json?.outcome === "string" ? response.summary_json.outcome : null,
             direction: response.direction === "inbound" ? "inbound" : "outbound",
             from_number: response.from_number ?? response.caller_ani,
             to_number: response.to_number ?? response.called_did,

@@ -197,13 +197,16 @@ _SAVED = (
 )
 _Q_TENANT_PROJECT = (
     "UPDATE tenants SET subscription_status = $2 "
-    "WHERE id = $1::uuid AND stripe_subscription_id IS NULL AND plan_id = $3"
+    "WHERE id = $1::uuid AND stripe_subscription_id IS NULL AND plan_id = $3 "
+    "AND subscription_status IS DISTINCT FROM 'suspended'"
 )
 _Q_TENANT_PLAN_ONLY = (
     "UPDATE tenants SET plan_id = $2 WHERE id = $1::uuid AND stripe_subscription_id IS NULL"
 )
 _Q_TENANT_GRANT = (
-    "UPDATE tenants SET plan_id = $2, subscription_status = $3 "
+    "UPDATE tenants SET plan_id = $2, "
+    "subscription_status = CASE WHEN subscription_status = 'suspended' "
+    "THEN subscription_status ELSE $3 END "
     "WHERE id = $1::uuid AND stripe_subscription_id IS NULL"
 )
 # Webhook path: the payment is found by PayPal's transaction id alone.
@@ -520,10 +523,13 @@ class PayPalSubscriptionService:
         try:
             async with acquire_with_tenant(self._pool, tenant_id) as conn:
                 tenant = await conn.fetchrow(_Q_TENANT_LOCK, tenant_id)
-                if (tenant is None or tenant["status"] != "active"
-                        or canonical(tenant["subscription_status"]) == SUSPENDED):
+                if tenant is None or tenant["status"] != "active":
                     raise CheckoutError("tenant_unavailable", "Billing account is unavailable.", 403,
                                         request_not_started=True)
+                if canonical(tenant["subscription_status"]) == SUSPENDED:
+                    raise CheckoutError(
+                        "tenant_suspended", "This account is suspended and cannot buy a plan. Contact support.",
+                        403, request_not_started=True)
                 existing = await conn.fetchrow(_Q_ROW_BY_ID, request_id, tenant_id)
                 if existing is not None:
                     return "existing", dict(existing)
@@ -1031,6 +1037,15 @@ class PayPalSubscriptionService:
         return await self._reverse(
             str(payment["tenant_id"]), str(payment["subscription_id"]), str(payment["id"]),
             kind, event_id)
+
+    async def owns_transaction(self, transaction_id: str) -> bool:
+        """Read-only: is this PayPal transaction id one of our plan payments?
+
+        Same cross-tenant lookup as ``end_for_reversal`` (platform connection, by the
+        PayPal-global transaction id from a signature-verified webhook); only a
+        boolean leaves, never the tenant."""
+        async with acquire_with_tenant(self._pool, None) as conn:
+            return await conn.fetchrow(_Q_PAYMENT_BY_TXN, transaction_id) is not None
 
     async def end_subscription_for_reversal(self, *, paypal_subscription_id: str, kind: str,
                                             event_id: str) -> str:

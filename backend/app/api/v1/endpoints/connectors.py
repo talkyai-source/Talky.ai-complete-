@@ -7,7 +7,10 @@ Day 24: Unified Connector System
 from app.core.error_handlers import safe_exception_message
 from app.api.v1.validation import ResourceUUID
 import asyncio
+import hashlib
+import hmac
 import os
+import secrets
 import logging
 import re
 from contextlib import suppress
@@ -15,15 +18,16 @@ from typing import Optional, List, Any
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Depends, Query, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.security.rbac import require_permission, Permission
+from app.core.security.cookies import _cookie_secure
 from app.infrastructure.connectors.base import ConnectorFactory
-from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError
+from app.infrastructure.connectors.oauth import get_oauth_state_manager, OAuthStateError, OAuthStateManager
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.services.connector_lifecycle import (
     ConnectorActor, ConnectorLifecycle, ConnectorLifecycleError, revoke_token_at_provider as _revoke_token_at_provider,
@@ -167,7 +171,7 @@ async def list_providers():
     return providers
 
 
-@router.get("", response_model=List[ConnectorResponse])
+@router.get("", response_model=List[ConnectorResponse], dependencies=[Depends(require_permission(Permission.CONNECTORS_READ))])
 async def list_connectors(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -446,7 +450,7 @@ class TypeAuthorizeResponse(BaseModel):
     authorization_url: str
 
 
-@router.get("/status", response_model=ConnectorStatusListResponse)
+@router.get("/status", response_model=ConnectorStatusListResponse, dependencies=[Depends(require_permission(Permission.CONNECTORS_READ))])
 async def list_connector_statuses(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -580,9 +584,41 @@ async def list_connector_statuses(
     return ConnectorStatusListResponse(items=items)
 
 
+# The sign-in is bound to the browser that started it: a one-time nonce goes to
+# that browser as a cookie and only its SHA-256 hash is kept in the Redis state.
+# One cookie per flow (name carries a short id of the state) so two connectors
+# started in parallel in one browser do not overwrite each other.
+_OAUTH_NONCE_COOKIE_PREFIX = "talky_oauth_nonce_"
+_OAUTH_CALLBACK_COOKIE_PATH = "/api/v1/connectors/callback"
+
+
+def _nonce_hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+
+def _nonce_cookie_name(state: str) -> str:
+    return _OAUTH_NONCE_COOKIE_PREFIX + hashlib.sha256(state.encode("utf-8")).hexdigest()[:16]
+
+
+def _clear_nonce_cookie(response, state: str) -> None:
+    response.delete_cookie(
+        key=_nonce_cookie_name(state), path=_OAUTH_CALLBACK_COOKIE_PATH,
+        httponly=True, secure=_cookie_secure(), samesite="lax")
+
+
+def _browser_matches_state(request, state: str, state_data) -> bool:
+    """True only when the callback browser holds the nonce the start issued."""
+    stored = (state_data or {}).get("browser_nonce_hash")
+    cookies = getattr(request, "cookies", None) or {}
+    nonce = cookies.get(_nonce_cookie_name(state))
+    if not isinstance(stored, str) or not stored or not nonce:
+        return False
+    return hmac.compare_digest(_nonce_hash(nonce).encode("utf-8"), stored.encode("utf-8"))
+
+
 async def _start_connector_authorization(*, connector_type, provider, name,
                                         http_request, current_user, db_client,
-                                        frontend_redirect_uri=None):
+                                        frontend_redirect_uri=None, response=None):
     """Share human admission and bounded preparation across both OAuth starts."""
     try:
         lifecycle = ConnectorLifecycle(db_client, actor=ConnectorActor.human(
@@ -599,7 +635,8 @@ async def _start_connector_authorization(*, connector_type, provider, name,
     try:
         base_url = os.getenv("API_BASE_URL", str(http_request.base_url).rstrip("/"))
         backend_callback = f"{base_url}/api/v1/connectors/callback"
-        extra_data = {"connector_id": connector_id}
+        browser_nonce = secrets.token_urlsafe(32)
+        extra_data = {"connector_id": connector_id, "browser_nonce_hash": _nonce_hash(browser_nonce)}
         if frontend_redirect_uri is not None:
             extra_data["frontend_redirect_uri"] = frontend_redirect_uri
         oauth_manager = get_oauth_state_manager()
@@ -616,6 +653,11 @@ async def _start_connector_authorization(*, connector_type, provider, name,
         )
         if not isinstance(auth_url, str) or not auth_url.strip():
             raise ValueError("OAuth authorization URL was not prepared")
+        if response is not None:
+            response.set_cookie(
+                key=_nonce_cookie_name(state_data["state"]), value=browser_nonce,
+                max_age=OAuthStateManager.STATE_TTL_SECONDS, path=_OAUTH_CALLBACK_COOKIE_PATH,
+                httponly=True, secure=_cookie_secure(), samesite="lax")
         return {"authorization_url": auth_url, "state": state_data["state"]}
     except (Exception, asyncio.CancelledError) as exc:
         # The pending creation already committed. Retire only that operation;
@@ -648,6 +690,7 @@ async def authorize_connector_by_type(
     ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
+    response: Response = None,
 ):
     """Start OAuth for the provider behind this dashboard card."""
     if type not in CARD_PROVIDERS:
@@ -669,7 +712,7 @@ async def authorize_connector_by_type(
         connector_type=conn_type, provider=provider,
         name=PROVIDER_METADATA.get(provider, {}).get("name"),
         http_request=http_request, current_user=current_user, db_client=db_client,
-        frontend_redirect_uri=redirect_uri,
+        frontend_redirect_uri=redirect_uri, response=response,
     )
     return TypeAuthorizeResponse(authorization_url=prepared["authorization_url"])
 
@@ -757,7 +800,8 @@ async def authorize_connector(
     request: CreateConnectorRequest,
     http_request: Request,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    response: Response = None,
 ):
     """
     Start OAuth authorization flow for a connector.
@@ -789,6 +833,7 @@ async def authorize_connector(
         connector_type=request.type, provider=request.provider,
         name=request.name or PROVIDER_METADATA.get(request.provider, {}).get("name"),
         http_request=http_request, current_user=current_user, db_client=db_client,
+        response=response,
     )
     return OAuthAuthorizeResponse(**prepared)
 
@@ -812,11 +857,16 @@ async def oauth_callback(
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     provider: Optional[str] = None
 
+    def finish(redirect: RedirectResponse) -> RedirectResponse:
+        # The nonce is one-time: every ending clears this flow's cookie.
+        _clear_nonce_cookie(redirect, state)
+        return redirect
+
     def fail(problem: str) -> RedirectResponse:
         # Every error return names its card once the state told us the
         # provider (D3-3); before that there is nothing to guess from.
-        return RedirectResponse(_frontend_callback_url(
-            frontend_url, status="error", provider=provider, error=problem))
+        return finish(RedirectResponse(_frontend_callback_url(
+            frontend_url, status="error", provider=provider, error=problem)))
 
     if error or not code:
         problem = error or "missing_code"
@@ -847,8 +897,13 @@ async def oauth_callback(
         if not state_data:
             raise OAuthStateError("Invalid or expired OAuth state")
         
+        provider = state_data.get("provider")
+        # Bind to the starting browser BEFORE any lookup, code exchange or write.
+        if not _browser_matches_state(request, state, state_data):
+            logger.warning("OAuth callback refused: browser nonce missing or mismatched provider=%s", provider)
+            return fail("state_mismatch")
+
         tenant_id = state_data["tenant_id"]
-        provider = state_data["provider"]
         redirect_uri = state_data["redirect_uri"]
         code_verifier = state_data["code_verifier"]
         connector_id = state_data.get("connector_id")
@@ -1029,7 +1084,7 @@ async def oauth_callback(
 
         logger.info(f"OAuth completed for {provider}, connector {connector_id}")
 
-        return RedirectResponse(_frontend_callback_url(frontend_url, status="success", provider=provider))
+        return finish(RedirectResponse(_frontend_callback_url(frontend_url, status="success", provider=provider)))
         
     except OAuthStateError as e:
         logger.warning(f"OAuth state error: {e}")
@@ -1042,7 +1097,7 @@ async def oauth_callback(
 # Registered AFTER /callback (and every other static single-segment route) so the
 # dynamic catch-all can't shadow them. See the note where the POST /authorize
 # route is declared above.
-@router.get("/{connector_id}", response_model=ConnectorResponse)
+@router.get("/{connector_id}", response_model=ConnectorResponse, dependencies=[Depends(require_permission(Permission.CONNECTORS_READ))])
 async def get_connector(
     connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),

@@ -249,6 +249,9 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
                 return False
             if "information_schema.columns" in query:
                 return 2
+            if "INTERVAL '6 hours'" in query:
+                assert "processed_webhook_events" in query and "'failed', 'pending'" in query
+                return 0  # no stuck Stripe receipt here; see test_small_money_and_signin_fixes_20261120
             assert "processed_webhook_events" in query and "needs_review" in query
             assert "event_payload" not in query
             return 2
@@ -285,9 +288,10 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
     assert report["payments"]["paypal_needs_review"] == 0
     assert report["trunks"]["status"] == "ok"
     assert report["recordings"]["status"] == "ok"
-    # payments, the PayPal table probe, the recording-columns probe, tenants, one tenant's trunks,
-    # and that tenant's two recording statements
-    assert len(reads) == 7
+    assert report["payments"]["stuck"] == 0
+    # payments, the PayPal table probe, the stuck-receipt count, the recording-columns probe, tenants,
+    # one tenant's trunks, and that tenant's two recording statements
+    assert len(reads) == 8
 
 
 @pytest.mark.parametrize("legacy,paypal,status", [(0, 3, "alert"), (2, 3, "alert"), (0, 0, "ok")])
@@ -301,6 +305,8 @@ async def test_database_signals_add_paypal_rows_that_need_a_person(watch, monkey
                 return True
             if "FROM paypal_webhook_events" in query:
                 return paypal
+            if "INTERVAL '6 hours'" in query:
+                return 0
             return legacy
 
         async def fetch(self, query, *args):
@@ -313,7 +319,7 @@ async def test_database_signals_add_paypal_rows_that_need_a_person(watch, monkey
     monkeypatch.setattr(watch, "acquire_with_tenant", acquire)
     report = await watch.check_database(object(), redis, now=NOW, max_tenants=10)
     assert report["payments"] == {"status": status, "needs_review": legacy + paypal,
-                                  "paypal_needs_review": paypal}
+                                  "paypal_needs_review": paypal, "stuck": 0}
     sql = next(q for q in queries if "FROM paypal_webhook_events" in q)
     assert sql.lstrip().upper().startswith("SELECT COUNT(*)")
     assert "payload" not in sql and "event_id" not in sql
@@ -326,6 +332,8 @@ async def test_database_signals_without_the_paypal_table_keep_the_old_count(watc
             if "to_regclass" in query:
                 return False
             assert "FROM paypal_webhook_events" not in query
+            if "INTERVAL '6 hours'" in query:
+                return 0
             return 2
 
         async def fetch(self, query, *args):
@@ -337,7 +345,8 @@ async def test_database_signals_without_the_paypal_table_keep_the_old_count(watc
 
     monkeypatch.setattr(watch, "acquire_with_tenant", acquire)
     report = await watch.check_database(object(), redis, now=NOW, max_tenants=10)
-    assert report["payments"] == {"status": "alert", "needs_review": 2, "paypal_needs_review": 0}
+    assert report["payments"] == {"status": "alert", "needs_review": 2, "paypal_needs_review": 0,
+                                  "stuck": 0}
 
 
 async def test_database_failure_is_explicit_and_does_not_echo_dsn(watch, monkeypatch, redis):

@@ -76,6 +76,7 @@ class FakePlans:
         self.synced = []
         self.ended = []
         self.ended_by_sub = []
+        self.owned = set()
 
     async def sync(self, paypal_subscription_id):
         self.synced.append(paypal_subscription_id)
@@ -88,6 +89,9 @@ class FakePlans:
         if self.error:
             raise self.error
         return self.end_answer
+
+    async def owns_transaction(self, transaction_id):
+        return transaction_id in self.owned
 
     async def end_subscription_for_reversal(self, *, paypal_subscription_id, kind, event_id):
         self.ended_by_sub.append(dict(paypal_subscription_id=paypal_subscription_id, kind=kind, event_id=event_id))
@@ -306,8 +310,11 @@ async def test_reversed_other_resource_uses_the_up_link(world):
     assert world.svc.reversed[0]["capture_id"] == CAPTURE
 
 
-def dispute(*ids, dispute_id="PP-D-1"):
+def dispute(*ids, dispute_id="PP-D-1", stage="CHARGEBACK"):
+    # CREATED reverses only past the inquiry stage; see test_paypal_dispute_and_capture_20261120.py
     res = {"disputed_transactions": [{"seller_transaction_id": i} for i in ids] + [{"x": 1}]}
+    if stage:
+        res["dispute_life_cycle_stage"] = stage
     if dispute_id:
         res["dispute_id"] = dispute_id
     return res
@@ -345,16 +352,16 @@ async def test_several_transactions_take_the_worst_answer(world, answers, state)
 
 @pytest.mark.parametrize("event_type", ["CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"])
 async def test_dispute_update_on_our_order_needs_review_and_never_reverses(world, event_type):
-    assert await run(world, body(event_type, dispute("OTHER", CAPTURE))) == {"status": "needs_review"}
+    assert await run(world, body(event_type, dispute("OTHER", CAPTURE, stage="INQUIRY"))) == {"status": "needs_review"}
     assert world.svc.reversed == [] and row(world)["detail"] == "dispute_update"
     assert row(world)["order_id"] == ORDER
 
 
 async def test_dispute_update_on_foreign_payment_is_ignored(world):
-    assert await run(world, body("CUSTOMER.DISPUTE.UPDATED", dispute("OTHER"))) == {"status": "ignored"}
+    assert await run(world, body("CUSTOMER.DISPUTE.UPDATED", dispute("OTHER", stage="INQUIRY"))) == {"status": "ignored"}
 
 
-@pytest.mark.parametrize("event_type", ["CHECKOUT.ORDER.APPROVED", "PAYMENT.CAPTURE.PENDING", "SOMETHING.ELSE"])
+@pytest.mark.parametrize("event_type", ["PAYMENT.CAPTURE.PENDING", "SOMETHING.ELSE"])
 async def test_other_events_are_ignored(world, event_type):
     assert await run(world, body(event_type)) == {"status": "ignored"}
     assert world.svc.settled == [] and world.svc.reversed == []

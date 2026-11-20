@@ -68,6 +68,9 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 
+// Mirrors FAILED_OUTCOMES in backend/app/domain/services/call_outcomes.py (what the dashboard counts as failed).
+const FAILED_OUTCOME_NAMES = ["no_answer", "busy", "rejected", "unreachable", "network_failure", "failed", "cancelled", "voicemail"];
+
 function getStatusStyle(status: string) {
     switch (status) {
         case "running":
@@ -768,7 +771,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 </div>
                                 <div>
                                     <p className="text-2xl font-bold text-foreground">
-                                        {stats?.call_outcome_counts?.["failed"] || 0}
+                                        {FAILED_OUTCOME_NAMES.reduce((sum, name) => sum + (stats?.call_outcome_counts?.[name] || 0), 0)}
                                     </p>
                                     <p className="text-sm text-muted-foreground">Failed</p>
                                 </div>

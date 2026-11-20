@@ -14,6 +14,7 @@ test("campaign cache commits never rewrite capability objects", () => {
             transfer_runtime_available: true,
             transfer_platform_enabled: true,
             transfer_configuration_available: true,
+            recording_platform_enabled: false,
         };
         const campaign: InboundCampaign = {
             id: "inbound-1",

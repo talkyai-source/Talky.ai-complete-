@@ -122,7 +122,7 @@ async def _window_usage_minutes(conn: Any, tenant_id: str, windows: list) -> dic
 
 async def _ledger_rows(conn: Any, tenant_id: str) -> list:
     return await conn.fetch(
-        "SELECT minutes_delta, created_at, provider_event_id FROM billing_ledger WHERE tenant_id=$1::uuid",
+        "SELECT minutes_delta, created_at, provider_event_id, kind FROM billing_ledger WHERE tenant_id=$1::uuid",
         str(tenant_id),
     )
 
@@ -141,14 +141,23 @@ async def unrecorded_topup_usage(conn: Any, tenant_id: str, base: int, rows: lis
     prefix = f"{USAGE_EVENT_PREFIX}{tenant_id}:"
     recorded: dict[str, int] = {}
     recorded_at: dict[str, datetime] = {}
-    purchases: list[tuple[datetime, int]] = []
+    purchases: list[tuple[datetime, int, bool]] = []
     for row in rows:
         event_id = row["provider_event_id"] or ""
         if event_id.startswith(prefix):
             recorded[event_id[len(prefix):]] = row["minutes_delta"]
             recorded_at[event_id[len(prefix):]] = row["created_at"]
         else:
-            purchases.append((row["created_at"], row["minutes_delta"]))
+            purchases.append((row["created_at"], row["minutes_delta"], row["kind"] in ("refund", "dispute")))
+    def bought(month: Any) -> int:
+        # A refund or dispute reverses minutes without un-using them: minutes
+        # used in the window it was recorded in were still available then, so
+        # it reduces only later windows (and always the balance, via the sum).
+        return sum(
+            delta for created, delta, reversal in purchases
+            if created < (month["start"] if reversal else month["end"])
+        )
+
     months = [{**dict(month), "key": _window_key(month, recorded_at)} for month in windows]
     open_months = [m for m in months if m["key"] not in recorded]
     if not open_months:
@@ -156,8 +165,7 @@ async def unrecorded_topup_usage(conn: Any, tenant_id: str, base: int, rows: lis
     # Usage only matters where bought minutes were available; skip the calls
     # scan when none ever were (every window then records zero).
     ever_available = any(
-        sum(delta for created, delta in purchases if created < month["end"])
-        + sum(delta for closed, delta in recorded.items() if closed < month["key"]) > 0
+        bought(month) + sum(delta for closed, delta in recorded.items() if closed < month["key"]) > 0
         for month in open_months
     )
     used = await _window_usage_minutes(conn, tenant_id, open_months) if ever_available else {}
@@ -168,7 +176,7 @@ async def unrecorded_topup_usage(conn: Any, tenant_id: str, base: int, rows: lis
         if key in recorded:
             continue
         available = (
-            sum(delta for created, delta in purchases if created < month["end"])
+            bought(month)
             + sum(delta for closed, delta in recorded.items() if closed < key)
             - pending
         )

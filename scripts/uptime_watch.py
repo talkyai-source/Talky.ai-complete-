@@ -29,6 +29,7 @@ RETRY_DELAY_S = 20
 MIN_CERT_DAYS = 14
 FAILING_RE = re.compile(r"^Failing:\s*(.*)$", re.MULTILINE)
 LAST_ALERT_RE = re.compile(r"^Last alert:\s*(\S+)\s*$", re.MULTILINE)
+WATCH_FAILING_RE = re.compile(r"^Watch failing:\s*(\d{1,4})\s*$", re.MULTILINE)
 RECOVERED_MARK = "Recovered:"
 
 
@@ -88,14 +89,19 @@ def check_http(name, url, timeout, json_key, opener):
         return {"name": name, "ok": False, "detail": type(exc).__name__}
     if status != 200:
         return {"name": name, "ok": False, "detail": f"HTTP {status}"}
+    extra = {}
     if json_key is not None:
         try:
-            ok = json.loads(body).get(json_key) is True
+            parsed = json.loads(body)
+            ok = parsed.get(json_key) is True
+            count = parsed.get("failing")
         except Exception:
             return {"name": name, "ok": False, "detail": "HTTP 200 unexpected body"}
+        if name == "server-health-watch" and type(count) is int and 0 <= count <= 9999:
+            extra = {"watch_failing": count}  # a changed count is a new failure
         if not ok:
-            return {"name": name, "ok": False, "detail": NOT_OK_DETAIL.get(name, "HTTP 200 not ready")}
-    return {"name": name, "ok": True, "detail": "HTTP 200"}
+            return {"name": name, "ok": False, "detail": NOT_OK_DETAIL.get(name, "HTTP 200 not ready"), **extra}
+    return {"name": name, "ok": True, "detail": "HTTP 200", **extra}
 
 
 def check_tls(name, host, cert_fetcher, now):
@@ -134,6 +140,10 @@ def run_checks(opener=real_opener, cert_fetcher=real_cert_fetcher, sleep=time.sl
 # --------------------------------------------------------------------------
 # Decision (pure)
 # --------------------------------------------------------------------------
+def _watch_failing(results):
+    return next((r["watch_failing"] for r in results if "watch_failing" in r), None)
+
+
 def decide(results, open_issue, now):
     """open_issue: None or {"last_alert_at": datetime, "failing": set[str]}."""
     failing = {r["name"] for r in results if not r["ok"]}
@@ -142,6 +152,9 @@ def decide(results, open_issue, now):
     if open_issue is None:
         return "open"
     if failing != set(open_issue["failing"]):
+        return "comment"
+    seen, was = _watch_failing(results), open_issue.get("watch_failing")
+    if seen is not None and was is not None and seen != was:
         return "comment"
     if now - open_issue["last_alert_at"] >= timedelta(minutes=REPEAT_MINUTES):
         return "comment"
@@ -161,6 +174,9 @@ def alert_text(results, now):
     lines = [f"Time: {_utc(now)}", "", "Failing checks:"]
     lines += [f"- {r['name']}: {r['detail']}" for r in bad]
     lines += ["", "Failing: " + ",".join(sorted(r["name"] for r in bad))]
+    count = _watch_failing(results)
+    if count is not None:
+        lines.append(f"Watch failing: {count}")
     return "\n".join(lines)
 
 
@@ -212,7 +228,9 @@ def find_open_issue(gh):
                 pass  # keep the createdAt fallback
         match = FAILING_RE.search(text)
         failing = {x.strip() for x in (match.group(1).split(",") if match else []) if x.strip()}
-        return {"number": issue["number"], "last_alert_at": last, "failing": failing}
+        counted = WATCH_FAILING_RE.search(text)
+        return {"number": issue["number"], "last_alert_at": last, "failing": failing,
+                "watch_failing": int(counted.group(1)) if counted else None}
     return None
 
 

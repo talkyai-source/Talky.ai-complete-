@@ -146,6 +146,43 @@ async def _plan_sync(
     return "completed", f"plan_{outcome.status}"[:64], outcome.subscription_id
 
 
+_ESCALATED_STAGES = frozenset({"CHARGEBACK", "PRE_ARBITRATION", "ARBITRATION"})
+
+
+def _escalated(resource: dict) -> bool:
+    """The money is taken back only once the dispute is past the inquiry stage.
+    Field and values: PayPal's public webhook documentation (not observed here)."""
+    if resource.get("status") == "RESOLVED":
+        return False  # already decided (fields: PayPal's documentation, not observed here)
+    outcome = resource.get("dispute_outcome")
+    if isinstance(outcome, dict) and outcome.get("outcome_code") == "RESOLVED_SELLER_FAVOUR":
+        return False  # the seller won: the money is ours
+    return resource.get("dispute_life_cycle_stage") in _ESCALATED_STAGES
+
+
+async def _reverse_dispute(
+    service, plans, event_id: str, resource: dict
+) -> tuple[str, str | None, str | None]:
+    dispute = _clip(resource.get("dispute_id"), 64) or event_id
+    results: list[str] = []
+    for capture_id in _seller_transactions(resource):
+        if not _CAPTURE_ID.match(capture_id):
+            continue
+        answer = await service.reverse_capture(
+            capture_id=capture_id, kind="dispute",
+            event_id=f"paypal:dispute:{dispute}:{capture_id}",
+        )
+        if answer != "unknown":
+            results.append(_from_reverse(answer))
+            continue
+        plan_answer = await plans.end_for_reversal(
+            transaction_id=capture_id, kind="dispute",
+            event_id=f"paypal:plan-dispute:{dispute}:{capture_id}",
+        )
+        results.append("ignored" if plan_answer == "not_ours" else "completed")
+    return _worst(results), "dispute_created" if results else "no_transactions", None
+
+
 async def _dispatch(
     pool, service, plans, event_id: str, event_type: str, event: dict, resource: dict
 ) -> tuple[str, str | None, str | None]:
@@ -230,29 +267,33 @@ async def _dispatch(
         )
         return _from_reverse(answer), f"reversal_{answer}", None
 
-    if event_type == "CUSTOMER.DISPUTE.CREATED":
-        dispute = _clip(resource.get("dispute_id"), 64) or event_id
-        results: list[str] = []
-        for capture_id in _seller_transactions(resource):
-            if not _CAPTURE_ID.match(capture_id):
-                continue
-            answer = await service.reverse_capture(
-                capture_id=capture_id, kind="dispute",
-                event_id=f"paypal:dispute:{dispute}:{capture_id}",
-            )
-            if answer != "unknown":
-                results.append(_from_reverse(answer))
-                continue
-            plan_answer = await plans.end_for_reversal(
-                transaction_id=capture_id, kind="dispute",
-                event_id=f"paypal:plan-dispute:{dispute}:{capture_id}",
-            )
-            results.append("ignored" if plan_answer == "not_ours" else "completed")
-        state = _worst(results)
-        return state, "dispute_created" if results else "no_transactions", None
+    if event_type == "CHECKOUT.ORDER.APPROVED":
+        paypal_order_id = resource.get("id")
+        if not isinstance(paypal_order_id, str) or not _CAPTURE_ID.match(paypal_order_id):
+            return "ignored", "no_order_id", None
+        outcome = await service.capture_approved_order(paypal_order_id=paypal_order_id)
+        if outcome is None:
+            return "ignored", "not_our_order", None
+        if outcome.status == "not_approved":
+            # PayPal refused the capture (declined card, expired order) and will
+            # answer the same on every redelivery: final. The browser return and
+            # PAYMENT.CAPTURE.COMPLETED still credit a later successful capture.
+            # A transient PayPal error is raised by the service and still retries.
+            return "completed", "approved_not_captured", str(outcome.order_id)
+        return "completed", f"approved_{outcome.status}", str(outcome.order_id)
 
-    if event_type in ("CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"):
-        # Minutes never change automatically here; a person decides.
+    if event_type == "CUSTOMER.DISPUTE.CREATED" and _escalated(resource):
+        return await _reverse_dispute(service, plans, event_id, resource)
+
+    if event_type == "CUSTOMER.DISPUTE.UPDATED" and _escalated(resource):
+        state, detail, our_id = await _reverse_dispute(service, plans, event_id, resource)
+        return state, "dispute_escalated" if detail == "dispute_created" else detail, our_id
+
+    if event_type in (
+        "CUSTOMER.DISPUTE.CREATED", "CUSTOMER.DISPUTE.UPDATED", "CUSTOMER.DISPUTE.RESOLVED"
+    ):
+        # An inquiry (money still ours) or a later update: minutes never change
+        # automatically here; a person decides.
         for capture_id in _seller_transactions(resource):
             async with acquire_with_tenant(pool, None) as conn:
                 row = await conn.fetchrow(
@@ -261,7 +302,12 @@ async def _dispatch(
                     capture_id,
                 )
             if row is not None:
-                return "needs_review", "dispute_update", str(row["id"])
+                detail = "dispute_inquiry" if event_type == "CUSTOMER.DISPUTE.CREATED" else "dispute_update"
+                return "needs_review", detail, str(row["id"])
+            if await plans.owns_transaction(capture_id):
+                # A plan payment: the plan is ended only past the inquiry stage.
+                detail = "dispute_inquiry" if event_type == "CUSTOMER.DISPUTE.CREATED" else "dispute_update"
+                return "needs_review", detail, None
         return "ignored", "not_our_order", None
 
     return "ignored", "event_not_handled", None

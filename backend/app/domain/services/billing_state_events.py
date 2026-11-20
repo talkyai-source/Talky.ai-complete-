@@ -5,6 +5,7 @@ returned to the webhook receipt transaction; no email or audit send is issued.
 """
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -26,6 +27,8 @@ from app.domain.services.subscription_status import (
 
 class BillingStateBusy(RuntimeError):
     """Another transaction is reading/applying this subscription; retry later."""
+
+logger = logging.getLogger(__name__)
 
 
 class BillingStateReviewRequired(ValueError):
@@ -223,12 +226,14 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
             status = SUSPENDED  # an open chargeback keeps calls off (_apply_dispute)
         await conn.execute(
             """UPDATE tenants SET subscription_status=$4 WHERE id=$1::uuid
-               AND stripe_subscription_id=$2 AND stripe_customer_id=$3""",
+               AND stripe_subscription_id=$2 AND stripe_customer_id=$3
+               AND (subscription_status IS DISTINCT FROM 'suspended' OR $4='suspended')""",
             tenant_id, subscription_id, customer_id, status,
         )
     if canonical(subscription["status"]) == CANCELLED:
         await conn.execute(
-            """UPDATE tenants SET stripe_subscription_id=NULL,subscription_status=$4
+            """UPDATE tenants SET stripe_subscription_id=NULL,
+                 subscription_status=CASE WHEN subscription_status='suspended' THEN subscription_status ELSE $4 END
                WHERE id=$1::uuid AND stripe_subscription_id=$2 AND stripe_customer_id=$3""",
             tenant_id, subscription_id, customer_id, CANCELLED,
         )
@@ -488,12 +493,20 @@ async def refresh_invoice_details(conn, billing, event_type, data, source_refere
                                 source_reference=source_reference, details_only=True)
 
 
-DISPUTE_EVENTS = {"charge.dispute.created", "charge.dispute.closed"}
+DISPUTE_EVENTS = {"charge.dispute.created", "charge.dispute.closed",
+                  "charge.dispute.funds_withdrawn", "charge.dispute.updated"}
+# An inquiry can escalate on the same dispute object; these events carry that.
+_DISPUTE_OPENING_EVENTS = {"charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.updated"}
 
 
 def _dispute_open(recorded):
     dispute = _object(_object(recorded).get("metadata")).get("dispute") if recorded else None
     return bool(dispute) and _object(dispute).get("status") == "open"
+
+
+# Stripe dispute statuses that mean money has moved or is at stake. The
+# warning_* statuses are card-network inquiries: nothing is taken back.
+_MONEY_DISPUTE_STATUSES = {"needs_response", "under_review", "lost"}
 
 
 async def _apply_dispute(conn, billing, event_type, data, source_reference):
@@ -504,15 +517,15 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
     by the top-up handler first; a won one gets its minutes back here.
     """
     dispute = await _current(billing, "Dispute", data.get("id"))
+    if event_type in _DISPUTE_OPENING_EVENTS and dispute.get("status") not in _MONEY_DISPUTE_STATUSES:
+        return _result("ignored", reason="dispute_inquiry")
     charge_id = _id(dispute.get("charge"))
     if not charge_id:
         raise BillingStateReviewRequired("dispute_charge_missing")
     charge = await _current(billing, "Charge", charge_id)
     if event_type == "charge.dispute.closed":
-        if dispute.get("status") != "won":
-            return _result("ignored", reason="dispute_not_won")
         payment_id = _id(charge.get("payment_intent"))
-        if payment_id:
+        if dispute.get("status") == "won" and payment_id:
             from app.domain.services.topup_service import TopupService
             if await TopupService(None).reinstate_dispute(
                 conn, payment_id=payment_id, dispute_id=dispute["id"], event_id=source_reference,
@@ -534,7 +547,11 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
     )
     if recorded is None:
         raise BillingStateReviewRequired("disputed_subscription_unrecorded")
-    if event_type == "charge.dispute.created":
+    current = _object(_object(recorded["metadata"]).get("dispute"))
+    if event_type in _DISPUTE_OPENING_EVENTS:
+        if event_type != "charge.dispute.created" and current.get("id") == dispute["id"]:
+            # Already stored (open, or already finished): an update never reopens it.
+            return _result("ignored", tenant_id, reason="dispute_already_recorded")
         await conn.execute(
             """UPDATE subscriptions SET metadata=COALESCE(metadata,'{}'::jsonb)
                      || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status','open')),
@@ -547,20 +564,46 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
             tenant_id, subscription_id, SUSPENDED,
         )
         return _result("handled", tenant_id, reason="subscription_dispute_suspended")
-    current = _object(_object(recorded["metadata"]).get("dispute"))
+    final_status = dispute.get("status")
+    if final_status not in {"won", "warning_closed"}:
+        # Lost (or any other non-won final status): suspend and record it.
+        # No existing result kind both commits and flags the receipt (review
+        # and reconciliation both roll the transaction back), so commit.
+        # An inquiry that escalated to a chargeback was never stored open: it
+        # is suspended here, on its final status.
+        same = current.get("id") == dispute["id"]
+        is_open = current.get("status") == "open"
+        if (same and not is_open) or (is_open and not same):
+            # Already finished, or a different dispute is the open one.
+            return _result("ignored", tenant_id, reason="dispute_not_recorded")
+        await conn.execute(
+            """UPDATE subscriptions SET metadata=COALESCE(metadata,'{}'::jsonb)
+                     || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status','lost')),
+                   updated_at=NOW()
+               WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
+            subscription_id, tenant_id, dispute["id"],
+        )
+        await conn.execute(
+            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid AND stripe_subscription_id=$2""",
+            tenant_id, subscription_id, SUSPENDED,
+        )
+        logger.error("Subscription dispute not won tenant_id=%s dispute_id=%s status=%s: account stays suspended",
+                     tenant_id, dispute["id"], final_status)
+        return _result("handled", tenant_id, reason="subscription_dispute_lost")
     if current.get("id") != dispute["id"] or current.get("status") != "open":
         return _result("ignored", tenant_id, reason="dispute_not_recorded")
     subscription = await _current(billing, "Subscription", subscription_id)
     await conn.execute(
         """UPDATE subscriptions SET metadata=COALESCE(metadata,'{}'::jsonb)
-                 || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status','won')),
+                 || jsonb_build_object('dispute', jsonb_build_object('id',$3::text,'status',$4::text)),
                updated_at=NOW()
            WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
-        subscription_id, tenant_id, dispute["id"],
+        subscription_id, tenant_id, dispute["id"], "won" if final_status == "won" else "closed",
     )
     await conn.execute(
         """UPDATE tenants SET subscription_status=$3
-           WHERE id=$1::uuid AND stripe_subscription_id=$2 AND subscription_status=$4""",
+           WHERE id=$1::uuid AND (stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)
+             AND subscription_status=$4""",
         tenant_id, subscription_id, canonical(subscription.get("status")), SUSPENDED,
     )
     return _result("handled", tenant_id, reason="subscription_dispute_won")

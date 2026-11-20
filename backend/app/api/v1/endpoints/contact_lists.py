@@ -362,7 +362,8 @@ def _live_count(
 # GET /campaigns/{campaign_id}/contact-lists
 # =============================================================================
 
-@router.get("/campaigns/{campaign_id}/contact-lists", response_model=List[ContactListOut])
+@router.get("/campaigns/{campaign_id}/contact-lists", response_model=List[ContactListOut],
+            dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def list_contact_lists(
     campaign_id: str,
     current_user: CurrentUser = Depends(get_current_user),

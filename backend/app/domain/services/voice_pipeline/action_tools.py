@@ -261,7 +261,17 @@ async def run_voice_action(
                 "caller_opt_out_detected call_id=%s evidence=end_call_tool recorded=%s",
                 str(getattr(session, "call_id", "?"))[:12], opt_out_recorded,
             )
-        if not opted_out and not end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text):
+        # Same evidence as the text-marker path (end_call.model_end_call_allowed):
+        # a mailbox/screening flag, unless the caller asks to stay.
+        from app.domain.services.caller_assertions import continuation_after
+        machine = (
+            (getattr(session, "_amd_voicemail", False) is True
+             or getattr(session, "_machine_screening", False) is True)
+            and not continuation_after(user_text)
+        )
+        if not opted_out and not machine and not end_call_intent_present(
+            user_text, previous_assistant_text=previous_assistant_text
+        ):
             result = _result(
                 action,
                 success=False,

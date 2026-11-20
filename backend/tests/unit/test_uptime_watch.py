@@ -280,10 +280,10 @@ def test_server_health_watch_is_judged_by_its_clear_flag():
     assert clear["ok"] is True
     # Failing checks on the server, or a watch that stopped: both read as not clear,
     # and the alert says so in words instead of "not ready".
-    for body in (b'{"clear": false, "failing": 2, "ran_recently": true}',
-                 b'{"clear": false, "failing": 0, "ran_recently": false}'):
+    for body, count in ((b'{"clear": false, "failing": 2, "ran_recently": true}', 2),
+                        (b'{"clear": false, "failing": 0, "ran_recently": false}', 0)):
         assert uw.check_http("server-health-watch", url, 10, "clear", lambda u, t, body=body: (200, body)) == {
-            "name": "server-health-watch", "ok": False,
+            "name": "server-health-watch", "ok": False, "watch_failing": count,
             "detail": "the server's own health watch holds a failing check, or has not run for 10 minutes"}
     # Other checks keep their wording.
     assert uw.check_http("api-readiness", url, 10, "ready",

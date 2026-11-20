@@ -77,7 +77,7 @@ def _clean_ledger():
     """The ledger is module-global; keep tests independent."""
     rps._DISCLOSURE_LEDGER.clear()
     with patch(
-        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_state",
         new=AsyncMock(return_value=True),
     ), patch(
         "app.domain.services.telephony.modes.caller_first._set_inbound_consent_status",
@@ -273,7 +273,9 @@ async def test_inbound_recording_gate_opens_only_after_shared_disclosure():
 
 
 @pytest.mark.asyncio
-async def test_inbound_recording_gate_stays_closed_when_disclosure_fails():
+async def test_inbound_recording_gate_stays_closed_when_disclosure_fails_under_strict_setting(monkeypatch):
+    """RECORDING_REQUIRE_NOTICE_PROOF=true restores the old rule: no receipt, no recording."""
+    monkeypatch.setenv("RECORDING_REQUIRE_NOTICE_PROOF", "true")
     log = []
     voice_session, _ = _make_voice_session(log, raises=True)
     gateway = _GatedInboundMediaGateway(log)
@@ -286,6 +288,23 @@ async def test_inbound_recording_gate_stays_closed_when_disclosure_fails():
     assert allowed is False
     assert gateway.enabled is False
     assert ("recording_gate", True) not in log
+
+
+@pytest.mark.asyncio
+async def test_inbound_recording_gate_opens_when_disclosure_fails_by_default(monkeypatch):
+    """Default rule (owner decision): a missing notice receipt keeps the recording."""
+    monkeypatch.delenv("RECORDING_REQUIRE_NOTICE_PROOF", raising=False)
+    log = []
+    voice_session, _ = _make_voice_session(log, raises=True)
+    gateway = _GatedInboundMediaGateway(log)
+    voice_session.media_gateway = gateway
+    p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+    with p_container, p_policy:
+        allowed = await prepare_inbound_recording(voice_session)
+
+    assert allowed is True
+    assert gateway.enabled is True
 
 
 @pytest.mark.asyncio

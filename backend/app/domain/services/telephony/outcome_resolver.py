@@ -306,7 +306,9 @@ def resolve_call_outcome(
         return CallOutcome.GOAL_ACHIEVED
     if getattr(voice_session, "_goal_failed", False):
         return CallOutcome.GOAL_NOT_ACHIEVED
-    if getattr(voice_session, "_pipeline_failed", False):
+    # Only when the callee never spoke (FAILED is redialled 30 s and 2 min later;
+    # someone who just talked with the agent must not be rung back).
+    if getattr(voice_session, "_pipeline_failed", False) and _conversation_user_turns(voice_session) == 0:
         return CallOutcome.FAILED
     # The TTS provider failed terminally and the call was hung up on the
     # caller (voice_pipeline/tts_playback.py). The inbound resolver already

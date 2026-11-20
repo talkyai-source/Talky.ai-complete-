@@ -34,9 +34,9 @@ function formatDuration(seconds?: number) {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
 }
 
-function formatTurnTimestamp(ts: string) {
+function formatTurnTimestamp(ts: string, timeZone?: string) {
     const parsed = Date.parse(ts);
-    if (Number.isFinite(parsed)) return new Date(ts).toLocaleTimeString();
+    if (Number.isFinite(parsed)) return formatTimestamp(ts, timeZone).time;
     return ts;
 }
 
@@ -170,7 +170,8 @@ export default function CallDetailPage() {
             if (isPlaying) {
                 audioRef.current.pause();
             } else {
-                audioRef.current.src = url;
+                // Re-setting src reloads the audio, so a resume would restart it.
+                if (audioRef.current.src !== url) audioRef.current.src = url;
                 await audioRef.current.play();
             }
         } catch {
@@ -376,7 +377,7 @@ export default function CallDetailPage() {
                                             >
                                                 <p className="text-sm text-foreground">{turn.content}</p>
                                                 <p className="mt-2 text-xs text-muted-foreground">
-                                                    {formatTurnTimestamp(turn.timestamp)}
+                                                    {formatTurnTimestamp(turn.timestamp, user?.account_timezone)}
                                                 </p>
                                             </div>
                                         </motion.div>

@@ -385,6 +385,14 @@ async def test_after_purchase_a_changed_price_never_blocks_a_status_change(state
     assert after["minutes_allocated"] == before["minutes_allocated"], "no minutes from a lifecycle event"
 
 
+async def _stored_dispute_status(fixture, subscription_id):
+    # Read on the connection kind the handler itself uses.
+    async with acquire_with_tenant(fixture.service_pool, None) as conn:
+        return await conn.fetchval(
+            "SELECT metadata->'dispute'->>'status' FROM subscriptions WHERE stripe_subscription_id=$1 AND tenant_id=$2",
+            subscription_id, fixture.tenants[0])
+
+
 async def test_a_chargeback_on_a_plan_suspends_calls_until_the_dispute_is_won(state_db):
     fixture = state_db
     receipt, subscription, session, invoice = await _paid(fixture)
@@ -406,10 +414,39 @@ async def test_a_chargeback_on_a_plan_suspends_calls_until_the_dispute_is_won(st
     await _apply(fixture, "customer.subscription.updated", subscription)
     assert (await _tenant(fixture))["subscription_status"] == "suspended"
 
-    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="lost"), "sk_test_synthetic")
-    assert (await _apply(fixture, "charge.dispute.closed", dispute))["reason"] == "dispute_not_won"
-    assert (await _tenant(fixture))["subscription_status"] == "suspended"
     fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="won"), "sk_test_synthetic")
     result = await _apply(fixture, "charge.dispute.closed", dispute)
     assert result["reason"] == "subscription_dispute_won"
     assert (await _tenant(fixture))["subscription_status"] == "active"
+    stored = await _stored_dispute_status(fixture, subscription["id"])
+    assert stored == "won"
+
+
+async def test_a_lost_chargeback_on_a_plan_is_final_and_keeps_calls_suspended(state_db):
+    # 20 Nov 2026: a lost dispute is stored as lost. Before, it was left
+    # "open", so the account stayed suspended with nothing on record saying why.
+    fixture = state_db
+    receipt, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "invoice.paid", invoice)
+    charge_id, payment_id, dispute_id = "ch_" + uuid4().hex, "pi_" + uuid4().hex, "dp_" + uuid4().hex
+    fixture.objects[("Charge", charge_id)] = stripe.Charge.construct_from({
+        "id": charge_id, "object": "charge", "livemode": False, "invoice": invoice["id"],
+        "customer": session["customer"], "payment_intent": payment_id, "currency": "usd",
+    }, "sk_test_synthetic")
+    dispute = {"id": dispute_id, "object": "dispute", "livemode": False, "charge": charge_id,
+               "payment_intent": payment_id, "status": "needs_response"}
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dispute, "sk_test_synthetic")
+    assert (await _apply(fixture, "charge.dispute.created", dispute))["reason"] == "subscription_dispute_suspended"
+
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="lost"), "sk_test_synthetic")
+    assert (await _apply(fixture, "charge.dispute.closed", dispute))["reason"] == "subscription_dispute_lost"
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    stored = await _stored_dispute_status(fixture, subscription["id"])
+    assert stored == "lost"
+    # Lost is final: neither an ordinary update nor a late 'won' for the same
+    # dispute puts calls back.
+    await _apply(fixture, "customer.subscription.updated", subscription)
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="won"), "sk_test_synthetic")
+    assert (await _apply(fixture, "charge.dispute.closed", dispute))["reason"] == "dispute_not_recorded"
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"

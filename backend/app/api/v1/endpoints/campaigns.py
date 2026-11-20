@@ -458,7 +458,7 @@ async def _valid_voice_ids_for_provider(provider: str, *, pool=None, tenant_id=N
     return {v.id for v in voices}
 
 
-@router.get("/")
+@router.get("/", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def list_campaigns(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
@@ -944,7 +944,7 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
     return schedule, campaign_progress(campaign.get("status"), live_calls, awaiting)
 
 
-@router.get("/{campaign_id}")
+@router.get("/{campaign_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def get_campaign(
     campaign_id: ResourceUUID,
     request: Request,
@@ -1083,7 +1083,7 @@ async def update_campaign(
         raise HTTPException(status_code=500, detail="Failed to update campaign")
 
 
-@router.get("/{campaign_id}/calls")
+@router.get("/{campaign_id}/calls", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ)), Depends(require_permission(Permission.CALLS_READ))])
 async def list_campaign_calls_with_transcripts(
     campaign_id: ResourceUUID,
     request: Request,
@@ -1639,7 +1639,7 @@ async def delete_campaign(
         raise HTTPException(status_code=500, detail="Failed to delete campaign")
 
 
-@router.get("/{campaign_id}/jobs")
+@router.get("/{campaign_id}/jobs", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def get_campaign_jobs(
     campaign_id: ResourceUUID,
     status: Optional[str] = Query(None, description="Filter by job status"),
@@ -1800,7 +1800,7 @@ _STATS_STRING_SUMMARY_SQL = """
 """
 
 
-@router.get("/{campaign_id}/stats")
+@router.get("/{campaign_id}/stats", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def get_campaign_stats(
     campaign_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
@@ -2340,7 +2340,7 @@ async def update_contact_in_campaign(
         raise HTTPException(status_code=500, detail="Failed to update contact")
 
 
-@router.get("/{campaign_id}/contacts")
+@router.get("/{campaign_id}/contacts", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
 async def list_campaign_contacts(
     campaign_id: ResourceUUID,
     page: int = Query(1, ge=1, le=10001, description="Page number (1-indexed)"),

@@ -298,11 +298,17 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
 
     if sid in _DONE:
         return False
-    if _is_true_inbound_session(vs):
+    inbound = _is_true_inbound_session(vs)
+    if inbound and getattr(vs, "_recording_allowed", False) is not True:
+        # An inbound gate opens only after the notice attempt; until then nothing goes to disk.
+        # A gate closed mid-call (emergency stop) also destroys the copy already written.
+        gone = _STATE.pop(id(vs), None)
+        if gone is not None:
+            await asyncio.to_thread(_rmtree, gone.key)
         return False
     if getattr(vs, "_transfer_connected", False) or getattr(vs, "_recording_saved_at_transfer", False):
         return False
-    if getattr(vs, "_recording_policy_decided", False) is not True:
+    if not inbound and getattr(vs, "_recording_policy_decided", False) is not True:
         # Until the call has taken its recording decision nothing goes to
         # disk: not the audio of a tenant who switched recording off, and
         # not what was said before the spoken notice.

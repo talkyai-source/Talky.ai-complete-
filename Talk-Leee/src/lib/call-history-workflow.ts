@@ -72,11 +72,19 @@ export function callHasCapturedContact(
     return Boolean(call.captured_phone?.trim() || call.captured_email?.trim());
 }
 
+// Mirrors backend/app/domain/services/call_outcomes.py FAILED_OUTCOMES: the
+// dashboard counts by that list, so Call history must too. "timeout" and
+// "unavailable" are not written by today's server; older calls may carry
+// them, and they must never start to read as answered.
 const FAILED_CALL_OUTCOMES = new Set([
-    "busy",
-    "failed",
     "no_answer",
+    "busy",
     "rejected",
+    "unreachable",
+    "network_failure",
+    "failed",
+    "cancelled",
+    "voicemail",
     "timeout",
     "unavailable",
 ]);
@@ -95,14 +103,19 @@ const CONNECTED_CALL_OUTCOMES = new Set([
 export function classifyCall(call: Pick<Call, "status" | "outcome">): { answered: boolean; failed: boolean } {
     const status = call.status.trim().toLowerCase();
     const outcome = call.outcome?.trim().toLowerCase() ?? "";
-    const failed =
-        ["busy", "failed", "no_answer"].includes(status) ||
-        FAILED_CALL_OUTCOMES.has(outcome);
-    // A finished call ends with status "ended" and carries the result in
-    // outcome (2026-09-28: every answered call read "0 answered" because only
-    // the status was checked).
+    // The server writes status "completed" for EVERY finished call and puts the
+    // truth in outcome (call_service.py), so outcome decides when present and
+    // status is only the fallback for a call that has none.
+    if (outcome) {
+        const failedByOutcome = FAILED_CALL_OUTCOMES.has(outcome);
+        return {
+            answered: !failedByOutcome && (CONNECTED_CALL_OUTCOMES.has(outcome) || ["answered", "completed"].includes(status)),
+            failed: failedByOutcome || ["busy", "failed", "no_answer"].includes(status),
+        };
+    }
+    const failed = ["busy", "failed", "no_answer"].includes(status);
     return {
-        answered: !failed && (["answered", "completed"].includes(status) || CONNECTED_CALL_OUTCOMES.has(outcome)),
+        answered: !failed && ["answered", "completed"].includes(status),
         failed,
     };
 }
@@ -188,7 +201,7 @@ export function inferCallLeadType(
     const verdict = call.lead_outcome?.split("|")[0].trim().toLowerCase() ?? "";
     const outcome = call.outcome?.trim().toLowerCase() ?? "";
     const status = call.status.trim().toLowerCase();
-    const coldResults = ["failed", "no_answer", "busy", "rejected", "unavailable"];
+    const coldResults = ["failed", "no_answer", "busy", "rejected", "unavailable", "unreachable", "network_failure", "cancelled", "voicemail"];
 
     if (verdict.startsWith("callback")) return "follow_up";
     if (verdict.startsWith("qualified") || outcome === "goal_achieved") return "hot";

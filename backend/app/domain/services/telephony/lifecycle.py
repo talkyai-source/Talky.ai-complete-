@@ -669,10 +669,14 @@ def _collect_expired_sessions(
         if call_session is None:
             continue
         transfer_connected = bool(getattr(vs, "_transfer_connected", False))
+        # A transfer that is still ringing (marker valid for 150 s at most): the
+        # caps and the stale check wait; they apply again on the next sweep.
+        from app.domain.services.voice_pipeline.action_execution import transfer_in_progress
+        ringing = transfer_in_progress(vs, call_session)
         # Once a supervised human target answers, the AI/media session is
         # intentionally quiesced and therefore looks inactive. The pinned
         # absolute deadline remains authoritative for the human bridge.
-        if not transfer_connected and call_session.is_stale(inactivity_timeout_s):
+        if not transfer_connected and not ringing and call_session.is_stale(inactivity_timeout_s):
             stale.append(call_id)
             continue
         duration = call_session.get_duration_seconds()
@@ -683,7 +687,7 @@ def _collect_expired_sessions(
         if not isinstance(session_soft_cap, (int, float)) or session_soft_cap < 0:
             session_soft_cap = soft_cap_s
         # Absolute hard ceiling — end no matter what.
-        if duration > session_max_duration:
+        if duration > session_max_duration and not ringing:
             overlong.append(call_id)
             continue
         # Prepaid balance (outbound only): binds even while the agent is closing.
@@ -694,6 +698,7 @@ def _collect_expired_sessions(
         # Soft cap (5 min): wrap up unless the agent is actively closing.
         if (
             not transfer_connected
+            and not ringing
             and session_soft_cap
             and duration > session_soft_cap
             and not _session_is_closing(vs)
@@ -820,9 +825,19 @@ async def _apply_account_call_cap(voice_session) -> None:
         logger.warning("outbound_account_call_cap_unavailable call=%s err=%s",
                        short_id, type(exc).__name__)
         return
+    if isinstance(account_max, int) and not isinstance(account_max, bool) and account_max > 0:
+        # Remembered whatever its size: a transferred call may run longer than
+        # the platform cap, but never longer than the account's own maximum.
+        voice_session._account_call_cap_seconds = account_max
     if isinstance(account_max, int) and 0 < account_max < _SESSION_MAX_DURATION_S:
         voice_session._max_call_duration_seconds = account_max
         logger.info("outbound_account_call_cap call=%s max_s=%d", short_id, account_max)
+    elif isinstance(account_max, int) and account_max > 0 and getattr(
+        voice_session, "_transfer_connected", False
+    ):
+        _now_limit = getattr(voice_session, "_max_call_duration_seconds", None)
+        if isinstance(_now_limit, (int, float)) and _now_limit > account_max:
+            voice_session._max_call_duration_seconds = account_max
 
 
 def _loop_now() -> float:
@@ -3721,10 +3736,11 @@ async def _heartbeat_active_inbound_admission(
                 # cluster heartbeat and immediately destroys any buffered
                 # caller/agent audio when it is closed.
                 from app.domain.services.telephony.modes.caller_first import (
-                    _live_inbound_recording_enabled,
+                    _live_inbound_recording_state,
                 )
 
-                if not await _live_inbound_recording_enabled(container.db_pool):
+                # Only a definite "off" clears buffers; an unreadable switch must not.
+                if (await _live_inbound_recording_state(container.db_pool)) is False:
                     disable_live_inbound_recordings(pbx_call_id)
                 # Refresh immediately when the post-answer callback starts,
                 # then at a fixed cadence.  Sleeping first left the call with
@@ -5329,7 +5345,11 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
                 "transfer_call_limit_kept call=%s max_s=%d", call_id[:12], int(_current),
             )
         else:
-            voice_session._max_call_duration_seconds = max(int(_current), transfer_max_duration_seconds())
+            _new_limit = max(int(_current), transfer_max_duration_seconds())
+            _account_cap = getattr(voice_session, "_account_call_cap_seconds", None)
+            if isinstance(_account_cap, int) and not isinstance(_account_cap, bool) and _account_cap > 0:
+                _new_limit = min(_new_limit, _account_cap)  # the account's own maximum stands
+            voice_session._max_call_duration_seconds = _new_limit
             logger.info(
                 "transfer_call_limit_raised call=%s max_s=%d",
                 call_id[:12],
@@ -5392,7 +5412,22 @@ async def _on_transfer_connected(call_id: str, target_call_id: str) -> None:
                 transfer_recording_name=_rec_name,
             )
             voice_session._recording_saved_at_transfer = True
-            voice_session._recording_awaiting_transfer_part = True
+            # Awaiting only when an entry was really parked or the phone
+            # system is recording; otherwise the end of the call has nothing
+            # to join and must not report a missing entry.
+            _parked = bool(_rec_name)
+            if not _parked:
+                try:
+                    from app.domain.services.recording_spool import list_entries
+
+                    _sid = str(getattr(voice_session, "call_id", ""))
+                    _parked = any(
+                        e.awaiting == "transfer_part" and e.session_call_id == _sid
+                        for e in await asyncio.to_thread(list_entries)
+                    )
+                except Exception:  # noqa: BLE001 - cannot tell: keep the old behaviour
+                    _parked = True
+            voice_session._recording_awaiting_transfer_part = _parked
     except Exception as exc:
         logger.warning("Transfer recording save failed for %s: %s", call_id[:12], exc)
 
@@ -5434,7 +5469,8 @@ async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> No
             name_fn = getattr(adapter, "transfer_recording_name", None)
             name = name_fn(call_id) if callable(name_fn) else None
             if not name:
-                logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
+                if getattr(voice_session, "_recording_awaiting_transfer_part", False):
+                    logger.error("transfer_recording_entry_missing call=%s", call_id[:12])
                 return
             if _is_true_inbound_session(voice_session):
                 # Inbound: the agent's part was discarded at the handover because
@@ -5459,6 +5495,11 @@ async def _finalize_transfer_recording_at_end(voice_session, call_id: str) -> No
                 awaiting_transfer=True, transfer_recording_name=name,
             )
             await asyncio.to_thread(write_entry, entry, b"")
+            # No parked entry at the handover: the agent's part may already be
+            # saved (a failed pending write), so Asterisk's copy is kept.
+            from app.domain.services.telephony.transfer_recording import keep_stored_copy
+
+            keep_stored_copy(entry.key)
         task = asyncio.create_task(
             finalize_transfer_entry(entry, adapter=adapter, call_ended=True),
             name=f"transfer-recording-finalize:{call_id[:12]}",
@@ -6140,6 +6181,29 @@ async def _on_call_ended(
         # lead DNC. Runs once, at teardown, and never blocks the rest of it.
         try:
             _cs = getattr(voice_session, "call_session", None)
+            # Words said just before the hang-up that never got a turn (a
+            # speech-to-text partial, or a queued turn): same gate and
+            # detector as turn_ender._keep_unprocessed_opt_out.
+            try:
+                from app.domain.services.voice_pipeline.identity_disposition import contains_dnc as _contains_dnc
+
+                if (
+                    _cs is not None
+                    and getattr(_cs, "campaign_id", None) not in ("ask-ai", "voice-demo")
+                ):
+                    _queued_turn = getattr(_cs, "_queued_next_turn", None)
+                    _queued_turn = _queued_turn if isinstance(_queued_turn, dict) else {}
+                    for _words in (
+                        getattr(_cs, "current_user_input", None),
+                        _queued_turn.get("text"),
+                        _queued_turn.get("latest_text"),
+                    ):
+                        if _words and _contains_dnc(str(_words)):
+                            _cs._caller_opted_out = True
+                            logger.info("teardown_unprocessed_opt_out_kept call_id=%s", call_id[:12])
+                            break
+            except Exception:  # noqa: BLE001 - a compliance note must never break teardown
+                pass
             opted_out = bool(
                 getattr(voice_session, "_caller_opted_out", False)
                 or getattr(_cs, "_caller_opted_out", False)

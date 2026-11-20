@@ -1308,6 +1308,7 @@ class CallGuard:
                       AND created_at > NOW() - INTERVAL '1 hour'
                       AND severity IN ('high', 'critical')
                       AND resolved_at IS NULL
+                      AND COALESCE(action_details->>'source', '') <> 'abuse_observer'
                     """,
                     tenant_id,
                 )

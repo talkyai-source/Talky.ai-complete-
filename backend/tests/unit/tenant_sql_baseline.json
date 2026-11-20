@@ -53,7 +53,7 @@
       "id": "01473b8b144b9d589e01db20d3cac424c1993543295b61f333d9071840cf7c6b",
       "file": "app/domain/services/telephony/modes/caller_first.py",
       "function": "_set_inbound_consent_status",
-      "line": 134,
+      "line": 144,
       "method": "execute",
       "tables": [
         "calls"
@@ -176,7 +176,7 @@
       "id": "05a3d5dc18435b352986e9141fe1c4f749678c1691ceca3fcb2d267c7764bcd8",
       "file": "app/api/v1/endpoints/auth/password.py",
       "function": "change_password",
-      "line": 102,
+      "line": 108,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -192,7 +192,7 @@
       "id": "0604b70082ebf81ba0ca3f17823d663c32dd1d942c2de77c97ad55766cb2eabb",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.cancel_reassignment",
-      "line": 3216,
+      "line": 3291,
       "method": "fetchrow",
       "tables": [
         "inbound_reassignment_requests"
@@ -224,7 +224,7 @@
       "id": "0679423f712f009418366a2a11ea15c8af8dfce12af69d198c980b8b743df029",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_overview",
-      "line": 2585,
+      "line": 2660,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -336,7 +336,7 @@
       "id": "09271bb5fb58b7115b19faf06b2ffe892c8e258b11c3452685b769fa6fe425ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2735,
+      "line": 2840,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -1003,7 +1003,7 @@
       "id": "14153fdce5931db54ab17b1384b55cb2d5e3e56b3aabd5704b208b60e0bc5cd2",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 2915,
+      "line": 2990,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -1049,7 +1049,7 @@
       "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2515,
+      "line": 2520,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -1098,7 +1098,7 @@
       "id": "1932d77adb490c8554c84be0f3a7d8556dc3795ca145191a722c44b3c9ad77d1",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2656,
+      "line": 2761,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -1114,7 +1114,7 @@
       "id": "1aad134fdaa0489f6ab03fa48987f0df94f34a99b7e28e37d70e4e5c0c09d8a1",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_reconcile_account_call_authority",
-      "line": 231,
+      "line": 233,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -1177,7 +1177,7 @@
       "id": "1c2739c3ca13c44abcdc08da7a26ac36bc569a5bc22845a7bb4ecea86dbd3e9c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._claim_operation",
-      "line": 421,
+      "line": 439,
       "method": "fetchrow",
       "tables": [
         "inbound_operation_idempotency"
@@ -1209,7 +1209,7 @@
       "id": "1cd4a9aedd87cc7412e3caffd4dab05b6f11846d531111f6f79094b4313f6dcb",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3431,
+      "line": 3506,
       "method": "fetchrow",
       "tables": [
         "tenant_phone_numbers"
@@ -1225,7 +1225,7 @@
       "id": "1d5ab2815c22adf520f8e4ce4e73f408efeb048d9172e1f096d48b08f019777d",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 906,
+      "line": 939,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1306,7 +1306,7 @@
       "id": "222517c2c2dc523e05f7836988b99255abba2c34d588594b57c2295b1601466c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.did_availability",
-      "line": 2181,
+      "line": 2252,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -1400,7 +1400,7 @@
       "id": "27b07b700ce521496794bc10f1e1b14b6f6021d849e1ea31ee9882b7119518c0",
       "file": "app/domain/services/voice_pipeline/action_execution.py",
       "function": "_context",
-      "line": 91,
+      "line": 256,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -1463,10 +1463,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "46761210656bafc32f62690ceea11f2e202aa0599f74676fed756f3645017f68",
+      "id": "0c556b71bf9371edef7fdb991586040ca6350e552055e1bc646b80bd149cacf9",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_campaign_counters_pooled",
-      "line": 1109,
+      "line": 1124,
       "method": "execute",
       "tables": [
         "campaigns"
@@ -1530,7 +1530,7 @@
       "id": "2bd0fa4b4fe21312723bb7be23911838cac881906ada2aa7c051e80159ed8819",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
-      "line": 2798,
+      "line": 2873,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -1546,7 +1546,7 @@
       "id": "2bf1b11b64a94081c66d0219ef23b3cd6132f287c41670b479ef609fb687e36e",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._mark_retry_enqueued",
-      "line": 849,
+      "line": 882,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1596,7 +1596,7 @@
       "id": "2e650443cfab95741485c35856c6716e1b12ad210ee9c7e1ab9c9633f3c39b47",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_dispute",
-      "line": 510,
+      "line": 537,
       "method": "fetchrow",
       "tables": [
         "invoices"
@@ -1660,7 +1660,7 @@
       "id": "30f43b2bcb1d0980e26d85305e0e3a46397ebe3a0be9d478d4f1aaa854e5003b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_campaign_calling_config",
-      "line": 2175,
+      "line": 2278,
       "method": "fetchval",
       "tables": [
         "campaigns"
@@ -1676,7 +1676,7 @@
       "id": "31ac452775c17ab9d48d7403188a959d2999b93a220081a0f0b7a1b740700fe9",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_job_completion_pooled",
-      "line": 1304,
+      "line": 1338,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -1693,7 +1693,7 @@
       "id": "346092b23a80d6469a1ab9b43475c1ee73e1225083885e8840c514a2adb190fe",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_invoice_for_adjustment",
-      "line": 458,
+      "line": 477,
       "method": "fetchval",
       "tables": [
         "invoices"
@@ -1774,7 +1774,7 @@
       "id": "3703ed4d5cef73e13a0043ab6270e6c5415d7574280d93aa94b425943bb3964b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2630,
+      "line": 2735,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1806,7 +1806,7 @@
       "id": "38a6fb4a35cdc48dec6abfada9c3f90bd836338cf637408a84af454454ad044b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_campaign",
-      "line": 1455,
+      "line": 1518,
       "method": "fetchval",
       "tables": [
         "dialer_jobs"
@@ -1964,7 +1964,7 @@
       "id": "3e6ef6e35bb3ddaff479f5981bd4d5314b0d5453883bcce13727f73e3aeaddd8",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_on_call_ended",
-      "line": 5884,
+      "line": 6290,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2028,7 +2028,7 @@
       "id": "3ed0ba96e146cf161d2f5eb7f69cc0d30701f5a994bbf837f452f0745097ea24",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_binding",
-      "line": 114,
+      "line": 117,
       "method": "fetchrow",
       "tables": [
         "billing_checkout_attempts"
@@ -2242,7 +2242,7 @@
       "id": "447f419ce95a047f476f12f9b672ec40b21478dc7353f432dfe9b5aaa6adb98d",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.cancel_reassignment",
-      "line": 3202,
+      "line": 3277,
       "method": "fetchrow",
       "tables": [
         "inbound_reassignment_requests"
@@ -2387,7 +2387,7 @@
       "id": "487e1b5192d85f5114fdefaa5f12a6420d06d9830b69191efe80a9d8f607c62c",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_last_called",
-      "line": 2364,
+      "line": 2467,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2420,7 +2420,7 @@
       "id": "4a94f09e5821c9c8770a4dd39e2e3d3586c0afbb91a35afe7ae35cf434508449",
       "file": "app/domain/services/call_feedback_service.py",
       "function": "CallFeedbackRepository.replace",
-      "line": 430,
+      "line": 434,
       "method": "fetchrow",
       "tables": [
         "call_feedback"
@@ -2436,7 +2436,7 @@
       "id": "4ade25424bc1a3e0f75739755e72548af3e3c7f946f7b1b6f89e46b1357a8945",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._campaign_inflight_calls",
-      "line": 2229,
+      "line": 2332,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -2484,7 +2484,7 @@
       "id": "4c2e40aa49b4a3a7db4d461bc46a601eeacfc2709174ae62cda5df94c0f322f3",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_find_inbound_admission_by_provider_identity",
-      "line": 2942,
+      "line": 3190,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2517,7 +2517,7 @@
       "id": "4d4343a00aee017677b942dff0380f14f671175a0716ed26e740ef89f05e23d8",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 923,
+      "line": 956,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2547,7 +2547,7 @@
       "id": "4de5a7a64dde37fcf587bda9ac7044b26ccec0d391e795891d721bfc81b2cb6c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3280,
+      "line": 3355,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -2580,7 +2580,7 @@
       "id": "4f16a5f0491bc94c8268d981399dc43b9b72f7ba894a992dec6720380d264d8d",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
-      "line": 2749,
+      "line": 2824,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -2612,7 +2612,7 @@
       "id": "5ff82a66c75ad8e74690a66ddc68b19b8bb39c411ef1c295536bb426dd9d308f",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.sync_subscription",
-      "line": 488,
+      "line": 490,
       "method": "execute",
       "tables": [
         "subscriptions"
@@ -2738,7 +2738,7 @@
       "id": "55946d61b857a13071f79980232feb2e3293c6bcf1e05fa996c177063185be9d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_timezone",
-      "line": 2390,
+      "line": 2493,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2800,7 +2800,7 @@
       "id": "5826b98eaeebc8e404b42bb92566f26b34993cc0fb7f6927474c9c6e2a4f1a39",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3543,
+      "line": 3618,
       "method": "fetchrow",
       "tables": [
         "inbound_reassignment_requests"
@@ -2880,7 +2880,7 @@
       "id": "5b72906c4e0161bff0a58d86965d0dba4777128c6fc316471486fcfbe93ed366",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
-      "line": 2736,
+      "line": 2811,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -2896,7 +2896,7 @@
       "id": "5cf4e75f69035e7650ba72ac3873d46f278bcc30cddb0beabce159561b6eed0b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
-      "line": 2776,
+      "line": 2851,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -2976,7 +2976,7 @@
       "id": "5f9b82e40498a7df8992ba5c19b12602225d936901f5f7b9d10da9ab679dd29e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._load_existing_call_intent",
-      "line": 2531,
+      "line": 2636,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -3021,7 +3021,7 @@
       "id": "614582678ad5c141315b223e5f0df717ef9beaf8c0ba6281d72681d7db013344",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 2941,
+      "line": 3016,
       "method": "fetchval",
       "tables": [
         "inbound_reassignment_requests"
@@ -3037,7 +3037,7 @@
       "id": "d20a8fbbd1d8afcf1667f7e6e042e8c9832f0636f8eb1c0609b1cc62bcda6c8c",
       "file": "app/domain/services/telephony/recording.py",
       "function": "_process_locked",
-      "line": 489,
+      "line": 493,
       "method": "execute",
       "tables": [
         "calls"
@@ -3180,7 +3180,7 @@
       "id": "65d9eaa45273c5abab4370f958818d774daf78bd288b3021a7b3b0229b9bc77f",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._ensure_default_concurrency_policy",
-      "line": 1329,
+      "line": 1384,
       "method": "fetchrow",
       "tables": [
         "tenant_telephony_concurrency_policies"
@@ -3196,7 +3196,7 @@
       "id": "66613a7831cf0d84f0ce7b8535c12d393cdf2c2ea8c1ca7e7d1edd0ea59283fb",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_route",
-      "line": 1247,
+      "line": 1257,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -3213,7 +3213,7 @@
       "id": "666867c908655ad5373f714fe03d4cd643deb6c78a73755002cd9122f9fa54f7",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3298,
+      "line": 3373,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -3291,7 +3291,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6782908b6555c71139dd57959454df92b502b59f04fc5dd6333162bd4208cec1",
+      "id": "a7943221d795b7602165c28320c96d349bf05876f21529fbc310b74e89002c27",
       "file": "app/domain/services/topup_usage.py",
       "function": "_closed_windows",
       "line": 85,
@@ -3358,7 +3358,7 @@
       "id": "6a1927db31205bbbfd924bf9fd07e07c86f358da0b7ce05d13a4c6f8a6071163",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3289,
+      "line": 3364,
       "method": "fetchrow",
       "tables": [
         "inbound_campaign_configs"
@@ -3660,7 +3660,7 @@
       "id": "72d603e091a64b0a515aeb04b04d6e244b776dd861a1ef0d012d9f21a7cd1476",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_load_termination_pending_candidates",
-      "line": 1759,
+      "line": 1975,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -3788,7 +3788,7 @@
       "id": "76d4dee95b3d44e3d6914bda8b22d69785e511eb2bea1cb45a74a0999fa61883",
       "file": "app/domain/services/voice_pipeline/action_execution.py",
       "function": "_context",
-      "line": 107,
+      "line": 272,
       "method": "fetchval",
       "tables": [
         "connector_accounts",
@@ -3901,7 +3901,7 @@
       "id": "782bd5a3321c3ab0dfc79d78ab7634c187ba9191f87e698e2cb89360e76987b5",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_active_tenant_ids",
-      "line": 1920,
+      "line": 1987,
       "method": "fetch",
       "tables": [
         "campaigns"
@@ -3933,7 +3933,7 @@
       "id": "785683dc5454ee2e80efd1c189a940d8df7dd6b3c4bdf1143bcd8a713680f66c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_overview",
-      "line": 2575,
+      "line": 2650,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -3949,7 +3949,7 @@
       "id": "79741cea5fe6d499ac8691b29b27295b1cef1245a1c4a190d76d8aaaf1d37b4f",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.get_reassignment_request",
-      "line": 3137,
+      "line": 3212,
       "method": "fetchrow",
       "tables": [
         "inbound_reassignment_requests"
@@ -4000,7 +4000,7 @@
       "id": "7d2d73e8ca4a64a60a87b9efb3e5aa8e02cf866e1bedc0ab4d0f3dd66abc29a2",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
-      "line": 296,
+      "line": 306,
       "method": "execute",
       "tables": [
         "invoices"
@@ -4013,10 +4013,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "69b9308029b0fc3cb10b00895449d108d99ca41bd30dde3149edca715e10c50a",
+      "id": "b043c03948d61581c1376fc81c839938300c9d877a4c538416180a0517774114",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 3950,
+      "line": 3960,
       "method": "execute",
       "tables": [
         "leads"
@@ -4032,7 +4032,7 @@
       "id": "7d57110ee8cf98f1615cd92b7116bf0fc15e16a0ef33b2e55c0dc0c16f94187c",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
-      "line": 269,
+      "line": 279,
       "method": "fetchrow",
       "tables": [
         "invoices"
@@ -4048,7 +4048,7 @@
       "id": "7d606d341b03cdb36053e635fec24df9629a04fc650272a95deabd852e693292",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_checkout",
-      "line": 380,
+      "line": 399,
       "method": "fetchrow",
       "tables": [
         "billing_checkout_attempts"
@@ -4218,7 +4218,7 @@
       "id": "846b0c6d66c0c9f4ec6d237aca4753fc00004d818c2311d5408e2d69b7b2da23",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._attempt_settled_failed_unanswered",
-      "line": 3277,
+      "line": 3412,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -4251,7 +4251,7 @@
       "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_from_number",
-      "line": 1208,
+      "line": 1218,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -4310,10 +4310,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "88fff2d423cd2204acaaec76cf25db610387b0b8bb32be6b13a8c1fbaf1db21e",
+      "id": "a5a79d3f66685843aa2375bede64b2b624a91f11a42ffeb103aac07452e34f17",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_list_campaigns",
-      "line": 2680,
+      "line": 2755,
       "method": "fetch",
       "tables": [
         "campaigns",
@@ -4330,7 +4330,7 @@
       "id": "890a5620a348ef42b7b97def054ae1afa214810b226ce30fc8d799c686dd7dcf",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts._claim",
-      "line": 145,
+      "line": 147,
       "method": "fetchval",
       "tables": [
         "subscriptions"
@@ -4346,7 +4346,7 @@
       "id": "89e4e442bd5ec0dacc64ccb79c8e6633e64dd7170d62d62b91659a310e38027b",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._active_caller_opt_out_pooled",
-      "line": 1002,
+      "line": 1035,
       "method": "fetchval",
       "tables": [
         "dnc_entries"
@@ -4525,7 +4525,7 @@
       "id": "9131fbc87bb79211a30f74ac8e9e70ba8424281c348df2b4a1aeed4980b5395d",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_campaign",
-      "line": 1466,
+      "line": 1529,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -4554,7 +4554,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "916a97c5f38c881bd66b63a7dfdfd68ba3df559f8e40cad77948f6af9694f75b",
+      "id": "089f21a9f8d2eb6ba2dcb312366c452adc2c8cf05b643e2bb9bfe53cf941338b",
       "file": "app/domain/services/topup_usage.py",
       "function": "_closed_windows",
       "line": 76,
@@ -4584,26 +4584,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "927d50d92ffff802d2bd29a548c24d4ec5aeb240272193eb1807e82298614f4d",
-      "file": "app/api/v1/endpoints/alerts.py",
-      "function": "ack_alert",
-      "line": 226,
-      "method": "execute",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "UPDATE security_events SET resolution_notes = COALESCE(resolution_notes || E'\\n', '') || $2 WHERE event_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "936d90a0d1200896238d1c58624cd825c4b88fd86a0251f0408de697687e89ab",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3519,
+      "line": 3594,
       "method": "execute",
       "tables": [
         "tenant_phone_numbers"
@@ -4677,22 +4661,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "94f7db0158ff0b80639b0712e161f5e317c337e8ae4a247f2c46c868d9bd1271",
-      "file": "app/api/v1/endpoints/alerts.py",
-      "function": "ack_alert",
-      "line": 233,
-      "method": "fetchrow",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "SELECT event_id, created_at, severity, status, title, description, evidence, assigned_to, resolved_at, resolution_notes, alert_type FROM security_events WHERE event_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4796,7 +4764,7 @@
       "id": "9b4478e1aad60795723c0564df62cea579b50143170d51c55caf13503b26ed7b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_campaign",
-      "line": 1445,
+      "line": 1508,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -4828,7 +4796,7 @@
       "id": "9ba21c7910549b9e4ce262c3b509f554eddb275cb7f5de1413a9ce300e594116",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 545,
+      "line": 546,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -4923,7 +4891,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9ec2a8e68baefd5f8fa029eba902fa7da772db1c7b964fd1b9713d5434a54a7d",
+      "id": "163b24c89bb85ab340206f43efc18cc0de02ef3d14a395aac2516c2323be6274",
       "file": "app/domain/services/topup_usage.py",
       "function": "_closed_windows",
       "line": 67,
@@ -4940,7 +4908,7 @@
       "id": "9f491d87722f6bfca3cba0beb7b84160e09be4431aad130e5a7f80bf6637b8b4",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 2927,
+      "line": 3002,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -5004,7 +4972,7 @@
       "id": "a09fe380a8c037f063d04db4b93d374077100b30310c70bdf72750113dcf999c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3265,
+      "line": 3340,
       "method": "fetchrow",
       "tables": [
         "inbound_reassignment_requests"
@@ -5066,7 +5034,7 @@
       "id": "a1b9751685d701a3e78c01ee999fca8012c790e4b3a0d8d2f72fab2c3e59f3c4",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2681,
+      "line": 2786,
       "method": "execute",
       "tables": [
         "call_events"
@@ -5098,7 +5066,7 @@
       "id": "a345e4856e73f82534509aff07e61ed4c8d684aced80686ec43b5d115f870e09",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._bind_call_intent",
-      "line": 3420,
+      "line": 3555,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -5146,7 +5114,7 @@
       "id": "a45d41ae1a8c0f999d334206bba6480dba7661a442412b8ca7f7b27f49a12299",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3534,
+      "line": 3545,
       "method": "execute",
       "tables": [
         "inbound_campaign_configs"
@@ -5331,7 +5299,7 @@
       "id": "ab9a9838179cc1b623a84db222d32d611a65695ed4769d5bf47af8ad6f0ac8dd",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_hydrate_orphan_recovery_context",
-      "line": 1494,
+      "line": 1710,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -5364,7 +5332,7 @@
       "id": "ac6231251db0372d63d4a068961bae51a9efe7722a330d7d8aeb69c182f344f6",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._claim_operation",
-      "line": 391,
+      "line": 409,
       "method": "fetchrow",
       "tables": [
         "inbound_operation_idempotency"
@@ -5649,7 +5617,7 @@
       "id": "337d0ab9e7a8aa83d7ee6ca1a52f8d0e54a04b0ee2b6964e6593cef109166cf3",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_subscription",
-      "line": 206,
+      "line": 209,
       "method": "execute",
       "tables": [
         "subscriptions"
@@ -5665,7 +5633,7 @@
       "id": "b8f2d2033fb0771fe3e2a60b9426e144fee01a076f6040bb80c39eee1b10747a",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._assert_did_free",
-      "line": 1230,
+      "line": 1285,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -5697,7 +5665,7 @@
       "id": "ba35dc9116ca0bb451053e895c453505522443ec9b30dbe7cc47347da0aafbe8",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_assignment_quarantine",
-      "line": 2743,
+      "line": 2818,
       "method": "fetchrow",
       "tables": [
         "inbound_campaign_configs"
@@ -5935,7 +5903,7 @@
       "id": "c1fd75a4915b6aabe45433890d55d5804a3573f7dafe9ecf7081e18bc709142e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2704,
+      "line": 2809,
       "method": "execute",
       "tables": [
         "call_events"
@@ -5998,10 +5966,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c3e85b181ba0eb761a0e0c6b81b281986d62ba2f1b86153a4213388c3cd74a7b",
+      "id": "387d75314048421fee1867fc3a9bb0d537aa05ca653f5437920ac4f0d1bd15b0",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_lifecycle",
-      "line": 2099,
+      "line": 2170,
       "method": "fetchrow",
       "tables": [
         "inbound_campaign_configs"
@@ -6017,7 +5985,7 @@
       "id": "c3f29aafc8d5efdd2166be4ab357aed09d791e3971826403d32f8b5858d80732",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.list_reassignment_requests",
-      "line": 3155,
+      "line": 3230,
       "method": "fetch",
       "tables": [
         "inbound_reassignment_requests"
@@ -6094,10 +6062,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c5ac7fd4b341b36abb8f2229e1b5e78fe64d96265062e320abefdcb4b3223d54",
+      "id": "cf504c02c60ad9b524955ae7c466e01244638a9d117018846476b955920b40ad",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._load_bundle",
-      "line": 533,
+      "line": 551,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -6107,15 +6075,16 @@
         "tenant_ai_configs",
         "tenant_inbound_controls",
         "tenant_phone_numbers",
+        "tenant_recording_policy",
         "tenant_sip_trunks",
         "tenant_telephony_concurrency_policies"
       ],
-      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 {branch}",
+      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, ( SELECT trp.default_consent_mode FROM tenant_recording_policy trp WHERE trp.tenant_id = cfg.tenant_id ) AS tenant_recording_mode, EXISTS ( SELECT 1 FROM tenant_recording_policy trp2 WHERE trp2.tenant_id = cfg.tenant_id ) AS tenant_recording_policy_saved, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 {branch}",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Existing unresolved debt; tenant-scoping review required. 20 Nov 2026: the bundle also reads the tenant's recording policy (mode, and whether one is saved); both sub-selects bind tenant_recording_policy.tenant_id to cfg.tenant_id."
     },
     {
       "id": "c5e7e146444459936d91b01f087346f3f96395c8f246530fc51d5155eefd5894",
@@ -6151,7 +6120,7 @@
       "id": "c63e382f00419a00d46b697d4a99d87f1c9725d6e2691dfb597d6b203ac4e36c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._store_operation",
-      "line": 460,
+      "line": 478,
       "method": "execute",
       "tables": [
         "inbound_operation_idempotency"
@@ -6167,7 +6136,7 @@
       "id": "c6ae4e73e2a0aa32abcbbc76cd06c38b275a7642a2821025e0dd1d5278a40fe4",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._assert_extension_free",
-      "line": 1298,
+      "line": 1353,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -6229,7 +6198,7 @@
       "id": "c855225e777ff571d12e742627dc53c7f4fe8a1efc06e06252f16836975e941a",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 3007,
+      "line": 3082,
       "method": "fetchval",
       "tables": [
         "inbound_did_assignments"
@@ -6390,7 +6359,7 @@
       "id": "cb71667fbab5e32bb9c82878417f97d0ab09d18c62e3492ec194cd08f093a628",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 610,
+      "line": 611,
       "method": "execute",
       "tables": [
         "calls"
@@ -6419,10 +6388,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cbdc52252e8a8cd6bf0cfd55021f3972a55e38bfa09f86c9b63f163d1e6915f4",
+      "id": "1d91bb9d370d18c03e8c733b0472b632ea34c79073db77ad4617895ff7ad9957",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.list_campaigns",
-      "line": 1136,
+      "line": 1191,
       "method": "fetch",
       "tables": [
         "calls",
@@ -6432,21 +6401,22 @@
         "tenant_ai_configs",
         "tenant_inbound_controls",
         "tenant_phone_numbers",
+        "tenant_recording_policy",
         "tenant_sip_trunks",
         "tenant_telephony_concurrency_policies"
       ],
-      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 WHERE cfg.tenant_id = $1{IfExp(test=Name(id='include_archived', ctx=Load()), body=Constant(value=''), orelse=Constant(value=\" AND cfg.status <> 'archived'\"))} ORDER BY cfg.updated_at DESC",
+      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, ( SELECT trp.default_consent_mode FROM tenant_recording_policy trp WHERE trp.tenant_id = cfg.tenant_id ) AS tenant_recording_mode, EXISTS ( SELECT 1 FROM tenant_recording_policy trp2 WHERE trp2.tenant_id = cfg.tenant_id ) AS tenant_recording_policy_saved, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 WHERE cfg.tenant_id = $1{IfExp(test=Name(id='include_archived', ctx=Load()), body=Constant(value=''), orelse=Constant(value=\" AND cfg.status <> 'archived'\"))} ORDER BY cfg.updated_at DESC",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Existing unresolved debt; tenant-scoping review required. 20 Nov 2026: the bundle also reads the tenant's recording policy (mode, and whether one is saved); both sub-selects bind tenant_recording_policy.tenant_id to cfg.tenant_id."
     },
     {
       "id": "cc1d074d33dd76aca6fa051a800a51219d39483404c014525f49d68a5626f857",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_binding",
-      "line": 106,
+      "line": 109,
       "method": "fetchrow",
       "tables": [
         "subscriptions"
@@ -6560,7 +6530,7 @@
       "id": "d12cdda081a6a96db6a044283dc9c60765ae88034c32ccefb38b0fd34e575f5b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
-      "line": 3374,
+      "line": 3449,
       "method": "fetchval",
       "tables": [
         "inbound_did_assignments"
@@ -6686,10 +6656,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "945097fffa503e422f9f9ce22e9c2ff2d308682d35c785b6b0ceb6950b108649",
+      "id": "c4a7637df99ce863f258e085af2094ea9c32c609a006faafdccef50eaaf922bb",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3636,
+      "line": 3646,
       "method": "execute",
       "tables": [
         "calls"
@@ -6730,10 +6700,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d7cd916d13d44e3180d8613c21fb3c2e83368116ff61a4b4adc472a46ade986e",
+      "id": "36bc6e9f572bbceed886445bfdea2d6aa754352c62db61ca129d1ff013a9554f",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_list_assignments",
-      "line": 2628,
+      "line": 2703,
       "method": "fetch",
       "tables": [
         "calls",
@@ -6743,15 +6713,16 @@
         "tenant_ai_configs",
         "tenant_inbound_controls",
         "tenant_phone_numbers",
+        "tenant_recording_policy",
         "tenant_sip_trunks",
         "tenant_telephony_concurrency_policies"
       ],
-      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='clauses', ctx=Load())], keywords=[])} ORDER BY a.updated_at DESC LIMIT 500",
+      "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, ( SELECT trp.default_consent_mode FROM tenant_recording_policy trp WHERE trp.tenant_id = cfg.tenant_id ) AS tenant_recording_mode, EXISTS ( SELECT 1 FROM tenant_recording_policy trp2 WHERE trp2.tenant_id = cfg.tenant_id ) AS tenant_recording_policy_saved, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='clauses', ctx=Load())], keywords=[])} ORDER BY a.updated_at DESC LIMIT 500",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Existing unresolved debt; tenant-scoping review required. 20 Nov 2026: the bundle also reads the tenant's recording policy (mode, and whether one is saved); both sub-selects bind tenant_recording_policy.tenant_id to cfg.tenant_id."
     },
     {
       "id": "d853fae6f3c20f331ec8d6701cb77c5cc7589941505664de65dbb44c6bb16893",
@@ -6819,7 +6790,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "dbdb7256ffd27d5ed7c172d7f926775ca113e8f9ea64bfe3a409a168772e9b68",
+      "id": "5e6451908724c663b4454414c4ffd072724095d1d25df59b974d8120060504e7",
       "file": "app/domain/services/topup_usage.py",
       "function": "_closed_windows",
       "line": 93,
@@ -7239,7 +7210,7 @@
       "id": "eeb4f9c7ac1cca87025a36962645c481db06bd52af1435e50c2b96b303bc8327",
       "file": "app/domain/services/call_feedback_service.py",
       "function": "CallFeedbackRepository.begin_initial_attempt",
-      "line": 477,
+      "line": 481,
       "method": "fetchrow",
       "tables": [
         "call_feedback"
@@ -7306,7 +7277,7 @@
       "id": "f04ca2e84e695bb9fcd5a0b8942bdc8be6dcd94ee09a0b639acc35f6d7fd8ea0",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_campaign",
-      "line": 1478,
+      "line": 1541,
       "method": "fetchval",
       "tables": [
         "contact_lists"
@@ -7371,7 +7342,7 @@
       "id": "f22d3e3a5b02630dfd92dcfe03eae5036949d1bd8590c19ecbb33baec84dd330",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 3024,
+      "line": 3099,
       "method": "fetchrow",
       "tables": [
         "inbound_did_assignments"
@@ -7387,7 +7358,7 @@
       "id": "f2fb661f044a2f5aa1b880c94774e69504dd6e947d4d5ce5605493f47850b856",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.get_runtime_capabilities",
-      "line": 2251,
+      "line": 2325,
       "method": "fetchval",
       "tables": [
         "inbound_campaign_configs"
@@ -7403,7 +7374,7 @@
       "id": "f314ccbcf229348fd598ef3b2f111cadc3f9356a02c7dc1fa7c54244013a89ba",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._lead_has_live_or_answered_call",
-      "line": 3898,
+      "line": 4035,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -7464,10 +7435,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "12d778f199a39f3af3497d30c278cc0f21bcdbeeed7f4ae0c8cb86a87c2d7a5a",
+      "id": "5b035e2f67f0085ebc8a8a918543f4b18d99cc8adb6b8927d0f592a5eb65f585",
       "file": "app/api/v1/endpoints/alerts.py",
       "function": "list_alerts",
-      "line": 184,
+      "line": 208,
       "method": "fetch",
       "tables": [],
       "sql": "{Call(func=Attribute(value=Constant(value='\\n'), attr='join', ctx=Load()), args=[Name(id='sql', ctx=Load())], keywords=[])}",
@@ -7529,7 +7500,7 @@
       "id": "f7ef4cb0578e0b49273e327599ff47fd3fc8bae2d01b8db2beedd217cdb20409",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 767,
+      "line": 800,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -7575,7 +7546,7 @@
       "id": "f8eb40dbb475337842ac9bb6d8665cc1a056fe6f1785c0530d451f35211931bf",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_rotate_deferred_termination_candidate",
-      "line": 1867,
+      "line": 2083,
       "method": "execute",
       "tables": [
         "calls"
@@ -7697,7 +7668,7 @@
       "id": "fe515def07cf978f5371eee347e771581fe01b053bd121f9131e817f5ea66a36",
       "file": "app/api/v1/endpoints/auth/password.py",
       "function": "change_password",
-      "line": 83,
+      "line": 89,
       "method": "fetchrow",
       "tables": [
         "user_profiles"
@@ -7748,7 +7719,7 @@
       "id": "ff4501907e5e16fb8e34e388022e2266d252c2ebc38102347953ea41e6fda608",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
-      "line": 2921,
+      "line": 2996,
       "method": "fetchrow",
       "tables": [
         "inbound_campaign_configs"
@@ -7833,7 +7804,7 @@
       "id": "05b0b41bbfeb09b51934b56cf91693d76c819ed1f3e453b833e2b5781e154b2d",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
-      "line": 125,
+      "line": 126,
       "method": "fetch",
       "tables": [
         "billing_webhook_notifications"
@@ -7843,7 +7814,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:125.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:126.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -8159,10 +8130,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "f96a5b74f4abdf6522971242edf5ef9847403209cd92fa8043c210958ee90ff4",
+      "id": "c31bebf68f237b04cddaa1a82465620be44e7309d20bd221439a1d2dc6ca2cbc",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4343,
+      "line": 4350,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8174,10 +8145,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "aa45d9ce9ec2cf68a292928245c016d9a6593abdef4e1b7717b9461031c3dc8a",
+      "id": "5bb9e72fdd025cb22f8b2e28e4721ef6c5d5118a6f4f015383dc228e01369c08",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5261,
+      "line": 5268,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8189,10 +8160,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "37fa303dd36ed7a39cbf6764d2a4c2f75189da6ad7838c4b11558e6774d1e702",
+      "id": "42c8f8f220b9a8b82a1f839a79d1b17da0f0effed6996524639d941f3095a43e",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3351,
+      "line": 3358,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8204,10 +8175,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "38e891374b3a2f549dd4399f9055cf3a3e15a55c33ae7484be4a6ff441717d94",
+      "id": "c455d5010cbf3e908ef42e96ae93943ab25c2a9aed6f990aa94f1169c93af542",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5434,
+      "line": 5441,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8219,10 +8190,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "93f7bdde843f390662d6bdfed197baff62f47b2bd6b020aac2736eace02d51af",
+      "id": "2f6c7169d282a849219627c158a94f441c742adc73b5f5d563a95431ee1d8d33",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3701,
+      "line": 3708,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8234,10 +8205,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "64d34608e5343e3c99590dd172b82a55d8988ccb1f55075da25623297094a23d",
+      "id": "056ceaee775ca8b8eb428caa0a6060dcc2166ae807516b978da316eb895a7bdd",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 6145,
+      "line": 6152,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8270,7 +8241,7 @@
       "id": "16bc7df9be6214a980c9cca96efb291c96013ca1ce390f93d3456128053410dc",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.authorize_retry",
-      "line": 227,
+      "line": 228,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -8280,7 +8251,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:227.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:228.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -8374,7 +8345,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3075,
+      "line": 3203,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8384,14 +8355,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3075.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3203.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3517,
+      "line": 3550,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8401,14 +8372,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3517.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3550.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3597,
+      "line": 3630,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8419,7 +8390,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3597.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3630.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -9151,7 +9122,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1366ef94b19a06c55ac3ec9b553e44923da6991a05554ea0de43b233be80a6d3",
+      "id": "b881d09350565564d26689fca979ed14615bcff972e40745df3648829c45c465",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1243,
@@ -9317,7 +9288,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "9b9417f0523cbf0a11233aa4c362302ab4816ce8ff7fff4ed94f99ed592bca65",
+      "id": "9455ce1d6df1f98d3594b3b3cb6f7713c757bf0215206f69a734ea31aa53a27c",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 793,
@@ -9454,7 +9425,7 @@
       "id": "4faddfc1ffe82d25a4f2adb64aeb12b997df7a04e55366b06ee508f4b4bb79ad",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 327,
+      "line": 371,
       "method": "execute",
       "tables": [
         "billing_webhook_notifications"
@@ -9464,7 +9435,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:327.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:371.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -9522,7 +9493,7 @@
       "id": "518cfda36a69f162e83729ae7c98b12a5cc675d885eea97eb1a1db9ffb6a8085",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.authorize_retry",
-      "line": 218,
+      "line": 219,
       "method": "fetchrow",
       "tables": [
         "processed_webhook_events"
@@ -9532,7 +9503,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:218.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:219.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -9589,7 +9560,7 @@
       "id": "5397fa2ec76ca061907685ef0d434f01df8caefd18e65997c11d85cef3834ab7",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.authorize_retry",
-      "line": 236,
+      "line": 237,
       "method": "execute",
       "tables": [
         "processed_webhook_events"
@@ -9599,7 +9570,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:236.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:237.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -9660,7 +9631,7 @@
       "id": "5a14ccff4ee66446d46d39d3827652454673b3a60148408f9cf08867257a7e27",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 312,
+      "line": 356,
       "method": "fetchrow",
       "tables": [
         "billing_webhook_notifications"
@@ -9670,7 +9641,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:312.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:356.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -9885,7 +9856,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "13417f3dda03f5d2ba73daebff27909e494b9b9c5a2dcc8922e1fcd1cd59d267",
+      "id": "e45b1c1c75b7f5a59b0184f09dbbdaf0a9853db825dfebc1b6595051402749c9",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1612,
@@ -9934,7 +9905,7 @@
       "category": "platform_public_intake"
     },
     {
-      "id": "248d74493df7b9487e9b8f2d36e4f718c89afb01256a1826e792311363decf63",
+      "id": "c61753e7ebe1884ac03acc5de198c4ceb2f1057e7dea57f85463aba1338ae57f",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_topup_checkout_session",
       "line": 270,
@@ -10165,7 +10136,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "02b6a591ba6ddcf9a952d185ae040a8b24f14b89f8d5519ae8aa84cb105346d0",
+      "id": "8311187126d0af7a401b27ab96140170ce20c3690753ee150c5cd9fc4dc453eb",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_or_get_customer",
       "line": 151,
@@ -10195,7 +10166,7 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "6a9f2e80c4af2a17d5064ea310584eb12099bec05c8a6acfb2408a5dafc38e94",
+      "id": "29e77dae2074a2acc2e8556cba8bd977ad639de208d2bb36cd3a34c52e9ca49f",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2332,
@@ -10317,7 +10288,7 @@
       "id": "79d8500997b271755212e72fd128468241ba34b1bc2a41dc2c24395d1211736c",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
-      "line": 152,
+      "line": 153,
       "method": "fetch",
       "tables": [
         "invoices"
@@ -10327,7 +10298,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:152.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:153.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -10366,7 +10337,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "dac60995565f177e6ac1ff570d388d641865ba81cd016a72e98e48e9a9b5d307",
+      "id": "105b2658b81b075c514e087c5c60d882b6ad3f7cc9db0b6f69a99ce86497916c",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1070,
@@ -10464,7 +10435,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "156732e8c0c0b292deeec8c9d1130a92e101f06a0b06263ec178338540f6adb1",
+      "id": "eec8e86680def948bb98c26a26ff1b0e13b00b0df8f06164723d953133d86261",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 2195,
@@ -10715,7 +10686,7 @@
       "id": "8ea4b7a88f764f08546b67a938345caccb0d110ded3e36d0d3aa11582e814fce",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.refresh_details",
-      "line": 277,
+      "line": 321,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -10725,14 +10696,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:277.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:321.",
       "category": "operator_billing_reconciliation"
     },
     {
-      "id": "0e7441e61b17a444451132530dcd38fd6f3855c44d7e0673d6fab24c12b3624b",
+      "id": "edacdf1539d66c760d9b85c38fdebac32a1ade581040c1ee75f0b5a2a7221119",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.cancel_subscription",
-      "line": 448,
+      "line": 451,
       "method": "_stripe_call",
       "tables": [],
       "sql": "update",
@@ -11360,7 +11331,7 @@
       "id": "b477c3463aee43cf44540ca634e823f2aab42edbeb4e09f514a347cefaad8b26",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
-      "line": 166,
+      "line": 167,
       "method": "fetch",
       "tables": [
         "billing_checkout_attempts"
@@ -11370,7 +11341,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:166.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:167.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -11445,7 +11416,7 @@
       "id": "b89f6a6101b666ea8ef2938af6b6a94ed20bff70260202a348404e18af819a54",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 320,
+      "line": 364,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -11455,7 +11426,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:320.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:364.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -11514,10 +11485,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "d222b461ec30f2b1faa1a3df19b817bb951099c7f289b9e503d3b1a0a70cfc40",
+      "id": "02dac0091947a73b0697c35c465f9d0e1a43adb1742c77474acb52d1a6435d7a",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.create",
-      "line": 379,
+      "line": 381,
       "method": "_stripe_call",
       "tables": [],
       "sql": "create",
@@ -11525,7 +11496,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 2,
-      "reason": "The string selects a Stripe SDK operation. It is not SQL or a database identifier. Exact reviewed operation: _stripe_call; app/domain/services/billing_checkout.py:379.",
+      "reason": "The string selects a Stripe SDK operation. It is not SQL or a database identifier. Exact reviewed operation: _stripe_call; app/domain/services/billing_checkout.py:381.",
       "category": "not_database_sql"
     },
     {
@@ -11758,7 +11729,7 @@
       "id": "d1695f1c303a1c27f9c5a647f3e05497e592b938760623a95e4a943f514054d6",
       "file": "app/domain/services/topup_usage.py",
       "function": "record_all_topup_usage",
-      "line": 241,
+      "line": 249,
       "method": "fetch",
       "tables": [
         "billing_ledger"
@@ -11768,7 +11739,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Reminder-worker top-up sweep must discover every tenant with ledger history. It selects only DISTINCT tenant_id, then opens a tenant-scoped acquisition for each tenant before recording usage. Source: topup_usage.py:236-250. Exact reviewed operation: fetch; app/domain/services/topup_usage.py:241.",
+      "reason": "Reminder-worker top-up sweep must discover every tenant with ledger history. It selects only DISTINCT tenant_id, then opens a tenant-scoped acquisition for each tenant before recording usage. Source: topup_usage.py:236-250. Exact reviewed operation: fetch; app/domain/services/topup_usage.py:249.",
       "category": "individually_reviewed"
     },
     {
@@ -11843,7 +11814,7 @@
       "id": "d43c7ffa5ac3628022483188a8b51aaf592511042da0d83179c31d62437c18e6",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
-      "line": 141,
+      "line": 142,
       "method": "fetch",
       "tables": [
         "subscriptions"
@@ -11853,7 +11824,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:141.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:142.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -12135,7 +12106,7 @@
       "id": "e9b20b29eec3b2e764b42ad8308882e85d9f2080d6d97cddbaeaab28dcba554f",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
-      "line": 116,
+      "line": 117,
       "method": "fetch",
       "tables": [
         "billing_ledger",
@@ -12146,7 +12117,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:116.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:117.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -12284,7 +12255,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "08030ab93ed79e2111b652c3e91331450bcbea039bd0369ef39bfbdb52983fda",
+      "id": "34fa1c2da7e079b377157db56f874fe3d00594cc07343cda10eb0024ea35e35c",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_portal_session",
       "line": 343,
@@ -12319,7 +12290,7 @@
       "id": "f501acdcc740577764493be4e1b1f5462a199864e1baf0ea5e9e69d2f1087e94",
       "file": "app/api/v1/endpoints/telephony_providers.py",
       "function": "save_provider",
-      "line": 247,
+      "line": 250,
       "method": "fetchrow",
       "tables": [
         "tenant_telephony_credentials"
@@ -12329,14 +12300,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Credential INSERT binds authenticated tenant as $1. ON CONFLICT targets (tenant_id,provider), so its update cannot cross tenant ownership. Current provider authority and transactional audit remain separate enforced route invariants. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_providers.py:247.",
+      "reason": "Credential INSERT binds authenticated tenant as $1. ON CONFLICT targets (tenant_id,provider), so its update cannot cross tenant ownership. Current provider authority and transactional audit remain separate enforced route invariants. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_providers.py:250.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "f897a01ee035ee72eea14bf21c30a2bdb0e55eb50c148d808d9ad19c5ee14de3",
       "file": "app/domain/services/call_guard.py",
       "function": "CallGuard._check_dnc",
-      "line": 970,
+      "line": 1015,
       "method": "fetchrow",
       "tables": [
         "dnc_entries"
@@ -12346,7 +12317,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "DNC explicitly permits only the supplied tenant OR tenant_id IS NULL global suppression for the bound normalized number, with expiry checks. The OR is intentional global policy, not all-tenant access; scanner conservatively refuses OR proofs. Exact reviewed operation: fetchrow; app/domain/services/call_guard.py:970.",
+      "reason": "DNC explicitly permits only the supplied tenant OR tenant_id IS NULL global suppression for the bound normalized number, with expiry checks. The OR is intentional global policy, not all-tenant access; scanner conservatively refuses OR proofs. Exact reviewed operation: fetchrow; app/domain/services/call_guard.py:1015.",
       "category": "reviewed_tenant_plus_global"
     },
     {
@@ -12555,27 +12526,27 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "31a7633501386a576bdefaf0fcffb2e47473cb43d10d81813ee42900ffc7af4c",
+      "id": "ef803cffb88f79e5e1c8f08c986dcf09f735f8a12ca3a64821d62fa0311413e3",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.dismiss",
-      "line": 260,
+      "line": 263,
       "method": "fetchrow",
       "tables": [
         "processed_webhook_events"
       ],
-      "sql": "SELECT state FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE",
+      "sql": "SELECT state, received_at < NOW() - INTERVAL '6 hours' AS stuck FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only (scripts/reconcile_billing_webhooks.py dismiss). Locks ONE global provider-event receipt by its event_id before deciding; receipts are platform rows whose tenant_id is NULL until reconciliation, so a tenant filter would hide exactly the receipts that need review. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:260."
+      "reason": "Operator CLI only (scripts/reconcile_billing_webhooks.py dismiss). Locks ONE global provider-event receipt by its event_id before deciding; receipts are platform rows whose tenant_id is NULL until reconciliation, so a tenant filter would hide exactly the receipts that need review. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:263. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused."
     },
     {
       "id": "6673aaa6bec14521464cb1a2eb9964c1be1b2901e751da8371a42d313274497a",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.dismiss",
-      "line": 270,
+      "line": 280,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -12586,30 +12557,30 @@
       "bypass": true,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only. Writes the audit row (operator, decision, reason) for ONE receipt named by event_id, in the same transaction as the state change; the review log is a platform table with no tenant column. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:270."
+      "reason": "Operator CLI only. Writes the audit row (operator, decision, reason) for ONE receipt named by event_id, in the same transaction as the state change; the review log is a platform table with no tenant column. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:280."
     },
     {
-      "id": "a93b8bbcbfba8fcd55e268b703be23325b5f985719cea8aa1e350384eb48be94",
+      "id": "9e8ab92d4356bac969270d46cb4f3c001f0b59c4a24c0b07f0985751d8b96826",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.dismiss",
-      "line": 275,
+      "line": 285,
       "method": "fetch",
       "tables": [
         "processed_webhook_events"
       ],
-      "sql": "UPDATE processed_webhook_events SET state='dismissed' WHERE event_id=$1 AND state='needs_review' RETURNING event_id",
+      "sql": "UPDATE processed_webhook_events SET state='dismissed' WHERE event_id=$1 AND state IN ('needs_review','failed','pending') RETURNING event_id",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:275."
+      "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:285. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused."
     },
     {
       "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._stale_payload_reason",
-      "line": 2162,
+      "line": 2167,
       "method": "fetchrow",
       "tables": [
         "contact_lists",
@@ -12621,7 +12592,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2162.",
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2167.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -12679,7 +12650,7 @@
       "id": "7bfcc00032005fcf66a7719be11d344221ba65575b12c2510d3f70054ffd129c",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.settle_paypal_order",
-      "line": 274,
+      "line": 323,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12689,14 +12660,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_session_id (the PayPal order id). Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:274.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_session_id (the PayPal order id). Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:323.",
       "category": "individually_reviewed"
     },
     {
       "id": "67b9d414c0327f544625c4b7a98df3542fc5927150b803a386a39288966351e7",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.reverse_capture",
-      "line": 318,
+      "line": 367,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12706,14 +12677,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_payment_id (the PayPal capture id) for a refund or a dispute. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:318.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_payment_id (the PayPal capture id) for a refund or a dispute. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:367.",
       "category": "individually_reviewed"
     },
     {
       "id": "34379a461b76f1ec0a62f645bb5765f9ff7451c325f4c5cb4df65e355922ab33",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_dispatch",
-      "line": 258,
+      "line": 299,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12723,14 +12694,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Dispute updates only: it answers whether the disputed capture is one of ours, returns the order id for the receipt, and changes nothing. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:258.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Dispute updates only: it answers whether the disputed capture is one of ours, returns the order id for the receipt, and changes nothing. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:299.",
       "category": "individually_reviewed"
     },
     {
       "id": "e7b4266c886df4b7ff7c55319ca500b7108be825d82f3dc9bbc90c679e28c9ae",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 313,
+      "line": 359,
       "method": "fetchval",
       "tables": [
         "paypal_webhook_events"
@@ -12740,14 +12711,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchval; app/domain/services/paypal_webhooks.py:313.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchval; app/domain/services/paypal_webhooks.py:359.",
       "category": "system_provider_receipt"
     },
     {
       "id": "b61dcfeed46e26f3df217de23cda5841a18e3dfac60b8b277ddfddd6797a74de",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 322,
+      "line": 368,
       "method": "fetchrow",
       "tables": [
         "paypal_webhook_events"
@@ -12757,14 +12728,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:322.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:368.",
       "category": "system_provider_receipt"
     },
     {
       "id": "6b9ce372a5e98d77994f1b2decdd72838c232d601dc799ba3e941093d89a0a25",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 336,
+      "line": 382,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12774,7 +12745,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:336.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:382.",
       "category": "system_provider_receipt"
     },
     {
@@ -12798,7 +12769,7 @@
       "id": "374ad8c0069cdff9a19f35edd8267b51808a0e43609afa88d837037716d0beed",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_fail",
-      "line": 384,
+      "line": 430,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12808,7 +12779,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:384.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:430.",
       "category": "system_provider_receipt"
     },
     {
@@ -12832,7 +12803,7 @@
       "id": "51493848011df758a04b95c656bd74058dea8f9ecb355e8e8a6dbbebe33e95ef",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.reverse_capture",
-      "line": 374,
+      "line": 393,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12842,14 +12813,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:374.",
+      "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:393.",
       "category": "individually_reviewed"
     },
     {
       "id": "24b315bdd7dca75b6658aed78f539b365d826ec3bba12da867063424b3ceaad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sync",
-      "line": 678,
+      "line": 684,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12859,14 +12830,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:678.",
+      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:684.",
       "category": "individually_reviewed"
     },
     {
       "id": "7dbfc5af78dc6c9ff445f5734ad8280814cfba54b7967ce7d3b1ff0eda592704",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_for_reversal",
-      "line": 1028,
+      "line": 1034,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments"
@@ -12876,14 +12847,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1028.",
+      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1034.",
       "category": "individually_reviewed"
     },
     {
       "id": "d517413e429d2f424f1200b7bce68e0eb8eb293f5324d5ec373276437f2df6d1",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._plan_option",
-      "line": 505,
+      "line": 508,
       "method": "fetchrow",
       "tables": [
         "paypal_plan_options"
@@ -12893,14 +12864,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:505.",
+      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:508.",
       "category": "platform_catalog"
     },
     {
       "id": "751c47bfec7a9903977c065e4ca98c85319ae5f63703c95e95d1962fc3fa5d7d",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._record_review",
-      "line": 898,
+      "line": 904,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12910,14 +12881,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:898.",
+      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:904.",
       "category": "system_provider_receipt"
     },
     {
       "id": "92b36a0f21b827a1e8ffb9ab4ea259295286cbd1e29e66da76421d506dc7da33",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1069,
+      "line": 1084,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12927,14 +12898,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1069.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1084.",
       "category": "system_discovery"
     },
     {
       "id": "a58656db090728cb8108aed77ea9e8fa7dc90ae259b5bd24621a57f8101a0100",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1070,
+      "line": 1085,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12944,14 +12915,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1070.",
+      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1085.",
       "category": "system_discovery"
     },
     {
       "id": "610d06b38d3170483be75a4e3784ce301002a9da5ceee29e77c0a11b17d13af9",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_dispatch",
-      "line": 164,
+      "line": 201,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments",
@@ -12962,7 +12933,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a refund of a plan payment): finds which PayPal subscription the refunded payment belongs to by PayPal's transaction id (unique index); the two tables are joined on subscription id AND tenant_id. It returns the PayPal subscription id only, which is then passed to PayPalSubscriptionService.sync. It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:164.",
+      "reason": "PayPal webhook path (a refund of a plan payment): finds which PayPal subscription the refunded payment belongs to by PayPal's transaction id (unique index); the two tables are joined on subscription id AND tenant_id. It returns the PayPal subscription id only, which is then passed to PayPalSubscriptionService.sync. It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_webhooks.py:201.",
       "category": "individually_reviewed"
     },
     {
@@ -12987,7 +12958,7 @@
       "id": "461751b083aef4dbdf6d94e1f20aa3961efe41546152fc58ee16af7b98b33206",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_subscription_for_reversal",
-      "line": 1043,
+      "line": 1058,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12997,14 +12968,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1043.",
+      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1058.",
       "category": "individually_reviewed"
     },
     {
       "id": "f27b597611809426dc307f3c9163b3511ce2531e64d917830d77ec5d4e301bb6",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1071,
+      "line": 1086,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13014,14 +12985,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1071.",
+      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1086.",
       "category": "system_discovery"
     },
     {
       "id": "ec8dfe3b69ee2b9d30b17497f962cfce5bd026f0369ba1942b0354a48e83fe68",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1072,
+      "line": 1087,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13031,14 +13002,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1072.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1087.",
       "category": "system_discovery"
     },
     {
       "id": "6a7283106e60f9ebd4c935eb5f737feffb595555472efbc398b853fe51932ad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1095,
+      "line": 1110,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13048,14 +13019,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1095.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1110.",
       "category": "system_discovery"
     },
     {
-      "id": "db7dfd957bcdc7b4dd1cb70767ea5ff184cabadca488880b7c761f089256e2e5",
+      "id": "169ff667886b1b796af930c46c2e5bd24b88f1ce720bf62140889b86f7a3cfcd",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter.delete_stored_recording",
-      "line": 2658,
+      "line": 2665,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -13063,8 +13034,59 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2658.",
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2665.",
       "category": "not_database_sql"
+    },
+    {
+      "id": "0bb1b565af46fe815d1325d393d3a59644dab74ce6282b3797220795bf9afee7",
+      "file": "app/api/v1/endpoints/auth/password.py",
+      "function": "change_password",
+      "line": 134,
+      "method": "fetchrow",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "SELECT family_id FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2 AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Password change keeps the device that made the change signed in: the refresh-token family of the request's own cookie is read so it can be excluded from the revocation that follows. The row is bound by the token's hash AND the authenticated user's id; refresh tokens are owned by a user (including tenantless platform accounts), not by a tenant, exactly like the other refresh_tokens statements in auth/. An unknown or revoked token yields no family and everything is revoked as before. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/password.py:134.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "dd90e8713218ebcbae976c7fbb3fe07000f7a623fd3ba4698654cb6611655a0c",
+      "file": "app/domain/services/paypal_topups.py",
+      "function": "PayPalTopupService.capture_approved_order",
+      "line": 310,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id FROM topup_orders WHERE provider_session_id = $1 AND provider = 'paypal'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (CHECKOUT.ORDER.APPROVED): no tenant is signed in, so the order is found by the PayPal order id that this product itself stored on the order when it created the PayPal order, together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the event. The statement only reads the order's id and tenant; every write happens in capture_for_tenant, which re-reads the order with id AND tenant_id on a tenant-bound connection. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:310.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "615ab944ed391d9a05795b79b0fb967dc417847919897d8f27a723b16a316c4c",
+      "file": "app/domain/services/paypal_subscriptions.py",
+      "function": "PayPalSubscriptionService.owns_transaction",
+      "line": 1048,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_subscription_payments"
+      ],
+      "sql": "SELECT id, tenant_id, subscription_id FROM paypal_subscription_payments WHERE paypal_transaction_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "PayPal webhook path (a dispute at the inquiry stage): no tenant is signed in, so a plan payment is recognised by the PayPal transaction id this product stored when it recorded the payment; it is the same lookup end_for_reversal uses. It is reached only from handle_paypal_webhook, after PayPal verified the event. The method is read-only and only a boolean leaves it (ours / not ours): the dispute is flagged for a person's review, no plan is ended and nothing is written. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1048.",
+      "category": "individually_reviewed"
     }
   ]
 }

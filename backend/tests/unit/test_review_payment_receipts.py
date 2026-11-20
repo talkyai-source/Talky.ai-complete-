@@ -6,6 +6,7 @@ real-PostgreSQL migration test is tests/integration/test_webhook_receipt_dismiss
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 import hashlib
 import importlib
 import importlib.util
@@ -28,13 +29,14 @@ class Store:
     def __init__(self, states):
         self.rows = {eid: {"event_id": eid, "state": st, "event_type": "invoice.paid",
                            "provider_mode": "test", "payload_hash": None, "last_error_code": None,
-                           "attempt_count": 0, "tenant_id": None, "legacy_claim": False}
+                           "attempt_count": 0, "tenant_id": None, "legacy_claim": False,
+                           "received_at": datetime.now(timezone.utc)}
                      for eid, st in states.items()}
         self.log = []
         self.updates = 0
 
     def snapshot(self):
-        return json.dumps(self.rows, sort_keys=True), list(self.log)
+        return json.dumps(self.rows, sort_keys=True, default=str), list(self.log)
 
 
 class Conn:
@@ -48,6 +50,8 @@ class Conn:
             return False
         if "information_schema.columns" in sql:  # healthwatch's recording-columns probe
             return 0
+        if "INTERVAL '6 hours'" in sql:  # healthwatch's stuck failed/pending count: none in this store
+            return 0
         if "state='needs_review'" in sql and "count(*)" in sql:  # healthwatch's exact query
             return sum(1 for r in self.s.rows.values() if r["state"] == "needs_review")
         raise AssertionError(sql)
@@ -55,13 +59,18 @@ class Conn:
     async def fetchrow(self, sql, eid):
         assert "FOR UPDATE" in sql
         row = self.s.rows.get(eid)
-        return dict(row) if row else None
+        if not row:
+            return None
+        if "received_at < NOW() - INTERVAL '6 hours'" not in sql:  # the webhook processor's own read
+            return dict(row)
+        return {**row, "stuck": row["received_at"] < datetime.now(timezone.utc) - timedelta(hours=6)}
 
     async def fetch(self, sql, *args):
         if "RETURNING event_id" in sql and "state='dismissed'" in sql:
             eid = args[0]
             row = self.s.rows.get(eid)
-            if self.fail_update or not row or row["state"] != "needs_review":
+            assert "state IN ('needs_review','failed','pending')" in sql
+            if self.fail_update or not row or row["state"] not in ("needs_review", "failed", "pending"):
                 return []
             row["state"] = "dismissed"
             self.s.updates += 1
@@ -132,7 +141,7 @@ async def test_missing_operator_or_short_reason_is_refused_and_changes_nothing(s
 
 
 @pytest.mark.parametrize("event_id", ["evt_done", "evt_failed", "evt_missing"])
-async def test_a_receipt_that_is_not_needs_review_is_refused(store, event_id):
+async def test_a_receipt_that_cannot_be_dismissed_is_refused(store, event_id):
     before = store.snapshot()
     with pytest.raises(ValueError):
         await recon().dismiss(event_id, operator="op", reason=REASON)
@@ -168,13 +177,13 @@ async def test_healthwatch_query_no_longer_counts_a_dismissed_receipt(store):
     watch.acquire_with_tenant = acquire
     # The PayPal part of the count is its own key; with no PayPal table it is zero.
     assert (await watch.check_database(object(), None, now=None))["payments"] == {
-        "status": "alert", "needs_review": 2, "paypal_needs_review": 0}
+        "status": "alert", "needs_review": 2, "paypal_needs_review": 0, "stuck": 0}
     await recon().dismiss("evt_a", operator="op", reason=REASON)
     assert (await watch.check_database(object(), None, now=None))["payments"] == {
-        "status": "alert", "needs_review": 1, "paypal_needs_review": 0}
+        "status": "alert", "needs_review": 1, "paypal_needs_review": 0, "stuck": 0}
     await recon().dismiss("evt_b", operator="op", reason=REASON)
     assert (await watch.check_database(object(), None, now=None))["payments"] == {
-        "status": "ok", "needs_review": 0, "paypal_needs_review": 0}
+        "status": "ok", "needs_review": 0, "paypal_needs_review": 0, "stuck": 0}
 
 
 def _event():

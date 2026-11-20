@@ -229,6 +229,9 @@ type ImportFieldError = {
     error: string;
 };
 
+// The server accepts 1 to 100 per page.
+const CONTACTS_PAGE_SIZE = 50;
+
 export default function ContactsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [selectedCampaign, setSelectedCampaign] = useState<string>("");
@@ -374,6 +377,14 @@ export default function ContactsPage() {
     // must not overwrite the table (or the has-contacts flag) of the current one.
     const contactsRequestSeq = useRef(0);
 
+    // Paging: the page number belongs to the campaign/list/search it was chosen
+    // for, so changing any of them is page 1 again without an effect.
+    const filterKey = `${selectedCampaign}|${selectedListId ?? ""}|${debouncedSearch}`;
+    const [pageChoice, setPageChoice] = useState({ key: filterKey, page: 1 });
+    const page = pageChoice.key === filterKey ? pageChoice.page : 1;
+    const setPage = (next: number) => setPageChoice({ key: filterKey, page: next });
+    const [contactsTotal, setContactsTotal] = useState(0);
+
     const loadContacts = useCallback(async () => {
         if (!selectedCampaign) return;
         const unfiltered = !selectedListId && !debouncedSearch.trim();
@@ -383,13 +394,19 @@ export default function ContactsPage() {
             setContactsLoading(true);
             // A previous failure stays on screen until a read succeeds, so a
             // retry never flashes the empty-campaign layout.
-            const res = checkContactsPage(await dashboardApi.listContacts(selectedCampaign, 1, 50, {
+            const res = checkContactsPage(await dashboardApi.listContacts(selectedCampaign, page, CONTACTS_PAGE_SIZE, {
                 listId: selectedListId,
                 search: debouncedSearch,
             }), selectedCampaign);
             if (superseded()) return;
+            // The page emptied (its last rows were removed): go back one page.
+            if (res.items.length === 0 && page > 1 && res.total > 0) {
+                setPageChoice({ key: filterKey, page: page - 1 });
+                return;
+            }
             setContactsError("");
             setContacts(res.items);
+            setContactsTotal(res.total);
             // Only an UNFILTERED load is authoritative for "does this campaign
             // have any contacts at all".
             if (unfiltered) setCampaignHasContacts(res.total > 0);
@@ -403,7 +420,7 @@ export default function ContactsPage() {
                 setFirstLoadDone(true);
             }
         }
-    }, [selectedCampaign, selectedListId, debouncedSearch]);
+    }, [selectedCampaign, selectedListId, debouncedSearch, page, filterKey]);
 
     useEffect(() => {
         // Async contact fetch whenever campaign/list/search changes;
@@ -1533,6 +1550,29 @@ export default function ContactsPage() {
                                         ))}
                                     </tbody>
                                 </table>
+                            </div>
+                            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between" data-testid="contacts-paging">
+                                <p className="text-sm text-muted-foreground">
+                                    Showing {(page - 1) * CONTACTS_PAGE_SIZE + 1} to {(page - 1) * CONTACTS_PAGE_SIZE + contacts.length} of {contactsTotal} contacts
+                                </p>
+                                <div className="flex gap-2 sm:ml-auto">
+                                    <button
+                                        type="button"
+                                        onClick={() => setPage(Math.max(1, page - 1))}
+                                        disabled={page <= 1}
+                                        className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Previous
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setPage(page + 1)}
+                                        disabled={page * CONTACTS_PAGE_SIZE >= contactsTotal}
+                                        className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Next
+                                    </button>
+                                </div>
                             </div>
                             </>
                         )}

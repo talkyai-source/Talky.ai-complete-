@@ -253,7 +253,7 @@ async def test_another_outstanding_request_returns_its_durable_recovery_receipt(
     row["snapshot"] = json.dumps(row["snapshot"])
     conn = SimpleNamespace(
         fetchrow=AsyncMock(side_effect=[
-            {"id": row["tenant_id"], "status": "active", "stripe_customer_id": None, "stripe_subscription_id": None},
+            {"id": row["tenant_id"], "status": "active", "subscription_status": "inactive", "stripe_customer_id": None, "stripe_subscription_id": None},
             None, row,
         ]),
         fetchval=AsyncMock(return_value=False), execute=AsyncMock(),
@@ -282,7 +282,7 @@ def _claim_service(monkeypatch, paypal_status):
     tenant_id = uuid4()
     conn = SimpleNamespace(
         fetchrow=AsyncMock(side_effect=[
-            {"id": tenant_id, "status": "active", "stripe_customer_id": None, "stripe_subscription_id": None},
+            {"id": tenant_id, "status": "active", "subscription_status": "inactive", "stripe_customer_id": None, "stripe_subscription_id": None},
             None,
         ]),
         fetchval=AsyncMock(side_effect=[False, paypal_status]), execute=AsyncMock(),
@@ -324,7 +324,7 @@ async def test_an_unfinished_paypal_purchase_blocks_a_card_checkout_as_outstandi
 async def test_no_paypal_plan_leaves_the_card_claim_unchanged(monkeypatch):
     svc, tenant_id, conn = _claim_service(monkeypatch, None)
     conn.fetchrow = AsyncMock(side_effect=[
-        {"id": tenant_id, "status": "active", "stripe_customer_id": None, "stripe_subscription_id": None},
+        {"id": tenant_id, "status": "active", "subscription_status": "inactive", "stripe_customer_id": None, "stripe_subscription_id": None},
         None, None,
     ])
     await svc._claim(tenant_id, uuid4(), option(), "synthetic@example.com", None)

@@ -1247,9 +1247,15 @@ async def test_runtime_capabilities_require_code_and_platform_transfer_gates(mon
         def __init__(self, *, configuration_owned=True):
             self.configuration_owned = configuration_owned
 
+        async def fetchrow(self, query, *_args):
+            if "platform_runtime_controls" in query:
+                return {
+                    "inbound_transfer_enabled": True,
+                    "inbound_recording_enabled": False,
+                }
+            raise AssertionError(query)
+
         async def fetchval(self, query, *_args):
-            if "inbound_transfer_enabled" in query:
-                return True
             if "FROM inbound_campaign_configs" in query:
                 return self.configuration_owned
             raise AssertionError(query)
@@ -1274,6 +1280,7 @@ async def test_runtime_capabilities_require_code_and_platform_transfer_gates(mon
         "transfer_runtime_available": False,
         "transfer_platform_enabled": True,
         "transfer_configuration_available": False,
+        "recording_platform_enabled": False,
     }
 
     monkeypatch.setattr(
@@ -1300,6 +1307,7 @@ async def test_runtime_capabilities_require_code_and_platform_transfer_gates(mon
         "transfer_runtime_available": False,
         "transfer_platform_enabled": True,
         "transfer_configuration_available": False,
+        "recording_platform_enabled": False,
     }
 
 

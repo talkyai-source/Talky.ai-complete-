@@ -128,6 +128,13 @@ class _FakeConn:
                     self.calls_row["duration_seconds"] = args[2]
             return
 
+        if "UPDATE leads SET status = 'failed'" in q:
+            # Final-rejection fix-up: (lead_id, tenant_id); never touches
+            # 'deleted' / 'dnc' leads.
+            if self.leads_row and self.leads_row["id"] == args[0] and                     self.leads_row.get("status") not in ("deleted", "dnc"):
+                self.leads_row["status"] = "failed"
+            return
+
         if "UPDATE leads" in q:
             # Settlement shape: (lead_id, status, last_call_result, attempts,
             # tenant_id, keep_dnc). Mirrors the SQL CASE: 'deleted' is always

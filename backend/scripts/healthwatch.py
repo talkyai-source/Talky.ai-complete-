@@ -176,6 +176,7 @@ async def check_provider_observations(redis):
 # twice in a row before it counts.
 _EMAIL_FAILS_AT_ONCE = frozenset({"authentication", "unconfigured"})
 EMAIL_ALERT_AFTER_FAILURES = 2
+EMAIL_STALE_AFTER_HOURS = 72
 
 
 async def check_email(redis, *, now):
@@ -193,7 +194,13 @@ async def check_email(redis, *, now):
         if not math.isfinite(at):
             raise ValueError("Invalid send time")
         if record["outcome"] == "ok":
-            return {"status": "ok", "last_send_minutes_ago": max(0, round((now.timestamp() - at) / 60))}
+            minutes = max(0, round((now.timestamp() - at) / 60))
+            # An ok answer older than 72 hours is no proof the mailbox still
+            # works (a revoked password leaves the last ok in place). There is
+            # no "since when" for an empty record, so no_recent_evidence stays
+            # non-failing; stale is failing.
+            return {"status": "stale" if minutes > EMAIL_STALE_AFTER_HOURS * 60 else "ok",
+                    "last_send_minutes_ago": minutes}
         if record["outcome"] != "failed":
             raise ValueError("Invalid outcome")
         error, count, since = record["error"], int(record["consecutive_failures"]), float(record["failing_since"])
@@ -295,12 +302,19 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                         "SELECT count(*) FROM paypal_webhook_events WHERE state = 'needs_review' "
                         "OR (state IN ('failed', 'received') AND received_at < NOW() - INTERVAL '1 hour')")
                 count = (count or 0) + (paypal_count or 0)
+                # Stripe retries a failing event for three days and then stops;
+                # a receipt still failed/pending after 6 hours means a paid
+                # customer was not credited (processed_webhook_events.state,
+                # received_at: migration 0054).
+                stuck = await conn.fetchval(
+                    "SELECT count(*) FROM processed_webhook_events "
+                    "WHERE state IN ('failed', 'pending') AND received_at < NOW() - INTERVAL '6 hours'")
                 notice_columns = await conn.fetchval(
                     "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
                     "AND table_name = 'recordings_s3' AND column_name IN ('notice_state', 'transfer_part')")
                 tenants = await conn.fetch("SELECT id FROM tenants ORDER BY id LIMIT $1", max_tenants+1)
-            result["payments"] = {"status": "alert" if count else "ok", "needs_review": count,
-                                "paypal_needs_review": paypal_count or 0}
+            result["payments"] = {"status": "alert" if count or stuck else "ok", "needs_review": count,
+                                "paypal_needs_review": paypal_count or 0, "stuck": stuck or 0}
             if len(tenants) > max_tenants:
                 result["trunks"] = {"status": "unavailable", "reason": "tenant_limit_exceeded"}
                 return result
@@ -391,11 +405,44 @@ async def _record_run(redis, now):
         pass
 
 
+FAILING_STATUSES = frozenset({"alert", "unavailable", "unconfigured", "stale"})
+
+
+def _count(value):
+    return str(value) if type(value) is int and value >= 0 else "0"
+
+
+def fingerprint(name, value):
+    """Evidence of one failing check, for the failure alert (talky-notify@):
+    ``name:status`` plus the numbers that say how bad it is, so a 17th phone
+    line or a 7th payment is a NEW failure while the check is already red.
+    Counts and unit names only, never customer data or free text."""
+    status = value["status"]
+    base = f"{name}:{status}"
+    if status != "alert":
+        return base
+    try:
+        if name == "trunks":
+            return f"{base}:{_count(value['alert_count'])}"
+        if name == "payments":
+            return f"{base}:{_count(value['needs_review'])}+{_count(value['stuck'])}"
+        if name == "units":
+            failed = sorted(value["failed"])
+            if failed and all(_UNIT_NAME.match(unit) and ":" not in unit for unit in failed):
+                return f"{base}:{'+'.join(failed)}"
+        if name == "recordings":
+            return (f"{base}:{_count(value['missing'])}+{_count(value['pending_stuck'])}"
+                    f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed'])}")
+    except (KeyError, TypeError):
+        pass
+    return base
+
+
 async def _record_failing_checks(redis, result):
-    """Name the failing checks for the failure alert (talky-notify@), which
-    alerts again at once when this set changes. Names only, never values."""
-    failing = sorted(key for key, value in result.items()
-                     if key != "provider_error_rate" and value["status"] in {"alert", "unavailable", "unconfigured"})
+    """Record the failing checks' fingerprints for the failure alert
+    (talky-notify@), which alerts again at once when any fingerprint changes."""
+    failing = sorted(fingerprint(key, value) for key, value in result.items()
+                     if key != "provider_error_rate" and value["status"] in FAILING_STATUSES)
     try:
         if failing:
             await asyncio.wait_for(redis.set(FAILING_KEY, ",".join(failing), ex=600), IO_TIMEOUT_SECONDS)
@@ -463,7 +510,7 @@ async def run():
     print(json.dumps(result, sort_keys=True), flush=True)
     # Explicit, documented missing producer-rate coverage is not a fabricated
     # outage. All other unreadable/unconfigured required checks fail visibly.
-    return 1 if any(value["status"] in {"alert", "unavailable", "unconfigured"}
+    return 1 if any(value["status"] in FAILING_STATUSES
                     for key, value in result.items() if key != "provider_error_rate") else 0
 
 

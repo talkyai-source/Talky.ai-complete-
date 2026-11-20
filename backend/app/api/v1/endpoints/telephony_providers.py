@@ -138,18 +138,23 @@ def _validate_credentials_shape(provider: str, creds: Dict[str, str]) -> Dict[st
     raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
 
+def _allowed_test_result(raw):
+    """Bounded check outcome only; provider error text never leaves the server."""
+    result = raw or {}
+    if isinstance(result, str):
+        result = json.loads(result)
+    return {key: result[key] for key in
+            ("ok", "latency_ms", "status_code", "check_scope") if key in result}
+
+
 def _provider_state(row):
     if not row:
         return None
     state = {name: row[name] for name in
              ("provider", "label", "from_number", "status", "last_tested_at")}
-    result = row.get("last_test_result") or {}
-    if isinstance(result, str):
-        result = json.loads(result)
     # Provider error strings can echo authentication data. Retain only the
     # bounded check outcome, never raw results or encrypted/plain credentials.
-    state["last_test_result"] = {key: result[key] for key in
-                                 ("ok", "latency_ms", "status_code", "check_scope") if key in result}
+    state["last_test_result"] = _allowed_test_result(row.get("last_test_result"))
     return state
 
 
@@ -208,9 +213,7 @@ async def list_providers(
             status=r["status"],
             last_tested_at=r["last_tested_at"],
             last_test_result=(
-                json.loads(r["last_test_result"])
-                if isinstance(r["last_test_result"], str)
-                else r["last_test_result"]
+                _allowed_test_result(r["last_test_result"]) if r["last_test_result"] else None
             ),
             has_credentials=True,
         )

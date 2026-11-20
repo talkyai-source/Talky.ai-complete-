@@ -130,6 +130,8 @@ export interface InboundRuntimeCapabilities {
     transfer_runtime_available: boolean;
     transfer_platform_enabled: boolean;
     transfer_configuration_available: boolean;
+    /** Absent on an older server: treated as false. */
+    recording_platform_enabled: boolean;
 }
 
 const UnknownRecordSchema = z.record(z.string(), z.unknown());
@@ -372,6 +374,7 @@ export function parseInboundRuntimeCapabilities(value: unknown): InboundRuntimeC
     return {
         transfer_runtime_available: runtimeAvailable,
         transfer_platform_enabled: platformEnabled,
+        recording_platform_enabled: raw.recording_platform_enabled === true,
         // Never trust a loose truthy value or a contradictory aggregate from
         // the wire. Both independent server gates must be explicitly true.
         transfer_configuration_available:

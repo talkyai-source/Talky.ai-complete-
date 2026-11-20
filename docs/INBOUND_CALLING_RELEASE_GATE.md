@@ -5,6 +5,22 @@ Scope: Talky.ai inbound calling, tenant dashboard, backend admission/billing, an
 
 ## Current verdict
 
+> **Owner decision, 20 November 2026: recording of inbound calls is ON and follows the outbound rule.**
+> The owner asked for recording to be switched on ("make the recording on"), after the decision of
+> 18 November that every recording is kept. The platform switch `inbound_recording_enabled` is turned
+> on by the release through the audited controls path
+> (`venv/bin/python scripts/set_inbound_recording_switch.py --state on --apply`; `--state off` closes it,
+> and a closed switch reaches live calls on their next heartbeat). Each inbound campaign still has its
+> own recording switch and pinned notice. What changed in the rule: a tenant with no saved recording
+> policy is recorded with the spoken notice; when the notice's delivery receipt is missing the recording
+> is kept and marked `notice_state='unconfirmed'` (consent status `unknown`); a failed read of the live
+> switch no longer destroys captured audio (it is retried); inbound calls are crash-checkpointed once
+> their gate is open. Unchanged: the notice is always attempted first and nothing said before it is
+> captured; a tenant whose saved policy is `disabled` is never recorded and hears no notice;
+> `RECORDING_REQUIRE_NOTICE_PROOF=true` restores the strict rule (saved policy and receipt required).
+> **None of the recording proofs this document asks for has been run on a live inbound call.**
+> The statements below that say recording stays closed without a receipt describe the strict setting.
+
 > **Owner decision, 19 November 2026: inbound transfer is OPEN in production.** The owner asked for
 > transfer to a person to be live on incoming calls. The code-owned declaration
 > (`CONTROLLED_INBOUND_TRANSFER_RUNTIME_AVAILABLE`) is `True`, and the release switches the live
@@ -48,7 +64,7 @@ The safe default remains closed at every layer:
 - non-Asterisk production adapter: rejected
 - non-Redis or unverifiable telephony ownership: rejected
 - unavailable or errored Redis global-concurrency state: rejected for inbound admission
-- absent or unreadable recording policy: recording remains OFF for inbound calls (the outbound default changed on 18 November 2026; inbound did not)
+- absent recording policy: since 20 November 2026 an inbound call whose campaign has recording on is recorded with the spoken notice, as outbound calls are since 18 November 2026; under `RECORDING_REQUIRE_NOTICE_PROOF=true` recording remains OFF without a saved policy
 - controlled inbound transfer: the production declaration was code-owned OFF until 19 November 2026
   and is ON since the owner's decision of that day (see the note under "Current verdict");
   a proof-only staging path additionally requires one exact UUID-valid
@@ -64,7 +80,7 @@ The safe default remains closed at every layer:
 3. No default tenant, latest campaign, backup PBX, or unknown-DID AI fallback is permitted.
 4. Each admitted provider call has one durable inbound call row, one idempotent reservation, and one idempotent terminal settlement or release.
 5. The runtime maximum call duration equals the seconds reserved before answer. Any reported overage is held for reconciliation, never silently charged.
-6. Recording buffers stay closed until policy and the pinned disclosure/consent step succeed.
+6. Recording buffers stay closed until the policy allows recording and the pinned disclosure has been attempted. Since 20 November 2026 a missing delivery receipt no longer closes them (the recording is kept and marked unconfirmed) unless `RECORDING_REQUIRE_NOTICE_PROOF=true`.
 7. Live calls use the immutable admission snapshot. Editing an active configuration is prohibited.
 8. Only the process proving the Redis ARI ownership lock may control telephony. Loss of ownership fences the process, drains its locally controlled calls within a bounded deadline, and disconnects the adapter.
 9. Canary freeze and rollback disable durable ingress first. `--force` cannot bypass a freeze.
@@ -657,7 +673,7 @@ Each test must capture provider call ID, durable call ID, tenant, DID, route/con
 
 - [ ] Recording disabled: no recording is created.
 - [ ] Recording enabled: the exact pinned disclosure is the first required audio and buffers open only afterward.
-- [ ] Consent/disclosure failure leaves recording closed and terminates safely.
+- [ ] Consent/disclosure failure: under the strict setting recording stays closed; by default the recording is kept and marked unconfirmed. In both cases the call itself continues (it is not terminated).
 - [ ] Caller hangup during the greeting/disclosure path ends promptly with recording buffers closed and exactly one reservation release/terminal transition.
 - [ ] Private/anonymous ANI is not invented or exposed.
 - [ ] Tenant A cannot fetch Tenant B call, transcript, media, recording, or signed URL.

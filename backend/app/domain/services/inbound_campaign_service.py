@@ -28,6 +28,10 @@ from app.core.security.platform_admin_guard import require_platform_admin_mutati
 from app.domain.services.campaign_direction_guard import (
     acquire_campaign_direction_lock,
 )
+from app.domain.services.recording_policy_service import (
+    contains_unsupported_dtmf_opt_out,
+    notice_proof_required,
+)
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_overrides import (
     apply_qualification_overrides,
@@ -221,6 +225,11 @@ def mask_did(value: Optional[str]) -> str:
     return f"+{'*' * max(len(digits) - len(visible), 3)}{visible}"
 
 
+RECORDING_NOTICE_UNSUPPORTED_MESSAGE = (
+    "The recording notice cannot offer callers a way to opt out, such as pressing "
+    "a key: this service cannot do that during a call. Remove that sentence."
+)
+
 _BUNDLE_SQL = """
     SELECT
         cfg.id AS config_id,
@@ -275,6 +284,15 @@ _BUNDLE_SQL = """
         ) AS concurrency_policy_ready,
         COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled,
         COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled,
+        (
+            SELECT trp.default_consent_mode
+            FROM tenant_recording_policy trp
+            WHERE trp.tenant_id = cfg.tenant_id
+        ) AS tenant_recording_mode,
+        EXISTS (
+            SELECT 1 FROM tenant_recording_policy trp2
+            WHERE trp2.tenant_id = cfg.tenant_id
+        ) AS tenant_recording_policy_saved,
         COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled,
         COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled,
         a.id AS assignment_id,
@@ -980,6 +998,19 @@ class InboundCampaignService:
             consent_ok,
             "Recording policy is complete." if consent_ok else "Consent message is required.",
         )
+        notice_supported = not bool(
+            bundle.get("recording_enabled")
+        ) or not contains_unsupported_dtmf_opt_out(bundle.get("consent_message"))
+        add(
+            "recording_notice_supported",
+            "Recording notice can be spoken as written",
+            notice_supported,
+            (
+                "The recording notice can be spoken as written."
+                if notice_supported
+                else RECORDING_NOTICE_UNSUPPORTED_MESSAGE
+            ),
+        )
         platform_recording_ok = not bool(bundle.get("recording_enabled")) or bool(
             bundle.get("platform_recording_enabled")
         )
@@ -992,6 +1023,28 @@ class InboundCampaignService:
                 if platform_recording_ok
                 else "Enable the platform recording control or disable campaign recording."
             ),
+        )
+        account_setting_ok = True
+        account_setting_msg = "The account recording setting allows recording."
+        if bundle.get("recording_enabled"):
+            if bundle.get("tenant_recording_mode") == "disabled":
+                account_setting_ok = False
+                account_setting_msg = (
+                    "Your account's recording setting is \"disabled\", so calls on "
+                    "this campaign would not be recorded. Change it in Settings, "
+                    "or switch recording off for this campaign."
+                )
+            elif notice_proof_required() and not bundle.get("tenant_recording_policy_saved"):
+                account_setting_ok = False
+                account_setting_msg = (
+                    "Save a recording setting for your account in Settings before "
+                    "recording incoming calls."
+                )
+        add(
+            "recording_account_setting",
+            "Account recording setting allows recording",
+            account_setting_ok,
+            account_setting_msg,
         )
         qualification_supported = (
             not qualification_unsupported
@@ -1061,6 +1114,8 @@ class InboundCampaignService:
             "max_call_duration_valid": "Set max_call_duration_seconds to a whole number from 60 to 14400; omit it to use 1800.",
             "recording_consent": "Provide an approved recording consent message or disable recording.",
             "platform_recording_enabled": "Enable the platform recording control or disable campaign recording.",
+            "recording_notice_supported": "Remove the sentence that offers callers an opt-out from the recording notice.",
+            "recording_account_setting": "Change the recording setting in Settings, or switch recording off for this campaign.",
             "qualification_runtime_supported": (
                 "Use the supported purpose, persona, system_prompt, voice_id, "
                 "and silence_timeout_seconds fields; configure knowledge and "
@@ -1395,6 +1450,14 @@ class InboundCampaignService:
         ):
             raise InboundCampaignError(
                 "consent_message is required", code="missing_recording_consent", status_code=422
+            )
+        if normalized.get("recording_enabled") and contains_unsupported_dtmf_opt_out(
+            normalized.get("consent_message")
+        ):
+            raise InboundCampaignError(
+                RECORDING_NOTICE_UNSUPPORTED_MESSAGE,
+                code="unsupported_recording_notice",
+                status_code=422,
             )
         operation = "inbound_campaign.create"
         scope = f"tenant:{tenant_id}"
@@ -1778,6 +1841,14 @@ class InboundCampaignService:
                 raise InboundCampaignError(
                     "consent_message is required",
                     code="missing_recording_consent",
+                    status_code=422,
+                )
+            if final["recording_enabled"] and contains_unsupported_dtmf_opt_out(
+                final.get("consent_message")
+            ):
+                raise InboundCampaignError(
+                    RECORDING_NOTICE_UNSUPPORTED_MESSAGE,
+                    code="unsupported_recording_notice",
                     status_code=422,
                 )
             await _require_transfer_configuration(
@@ -2241,10 +2312,13 @@ class InboundCampaignService:
             config_id = _uuid(config_id, "config_id")
 
         async with acquire_with_tenant(self._pool, None) as conn:
-            platform_enabled = bool(
-                await conn.fetchval(
-                    "SELECT inbound_transfer_enabled FROM platform_runtime_controls WHERE id=1"
-                )
+            controls = await conn.fetchrow(
+                "SELECT inbound_transfer_enabled, inbound_recording_enabled "
+                "FROM platform_runtime_controls WHERE id=1"
+            )
+            platform_enabled = bool(controls and controls["inbound_transfer_enabled"])
+            recording_platform_enabled = bool(
+                controls and controls["inbound_recording_enabled"]
             )
             configuration_owned = bool(
                 config_id
@@ -2266,6 +2340,7 @@ class InboundCampaignService:
             "transfer_runtime_available": runtime_available,
             "transfer_platform_enabled": platform_enabled,
             "transfer_configuration_available": runtime_available and platform_enabled,
+            "recording_platform_enabled": recording_platform_enabled,
         }
 
     async def set_tenant_controls(

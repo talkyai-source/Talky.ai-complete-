@@ -2,7 +2,8 @@
 
 Default/list and inspect are read-only. Retrying money handlers requires one
 explicit event ID; legacy/ambiguous events require a recorded review first.
-`dismiss` closes one needs_review receipt without replay (one event per call).
+`dismiss` closes one needs_review receipt, or a failed/pending one older than 6 hours,
+without replay (one event per call).
 """
 
 import argparse

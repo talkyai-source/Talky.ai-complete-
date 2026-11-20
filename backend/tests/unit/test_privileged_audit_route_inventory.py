@@ -66,6 +66,9 @@ def record(module, function, proof="unit/test_privileged_mutation_audit.py", *he
 # handler is not silently inherited. AUDITED contains wiring review plus a
 # behavioral test reference, not a claim that every referenced suite ran today.
 AUDITED = {
+    ("POST", "/alerts/{alert_id}/ack"): record("alerts", "ack_alert", "unit/test_alert_and_assistant_model_audit_20261120.py"),
+    ("POST", "/alerts/{alert_id}/resolve"): record("alerts", "resolve_alert", "unit/test_alert_and_assistant_model_audit_20261120.py"),
+    ("PUT", "/assistant/model"): record("assistant_config", "set_assistant_model", "unit/test_alert_and_assistant_model_audit_20261120.py"),
     ("POST", "/rbac/roles/{role_id}/permissions"): record("rbac.roles", "add_permission_to_role"),
     ("DELETE", "/rbac/roles/{role_id}/permissions"): record("rbac.roles", "remove_permission_from_role"),
     ("POST", "/rbac/tenant-users"): record("rbac.tenant_users", "add_user_to_tenant"),

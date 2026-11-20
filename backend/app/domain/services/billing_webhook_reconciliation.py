@@ -29,7 +29,7 @@ RECOVERABLE_TYPES = frozenset(
         "credit_note.created", "credit_note.updated", "credit_note.voided",
         "refund.created", "refund.updated", "refund.failed", "charge.refund.updated",
         "charge.refunded",
-        "charge.dispute.created",
+        "charge.dispute.created", "charge.dispute.funds_withdrawn", "charge.dispute.updated",
         # Idempotent: a won dispute restores a subscription only while its
         # recorded dispute is still open, and top-up minutes through a ledger
         # row unique per event (billing_state_events._apply_dispute).
@@ -97,7 +97,8 @@ class BillingReconciliation:
                     if event_type.startswith("invoice.")
                     else (
                         "Dispute"
-                        if event_type in {"charge.dispute.created", "charge.dispute.closed"}
+                        if event_type in {"charge.dispute.created", "charge.dispute.closed",
+                                          "charge.dispute.funds_withdrawn", "charge.dispute.updated"}
                         else "Charge" if event_type == "charge.refunded"
                         else "Refund" if event_type.startswith("refund.") or event_type == "charge.refund.updated"
                         else "CreditNote" if event_type.startswith("credit_note.") else None
@@ -249,7 +250,9 @@ class BillingReconciliation:
         }
 
     async def dismiss(self, event_id, *, operator, reason):
-        """Close one needs_review receipt WITHOUT replay; no business effect is applied."""
+        """Close one needs_review receipt, or a failed/pending one older than 6 hours (the
+        age at which the payments alert counts it as stuck), WITHOUT replay; no business
+        effect is applied."""
         if not operator.strip() or len(operator) > 200 or not 12 <= len(reason.strip()) <= 2000:
             raise ValueError(
                 "An identified operator and substantive reconciliation reason are required"
@@ -258,15 +261,22 @@ class BillingReconciliation:
             if not await lock_event(conn, event_id):
                 raise BillingWebhookRetryable("event_busy")
             receipt = await conn.fetchrow(
-                "SELECT state FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE", event_id
+                "SELECT state, received_at < NOW() - INTERVAL '6 hours' AS stuck "
+                "FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE", event_id
             )
             if receipt is None:
                 raise ValueError("No receipt exists for this event")
             if receipt["state"] == "dismissed":
                 return {"event_id": event_id, "state": "dismissed", "changed": False,
                         "financial_effects_applied": False}
-            if receipt["state"] != "needs_review":
-                raise ValueError("Only a needs_review receipt can be dismissed")
+            if receipt["state"] in {"failed", "pending"}:
+                if not receipt["stuck"]:
+                    raise ValueError(
+                        "A failed or pending receipt younger than 6 hours may still be retried "
+                        "by Stripe; wait before dismissing it")
+            elif receipt["state"] != "needs_review":
+                raise ValueError("Only a needs_review receipt, or a failed or pending one older "
+                                 "than 6 hours, can be dismissed")
             await conn.execute(
                 """INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
                    VALUES($1,$2,'dismiss',$3)""",
@@ -274,7 +284,7 @@ class BillingReconciliation:
             )
             updated = await conn.fetch(
                 """UPDATE processed_webhook_events SET state='dismissed'
-                   WHERE event_id=$1 AND state='needs_review' RETURNING event_id""",
+                   WHERE event_id=$1 AND state IN ('needs_review','failed','pending') RETURNING event_id""",
                 event_id,
             )
             if len(updated) != 1:

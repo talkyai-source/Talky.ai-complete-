@@ -142,12 +142,23 @@ async def test_recording_turned_off_removes_the_folder(env):
     assert cp._STATE == {}
 
 
-async def test_inbound_session_is_never_written(env):
+async def test_inbound_session_with_closed_gate_is_never_written(env):
     gw = FakeGw()
     gw.caller += [chunk(100, 1)]
     env.live["pbx1"] = make_session("sess-in", gw, _inbound_admission={"x": 1})
     assert await cp.checkpoint_pass() == 0
     assert not (env.spool / "live").exists()
+
+
+async def test_inbound_session_with_open_gate_is_written(env):
+    gw = FakeGw()
+    gw.caller += [chunk(100, 1)]
+    env.live["pbx1"] = make_session(
+        "sess-in", gw, _inbound_admission={"x": 1},
+        _recording_allowed=True, _recording_policy_decided=False,
+    )
+    assert await cp.checkpoint_pass() == 1
+    assert (folder(env, "sess-in") / "meta.json").exists()
 
 
 @pytest.mark.parametrize("flag", ["_transfer_connected", "_recording_saved_at_transfer"])

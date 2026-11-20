@@ -230,10 +230,21 @@ def test_dnc_mutation_routes_require_admin(router, method, path):
 # so we don't silently lock out readonly principals from reads.
 _OPEN_ROUTES = [
     (campaigns_router, "POST", "/campaigns/preview-prompt"),
-    (campaigns_router, "GET", "/campaigns/"),
-    (dnc_router, "GET", "/dnc/"),
-    (dnc_router, "GET", "/dnc/check"),
 ]
+
+# Reads that carry only a READ permission (2026-11-20 role review): still no
+# mutation gate and no admin gate, so read-only roles are not locked out.
+_READ_GATED_ROUTES = [
+    (campaigns_router, "GET", "/campaigns/", {Permission.CAMPAIGNS_READ}),
+    (dnc_router, "GET", "/dnc/", {Permission.CALLS_READ}),
+    (dnc_router, "GET", "/dnc/check", {Permission.CALLS_READ}),
+]
+
+
+@pytest.mark.parametrize("router,method,path,expected", _READ_GATED_ROUTES)
+def test_read_routes_carry_only_a_read_gate(router, method, path, expected):
+    perms, has_admin = _gates_for(router, method, path)
+    assert perms == expected and not has_admin
 
 
 @pytest.mark.parametrize("router,method,path", _OPEN_ROUTES)
