@@ -37,7 +37,7 @@ def _log_setup(call_session, state: str, *, level: int = logging.INFO, **fields:
         detail = " ".join(f"{k}={v}" for k, v in fields.items() if v is not None)
         logger.log(level, "KB_SETUP %s call=%s %s", state,
                    str(getattr(call_session, "call_id", "?") or "?")[:8], detail)
-    except Exception:  # pragma: no cover - diagnostics must never break a call
+    except Exception:  # diagnostics must never break a call
         pass
 
 
