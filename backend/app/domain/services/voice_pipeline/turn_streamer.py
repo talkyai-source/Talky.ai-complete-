@@ -31,8 +31,14 @@ from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.ask_ai_constants import ask_ai_fact_sheet
 from app.domain.services.end_session_action import (
+    DEFAULT_FAREWELL,
+    END_SESSION_ACTION,
     build_end_session_tool_instructions,
     parse_end_session_action,
+    verified_opt_out,
+)
+from app.domain.services.voice_pipeline.sentence_segmentation import (
+    _is_missing_space_boundary,
 )
 from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
 from app.domain.services.voice_pipeline.figure_grounding import guard_figures
@@ -57,6 +63,7 @@ from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
 )
 from app.domain.services.voice_pipeline.action_tools import (
+    ACTION_END_CALL,
     ACTION_SCHEDULE_CALLBACK,
     ACTION_SEND_EMAIL,
     ACTION_SUBMIT_FORM,
@@ -142,6 +149,107 @@ async def _ensure_campaign_timezone(session) -> None:
 # tight so an ordinary spoken brace ("the price is {x}") never trips it.
 _ACTION_ENVELOPE_RE = re.compile(
     r"""\{\s*["']?\s*action\s*["']?\s*:""", re.IGNORECASE
+)
+
+
+_ADDRESS_MARKS = "@/"
+
+
+def _left_word_is_address(text: str, index: int) -> bool:
+    """True when the word that ENDS at the terminator ``index`` is an email or
+    web address ("john@gmail.com" in "john@gmail.com?Yes")."""
+    lo = index
+    while lo and not text[lo - 1].isspace():
+        lo -= 1
+    return any(m in text[lo:index] for m in _ADDRESS_MARKS)
+
+
+def _address_end_glue_index(text: str) -> int:
+    """Index of a '.' that ENDS an email / web address with a capitalised word
+    glued on ("john@example.com.Yes"); -1 if none. The segmenter ignores it
+    because the word before already contains a dot."""
+    if "@" not in text and "/" not in text:
+        return -1
+    for i, ch in enumerate(text):
+        if ch != "." or i + 1 >= len(text) or not text[i + 1].isupper() or not text[i - 1:i].isalnum():
+            continue
+        lo = i
+        while lo and not text[lo - 1].isspace():
+            lo -= 1
+        left = text[lo:i]
+        if "/" in left or ("@" in left and "." in left[left.index("@"):]):
+            return i
+    return -1
+
+
+def _glued_boundary_is_cut(text: str, index: int) -> bool:
+    """Decide a glued terminator once the word after it is COMPLETE.
+
+    Rule: a terminator INSIDE an address (the word after it carries "@", "/" or
+    "=", as in "John.Smith@gmail.com" or "/signup?ref=abc") is never a cut; a
+    terminator at the END of an address ("...gmail.com?Yes") is a cut only before
+    a capitalised word; every other glued terminator is a cut, as before.
+    """
+    if _left_word_is_address(text, index):
+        return text[index + 1].isupper()
+    hi = index + 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    return not any(m in text[index + 1:hi] for m in _ADDRESS_MARKS + "=")
+
+
+class _EndOfStream:
+    pass
+
+
+_EOS = _EndOfStream()
+
+
+class _WithEndOfStream:
+    """Async iterator that yields ``_EOS`` once when the provider stream ends.
+
+    A provider error is held in ``error`` and also ends the stream with ``_EOS``,
+    so text held back at that moment is decided before the error is re-raised.
+    ``pushback`` returns one token to the front (used at a round boundary).
+    """
+
+    def __init__(self, iterator) -> None:
+        self._it = iterator.__aiter__()
+        self._done = False
+        self._pending: list = []
+        self.error: Optional[Exception] = None
+
+    def __aiter__(self):
+        return self
+
+    def pushback(self, token) -> None:
+        self._pending.append(token)
+
+    async def aclose(self):
+        close = getattr(self._it, "aclose", None)
+        if close is not None:
+            await close()
+
+    async def __anext__(self):
+        if self._pending:
+            return self._pending.pop()
+        if self._done:
+            raise StopAsyncIteration
+        try:
+            return await self._it.__anext__()
+        except StopAsyncIteration:
+            self._done = True
+            return _EOS
+        except Exception as exc:  # noqa: BLE001 - re-raised after the loop
+            self._done = True
+            self.error = exc
+            return _EOS
+
+
+# A closing line already spoken before the cut: no second farewell.
+_GOODBYE_WORDS = re.compile(
+    r"\b(?:good\s*-?\s*bye|bye|take care|have a (?:great|good|nice|lovely)|thanks? for your time)\b",
+    re.IGNORECASE,
 )
 
 
@@ -400,8 +508,50 @@ class TurnStreamer:
         sentences_done = 0
         tts_was_interrupted = False
         suppressed_for_action = False
+        # Set when the model stopped writing its own turn and started writing
+        # the caller's: a terminator with NO space after it ("...correct?Yes").
+        # Everything from there is invented dialogue and is never spoken.
+        model_wrote_caller_turn = False
+        # '?' / '!' that ended the last flushed sentence AND was the last
+        # character received, so a next token starting with a letter (real
+        # tokens carry their own leading space) is a boundary split across tokens.
+        terminator_at_edge: Optional[str] = None
+        # Set when a tool round finished: the next token is the first of a new
+        # round of the same turn, never the caller's reply to the last one.
+        round_boundary = False
+        # After a cut keep reading the current round silently (nothing spoken or
+        # kept) so its tool calls still run; only when tools were offered.
+        _drain_after_cut = bool(offered_tools) and not context_failure
+        # A glued terminator whose next word has not finished arriving is held.
+        _held_glued = False
+        # The edge terminator closed an email / web address.
+        edge_after_address = False
+        # An end_call accepted this turn (for the farewell after a cut).
+        end_call_accepted = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
+
+        def _cut_now() -> bool:
+            """True when a cut has happened, or the boundary held back right now
+            will be decided as a cut as soon as its word is complete."""
+            if model_wrote_caller_turn:
+                return True
+            if not (_held_glued and buf):
+                return False
+            hosts = grounded_url_hosts([
+                *getattr(session, "_knowledge_grounding", []), *turn_grounding,
+            ]) if "." in buf else ()
+            idx = self._p._find_sentence_end(
+                buf, allow_clause=len(buf) >= 80, known_hosts=hosts,
+            )
+            ai = _address_end_glue_index(buf)
+            if ai >= 0 and (idx < 0 or ai < idx):
+                idx = ai
+            if idx < 0 or idx + 1 >= len(buf):
+                return False
+            if not (_is_missing_space_boundary(buf, idx) or idx == ai):
+                return False
+            return _glued_boundary_is_cut(buf, idx)
 
         def _leak_exempt():
             # Read-back values, plus vendor names the campaign's own approved
@@ -496,6 +646,21 @@ class TurnStreamer:
             _token_iter = _context_recovery()
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
+                nonlocal round_boundary, end_call_accepted
+                round_boundary = True
+                if _name != ACTION_END_CALL and _cut_now():
+                    # Second lock: once the model has written the caller's side
+                    # of the turn, nothing but end_call may act. The executors
+                    # still re-check the caller's real words.
+                    logger.warning(
+                        "model_wrote_caller_turn call=%s tool=%s — tool not run after a cut",
+                        call_id[:12], _name,
+                    )
+                    return json.dumps({
+                        "success": False, "confirmation_allowed": False,
+                        "status": "caller_turn_cut", "ends_turn": True,
+                        "message": "The action was not run. Do not retry it.",
+                    })
                 # Recording the caller's details is silent bookkeeping, not a wait.
                 # Only a lookup or a slow outside action leaves a wait; end_call
                 # and other control tools return at once (no "One moment" on
@@ -539,6 +704,9 @@ class TurnStreamer:
                         _name,
                     )
                     result = execution_failure_result(session, _name)
+                if (str(result.get("action") or _name) == "end_call"
+                        and result.get("status") == "accepted"):
+                    end_call_accepted = True
                 current = getattr(session, "_live_structured_state", _structured)
                 session._live_structured_state = reduce_live_state(
                     current,
@@ -578,8 +746,17 @@ class TurnStreamer:
                 campaign_id=getattr(session, "campaign_id", None),
             )
 
+        _token_iter = _WithEndOfStream(_token_iter)
         try:
             async for token in _token_iter:
+                _eos = token is _EOS
+                if _eos:
+                    # Stream finished: a boundary held for its next word to
+                    # complete is decided now, with the word complete.
+                    if not (_held_glued and buf and not tts_was_interrupted
+                            and not model_wrote_caller_turn):
+                        break
+                    token = " "
                 if first_token:
                     self._p.latency_tracker.mark_llm_first_token(call_id)
                     # Unblock the frontend audio player immediately on first token
@@ -595,8 +772,49 @@ class TurnStreamer:
                     tts_was_interrupted = True
                     break
 
-                all_tokens.append(token)
+                if round_boundary and _held_glued and buf and not model_wrote_caller_turn:
+                    # A tool round finished while a glued boundary was held:
+                    # its word is complete. Decide it now (a space ends the
+                    # word) and handle this token next, as the round's first.
+                    _token_iter.pushback(token)
+                    token = " "
+                    _eos = True  # a separator only: not part of the model's text
+                elif round_boundary:
+                    # A tool round finished. This token starts the next round of
+                    # the same turn: it can never be a glued caller turn.
+                    round_boundary = False
+                    terminator_at_edge = None
+                    if model_wrote_caller_turn:
+                        break  # the cut round's tools have run; no further round
+                    if (buf and token and not buf[-1].isspace() and not token[0].isspace()
+                            and buf.lstrip()[:1] != "{" and token.lstrip()[:1] != "{"):
+                        token = " " + token
+                if model_wrote_caller_turn:
+                    continue  # draining the cut round: nothing spoken or kept
+
+                if not _eos:
+                    all_tokens.append(token)
                 buf += token
+
+                if terminator_at_edge is not None and buf:
+                    _crossed = buf[0].isalpha() and (
+                        buf[0].isupper() if edge_after_address
+                        else terminator_at_edge in "?!" or buf[0].isupper()
+                    )
+                    terminator_at_edge = None
+                    if _crossed:
+                        # The sentence before the edge was already spoken;
+                        # this token begins the caller's turn, written by the model.
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s — turn cut at a "
+                            "boundary split across tokens",
+                            call_id[:12],
+                        )
+                        buf = ""
+                        if _drain_after_cut:
+                            continue
+                        break
 
                 # If the model is emitting the structured end-session action
                 # (pure JSON — by contract "no spoken text outside JSON"), do NOT
@@ -621,6 +839,7 @@ class TurnStreamer:
 
                 # Flush each complete sentence (or, for long buffers, the first
                 # clause) to TTS as tokens arrive.
+                _held_glued = False
                 while True:
                     grounded_hosts = grounded_url_hosts([
                         *getattr(session, "_knowledge_grounding", []), *turn_grounding,
@@ -628,6 +847,9 @@ class TurnStreamer:
                     idx = self._p._find_sentence_end(
                         buf, allow_clause=len(buf) >= 80, known_hosts=grounded_hosts,
                     )
+                    _ai = _address_end_glue_index(buf)
+                    if _ai >= 0 and (idx < 0 or _ai < idx):
+                        idx = _ai
                     if idx < 0:
                         break
                     # A final dot may be the middle of a streamed domain or
@@ -636,12 +858,40 @@ class TurnStreamer:
                     if idx + 1 == len(buf) and buf[idx] == ".":
                         break
 
+                    # A terminator with no space after it is where the model
+                    # stopped writing its own turn and started the caller's
+                    # ("...best option?Yes.Could I confirm..."). Speak this
+                    # sentence; everything after it is dialogue made up.
+                    turn_boundary = False
+                    if _is_missing_space_boundary(buf, idx) or idx == _ai:
+                        if not any(c.isspace() for c in buf[idx + 1:]):
+                            # The word after the terminator is still arriving
+                            # ("John." ... "Smith" "@" "gmail.com"): wait for
+                            # whitespace, the end of the stream or a round.
+                            _held_glued = True
+                            break
+                        turn_boundary = _glued_boundary_is_cut(buf, idx)
+                    terminator_at_edge = (
+                        buf[idx] if idx + 1 == len(buf) and buf[idx] in "?!." else None
+                    )
+                    edge_after_address = (
+                        terminator_at_edge is not None and _left_word_is_address(buf, idx)
+                    )
                     raw_sentence = buf[:idx + 1].strip()
                     # Skip the separator only when there IS one: at a
                     # missing-space boundary, idx + 2 swallows the first letter
                     # of whatever follows.
                     _skip = 2 if (idx + 1 < len(buf) and buf[idx + 1].isspace()) else 1
                     buf = buf[idx + _skip:] if idx + _skip <= len(buf) else ""
+                    if turn_boundary:
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s — turn cut at the "
+                            "boundary; %d char(s) of invented dialogue dropped",
+                            call_id[:12],
+                            len(buf),
+                        )
+                        buf = ""
 
                     # Extract-first (root cause, not a regex patch): pull the
                     # END_CALL sentinel out of the RAW model text before
@@ -712,8 +962,15 @@ class TurnStreamer:
                     if tts_was_interrupted:
                         break
 
-                if tts_was_interrupted:
+                # The cut must also stop the OUTER stream: the inner break only
+                # leaves the flush loop, and a normally spaced next chunk would
+                # otherwise be spoken as a new sentence.
+                if tts_was_interrupted or (model_wrote_caller_turn and not _drain_after_cut):
                     break
+
+            if _token_iter.error is not None:
+                # The stream failed; text held back was decided above.
+                raise _token_iter.error
 
         except asyncio.CancelledError:
             # The turn task was cancelled (barge-in, hangup): the filler is a
@@ -777,6 +1034,23 @@ class TurnStreamer:
             if self._p._supports_llm_end_session_action(session)
             else None
         )
+        if model_wrote_caller_turn and ask_ai_end_action:
+            action_with_cut = ask_ai_end_action
+            # An end action in the same completion as invented dialogue was
+            # reached by reading the model's own fabricated reply, not the caller's.
+            logger.warning(
+                "model_wrote_caller_turn call=%s — ignoring the end-call action "
+                "from the same completion",
+                call_id[:12],
+            )
+            ask_ai_end_action = None
+            if (action_with_cut.get("do_not_call")
+                    and verified_opt_out(action_with_cut, last_user_text)):
+                # ... except a do-not-call the caller's own words back: it is
+                # recorded by the normal path. The model's farewell came with
+                # the invented dialogue, so the default farewell replaces it.
+                ask_ai_end_action = {**action_with_cut, "farewell": DEFAULT_FAREWELL}
+                raw_response_text = json.dumps({"action": END_SESSION_ACTION, **ask_ai_end_action})
         if ask_ai_end_action:
             buf = ""
         elif suppressed_for_action:
@@ -822,6 +1096,27 @@ class TurnStreamer:
                     t_tts_end = time.monotonic()
                     if not tts_was_interrupted:
                         session._spoken_sentences.append(sentence)
+        # A cut round's end_call was accepted and nothing said goodbye: the line
+        # would drop right after the last sentence (maybe a question). Say the
+        # default farewell once, as the JSON-envelope path does.
+        if (model_wrote_caller_turn and _drain_after_cut and end_call_accepted
+                and not tts_was_interrupted and not _barged()
+                and not _GOODBYE_WORDS.search(" ".join(session._spoken_sentences[-1:]))):
+            await tool_filler.settle()
+            if t_tts_first is None:
+                t_tts_first = time.monotonic()
+                self._p.latency_tracker.mark_tts_start(call_id)
+            session.tts_active = True
+            session._reply_audio_started = True
+            session._voice_action_delivered_text = ""
+            tts_was_interrupted = await self._p.synthesize_and_send_audio(
+                session, DEFAULT_FAREWELL, websocket, track_latency=False,
+            )
+            _record_action_playback(DEFAULT_FAREWELL, tts_was_interrupted)
+            first_sentence = False
+            t_tts_end = time.monotonic()
+            if not tts_was_interrupted:
+                session._spoken_sentences.append(DEFAULT_FAREWELL)
         # Anti-silence safety net: the LLM stream completed WITHOUT error but
         # produced no spoken content at all (e.g. a reasoning model burned its
         # whole token budget on internal thinking, or an empty completion).
