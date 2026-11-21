@@ -77,8 +77,36 @@ def dnc_assertion_position(transcript: str) -> int:
 _HYPHENATED_BYE_BYE = re.compile(r"\b(bye)[-‐‑](?=bye\b)", re.I)
 
 
+_BYE_BYE_ALLOWED_AFTER = frozenset(
+    "then now for thanks thank you mate love dear darling cheers sir madam".split())
+_BYE_BYE_SAID_BEFORE = re.compile(r"\b(?:said|say|saying|says)\b", re.I)
+_PAUSE_BEFORE = re.compile(
+    r"\b(?:hang\s+on|hold\s+on|wait|one\s+moment|just\s+a\s+(?:sec|second|minute))\b", re.I)
+_RESUME_AFTER = re.compile(
+    r"\b(?:go\s+on|carry\s+on|go\s+ahead|continue|keep\s+going|you\s+were\s+saying)\b", re.I)
+_CLAUSE_END = re.compile(r"[.!?;\n]")
+
+
+def _is_standalone_bye_bye(text: str, match: re.Match) -> bool:
+    """A "bye bye" counts only as a farewell, not as words inside a sentence."""
+    if " ".join(re.findall(r"[a-z]+", match[0].lower())) != "bye bye":
+        return True
+    ends = [m.end() for m in _CLAUSE_END.finditer(text, 0, match.start())]
+    start = ends[-1] if ends else 0
+    after = _CLAUSE_END.search(text, match.end())
+    end = after.start() if after else len(text)
+    before_clause, after_clause = text[start:match.start()], text[match.end():end]
+    if _BYE_BYE_SAID_BEFORE.search(before_clause) or _PAUSE_BEFORE.search(text[:match.start()]):
+        return False
+    if _RESUME_AFTER.search(text[match.end():]):
+        return False
+    return all(w in _BYE_BYE_ALLOWED_AFTER for w in re.findall(r"[a-z']+", after_clause.lower()))
+
+
 def contains_explicit_goodbye(transcript: str) -> bool:
     """Explicit caller ending with no later request to continue."""
     transcript = _HYPHENATED_BYE_BYE.sub(r"\1 ", str(transcript or ""))
-    position = last_asserted_position(transcript, _EXPLICIT_GOODBYE_PATTERN)
+    matches = [m for m in assertion_matches(transcript, _EXPLICIT_GOODBYE_PATTERN)
+               if _is_standalone_bye_bye(transcript, m)]
+    position = matches[-1].start() if matches else -1
     return position >= 0 and not continuation_after(transcript, position)

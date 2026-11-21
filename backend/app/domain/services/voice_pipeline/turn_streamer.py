@@ -31,8 +31,11 @@ from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession
 from app.domain.services.ask_ai_constants import ask_ai_fact_sheet
 from app.domain.services.end_session_action import (
+    DEFAULT_FAREWELL,
+    END_SESSION_ACTION,
     build_end_session_tool_instructions,
     parse_end_session_action,
+    verified_opt_out,
 )
 from app.domain.services.voice_pipeline.sentence_segmentation import (
     _is_missing_space_boundary,
@@ -146,6 +149,31 @@ async def _ensure_campaign_timezone(session) -> None:
 _ACTION_ENVELOPE_RE = re.compile(
     r"""\{\s*["']?\s*action\s*["']?\s*:""", re.IGNORECASE
 )
+
+
+# An end_call's own `reason` (tool argument) naming a mailbox, answering machine
+# or call screening: the only refusal where silence beats "could you say it again?".
+_MACHINE_REASON = re.compile(
+    r"voice\s*-?\s*mail|mail\s*box|answer(?:ing)?\s*(?:machine|phone|service)|answerphone"
+    r"|machine|screening|screener|automated\s+(?:greeting|message)",
+    re.IGNORECASE,
+)
+
+
+def _is_address_token(text: str, index: int) -> bool:
+    """True when the space-delimited word around ``index`` is an email or web
+    address ("John.Smith@gmail.com", ".../signup?ref=abc"): letters hard against
+    its own '.' or '?' are part of the address, not the caller's reply."""
+    lo, hi = index, index + 1
+    while lo and not text[lo - 1].isspace():
+        lo -= 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    return "@" in text[lo:hi] or "/" in text[lo:hi]
+
+
+def _is_machine_reason(reason) -> bool:
+    return isinstance(reason, str) and bool(_MACHINE_REASON.search(reason))
 
 
 def _find_action_envelope_start(buf: str) -> int:
@@ -413,6 +441,15 @@ class TurnStreamer:
         terminator_at_edge: Optional[str] = None
         # True when an end_call the model requested this turn was refused.
         refused_end_call = False
+        # ... and True when one of those refusals was NOT a mailbox / answering
+        # machine / screening reason (then a live person may be on the line).
+        refused_end_call_not_machine = False
+        # Set when a tool round finished: the next token is the first of a new
+        # round of the same turn, never the caller's reply to the last one.
+        round_boundary = False
+        # After a cut keep reading the current round silently (nothing spoken or
+        # kept) so its tool calls still run; only when tools were offered.
+        _drain_after_cut = bool(offered_tools) and not context_failure
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
 
@@ -461,6 +498,7 @@ class TurnStreamer:
         # going silent, so it must not carry over from a previous turn.
         session._tts_delivery_failed = False
         session._tts_failure_reason = None
+        session._recovery_skipped_for_refused_end_call = False
         # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
         # (stale signal from a previous interruption) must not kill this fresh
         # reply. _barged() below ignores such stale events.
@@ -509,6 +547,8 @@ class TurnStreamer:
             _token_iter = _context_recovery()
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
+                nonlocal round_boundary, refused_end_call_not_machine
+                round_boundary = True
                 # Recording the caller's details is silent bookkeeping, not a wait.
                 # Only a lookup or a slow outside action leaves a wait; end_call
                 # and other control tools return at once (no "One moment" on
@@ -556,6 +596,8 @@ class TurnStreamer:
                         and result.get("status") == "caller_intent_unconfirmed"):
                     nonlocal refused_end_call
                     refused_end_call = True
+                    if not _is_machine_reason(_args.get("reason") if isinstance(_args, dict) else None):
+                        refused_end_call_not_machine = True
                 current = getattr(session, "_live_structured_state", _structured)
                 session._live_structured_state = reduce_live_state(
                     current,
@@ -612,6 +654,19 @@ class TurnStreamer:
                     tts_was_interrupted = True
                     break
 
+                if round_boundary:
+                    # A tool round finished. This token starts the next round of
+                    # the same turn: it can never be a glued caller turn.
+                    round_boundary = False
+                    terminator_at_edge = None
+                    if model_wrote_caller_turn:
+                        break  # the cut round's tools have run; no further round
+                    if (buf and token and not buf[-1].isspace() and not token[0].isspace()
+                            and buf.lstrip()[:1] != "{" and token.lstrip()[:1] != "{"):
+                        token = " " + token
+                if model_wrote_caller_turn:
+                    continue  # draining the cut round: nothing spoken or kept
+
                 all_tokens.append(token)
                 buf += token
 
@@ -630,6 +685,8 @@ class TurnStreamer:
                             call_id[:12],
                         )
                         buf = ""
+                        if _drain_after_cut:
+                            continue
                         break
 
                 # If the model is emitting the structured end-session action
@@ -674,9 +731,15 @@ class TurnStreamer:
                     # stopped writing its own turn and started the caller's
                     # ("...best option?Yes.Could I confirm..."). Speak this
                     # sentence; everything after it is dialogue made up.
-                    turn_boundary = _is_missing_space_boundary(buf, idx)
+                    turn_boundary = (
+                        _is_missing_space_boundary(buf, idx)
+                        and not _is_address_token(buf, idx)
+                    )
+                    # The word the terminator ends: an email or web address
+                    # ("...signup?" then "ref=abc") is not a turn boundary.
                     terminator_at_edge = (
-                        buf[idx] if idx + 1 == len(buf) and buf[idx] in "?!." else None
+                        buf[idx] if idx + 1 == len(buf) and buf[idx] in "?!."
+                        and not _is_address_token(buf, idx) else None
                     )
                     raw_sentence = buf[:idx + 1].strip()
                     # Skip the separator only when there IS one: at a
@@ -766,7 +829,7 @@ class TurnStreamer:
                 # The cut must also stop the OUTER stream: the inner break only
                 # leaves the flush loop, and a normally spaced next chunk would
                 # otherwise be spoken as a new sentence.
-                if tts_was_interrupted or model_wrote_caller_turn:
+                if tts_was_interrupted or (model_wrote_caller_turn and not _drain_after_cut):
                     break
 
         except asyncio.CancelledError:
@@ -832,6 +895,7 @@ class TurnStreamer:
             else None
         )
         if model_wrote_caller_turn and ask_ai_end_action:
+            action_with_cut = ask_ai_end_action
             # An end action in the same completion as invented dialogue was
             # reached by reading the model's own fabricated reply, not the caller's.
             logger.warning(
@@ -840,6 +904,13 @@ class TurnStreamer:
                 call_id[:12],
             )
             ask_ai_end_action = None
+            if (action_with_cut.get("do_not_call")
+                    and verified_opt_out(action_with_cut, last_user_text)):
+                # ... except a do-not-call the caller's own words back: it is
+                # recorded by the normal path. The model's farewell came with
+                # the invented dialogue, so the default farewell replaces it.
+                ask_ai_end_action = {**action_with_cut, "farewell": DEFAULT_FAREWELL}
+                raw_response_text = json.dumps({"action": END_SESSION_ACTION, **ask_ai_end_action})
         if ask_ai_end_action:
             buf = ""
         elif suppressed_for_action:
@@ -903,7 +974,10 @@ class TurnStreamer:
             and not _barged()
             and not tool_filler.interrupted
         )
-        if _would_recover and refused_end_call and not caller_finished:
+        if (_would_recover and refused_end_call and not refused_end_call_not_machine
+                and not caller_finished):
+            # B1: the turn_runner keeps the caller's message in history.
+            session._recovery_skipped_for_refused_end_call = True
             # The model's only output was an end_call that was refused (e.g. a
             # voicemail greeting not yet recognised): stay silent and keep
             # listening rather than say "could you say it again?" into it.

@@ -96,7 +96,9 @@ async def test_other_tools_still_continue_after_a_spoken_preamble():
     provider, rounds = _groq([("Let me check.", LOOKUP), ("Every hour, from five am.", None)])
     out = [t async for t in provider.stream_chat_with_tools(
         MESSAGES, tools=_tools(), tool_runner=_runner(), max_tool_rounds=3)]
-    assert "".join(out) == "Let me check.Every hour, from five am."
+    # Two rounds of one turn are two pieces of speech: the provider layer puts
+    # one space between them (21 Nov 2026), so they are never glued together.
+    assert "".join(out) == "Let me check. Every hour, from five am."
     assert len(rounds) == 2
 
 

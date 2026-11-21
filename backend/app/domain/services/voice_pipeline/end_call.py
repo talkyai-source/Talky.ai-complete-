@@ -99,13 +99,17 @@ def model_end_call_allowed(session, user_text=None) -> bool:
     previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
     if caller_signaled_end(user_text, previous_assistant_text=previous):
         return True
-    if continuation_after(user_text):
-        return False
+    from app.domain.services.caller_assertions import continues_after_opt_out
+    from app.domain.services.voice_pipeline.identity_disposition import dnc_assertion_position
+    opt_position = dnc_assertion_position(user_text)
     # Set only from caller evidence (phrase floor or a verified quote). Removing
     # future calls does not end a request the caller made in this same turn, so
-    # it is checked after the continuation test.
-    if getattr(session, "_caller_opted_out", False) is True:
-        return True
+    # a real request after the opt-out keeps the call open; a hostile or
+    # rhetorical question does not.
+    if opt_position >= 0 or getattr(session, "_caller_opted_out", False) is True:
+        return not continues_after_opt_out(user_text, opt_position)
+    if continuation_after(user_text):
+        return False
     if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
         return True
     declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
