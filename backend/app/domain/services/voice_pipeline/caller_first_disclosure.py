@@ -14,8 +14,11 @@ calls: "Hi, this is Sarah, an AI assistant from All State Estimation, on a
 recorded line. Am I speaking with John?". Where the platform's own notice is
 owed the opener says it, under the notice's proof rule; a tenant's own notice
 is spoken first. The opener ends on a question, so the model does not also
-answer that utterance. Inbound caller-first calls keep the notice and then the
-model's reply. _speak_recording_disclosure keeps its own rules: once per call,
+answer that utterance. Inbound caller-first calls keep the notice; since
+2026-11-21 a code-built line then says who is answering and that it is an AI
+assistant ("Thank you for calling Acme. This is Sarah, an AI assistant."), and
+the model's reply follows at once: before that, nothing made the first agent
+line of such a call say so. _speak_recording_disclosure keeps its own rules: once per call,
 the policy decides whether a notice is owed, and an interrupted or unproven
 notice still discards the recording.
 """
@@ -94,6 +97,8 @@ async def speak_disclosure_before_first_reply(
         finally:
             session._disclosure_in_flight = False
     if opener_with_notice is None:
+        if opener and _is_inbound_call(session):
+            await _speak_inbound_identity_line(session, voice_session)
         return False
     if getattr(voice_session, "_opener_spoken_as_notice", False):
         return True
@@ -120,3 +125,48 @@ async def speak_disclosure_before_first_reply(
             logger.debug("caller_first_opener_transcript_failed call_id=%s err=%s",
                          str(session.call_id)[:12], exc)
     return True
+
+
+def _is_inbound_call(session) -> bool:
+    from app.domain.services.telephony.config import _call_direction
+
+    return _call_direction(session) == "inbound"
+
+
+async def _speak_inbound_identity_line(session, voice_session) -> None:
+    """An incoming caller spoke first: say who this is, and that it is an AI,
+    before the model's first reply (which then follows at once; this never
+    answers for the model). Same delivered rule as the outbound opener above:
+    recorded, and ``_has_introduced`` set, only when it was really delivered;
+    cut off or failed, nothing is recorded and the introduction stays owed.
+    Not repeated (``_caller_first_disclosure_done`` allows one try per call, as
+    outbound), and not spoken when a first line that said it was already delivered."""
+    if getattr(session, "_has_introduced", False) or getattr(voice_session, "_opener_spoken_as_notice", False):
+        return
+    from app.domain.models.conversation import Message, MessageRole
+    from app.domain.services.voice_pipeline.inbound_answer_greeting import build_inbound_identity_line
+
+    line = build_inbound_identity_line(session)
+    interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+        session, line, websocket=None, track_latency=False,
+    )
+    if interrupted or getattr(session, "_tts_delivery_failed", False):
+        logger.warning("inbound_identity_line_unconfirmed call_id=%s — not recorded, introduction still owed",
+                       str(session.call_id)[:12])
+        return
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content=line))
+    session._has_introduced = True
+    try:
+        voice_session.pipeline.transcript_service.accumulate_turn(
+            call_id=session.call_id,
+            role="assistant",
+            content=line,
+            talklee_call_id=getattr(session, "talklee_call_id", None),
+            turn_index=getattr(session, "turn_id", 0),
+            event_type="assistant_response",
+            is_final=True,
+            include_in_plaintext=True,
+        )
+    except Exception as exc:  # transcript bookkeeping must never break the call
+        logger.debug("inbound_identity_line_transcript_failed call_id=%s err=%s",
+                     str(session.call_id)[:12], exc)
