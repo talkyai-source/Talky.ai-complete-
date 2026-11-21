@@ -224,6 +224,17 @@ def end_call_intent_present(text: str, *, previous_assistant_text: str | None = 
     return caller_signaled_end(text, previous_assistant_text=previous_assistant_text)
 
 
+OPT_OUT_CONDUCT = (
+    "Answer only what the caller just asked, in one sentence; make no offer and do not "
+    "continue the campaign; end the call once they have their answer."
+)
+
+
+def opt_out_refused_note(recorded: bool) -> str:
+    """Never claims the entry is recorded unless the write succeeded."""
+    return ("The caller's opt-out is recorded. " if recorded else "The caller asked not to be called again. ") + OPT_OUT_CONDUCT
+
+
 async def run_voice_action(
     session: Any,
     action: str,
@@ -269,7 +280,22 @@ async def run_voice_action(
              or getattr(session, "_machine_screening", False) is True)
             and not continuation_after(user_text)
         )
-        if not opted_out and not machine and not end_call_intent_present(
+        # An opt-out closes the call unless the caller asked for something AFTER it
+        # (same decision as the end-of-turn gate, end_call.opt_out_close_decision).
+        stored_opt_out = getattr(session, "_caller_opted_out", False) is True
+        if opted_out:
+            from app.domain.services.end_session_action import _quote_end
+            from app.domain.services.voice_pipeline.end_call import opt_out_position
+            position = opt_out_position(session, user_text)
+            if position < 0:
+                position = _quote_end(call_args.get("opt_out_quote"), user_text)
+            try:
+                session._opt_out_evidence = (user_text, position)
+            except Exception:
+                pass
+        from app.domain.services.voice_pipeline.end_call import opt_out_close_decision
+        opt_out_closes = opt_out_close_decision(session, user_text) is True
+        if not opt_out_closes and not machine and not end_call_intent_present(
             user_text, previous_assistant_text=previous_assistant_text
         ):
             result = _result(
@@ -277,8 +303,16 @@ async def run_voice_action(
                 success=False,
                 status="caller_intent_unconfirmed",
                 confirmation_allowed=False,
-                message="The caller has not clearly ended the conversation.",
+                message="The caller has not clearly ended the conversation." + (
+                    " " + opt_out_refused_note(
+                        opt_out_recorded or getattr(session, "_opt_out_recorded", False) is True
+                    ) if stored_opt_out else ""
+                ),
             )
+            if stored_opt_out:
+                result["opt_out"] = "recorded" if (
+                    opt_out_recorded or getattr(session, "_opt_out_recorded", False) is True
+                ) else "unconfirmed"
             # Words the model spoke with this decision were its closing; the
             # call stays open and the caller answers them (stream_tool_turn).
             result["ends_turn"] = True
