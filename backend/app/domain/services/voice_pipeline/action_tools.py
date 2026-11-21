@@ -269,7 +269,10 @@ async def run_voice_action(
              or getattr(session, "_machine_screening", False) is True)
             and not continuation_after(user_text)
         )
-        if not opted_out and not machine and not end_call_intent_present(
+        # An opt-out closes the call unless the caller also asked for something
+        # in this turn (the do-not-call write above is unaffected).
+        opt_out_closes = opted_out and not continuation_after(user_text)
+        if not opt_out_closes and not machine and not end_call_intent_present(
             user_text, previous_assistant_text=previous_assistant_text
         ):
             result = _result(

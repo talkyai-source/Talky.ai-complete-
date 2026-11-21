@@ -71,7 +71,14 @@ def dnc_assertion_position(transcript: str) -> int:
     return -1
 
 
+# STT writes the spaced goodbye "bye bye" as "Bye-bye." Same words: one character
+# swapped for a space, so offsets in the transcript stay valid. Bare "bye" is
+# still not a goodbye.
+_HYPHENATED_BYE_BYE = re.compile(r"\b(bye)[-‐‑](?=bye\b)", re.I)
+
+
 def contains_explicit_goodbye(transcript: str) -> bool:
     """Explicit caller ending with no later request to continue."""
+    transcript = _HYPHENATED_BYE_BYE.sub(r"\1 ", str(transcript or ""))
     position = last_asserted_position(transcript, _EXPLICIT_GOODBYE_PATTERN)
     return position >= 0 and not continuation_after(transcript, position)

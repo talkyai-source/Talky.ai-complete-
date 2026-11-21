@@ -34,6 +34,9 @@ from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
 )
+from app.domain.services.voice_pipeline.sentence_segmentation import (
+    _is_missing_space_boundary,
+)
 from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
 from app.domain.services.voice_pipeline.figure_grounding import guard_figures
 from app.domain.services.voice_pipeline.end_call import strip_and_flag
@@ -400,6 +403,16 @@ class TurnStreamer:
         sentences_done = 0
         tts_was_interrupted = False
         suppressed_for_action = False
+        # Set when the model stopped writing its own turn and started writing
+        # the caller's: a terminator with NO space after it ("...correct?Yes").
+        # Everything from there is invented dialogue and is never spoken.
+        model_wrote_caller_turn = False
+        # '?' / '!' that ended the last flushed sentence AND was the last
+        # character received, so a next token starting with a letter (real
+        # tokens carry their own leading space) is a boundary split across tokens.
+        terminator_at_edge: Optional[str] = None
+        # True when an end_call the model requested this turn was refused.
+        refused_end_call = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
 
@@ -539,6 +552,10 @@ class TurnStreamer:
                         _name,
                     )
                     result = execution_failure_result(session, _name)
+                if (str(result.get("action") or _name) == "end_call"
+                        and result.get("status") == "caller_intent_unconfirmed"):
+                    nonlocal refused_end_call
+                    refused_end_call = True
                 current = getattr(session, "_live_structured_state", _structured)
                 session._live_structured_state = reduce_live_state(
                     current,
@@ -598,6 +615,23 @@ class TurnStreamer:
                 all_tokens.append(token)
                 buf += token
 
+                if terminator_at_edge is not None and buf:
+                    _crossed = buf[0].isalpha() and (
+                        terminator_at_edge in "?!" or buf[0].isupper()
+                    )
+                    terminator_at_edge = None
+                    if _crossed:
+                        # The sentence before the edge was already spoken;
+                        # this token begins the caller's turn, written by the model.
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s — turn cut at a "
+                            "boundary split across tokens",
+                            call_id[:12],
+                        )
+                        buf = ""
+                        break
+
                 # If the model is emitting the structured end-session action
                 # (pure JSON — by contract "no spoken text outside JSON"), do NOT
                 # stream it to TTS, or the {"action":...} envelope gets read
@@ -636,12 +670,29 @@ class TurnStreamer:
                     if idx + 1 == len(buf) and buf[idx] == ".":
                         break
 
+                    # A terminator with no space after it is where the model
+                    # stopped writing its own turn and started the caller's
+                    # ("...best option?Yes.Could I confirm..."). Speak this
+                    # sentence; everything after it is dialogue made up.
+                    turn_boundary = _is_missing_space_boundary(buf, idx)
+                    terminator_at_edge = (
+                        buf[idx] if idx + 1 == len(buf) and buf[idx] in "?!." else None
+                    )
                     raw_sentence = buf[:idx + 1].strip()
                     # Skip the separator only when there IS one: at a
                     # missing-space boundary, idx + 2 swallows the first letter
                     # of whatever follows.
                     _skip = 2 if (idx + 1 < len(buf) and buf[idx + 1].isspace()) else 1
                     buf = buf[idx + _skip:] if idx + _skip <= len(buf) else ""
+                    if turn_boundary:
+                        model_wrote_caller_turn = True
+                        logger.warning(
+                            "model_wrote_caller_turn call=%s — turn cut at the "
+                            "boundary; %d char(s) of invented dialogue dropped",
+                            call_id[:12],
+                            len(buf),
+                        )
+                        buf = ""
 
                     # Extract-first (root cause, not a regex patch): pull the
                     # END_CALL sentinel out of the RAW model text before
@@ -712,7 +763,10 @@ class TurnStreamer:
                     if tts_was_interrupted:
                         break
 
-                if tts_was_interrupted:
+                # The cut must also stop the OUTER stream: the inner break only
+                # leaves the flush loop, and a normally spaced next chunk would
+                # otherwise be spoken as a new sentence.
+                if tts_was_interrupted or model_wrote_caller_turn:
                     break
 
         except asyncio.CancelledError:
@@ -777,6 +831,15 @@ class TurnStreamer:
             if self._p._supports_llm_end_session_action(session)
             else None
         )
+        if model_wrote_caller_turn and ask_ai_end_action:
+            # An end action in the same completion as invented dialogue was
+            # reached by reading the model's own fabricated reply, not the caller's.
+            logger.warning(
+                "model_wrote_caller_turn call=%s — ignoring the end-call action "
+                "from the same completion",
+                call_id[:12],
+            )
+            ask_ai_end_action = None
         if ask_ai_end_action:
             buf = ""
         elif suppressed_for_action:
@@ -830,7 +893,7 @@ class TurnStreamer:
         from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
         caller_finished = caller_signaled_end(last_user_text,
             previous_assistant_text=previous_assistant_turn(messages))
-        if (
+        _would_recover = (
             not tts_was_interrupted
             and sentences_done == 0
             and t_tts_first is None
@@ -839,7 +902,15 @@ class TurnStreamer:
             and not getattr(session, "_tts_delivery_failed", False)
             and not _barged()
             and not tool_filler.interrupted
-        ):
+        )
+        if _would_recover and refused_end_call and not caller_finished:
+            # The model's only output was an end_call that was refused (e.g. a
+            # voicemail greeting not yet recognised): stay silent and keep
+            # listening rather than say "could you say it again?" into it.
+            logger.warning(
+                "recovery_line_skipped call=%s reason=refused_end_call", call_id,
+            )
+        elif _would_recover:
             recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
             await tool_filler.settle()
             if caller_finished:

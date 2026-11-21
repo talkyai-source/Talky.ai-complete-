@@ -97,13 +97,15 @@ def model_end_call_allowed(session, user_text=None) -> bool:
             if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
         ), "")
     previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
-    # Set only from caller evidence (phrase floor or a verified quote).
-    if getattr(session, "_caller_opted_out", False) is True:
-        return True
     if caller_signaled_end(user_text, previous_assistant_text=previous):
         return True
     if continuation_after(user_text):
         return False
+    # Set only from caller evidence (phrase floor or a verified quote). Removing
+    # future calls does not end a request the caller made in this same turn, so
+    # it is checked after the continuation test.
+    if getattr(session, "_caller_opted_out", False) is True:
+        return True
     if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
         return True
     declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
