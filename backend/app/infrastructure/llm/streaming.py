@@ -179,6 +179,40 @@ async def execute_tool_call(call, tools, runner, *, timeout_seconds=None):
 
 MAX_NAVIGATION_ROUNDS = 4
 
+
+class RoundJoiner:
+    """Separate the spoken text of two rounds of ONE turn with a single space.
+
+    A new completion's first token carries no leading space, so "Let me check."
+    and "Every hour." arrived as "check.Every", which the self-dialogue guard
+    reads as a glued caller turn. The space is yielded to the speaker only: the
+    model's own assistant message and every tool payload keep the exact text.
+    Never added around a JSON envelope (text starting with "{").
+    """
+
+    def __init__(self):
+        self._tail = ""
+        self._envelope = False
+        self._started = False
+
+    def before_round(self, token):
+        """Text to yield ahead of ``token`` when it is the first of a new round."""
+        if (self._tail and not self._envelope and token
+                and not self._tail[-1].isspace() and not token[0].isspace()
+                and token.lstrip()[:1] != "{"):
+            return " "
+        return ""
+
+    def seen(self, token):
+        """Record a token that was yielded to the speaker."""
+        if not token:
+            return
+        if not self._started and token.strip():
+            self._started = True
+            self._envelope = token.lstrip()[:1] == "{"
+        self._tail = token[-1]
+
+
 TOOL_BUDGET_NOTE = (
     "No more tool calls are available in this reply. Answer the caller now from the "
     "results you have; if they do not contain the answer, say plainly what you cannot "
@@ -252,6 +286,7 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
         return
     extra = []
     results = {}
+    joiner = RoundJoiner()
     while budget.remaining:
         calls, content = [], []
         continuation = {"extra_messages": list(extra)} if extra else {}
@@ -259,9 +294,16 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
             messages, timeout_seconds=timeout_seconds, tools=tools, tool_choice="auto",
             tool_calls_sink=calls, **continuation, **kwargs,
         )) as stream:
+            first = True
             async for token in stream:
                 content.append(token)
                 if not require_tool_result_before_content:
+                    if first:
+                        gap = joiner.before_round(token)
+                        if gap:
+                            yield gap
+                    first = False
+                    joiner.seen(token)
                     yield token
         if not calls:
             if require_tool_result_before_content and content:
@@ -295,10 +337,17 @@ async def stream_tool_turn(provider, messages, *, tools=None, tool_runner=None,
         messages, timeout_seconds=timeout_seconds, extra_messages=extra,
         tools=tools, tool_choice="none", **kwargs,
     )) as stream:
+        first = True
         async for token in stream:
             if require_tool_result_before_content:
                 answer.append(token)
             else:
+                if first:
+                    gap = joiner.before_round(token)
+                    if gap:
+                        yield gap
+                first = False
+                joiner.seen(token)
                 yield token
     if answer:
         yield "".join(answer)

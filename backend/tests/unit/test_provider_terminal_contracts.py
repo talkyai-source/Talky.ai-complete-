@@ -115,7 +115,8 @@ async def test_valid_nullable_end_tool_with_preamble_executes_once_then_continue
         MESSAGES, tools=[TOOL], tool_runner=runner,
     )]
     runner.assert_awaited_once_with("end_call", {"reason": None})
-    assert output == ["I will finish.", "Goodbye."]
+    # The single space is the boundary between the two rounds (21 Nov 2026).
+    assert output == ["I will finish.", " ", "Goodbye."]
     assert create.await_count == 2
     assert closed == [True, True]
     continuation = create.await_args_list[1].kwargs
