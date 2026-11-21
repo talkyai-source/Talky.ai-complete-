@@ -238,7 +238,12 @@ async def test_agent_first_slow_path_consumes_pinned_custom_inbound_greeting():
         await _send_outbound_greeting(voice_session)
 
     heard = [value for kind, value in log if kind == "tts"]
-    assert heard[:2] == ["This call is recorded.", "Welcome to Acme support."]
+    # The saved greeting is still the line spoken (not a persona line); since
+    # 21 Nov 2026 it also tells the caller it is an AI when it does not say so.
+    assert heard[:2] == [
+        "This call is recorded.",
+        "This is Maya, an AI assistant. Welcome to Acme support.",
+    ]
 
 
 class _GatedInboundMediaGateway(_FakeMediaGateway):

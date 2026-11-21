@@ -4395,7 +4395,7 @@
       "id": "8f1f084fb385daf591f7c782c878e6c8c393cd1029484f7f6d78289d181df4d0",
       "file": "app/domain/services/telephony/prewarm.py",
       "function": "_lookup_campaign_row",
-      "line": 119,
+      "line": 148,
       "method": "fetchrow",
       "tables": [
         "campaigns"
@@ -8083,10 +8083,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Platform emergency approver endpoint:114\u2013123 denies one UUID request and records the authenticated denier. A platform operator may deny another operator's request; no tenant table is touched."
     },
     {
-      "id": "11055157f7e985b3d3795aa1f9e40be69fa8ecd650b0ccf793237cc59f43ce55",
+      "id": "88f35fff60cb59b9a98e20316917ca26c3a3db1b116f6d76b785e7d26ca4666b",
       "file": "app/domain/services/voice_pipeline/interrupt.py",
       "function": "_do_interrupt",
-      "line": 313,
+      "line": 333,
       "method": "_log_step",
       "tables": [],
       "sql": "begin",
@@ -8094,7 +8094,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "This string is the name of a telemetry/log step (begin/commit/rollback), not transaction SQL. Exact reviewed operation: _log_step; app/domain/services/voice_pipeline/interrupt.py:313.",
+      "reason": "This string is the name of a telemetry/log step (begin/commit/rollback), not transaction SQL. Exact reviewed operation: _log_step; app/domain/services/voice_pipeline/interrupt.py:333.",
       "category": "not_database_sql"
     },
     {
