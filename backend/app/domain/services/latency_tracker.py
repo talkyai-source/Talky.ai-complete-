@@ -117,7 +117,8 @@ class LatencyMetrics:
     def llm_first_token_ms(self) -> Optional[float]:
         """Time from LLM start to first streamed token."""
         if self.llm_start_time is not None and self.llm_first_token_time is not None:
-            return (self.llm_first_token_time - self.llm_start_time) * 1000
+            ms = (self.llm_first_token_time - self.llm_start_time) * 1000
+            return ms if ms >= 0 else None
         return None
 
     @property
@@ -263,9 +264,19 @@ class LatencyTracker:
         )
     
     def mark_llm_start(self, call_id: str) -> None:
-        """Mark when LLM processing starts."""
-        if call_id in self._metrics:
-            self._metrics[call_id].llm_start_time = time.monotonic()
+        """Mark when LLM processing starts.
+
+        Clears the stamps that only mean something AFTER a model start
+        (first token, model end). When the previous answer is still in
+        flight, no new turn is started but the model start is marked again;
+        first-token is first-wins, so the OLD stamp survived and the interval
+        came out negative (-510 .. -10451 ms on 20 Nov) or None.
+        """
+        metrics = self._metrics.get(call_id)
+        if metrics is not None:
+            metrics.llm_start_time = time.monotonic()
+            metrics.llm_first_token_time = None
+            metrics.llm_end_time = None
 
     def mark_listening_start(self, call_id: str) -> None:
         """Mark when turn listening window starts."""
