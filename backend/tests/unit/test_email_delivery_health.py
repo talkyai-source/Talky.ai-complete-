@@ -179,7 +179,13 @@ async def test_only_the_outcome_is_kept_never_the_message(redis, settings, smtp)
     await send("<p>secret code 482913</p>")
     stored = await redis.hgetall(email_delivery.KEY)
     assert set(stored) == {"outcome", "at", "error", "consecutive_failures", "failing_since"}
-    joined = " ".join(stored.values())
+    # The two time fields are plain numbers and nothing else. They are left out
+    # of the text search below: a time can contain "535" by chance, which made
+    # this test fail about once in a hundred runs.
+    times = {"at", "failing_since"}
+    for key in times:
+        assert stored[key].replace(".", "", 1).isdigit(), (key, stored[key])
+    joined = " ".join(value for key, value in stored.items() if key not in times)
     for private in (RECIPIENT, "482913", "sign-up", settings.email_user, settings.email_pass, "535", "accepted"):
         assert private not in joined
     assert 0 < await redis.ttl(email_delivery.KEY) <= email_delivery.TTL_SECONDS
