@@ -31,7 +31,7 @@ from app.domain.services.voice_pipeline.identity_disposition import (
 from app.domain.services.voice_pipeline.lead_slot_capture import (
     capture_turn_slots,
 )
-from app.domain.services.voice_pipeline.end_call import model_end_call_allowed
+from app.domain.services.voice_pipeline.end_call import fixed_rule_close, model_end_call_allowed
 from app.domain.services.end_session_action import (
     caller_signaled_end,
 )
@@ -1015,8 +1015,7 @@ class TurnEnder:
                 # forgets its tool/sentinel. Reuse the same playback/interrupt
                 # gates below; a topic refusal alone does not arm this path.
                 end_already_handled = getattr(session, "_end_session_action_handled", False) is True
-                if not end_already_handled and (contains_explicit_goodbye(full_transcript)
-                        or (contains_dnc(full_transcript) and caller_signaled_end(full_transcript))):
+                if not end_already_handled and fixed_rule_close(session, full_transcript):
                     session._end_call_requested = True
                 if not end_already_handled and getattr(session, "_end_call_requested", False):
                     # Keep caller authorization and current audio ownership.

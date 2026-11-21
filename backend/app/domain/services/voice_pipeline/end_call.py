@@ -88,36 +88,61 @@ def strip_and_flag(session, text: str) -> str:
 def opt_out_position(session, user_text) -> int:
     """Where the caller's opt-out sits in ``user_text``, or -1.
 
-    The phrase list gives it; a model-quoted opt-out leaves its end position on
-    the session (``_opt_out_evidence``) for exactly this text, so the tool gate
-    and the end-of-turn gate always read the same position.
+    The phrase list gives it (newest 1000 characters only); a model-quoted opt-out
+    leaves its end position on the session (``_opt_out_evidence``) for exactly this
+    text, so the tool gate and the end-of-turn gate always read the same position.
     """
+    from app.domain.services.caller_assertions import _window
     from app.domain.services.voice_pipeline.identity_disposition import dnc_assertion_position
-    position = dnc_assertion_position(user_text)
+    window, _, offset = _window(user_text, -1)
+    position = dnc_assertion_position(window)
     if position >= 0:
-        return position
+        return position + offset
     evidence = getattr(session, "_opt_out_evidence", None)
-    if isinstance(evidence, tuple) and len(evidence) == 2 and evidence[0] == user_text             and isinstance(evidence[1], int):
+    if (isinstance(evidence, tuple) and len(evidence) == 2 and evidence[0] == user_text
+            and isinstance(evidence[1], int)):
         return evidence[1]
     return -1
 
 
-def opt_out_close_decision(session, user_text):
+def opt_out_close_decision(session, user_text, previous_assistant_text=None):
     """True: a recorded opt-out lets the call close; False: the caller asked for
-    something after it; None: no opt-out rule applies (decide as for any call).
+    something after it and has not said goodbye since; None: no opt-out rule
+    applies (decide as for any call).
 
-    In the turn that carries the opt-out it ends the call unless the caller asks
-    for something AFTER it. On a later turn a stored opt-out is no standing
-    permission: only the caller's own end signal (checked by the callers) or a turn
-    of nothing but courtesy words closes.
+    In the turn that carries the opt-out the default is to close; only a tight
+    request AFTER it keeps the call open, and a goodbye after that request closes
+    it. On a later turn a stored opt-out is no standing permission: only the
+    caller's own end signal (checked by the callers) or a turn of nothing but
+    courtesy words closes.
     """
     if getattr(session, "_caller_opted_out", False) is not True:
         return None
-    from app.domain.services.caller_assertions import continues_after_opt_out, courtesy_only
-    position = opt_out_position(session, user_text)
-    if position >= 0:
-        return not continues_after_opt_out(user_text, position)
-    return True if courtesy_only(user_text) else None
+    from app.domain.services.caller_assertions import courtesy_only, request_after_opt_out
+    from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
+    text = str(user_text or "")
+    if previous_assistant_text is None:
+        previous_assistant_text = previous_assistant_turn(getattr(session, "conversation_history", ()))
+    position = opt_out_position(session, text)
+    if position < 0:
+        return True if courtesy_only(text, previous_assistant_text) else None
+    request = request_after_opt_out(text, position)
+    if request < 0:
+        return True
+    return caller_signaled_end(text[request:], previous_assistant_text=previous_assistant_text)
+
+
+def fixed_rule_close(session, text) -> bool:
+    """The turn finisher's own close (no model request): an explicit goodbye, or an
+    opt-out the opt-out decision lets close. One decision for every close path."""
+    from app.domain.services.end_session_action import caller_signaled_end
+    from app.domain.services.voice_pipeline.identity_disposition import contains_dnc, contains_explicit_goodbye
+    if contains_explicit_goodbye(text):
+        return True
+    if not contains_dnc(text):
+        return False
+    decision = opt_out_close_decision(session, text)
+    return decision if decision is not None else caller_signaled_end(text)
 
 
 def model_end_call_allowed(session, user_text=None) -> bool:
@@ -132,13 +157,14 @@ def model_end_call_allowed(session, user_text=None) -> bool:
             if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
         ), "")
     previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
-    if caller_signaled_end(user_text, previous_assistant_text=previous):
-        return True
-    # A recorded opt-out (phrase floor or a verified quote) decides here, with the
-    # same function the tool gate uses; None means no opt-out rule applies.
-    decision = opt_out_close_decision(session, user_text)
+    # A recorded opt-out decides first, with the same function the tool gate and the
+    # turn finisher use (caller_signaled_end counts the opt-out itself as an end
+    # signal, so it must not run before this); None means no opt-out rule applies.
+    decision = opt_out_close_decision(session, user_text, previous)
     if decision is not None:
         return decision
+    if caller_signaled_end(user_text, previous_assistant_text=previous):
+        return True
     if continuation_after(user_text):
         return False
     if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:

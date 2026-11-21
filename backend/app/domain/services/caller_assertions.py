@@ -90,55 +90,94 @@ def continuation_after(text: str | None, position: int = -1) -> bool:
     return any(match.start() > position for match in assertion_matches(text, _CONTINUE))
 
 
-_CONTINUE_REQUEST = re.compile(_CONTINUE.pattern.replace(r'|\b(?:what|why|how|where|when)\b', ''), re.I)
-_OPT_OUT_CONNECTOR = re.compile(r'\b(?:but|first|also|before|however|actually|instead)\b', re.I)
-_OPT_OUT_QUESTION = re.compile(r'\b(?:what|how|where|when)\b', re.I)
-_HOSTILE_QUESTION = re.compile(
-    r"^\s*(?:many\s+times|part\b|the\b|is\s+wrong|else\b|do\s+i\s+have\s+to)", re.I)
+# After an opt-out the default is to close. The call stays open only for a tight,
+# high-precision request; a hostile or rhetorical form in the same sentence
+# overrides it. When unsure: close.
+_OPT_OUT_WINDOW = 1000  # newest characters of a turn these decisions look at
+_REQUEST = re.compile(
+    r"\b(?:what|when|where|how|which|who)\s+(?:is|are|was|were|do|does|did|can|could|will|would|should|"
+    r"much|many|long|time|about)\b|"
+    r"\b(?:what|where|when|how)'s\b|"
+    r"\b(?:can|could|may|will|would)\s+(?:i|you|we|someone)\b|"
+    r"\bi\s+(?:need|want)\b|\bi\s+would\s+like\b|\bi'?d\s+like\b|"
+    r"\bi(?:'m|\s+am)\s+calling\s+about\b|\bhelp\s+with\b|"
+    r"\bplease\s+(?:send|tell|email|help|give|check|show|explain|update|cancel|answer|repeat|clarify)\b|"
+    r"\btell\s+me\b|\bexplain\s+the\b|\banswer\s+my\b|"
+    r"\bi\s+have\s+(?:a|another|one\s+more)\s+question\b|\b(?:wait|hold\s+on|hang\s+on|stay\s+on\s+the\s+line)\b|"
+    r"\b(?:don't|do\s+not)\s+hang\s+up\b|\bnot\s+(?:done|finished)\b", re.I)
+_HOSTILE = re.compile(
+    r"\bwhy\b|\bhow\s+dare\b|\bhow\s+many\s+times\b|\bhow\s+hard\s+is\b|\bwhat\s+is\s+it\s+with\b|"
+    r"\bwhat(?:'s|\s+is)\s+wrong\s+with\b|\bwhat's\s+more\b|\bwhat\s+part\s+of\b|\bget\s+off\b|"
+    r"\bwhen\s+will\s+you\b[^.!?;\n]*\blearn\b|\bwhen\s+i\s+say\b|"
+    r"\b(?:want|need)\s+(?:you\s+|it\s+)?to\s+stop\b|"
+    r"\bwhat\s+(?:are|do|did)\s+you\s+(?:going|gonna|want|even|think|people|doing|thinking)\b", re.I)
+_SENTENCE = re.compile(r"[.!?;\n]")
+
+
+def _window(text: str | None, position: int) -> tuple[str, int, int]:
+    """The newest 1000 characters, the position inside them, and the offset cut off."""
+    value = str(text or "")
+    offset = max(0, len(value) - _OPT_OUT_WINDOW)
+    return value[offset:], (position - offset if position >= 0 else -1), offset
+
+
+def request_after_opt_out(text: str | None, opt_out_position: int = -1) -> int:
+    """Start of the last real request AFTER the opt-out, in ``text``'s own offsets, or -1.
+
+    Only the newest 1000 characters are read: the caller's latest words carry the
+    decision, and the bound keeps the passes below cheap on the call's event loop.
+    """
+    window, position, offset = _window(text, opt_out_position)
+    value = _text(window)
+    found = -1
+    for match in assertion_matches(window, _REQUEST):
+        if match.start() <= position:
+            continue
+        ends = [m.end() for m in _SENTENCE.finditer(value, 0, match.start())]
+        after = _SENTENCE.search(value, match.end())
+        sentence = value[(ends[-1] if ends else 0):(after.start() if after else len(value))]
+        if not _HOSTILE.search(sentence):
+            found = match.start() + offset
+    return found
 
 
 def continues_after_opt_out(text: str | None, opt_out_position: int = -1) -> bool:
-    """After an opt-out, only a request for help that follows it keeps the call open.
-
-    Request vocabulary (_CONTINUE without bare question words) after the opt-out
-    counts; so does a what/how/where/when question that follows a connector
-    ("but first, what are your hours?") unless it is a hostile idiom ("how many
-    times", "what part", "what the ..."). "Why" never does, and "and" is not a
-    connector ("stop calling me and what's wrong with you people?" closes).
-    """
-    if any(m.start() > opt_out_position for m in assertion_matches(text, _CONTINUE_REQUEST)):
-        return True
-    value = _text(text)
-    connector = _OPT_OUT_CONNECTOR.search(value, opt_out_position + 1)
-    if connector is None:
-        return False
-    for m in assertion_matches(text, _OPT_OUT_QUESTION):
-        if m.start() > connector.start() and not _HOSTILE_QUESTION.match(value[m.end():]):
-            return True
-    return False
+    """True when the caller asked for something after the opt-out (see above)."""
+    return request_after_opt_out(text, opt_out_position) >= 0
 
 
 _COURTESY = re.compile(
-    r"(?:(?:okay|ok|right|fine|thanks(?: a lot| very much| so much)?|thank you(?: very much| so much)?|"
-    r"cheers|great|lovely|perfect|no|no thanks|nothing else|that's all|that's it|that is everything|"
-    r"that is all|alright|sure|got it|understood|bye|goodbye)\s+)+")
+    r"(?:(?:okay|ok|right|fine|yes|yeah|yep|thanks(?: a lot| very much| so much)?|"
+    r"thank you(?: very much| so much)?|cheers|great|lovely|perfect|cool|brilliant|mate|ta|then|"
+    r"no|no thanks|nothing else|that's all|that's it|that's great|that is everything|that is all|"
+    r"alright|sure|got it|understood|bye|goodbye|fair enough|will do|much appreciated|"
+    r"appreciated|appreciate it)\s+)+")
+_BARE_ANSWER = frozenset("yes yeah yep no okay ok sure right fine alright".split())
 _COURTESY_MAX_WORDS = 8
 _COURTESY_MAX_CHARS = 100
 
 
-def courtesy_only(text: str | None) -> bool:
+def courtesy_only(text: str | None, previous_assistant_text: str | None = None) -> bool:
     """The whole turn is only acknowledgement or courtesy words (at most 8).
 
-    The input is bounded before the regex runs, so a long turn cannot make the
-    overlapping alternatives backtrack.
+    Refused: any digit (a number is an answer), and a bare yes/no/okay when the
+    agent's last turn ended with a question (it answers that question). The input
+    is bounded before the regex runs, so a long turn cannot make the overlapping
+    alternatives backtrack.
     """
     raw = str(text or "")
-    if len(raw) > _COURTESY_MAX_CHARS:
+    if len(raw) > _COURTESY_MAX_CHARS or any(c.isdigit() for c in raw):
         return False
     words = re.findall(r"[a-z']+", raw.lower().replace("\u2019", "'"))
     if not words or len(words) > _COURTESY_MAX_WORDS:
         return False
-    return _COURTESY.fullmatch(" ".join(words) + " ") is not None
+    if _COURTESY.fullmatch(" ".join(words) + " ") is None:
+        return False
+    if all(w in _BARE_ANSWER for w in words):
+        from app.domain.services.end_session_action import _reply_scoped_to_question
+        if _reply_scoped_to_question(previous_assistant_text):
+            return False
+    return True
 
 
 def last_asserted_position(text: str | None, pattern: Pattern[str]) -> int:

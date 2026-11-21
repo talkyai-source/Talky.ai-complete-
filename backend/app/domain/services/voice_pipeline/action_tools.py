@@ -235,6 +235,21 @@ def opt_out_refused_note(recorded: bool) -> str:
     return ("The caller's opt-out is recorded. " if recorded else "The caller asked not to be called again. ") + OPT_OUT_CONDUCT
 
 
+def _earlier_caller_turns(session: Any, current_text: str, *, limit: int = 10) -> list[str]:
+    """The caller's own earlier words on this call (never the model's), newest first."""
+    out: list[str] = []
+    for message in reversed(list(getattr(session, "conversation_history", ()) or ())):
+        role = getattr(message, "role", None)
+        if getattr(role, "value", role) != "user":
+            continue
+        content = str(getattr(message, "content", "") or "")
+        if content and content != current_text:
+            out.append(content[-1000:])
+            if len(out) >= limit:
+                break
+    return out
+
+
 async def run_voice_action(
     session: Any,
     action: str,
@@ -258,6 +273,13 @@ async def run_voice_action(
             previous_assistant_text = previous_assistant_turn(getattr(session, "conversation_history", ()))
         call_args = dict(arguments or {})
         opted_out = call_args.get("do_not_call") is True and verified_opt_out(call_args, user_text)
+        if call_args.get("do_not_call") is True and not opted_out:
+            # The caller may have said it in an earlier turn that was only answered
+            # (the quote is never checked against the model's own words).
+            opted_out = any(
+                verified_opt_out(call_args, earlier)
+                for earlier in _earlier_caller_turns(session, user_text)
+            )
         opt_out_recorded = False
         if opted_out:
             # Do it before the goodbye can say it was done (same rule as the
@@ -289,15 +311,18 @@ async def run_voice_action(
             position = opt_out_position(session, user_text)
             if position < 0:
                 position = _quote_end(call_args.get("opt_out_quote"), user_text)
-            try:
-                session._opt_out_evidence = (user_text, position)
-            except Exception:
-                pass
+            if position >= 0:
+                try:
+                    session._opt_out_evidence = (user_text, position)
+                except Exception:
+                    pass
         from app.domain.services.voice_pipeline.end_call import opt_out_close_decision
-        opt_out_closes = opt_out_close_decision(session, user_text) is True
-        if not opt_out_closes and not machine and not end_call_intent_present(
-            user_text, previous_assistant_text=previous_assistant_text
-        ):
+        decision = opt_out_close_decision(session, user_text, previous_assistant_text)
+        # An opt-out rule, when it applies, is the whole answer (caller_signaled_end
+        # counts the opt-out itself as an end signal, so it must not override it).
+        closes = decision if decision is not None else (
+            machine or end_call_intent_present(user_text, previous_assistant_text=previous_assistant_text))
+        if not closes:
             result = _result(
                 action,
                 success=False,
