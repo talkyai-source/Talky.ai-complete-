@@ -182,6 +182,48 @@ def _address_end_glue_index(text: str) -> int:
     return -1
 
 
+def _address_continues(text: str, index: int) -> bool:
+    """True when the terminator at ``index``, with a letter glued after it, sits
+    INSIDE an email / web address ("Maria.Gonzalez@example.com",
+    ".../Signup?ref=Abc"): the word after it carries "@", "/" or "=", or the word
+    before it is an address and a lower-case letter follows."""
+    if _left_word_is_address(text, index):
+        return not text[index + 1].isupper()
+    hi = index + 1
+    while hi < len(text) and not text[hi].isspace():
+        hi += 1
+    return any(m in text[index + 1:hi] for m in _ADDRESS_MARKS + "=")
+
+
+def _find_end(find, buf: str, allow_clause: bool, hosts):
+    """``(idx, ai)``: the first sentence end in ``buf`` that is not inside an
+    address, and the address-end glue index (-1 if none). A terminator inside an
+    address is masked (its glued letter hidden), so the whole sentence is spoken as one piece and the
+    sentence end after the address is still found with its full context. A word
+    that is still arriving is left to the caller's hold."""
+    masked = buf
+    hidden: set[int] = set()
+    while True:
+        idx = find(masked, allow_clause=allow_clause, known_hosts=hosts)
+        ai = _address_end_glue_index(buf)
+        if ai >= 0 and (idx < 0 or ai < idx):
+            idx = ai
+        if idx < 0:
+            return -1, -1
+        # ``idx not in hidden``: a position is hidden once; if the segmenter
+        # still returns it, it is a boundary for another reason and the search
+        # ends there (it can never go round again on the same text).
+        if (idx != ai and idx not in hidden and idx + 1 < len(buf) and buf[idx + 1].isalpha()
+                and any(c.isspace() for c in buf[idx + 1:])
+                and _is_missing_space_boundary(buf, idx) and _address_continues(buf, idx)):
+            # Hide the glued letter, keep the terminator: it is then no boundary
+            # but still marks its word for the segmenter's abbreviation checks.
+            masked = masked[:idx + 1] + "_" + masked[idx + 2:]
+            hidden.add(idx)
+            continue
+        return idx, ai
+
+
 def _glued_boundary_is_cut(text: str, index: int) -> bool:
     """Decide a glued terminator once the word after it is COMPLETE.
 
@@ -190,12 +232,7 @@ def _glued_boundary_is_cut(text: str, index: int) -> bool:
     terminator at the END of an address ("...gmail.com?Yes") is a cut only before
     a capitalised word; every other glued terminator is a cut, as before.
     """
-    if _left_word_is_address(text, index):
-        return text[index + 1].isupper()
-    hi = index + 1
-    while hi < len(text) and not text[hi].isspace():
-        hi += 1
-    return not any(m in text[index + 1:hi] for m in _ADDRESS_MARKS + "=")
+    return not _address_continues(text, index)
 
 
 class _EndOfStream:
@@ -541,12 +578,7 @@ class TurnStreamer:
             hosts = grounded_url_hosts([
                 *getattr(session, "_knowledge_grounding", []), *turn_grounding,
             ]) if "." in buf else ()
-            idx = self._p._find_sentence_end(
-                buf, allow_clause=len(buf) >= 80, known_hosts=hosts,
-            )
-            ai = _address_end_glue_index(buf)
-            if ai >= 0 and (idx < 0 or ai < idx):
-                idx = ai
+            idx, ai = _find_end(self._p._find_sentence_end, buf, len(buf) >= 80, hosts)
             if idx < 0 or idx + 1 >= len(buf):
                 return False
             if not (_is_missing_space_boundary(buf, idx) or idx == ai):
@@ -844,13 +876,15 @@ class TurnStreamer:
                     grounded_hosts = grounded_url_hosts([
                         *getattr(session, "_knowledge_grounding", []), *turn_grounding,
                     ]) if "." in buf else ()
-                    idx = self._p._find_sentence_end(
-                        buf, allow_clause=len(buf) >= 80, known_hosts=grounded_hosts,
+                    idx, _ai = _find_end(
+                        self._p._find_sentence_end, buf, len(buf) >= 80, grounded_hosts,
                     )
-                    _ai = _address_end_glue_index(buf)
-                    if _ai >= 0 and (idx < 0 or _ai < idx):
-                        idx = _ai
                     if idx < 0:
+                        break
+                    # "...gmail.com?" at the end of what has arrived may be the
+                    # middle of an address ("...?ref=abc"): wait for one token.
+                    if (idx + 1 == len(buf) and buf[idx] in "?!"
+                            and _left_word_is_address(buf, idx)):
                         break
                     # A final dot may be the middle of a streamed domain or
                     # address. Wait for one token of lookahead (or normal

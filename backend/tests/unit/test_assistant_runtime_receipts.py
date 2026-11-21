@@ -226,8 +226,14 @@ async def test_hold_records_stop_only_after_actual_idle_stream_binary_work_ends(
 
 
 @pytest.mark.parametrize("mode", ["delay", "timeout", "error"])
-async def test_voice_provider_cleanup_receipt_waits_or_remains_unknown(ports, mode):
+async def test_voice_provider_cleanup_receipt_waits_or_remains_unknown(ports, mode, monkeypatch):
     ports.cleanup_mode = mode
+    if mode == "delay":
+        # The fixture's 30 ms cleanup limit raced this test's own release of the
+        # cleanup on a slow machine (it failed once on GitHub). A cleanup that
+        # finishes inside the limit must give a stop receipt, so the limit is
+        # generous here; the "timeout" case keeps the short one.
+        monkeypatch.setattr(receipt, "CLEANUP_TIMEOUT_SECONDS", 5)
     ws = Socket()
     task = asyncio.create_task(run_handler("voice", ws))
     await asyncio.wait_for(ws.ready.wait(), 1)
