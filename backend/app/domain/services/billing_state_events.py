@@ -18,11 +18,14 @@ from app.domain.services.billing_checkout import (
 )
 from app.domain.services.subscription_status import (
     CANCELLED,
+    INACTIVE,
     INCOMPLETE_EXPIRED,
     KNOWN_STATUSES,
     SUSPENDED,
     canonical,
 )
+from app.domain.services.payg import PAYG_PLAN_ID
+from app.domain.services.plan_end import end_plan
 
 
 class BillingStateBusy(RuntimeError):
@@ -224,19 +227,16 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
         status = canonical(subscription["status"])
         if _dispute_open(recorded) and status != CANCELLED:
             status = SUSPENDED  # an open chargeback keeps calls off (_apply_dispute)
-        await conn.execute(
-            """UPDATE tenants SET subscription_status=$4 WHERE id=$1::uuid
-               AND stripe_subscription_id=$2 AND stripe_customer_id=$3
-               AND (subscription_status IS DISTINCT FROM 'suspended' OR $4='suspended')""",
-            tenant_id, subscription_id, customer_id, status,
-        )
+        if status != CANCELLED:
+            await conn.execute(
+                """UPDATE tenants SET subscription_status=$4 WHERE id=$1::uuid
+                   AND stripe_subscription_id=$2 AND stripe_customer_id=$3
+                   AND (subscription_status IS DISTINCT FROM 'suspended' OR $4='suspended')""",
+                tenant_id, subscription_id, customer_id, status,
+            )
     if canonical(subscription["status"]) == CANCELLED:
-        await conn.execute(
-            """UPDATE tenants SET stripe_subscription_id=NULL,
-                 subscription_status=CASE WHEN subscription_status='suspended' THEN subscription_status ELSE $4 END
-               WHERE id=$1::uuid AND stripe_subscription_id=$2 AND stripe_customer_id=$3""",
-            tenant_id, subscription_id, customer_id, CANCELLED,
-        )
+        # The plan is over: the account becomes pay as you go and bought minutes stay usable.
+        await end_plan(conn, tenant_id, stripe_subscription_id=subscription_id, stripe_customer_id=customer_id)
     return _result("handled", tenant_id)
 
 
@@ -560,8 +560,9 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
             subscription_id, tenant_id, dispute["id"],
         )
         await conn.execute(
-            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid AND stripe_subscription_id=$2""",
-            tenant_id, subscription_id, SUSPENDED,
+            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid
+               AND (stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))""",
+            tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
         )
         return _result("handled", tenant_id, reason="subscription_dispute_suspended")
     final_status = dispute.get("status")
@@ -584,8 +585,9 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
             subscription_id, tenant_id, dispute["id"],
         )
         await conn.execute(
-            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid AND stripe_subscription_id=$2""",
-            tenant_id, subscription_id, SUSPENDED,
+            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid
+               AND (stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))""",
+            tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
         )
         logger.error("Subscription dispute not won tenant_id=%s dispute_id=%s status=%s: account stays suspended",
                      tenant_id, dispute["id"], final_status)
@@ -600,12 +602,17 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
            WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
         subscription_id, tenant_id, dispute["id"], "won" if final_status == "won" else "closed",
     )
-    await conn.execute(
+    restored = canonical(subscription.get("status"))
+    # A plan that ended while the dispute was open comes back as pay as you go, not as the old plan.
+    ended = restored == CANCELLED
+    lifted = await conn.execute(
         """UPDATE tenants SET subscription_status=$3
            WHERE id=$1::uuid AND (stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)
              AND subscription_status=$4""",
-        tenant_id, subscription_id, canonical(subscription.get("status")), SUSPENDED,
+        tenant_id, subscription_id, INACTIVE if ended else restored, SUSPENDED,
     )
+    if ended and lifted == "UPDATE 1":
+        await end_plan(conn, tenant_id, stripe_subscription_id=None)
     return _result("handled", tenant_id, reason="subscription_dispute_won")
 
 

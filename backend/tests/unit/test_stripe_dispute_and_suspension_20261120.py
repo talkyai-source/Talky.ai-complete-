@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.domain.services import billing_state_events as bse
+from app.domain.services import plan_end
 from app.domain.services.billing_checkout import CheckoutAttempts, CheckoutError
 
 TENANT, SUB, CUS = "11111111-1111-1111-1111-111111111111", "sub_1", "cus_1"
@@ -18,6 +19,7 @@ class State:
         self.meta = {"dispute": dispute} if dispute else {}
         self.sub_id = SUB
         self.customer = CUS
+        self.plan = "pro"
 
 
 def _norm(sql):
@@ -32,6 +34,8 @@ def _predicate_holds(pred, st, a):
         return st.sub_id == a[1]
     if pred == "(stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)":
         return st.sub_id == a[1] or st.sub_id is None
+    if pred == "(stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))":
+        return st.sub_id == a[1] or (st.sub_id is None and st.plan == a[3])
     if pred == "stripe_customer_id=$3":
         return st.customer == a[2]
     if pred == "subscription_status=$4":
@@ -57,6 +61,9 @@ class Conn:
             return {"tenant_id": TENANT, "stripe_subscription_id": SUB}
         if "FROM subscriptions" in sql:
             return {"metadata": dict(self.st.meta)}
+        if sql == plan_end._Q_TENANT:
+            return {"subscription_status": self.st.tenant, "plan_id": self.st.plan,
+                    "stripe_subscription_id": self.st.sub_id, "stripe_customer_id": self.st.customer}
         raise AssertionError(sql)
 
     def _update_tenants(self, sql, a):
@@ -64,15 +71,13 @@ class Conn:
         if not m:
             raise AssertionError(f"fake does not understand: {sql!r}")
         set_clause, where = m.groups()
-        if not all(_predicate_holds(p, self.st, a) for p in where.split(" AND ")):
+        compound = "(stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))"
+        predicates = [compound] if compound in where else []
+        predicates += where.replace(compound, "").split(" AND ")
+        if not all(_predicate_holds(p, self.st, a) for p in predicates if p.strip()):
             return "UPDATE 0"
         if set_clause in ("subscription_status=$3", "subscription_status=$4"):
             self.st.tenant = a[int(set_clause[-1]) - 1]
-        elif set_clause == ("stripe_subscription_id=NULL, subscription_status=CASE WHEN "
-                            "subscription_status='suspended' THEN subscription_status ELSE $4 END"):
-            self.st.sub_id = None
-            if self.st.tenant != "suspended":
-                self.st.tenant = a[3]
         else:
             raise AssertionError(f"fake does not understand SET: {set_clause!r}")
         return "UPDATE 1"
@@ -83,6 +88,11 @@ class Conn:
         if "UPDATE subscriptions SET metadata" in sql:
             status = "open" if "'open'" in sql else ("lost" if "'lost'" in sql else ("won" if "'won'" in sql else a[3]))
             self.st.meta["dispute"] = {"id": a[2], "status": status}
+            return "UPDATE 1"
+        if sql == plan_end._Q_TO_PAYG:
+            if self.st.sub_id != a[3]:
+                return "UPDATE 0"
+            self.st.plan, self.st.tenant, self.st.sub_id = a[1], a[2], None
             return "UPDATE 1"
         if sql.lstrip().startswith("UPDATE tenants SET"):
             return self._update_tenants(sql, a)
@@ -102,9 +112,18 @@ def _billing(dispute_status="x", subscription_status="active"):
     return SimpleNamespace(billing_mode="test", _stripe_call=call)
 
 
+ALLOCATIONS = []
+
+
 @pytest.fixture(autouse=True)
 def _invoice(monkeypatch):
     monkeypatch.setattr(bse, "_invoice_for_adjustment", AsyncMock(return_value="in_1"))
+    ALLOCATIONS.clear()
+
+    async def allocate(conn, tenant_id, minutes):
+        ALLOCATIONS.append((tenant_id, minutes))
+
+    monkeypatch.setattr(plan_end, "apply_plan_allocation", allocate)
 
 
 async def _run(event, dispute_status, st):
@@ -185,6 +204,7 @@ async def test_subscription_event_does_not_lift_admin_suspension(stripe_status):
     assert r["status"] == "handled"
     if stripe_status == "canceled":
         assert st.sub_id is None  # the subscription link is still cleared
+        assert st.plan == "payg" and ALLOCATIONS == [(TENANT, 0)]  # and the plan's minutes end
 
 
 @pytest.mark.asyncio
@@ -287,7 +307,9 @@ async def test_won_dispute_restores_a_plan_cancelled_while_the_dispute_was_open(
     r = await bse.apply_billing_event(
         Conn(st), _billing("won", subscription_status="canceled"), "charge.dispute.closed",
         {"id": "dp_1"}, source_reference="evt")
-    assert (st.tenant, r["reason"]) == ("cancelled", "subscription_dispute_won")
+    # The plan ended while the dispute was open: it comes back as pay as you go, with no plan minutes.
+    assert (st.tenant, r["reason"]) == ("inactive", "subscription_dispute_won")
+    assert st.plan == "payg" and st.sub_id is None and ALLOCATIONS and all(m == 0 for _, m in ALLOCATIONS)
 
 
 @pytest.mark.asyncio
@@ -297,7 +319,8 @@ async def test_warning_closed_restores_a_cancelled_plan_too():
     await bse.apply_billing_event(
         Conn(st), _billing("warning_closed", subscription_status="canceled"), "charge.dispute.closed",
         {"id": "dp_1"}, source_reference="evt")
-    assert st.tenant == "cancelled"
+    assert st.tenant == "inactive"
+    assert st.plan == "payg" and ALLOCATIONS == [(TENANT, 0)]
 
 
 @pytest.mark.asyncio
@@ -352,3 +375,19 @@ async def test_a_late_updated_never_reopens_a_closed_dispute():
     st = State("active", {"id": "dp_1", "status": "won"})
     r = await _run("charge.dispute.updated", "needs_response", st)
     assert (st.tenant, st.meta["dispute"]["status"], r["status"]) == ("active", "won", "ignored")
+
+
+@pytest.mark.asyncio
+async def test_dispute_opened_after_the_plan_ended_still_suspends():
+    st = State("inactive", None)
+    st.sub_id, st.plan = None, "payg"
+    await _run("charge.dispute.created", "needs_response", st)
+    assert st.tenant == "suspended"
+
+
+@pytest.mark.asyncio
+async def test_dispute_after_the_plan_ended_never_suspends_a_newer_plan():
+    st = State("active", None)
+    st.sub_id, st.plan = None, "pro"  # e.g. a PayPal plan bought since
+    await _run("charge.dispute.created", "needs_response", st)
+    assert st.tenant == "active"

@@ -52,4 +52,4 @@ Returning from the payment provider does not by itself activate a subscription. 
 
 ## Cancel a subscription
 
-Where the action is available to your role, cancellation normally takes effect at the end of the current billing period rather than immediately. Review your agreement and export anything you need to keep before the account's access ends.
+Where the action is available to your role, cancellation normally takes effect at the end of the current billing period rather than immediately. When the plan ends, its monthly minutes end with it. Minutes you bought as top-ups stay on your account: you can keep using them, buy pay-as-you-go minutes, or choose a new plan at any time.
