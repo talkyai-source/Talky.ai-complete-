@@ -545,7 +545,7 @@ class GeminiLLMProvider(LLMProvider):
         parts (including thought signatures) are preserved in every continuation.
         Repeated writes share a receipt; read-only tools rerun to refresh evidence.
         """
-        from app.infrastructure.llm.streaming import ToolRoundBudget, ends_turn
+        from app.infrastructure.llm.streaming import RoundJoiner, ToolRoundBudget, ends_turn
         budget = ToolRoundBudget(max_tool_rounds, navigation_round_allowed)
         if not tools or tool_runner is None:
             async with aclosing(self.stream_chat_with_timeout(
@@ -670,13 +670,21 @@ class GeminiLLMProvider(LLMProvider):
 
         decision_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
         tool_results = {}
+        joiner = RoundJoiner()
         while budget.remaining:
             # A new list per response avoids mutating already-sent signed parts.
             model_parts, fcalls, decision_tokens = [], [], []
             async with aclosing(_stream(decision_cfg, fcalls, model_parts)) as stream:
+                first = True
                 async for tok in stream:
                     decision_tokens.append(tok)
                     if not require_tool_result_before_content:
+                        if first:
+                            gap = joiner.before_round(tok)
+                            if gap:
+                                yield gap
+                        first = False
+                        joiner.seen(tok)
                         yield tok
             if not fcalls:
                 if require_tool_result_before_content and decision_tokens:
@@ -725,7 +733,14 @@ class GeminiLLMProvider(LLMProvider):
                 yield "".join(grounded_tokens)
         else:
             async with aclosing(_stream(round1_cfg, [], [])) as stream:
+                first = True
                 async for tok in stream:
+                    if first:
+                        gap = joiner.before_round(tok)
+                        if gap:
+                            yield gap
+                    first = False
+                    joiner.seen(tok)
                     yield tok
 
     async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):

@@ -5,7 +5,7 @@ Ordinary identity interpretation and spoken responses belong to the model.
 import re
 
 from app.domain.services.caller_assertions import (
-    assertion_matches, continuation_after, last_asserted_position, phrase_pattern,
+    assertion_matches, continuation_after, phrase_pattern,
 )
 
 _DNC_PHRASES = (
@@ -71,7 +71,81 @@ def dnc_assertion_position(transcript: str) -> int:
     return -1
 
 
+# STT writes the spaced goodbye "bye bye" as "Bye-bye." Same words: one character
+# swapped for a space, so offsets in the transcript stay valid. Bare "bye" is
+# still not a goodbye.
+_HYPHENATED_BYE_BYE = re.compile(r"\b(bye)[-‐‑](?=bye\b)", re.I)
+
+
+# "bye bye" is a farewell only when it stands alone in its clause. Clauses end at
+# sentence ends and commas. The words just before it in its own clause (none
+# when a comma or full stop comes first) and just after it must be only
+# interjections, thanks, farewell or courtesy phrases, or a term of address (after
+# it also a single capitalised name). Earlier clauses are free: "Thanks for your
+# help, bye-bye". Nothing may take it back later (wait, go on, a question), and no
+# pause request may stand before it in the same sentence. Anything else makes it
+# part of a sentence ("kiss your money bye-bye", "we said bye-bye to BT").
+# Hyphen and spaced forms share this one path.
+_FAREWELL_WORDS = (
+    r"okay|ok|right|alright|all right|yes|yeah|yep|no|nope|well|so|oh|then|now|for now|ta|"
+    r"lovely|great|fine|good|sounds good|that's (?:great|fine|good|lovely|ok|okay|all right|alright)|"
+    r"no problem|not a problem|no worries|sorry|never mind|cheers|and|again|too|you too|"
+    r"(?:thanks|thank you)(?: (?:so|very))?(?: much| a lot)?|thank you so much|"
+    r"for calling|for your (?:time|help|call)|for that|"
+    r"i'm not interested|i am not interested|not interested|no thanks|"
+    r"take care|all the best|god bless|good luck|enjoy|speak soon|talk soon|"
+    r"speak to you (?:soon|later)|i'll speak to you (?:soon|later)|see you(?: soon| later)?|"
+    r"have a (?:good|nice|great|lovely|wonderful) (?:day|evening|night|weekend|one|afternoon|morning|time)|"
+    r"i(?:'ve| have) got to (?:go|run)|i have to (?:go|run)|i'm off|i'm busy(?: right now)?|"
+    r"don't call (?:me )?(?:again|back)|do not call (?:me )?(?:again|back)|"
+    r"mate|love|darling|dear|sweetheart|pal|sir|madam|honey|buddy|bye|goodbye"
+)
+_FAREWELL_ONLY = re.compile(r"(?:(?:" + _FAREWELL_WORDS + r")\s+)*")
+_NAME = re.compile(r"[A-Z][a-z]+")
+_PAUSE_BEFORE = re.compile(
+    r"\b(?:hang\s+on|hold\s+on|wait|one\s+moment|just\s+a\s+(?:sec|second|minute))\b", re.I)
+_TAKEN_BACK_AFTER = re.compile(
+    r"\b(?:wait|hang\s+on|hold\s+on|go\s+on|carry\s+on|actually|one\s+more\s+thing|before\s+you\s+go|"
+    r"what\s+do\s+you\s+mean|continue|keep\s+going|you\s+were\s+saying|question)\b|\?", re.I)
+_SENTENCE_END = re.compile(r"[.!?;\n]")
+_CLAUSE_END = re.compile(r"[.!?;\n,]")
+
+
+def _words(fragment: str) -> str:
+    return " ".join(re.findall(r"[a-z']+", fragment.lower().replace("\u2019", "'"))) + " "
+
+
+def _only_farewell(fragment: str) -> bool:
+    """Only farewell words. Over 12 words it cannot be one, and the regex's
+    overlapping alternatives would backtrack exponentially on a long non-match.
+    The count is of the words the regex is given, not of whitespace-separated
+    pieces: "no/thanks/no/thanks" is one piece and many words."""
+    words = _words(fragment).lstrip()
+    return len(words.split()) <= 12 and bool(_FAREWELL_ONLY.fullmatch(words))
+
+
+def _is_standalone_bye_bye(text: str, match: re.Match) -> bool:
+    """A "bye bye" counts only as a farewell, not as words inside a sentence."""
+    if " ".join(re.findall(r"[a-z]+", match[0].lower())) != "bye bye":
+        return True
+    before_ends = [m.end() for m in _CLAUSE_END.finditer(text, 0, match.start())]
+    clause_start = before_ends[-1] if before_ends else 0
+    after = _CLAUSE_END.search(text, match.end())
+    clause_end = after.start() if after else len(text)
+    sentence_ends = [m.end() for m in _SENTENCE_END.finditer(text, 0, match.start())]
+    sentence_start = sentence_ends[-1] if sentence_ends else 0
+    if _PAUSE_BEFORE.search(text[sentence_start:match.start()]) or _TAKEN_BACK_AFTER.search(text[match.end():]):
+        return False
+    if not _only_farewell(text[clause_start:match.start()]):
+        return False
+    tail = text[match.end():clause_end]
+    return _only_farewell(tail) or bool(_NAME.fullmatch(tail.strip()))
+
+
 def contains_explicit_goodbye(transcript: str) -> bool:
     """Explicit caller ending with no later request to continue."""
-    position = last_asserted_position(transcript, _EXPLICIT_GOODBYE_PATTERN)
+    transcript = _HYPHENATED_BYE_BYE.sub(r"\1 ", str(transcript or ""))
+    matches = [m for m in assertion_matches(transcript, _EXPLICIT_GOODBYE_PATTERN)
+               if _is_standalone_bye_bye(transcript, m)]
+    position = matches[-1].start() if matches else -1
     return position >= 0 and not continuation_after(transcript, position)
