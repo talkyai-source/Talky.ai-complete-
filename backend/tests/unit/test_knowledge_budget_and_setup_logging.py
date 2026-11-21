@@ -263,7 +263,10 @@ def test_inbound_reports_on_with_the_node_count(caplog):
             {
                 "enabled": True,
                 "mode": "retrieve",
-                "nodes": [{"heading": "Pricing", "content": "x"}],
+                # A pinned section carries its source identity and revision today
+                # (sections.build_section_catalog refuses one without them).
+                "nodes": [{"id": "n1", "source_id": "s1", "source_version": 1, "version": 1,
+                           "heading": "Pricing", "content": "x"}],
                 "tenant_id": "t1",
                 "campaign_id": "c1",
             },
