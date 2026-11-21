@@ -67,6 +67,35 @@ def callee_first_eot_timeout(tuned_ms) -> int:
     return max(tuned, CALLEE_FIRST_MIN_EOT_TIMEOUT_MS)
 
 
+def stt_wiring_for_log(config) -> dict:
+    """Which speech-to-text provider this call uses and whether the Flux-only
+    end-of-turn settings (stt_eot_threshold / stt_eager_eot_threshold /
+    stt_eot_timeout_ms) reach it. Mirrors the engine choice in
+    VoiceOrchestrator._create_stt_provider; log text only, never changes what
+    any provider receives. Only Flux receives those three values."""
+    engine = (getattr(config, "stt_provider_type", None) or "deepgram_flux").lower()
+    lang = (getattr(config, "stt_language", None) or "en").strip().lower()
+    english = lang in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz")
+    if engine == "assemblyai":
+        provider = "assemblyai"
+    elif engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3") or not english:
+        provider = "deepgram_nova"
+    else:
+        provider = "deepgram_flux"
+    aai_turn = None
+    if provider == "assemblyai":
+        try:
+            from app.infrastructure.stt.assemblyai import _TURN_DETECTION_KEYS, AssemblyAISettings
+
+            params = AssemblyAISettings.model_validate(
+                getattr(config, "assemblyai_settings", None) or {}
+            ).connection_parameters()
+            aai_turn = {k: v for k, v in params.items() if k in _TURN_DETECTION_KEYS}
+        except Exception:  # diagnostics only
+            aai_turn = "unavailable"
+    return {"provider": provider, "applied": provider == "deepgram_flux", "aai_turn_detection": aai_turn}
+
+
 def _resolve_first_speaker(first_speaker: Optional[str]) -> str:
     """Per-call first-speaker choice (explicit value > env default).
 
@@ -370,22 +399,46 @@ async def prepare_prewarmed_session(
             # Swap the system prompt for the dedicated inbound base when in
             # caller-speaks-first mode.
             select_inbound_base_prompt(pre_warm_session)
-            logger.info(
-                "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=%s",
-                pre_warm_session.call_id[:12], getattr(config, "stt_eot_timeout_ms", None),
-            )
+            _w = stt_wiring_for_log(config)
+            if _w["applied"]:
+                logger.info(
+                    "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=%s applied=yes provider=%s",
+                    pre_warm_session.call_id[:12], getattr(config, "stt_eot_timeout_ms", None), _w["provider"],
+                )
+            else:
+                # INFO, not a warning: this is the normal state of every call on
+                # a provider other than Flux, and it is said once per call.
+                logger.info(
+                    "stt_eot_timeout_not_applied call_id=%s requested_timeout_ms=%s applied=no provider=%s "
+                    "(only Flux receives this timer; it is NOT in force on this call)",
+                    pre_warm_session.call_id[:12], getattr(config, "stt_eot_timeout_ms", None), _w["provider"],
+                )
         # One line per call with the policy values actually in force, so a
         # guard wired to a constant or missing input shows up in the logs.
         # Diagnostics only: it must never be able to fail call setup.
         from app.domain.services.voice_pipeline.figure_grounding import figure_grounding_mode
-        logger.info(
-            "voice_policy_wiring call_id=%s first_speaker=%s eot=%s eager=%s timeout_ms=%s "
+        _w = stt_wiring_for_log(config)
+        _tail = (
             "figure_grounding=%s policy_overrides=%s",
-            str(getattr(pre_warm_session, "call_id", "?"))[:12], effective_first_speaker,
-            getattr(config, "stt_eot_threshold", None), getattr(config, "stt_eager_eot_threshold", None),
-            getattr(config, "stt_eot_timeout_ms", None),
             figure_grounding_mode(), bool(os.getenv("PROMPT_POLICY_DIR", "").strip()),
         )
+        if _w["applied"]:
+            logger.info(
+                "voice_policy_wiring call_id=%s first_speaker=%s eot=%s eager=%s timeout_ms=%s "
+                "applied=yes provider=%s " + _tail[0],
+                str(getattr(pre_warm_session, "call_id", "?"))[:12], effective_first_speaker,
+                getattr(config, "stt_eot_threshold", None), getattr(config, "stt_eager_eot_threshold", None),
+                getattr(config, "stt_eot_timeout_ms", None), _w["provider"], *_tail[1:],
+            )
+        else:
+            logger.info(
+                "voice_policy_wiring call_id=%s first_speaker=%s requested_eot=%s requested_eager=%s "
+                "requested_timeout_ms=%s applied=no provider=%s (Flux-only settings, NOT in force on this call) "
+                "provider_turn_detection=%s " + _tail[0],
+                str(getattr(pre_warm_session, "call_id", "?"))[:12], effective_first_speaker,
+                getattr(config, "stt_eot_threshold", None), getattr(config, "stt_eager_eot_threshold", None),
+                getattr(config, "stt_eot_timeout_ms", None), _w["provider"], _w["aai_turn_detection"], *_tail[1:],
+            )
         if agent_name:
             pre_warm_session._agent_name = agent_name
 
