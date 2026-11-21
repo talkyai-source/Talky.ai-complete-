@@ -30,6 +30,7 @@ from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
     CampaignDirectionError,
+    CampaignDispatchError,
     CampaignError,
     CampaignNotFoundError,
     CampaignReadinessError,
@@ -72,6 +73,57 @@ load_dotenv()
 _campaign_stats_cache = OrderedDict()
 _CAMPAIGN_STATS_TTL = 10.0
 _CAMPAIGN_STATS_MAX = 128
+
+
+async def _count_new_contact_if_running(db_client, campaign: dict, campaign_id: str, tenant_id: str) -> None:
+    """A brand-new contact on a running campaign counts once in ``total_leads``.
+
+    The add endpoint never touched that column, so the campaign list and detail
+    showed the old total. One atomic, tenant-scoped, status-guarded increment;
+    best effort. Completed/failed counters are never touched.
+    """
+    if str(campaign.get("status") or "") != "running":
+        return
+    try:
+        async with acquire_with_tenant(db_client.pool, str(tenant_id)) as conn:
+            await conn.execute(
+                "UPDATE campaigns SET total_leads = COALESCE(total_leads, 0) + 1"
+                " WHERE id = $1::uuid AND tenant_id = $2::uuid AND status = 'running'"
+                " AND direction = 'outbound'",
+                str(campaign_id), str(tenant_id))
+    except Exception as exc:  # noqa: BLE001 - the contact write stands
+        logger.warning("contact_total_not_counted campaign=%s error=%s",
+                       str(campaign_id)[:8], type(exc).__name__)
+
+
+async def _queue_new_contacts_if_running(
+    db_client, campaign: dict, campaign_id: str, tenant_id: str, lead_id: str,
+) -> None:
+    """The contact just written gets its dialer job now while the campaign runs (G-F8).
+
+    Reuses the Start path (``allow_running=True``) narrowed to this one lead
+    (``only_lead_ids``), so no other pending contact is ever queued by it: the dedupe over active
+    jobs and ``uq_dialer_jobs_one_active_per_lead`` keep a lead from getting two
+    jobs, and the dialler still applies the calling-hours and do-not-call checks
+    before every dial. Best effort: the contact write stands whatever happens here.
+    A lost race on the job insert (two contacts added at once) is retried once.
+    """
+    if str(campaign.get("status") or "") != "running":
+        return
+    for attempt in (1, 2):
+        try:
+            await _get_campaign_service(db_client).start_campaign(
+                campaign_id=str(campaign_id), tenant_id=str(tenant_id), allow_running=True,
+                only_lead_ids=[str(lead_id)])
+            return
+        except CampaignDispatchError as exc:
+            if attempt == 2:
+                logger.warning("contact_queue_failed campaign=%s error=%s",
+                               str(campaign_id)[:8], type(exc).__name__)
+        except Exception as exc:  # noqa: BLE001 - the contact write stands
+            logger.warning("contact_queue_failed campaign=%s error=%s",
+                           str(campaign_id)[:8], type(exc).__name__)
+            return
 
 
 def _require_contact_write(response, campaign_id: str, operation: str) -> dict:
@@ -928,7 +980,7 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
                 tenant_id, campaign_id)
             live_calls = int(await conn.fetchval(
                 "SELECT count(*) FROM calls WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid"
-                " AND status = ANY($3::text[])",
+                " AND status = ANY($3::text[]) AND is_test IS NOT TRUE",
                 tenant_id, campaign_id, list(CAMPAIGN_LIVE_CALL_STATUSES)) or 0)
             # D3-14: durable jobs a Start has not queued yet.
             awaiting = int(await conn.fetchval(
@@ -1788,6 +1840,7 @@ _STATS_CALLS_SQL = """
            ) AS goals
       FROM calls
      WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+       AND is_test IS NOT TRUE
      GROUP BY outcome
 """
 
@@ -1797,6 +1850,7 @@ _STATS_STRING_SUMMARY_SQL = """
      WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
        AND jsonb_typeof(summary_json) = 'string'
        AND NOT COALESCE(goal_achieved, FALSE)
+       AND is_test IS NOT TRUE
 """
 
 
@@ -2170,6 +2224,8 @@ async def add_contact_to_campaign(
             ).execute()
             revived_row = _require_contact_write(revived, campaign_id, "revive")
             logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
+            await _queue_new_contacts_if_running(
+                db_client, campaign, campaign_id, current_user.tenant_id, str(revive_id))
             return {
                 "message": "Contact added successfully",
                 "contact": _contact_response(revived_row)
@@ -2195,6 +2251,10 @@ async def add_contact_to_campaign(
         created = _require_contact_write(response, campaign_id, "create")
 
         logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
+        await _count_new_contact_if_running(
+            db_client, campaign, campaign_id, current_user.tenant_id)
+        await _queue_new_contacts_if_running(
+            db_client, campaign, campaign_id, current_user.tenant_id, lead_id)
 
         return {
             "message": "Contact added successfully",
@@ -2225,7 +2285,7 @@ async def update_contact_in_campaign(
             db_client,
             campaign_id,
             tenant_id=current_user.tenant_id,
-            extra_columns=("script_config",),
+            extra_columns=("script_config", "status"),
         )
         # Same country the Add-Contact and CSV paths use, so all write paths
         # normalise a national-format number identically.
@@ -2311,7 +2371,7 @@ async def update_contact_in_campaign(
                 NOT_ORIGINATED_JOB_STATUSES,
                 REASON_LEAD_REMOVED,
             )
-            db_client.table("dialer_jobs").update({
+            cancelled_jobs = db_client.table("dialer_jobs").update({
                 "status": "cancelled",
                 "failure_reason": REASON_LEAD_REMOVED,
                 "last_error": "contact_phone_changed",
@@ -2320,6 +2380,14 @@ async def update_contact_in_campaign(
             ).in_(
                 "status", list(NOT_ORIGINATED_JOB_STATUSES),
             ).execute()
+            if getattr(cancelled_jobs, "data", None):
+                # A cancelled retry leaves the lead 'called', which no Start
+                # selects: move it back so the new number is dialled (G-F8).
+                db_client.table("leads").update({"status": "pending"}).eq(
+                    "id", contact_id,
+                ).eq("tenant_id", current_user.tenant_id).eq(
+                    "campaign_id", campaign_id,
+                ).eq("status", "called").execute()
 
         resp = (
             db_client.table("leads")
@@ -2331,6 +2399,9 @@ async def update_contact_in_campaign(
         )
         updated = _require_contact_write(resp, campaign_id, "update")
         logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
+        if phone_changed:
+            await _queue_new_contacts_if_running(
+                db_client, campaign, campaign_id, current_user.tenant_id, str(contact_id))
         return {"message": "Contact updated successfully", "contact": _contact_response(updated)}
 
     except HTTPException:
