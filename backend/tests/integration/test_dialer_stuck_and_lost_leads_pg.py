@@ -51,6 +51,9 @@ async def lost_db():
         await admin.execute(f'GRANT USAGE ON SCHEMA public TO "{role}"')
         await admin.execute(f'GRANT SELECT,INSERT,UPDATE ON calls, call_legs, call_events TO "{role}"')
         await admin.execute(f'GRANT SELECT,UPDATE ON campaigns, dialer_jobs, leads TO "{role}"')
+        # A call that becomes terminal queues its CRM delivery through the trigger
+        # calls_queue_crm_deliveries (migration 0048), which runs as the caller.
+        await admin.execute(f'GRANT SELECT,INSERT,UPDATE ON crm_deliveries TO "{role}"')
         for t in (tenant, other_tenant):
             await admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic lost leads')", t)
         for c, t in ((campaign, tenant), (other_campaign, other_tenant)):
