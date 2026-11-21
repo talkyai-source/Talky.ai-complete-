@@ -126,6 +126,14 @@ class InterruptResult:
     # reporting 0.0 for "not measured" would read as a perfect response.
     detect_ms: Optional[float] = None
     speech_to_stop_ms: Optional[float] = None
+    # 2026-11-21: `speech_to_stop_ms` starts at the caller's first loud frame and
+    # is reported even when no agent audio was playing, so it cannot say how long
+    # the agent really talked over the caller. `audible` = agent audio was thrown
+    # away at the clear (gateway frames or local bytes); `talk_over_ms` =
+    # min(detect_ms, time since the agent's first audio chunk) + teardown, 0 when
+    # not audible, None when audible but neither clock is available.
+    audible: bool = False
+    talk_over_ms: Optional[float] = 0.0
     # True when the full teardown ran ONLY because the gateway might still have
     # been draining — Python already believed it had finished. Kept distinct so
     # a probe that found nothing cannot be counted as a barge-in.
@@ -154,6 +162,10 @@ class InterruptResult:
             "speech_to_stop_ms": (
                 None if self.speech_to_stop_ms is None
                 else round(self.speech_to_stop_ms, 1)
+            ),
+            "audible": self.audible,
+            "talk_over_ms": (
+                None if self.talk_over_ms is None else round(self.talk_over_ms, 1)
             ),
             "errors": self.errors,
         }
@@ -283,6 +295,14 @@ async def _do_interrupt(
         _onset_age = None
     if _onset_age is not None:
         result.detect_ms = _onset_age * 1000.0
+    # Age of the agent's current run of audio, read against the same `started`.
+    _first_audio_age_ms = None
+    try:
+        _first_at = getattr(session, "_first_tts_chunk_at", None)
+        if isinstance(_first_at, (int, float)) and started - _first_at >= 0:
+            _first_audio_age_ms = (started - _first_at) * 1000.0
+    except Exception:  # noqa: BLE001 — a measurement must never stop the stop
+        _first_audio_age_ms = None
 
     # WAS THERE ANYTHING TO STOP? (2026-08-12, corrected 2026-08-12)
     #
@@ -329,7 +349,24 @@ async def _do_interrupt(
         logger.warning("interrupt %s: state change failed: %s", interrupt_id, exc)
 
     # ── 2. cancel the in-flight turn ──────────────────────────────────────
-    if cancel_task is not None:
+    # 2026-11-21: when agent audio is playing or may still be draining, the
+    # cancel is only REQUESTED here and the wait for the reply task to unwind
+    # happens after the gateway clear (below). A slow unwind (96-186 ms seen with
+    # one speech provider) used to keep the phone playing queued agent audio for
+    # that long. Requesting the cancel first matters: a reply task that is still
+    # running when the clear rotates the gateway's utterance id would stamp its
+    # next chunk with the NEW id, which the gateway accepts. A cancelled task
+    # gets its CancelledError on its next step, before it can send again.
+    _clear_first = bool(_tts_playing or _drain_ms is not None)
+    _cancel_job = None
+    if cancel_task is not None and _clear_first:
+        try:
+            _cancel_job = asyncio.ensure_future(cancel_task())
+            await asyncio.sleep(0)  # let the closure reach task.cancel()
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"cancel:{exc}")
+            logger.warning("interrupt %s: task cancel failed: %s", interrupt_id, exc)
+    elif cancel_task is not None:
         try:
             cancelled = await cancel_task()
             result.task_cancelled = bool(cancelled)
@@ -359,9 +396,6 @@ async def _do_interrupt(
                   detect_ms=(None if result.detect_ms is None
                              else round(result.detect_ms, 1)))
         return result
-
-    result.drain_probe = bool(_drain_ms is not None and not _tts_playing
-                              and not result.task_cancelled)
 
     # ── 3+4. Python buffers, then the C++ queue (one call does both) ──────
     try:
@@ -399,6 +433,20 @@ async def _do_interrupt(
             "still be audible: %s", interrupt_id, call_id[:12], exc,
         )
 
+    # ── 2b. clear-first path: now wait for the cancelled turn to unwind ───
+    if _cancel_job is not None:
+        try:
+            cancelled = await _cancel_job
+            result.task_cancelled = bool(cancelled)
+            _log_step(interrupt_id, call_id, "task_cancelled",
+                      cancelled=result.task_cancelled)
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"cancel:{exc}")
+            logger.warning("interrupt %s: task cancel failed: %s", interrupt_id, exc)
+
+    result.drain_probe = bool(_drain_ms is not None and not _tts_playing
+                              and not result.task_cancelled)
+
     # ── 5. stop the TTS provider generating more ──────────────────────────
     clear_queue = getattr(tts_provider, "clear_queue", None) if tts_provider else None
     if clear_queue:
@@ -420,6 +468,17 @@ async def _do_interrupt(
     # quote it as if the ear were instrumented.
     if result.detect_ms is not None:
         result.speech_to_stop_ms = result.detect_ms + result.elapsed_ms
+
+    # WAS THE AGENT REALLY AUDIBLE, AND FOR HOW LONG? (2026-11-21) See the
+    # field comment on InterruptResult. The clock is the agent's, not the caller's.
+    result.audible = bool(
+        result.local_bytes_discarded > 0 or result.gateway_dropped_frames > 0
+    )
+    if not result.audible:
+        result.talk_over_ms = 0.0
+    else:
+        _clocks = [c for c in (result.detect_ms, _first_audio_age_ms) if c is not None]
+        result.talk_over_ms = (min(_clocks) + result.elapsed_ms) if _clocks else None
 
     # A failed interrupt is the loudest failure this system has — it means the
     # caller is still being talked over. Never let it sit at debug.

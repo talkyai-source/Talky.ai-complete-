@@ -44,6 +44,34 @@ logger = logging.getLogger(__name__)
 _STT_UNMUTE_TAIL_S = float(os.getenv("STT_UNMUTE_TAIL_S", "0.25"))
 _TTS_INTER_CHUNK_TIMEOUT_S = 3.0
 
+# Agent audio that resumes after more than this much quiet is a NEW reply for the
+# talk-over clock (see _stamp_first_audio_chunk).
+_NEW_AUDIO_RUN_GAP_S = 0.6
+
+
+def _stamp_first_audio_chunk(session, now: float) -> None:
+    """Remember when the CURRENT run of agent audio began (barge-in talk-over).
+
+    `interrupt_complete` reports `talk_over_ms` from this stamp: how long the
+    agent had really been audible when the caller cut in, instead of the age of
+    the caller's own onset. Called for every chunk handed on for the phone, just
+    before `_last_tts_chunk_at` moves; only the first chunk of a run sets it. A
+    run ends when the previous chunk is older than `_NEW_AUDIO_RUN_GAP_S`, so
+    the next reply gets its own stamp. Never raises.
+    """
+    try:
+        first = getattr(session, "_first_tts_chunk_at", None)
+        last = getattr(session, "_last_tts_chunk_at", None)
+        if (
+            first is None
+            or last is None
+            or not isinstance(last, (int, float))
+            or now - last > _NEW_AUDIO_RUN_GAP_S
+        ):
+            session._first_tts_chunk_at = now
+    except Exception:  # noqa: BLE001 — a measurement must never stop audio
+        pass
+
 
 class _SynthesisFailure(RuntimeError):
     def __init__(self, reason: str):
@@ -557,7 +585,10 @@ class TtsPlayback:
                 # test_session_scratch_attrs — two features were silently dead
                 # for days on exactly that).
                 try:
-                    session._last_tts_chunk_at = time.monotonic()
+                    _now_chunk = time.monotonic()
+                    # Must run BEFORE the line below moves `_last_tts_chunk_at`.
+                    _stamp_first_audio_chunk(session, _now_chunk)
+                    session._last_tts_chunk_at = _now_chunk
                 except Exception:
                     pass
                 # Check barge-in again immediately after send: barge-in may have
