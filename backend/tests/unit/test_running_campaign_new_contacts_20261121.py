@@ -614,3 +614,64 @@ async def test_a_scoped_start_does_not_restamp_started_at_when_it_creates_a_job(
 
     assert db.tables["campaigns"][0]["started_at"] == "2026-11-20T09:00:00"
     assert len(db.tables["dialer_jobs"]) == 1
+
+
+# --- the service itself refuses a scoped start on a campaign that is not running ----
+@pytest.mark.parametrize("stored", ["stopped", "completed", "draft", "paused", "deleted"])
+async def test_a_scoped_start_on_a_campaign_that_is_not_running_writes_and_queues_nothing(stored):
+    db, queue = _running_db(new=1), _Queue([True])
+    db.tables["campaigns"][0]["status"] = stored
+    campaign_before = dict(db.tables["campaigns"][0])
+    leads_before = [dict(r) for r in db.tables["leads"]]
+    service = CampaignService(db, queue_service=queue)
+
+    with pytest.raises((CampaignStateError, CampaignError)):
+        await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True,
+                                     only_lead_ids=["new-0"])
+
+    assert db.tables["campaigns"][0] == campaign_before          # status and every column unchanged
+    assert db.tables["dialer_jobs"] == [] and queue.enqueued == []
+    assert db.tables["leads"] == leads_before                    # the contact is untouched
+
+
+async def test_a_scoped_start_on_a_running_campaign_still_queues_the_one_contact():
+    db, queue = _running_db(failed=2, new=1), _Queue([True])
+    service = CampaignService(db, queue_service=queue)
+
+    result = await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True,
+                                          only_lead_ids=["new-0"])
+
+    assert result.jobs_enqueued == 1 and [j.lead_id for j in queue.enqueued] == ["new-0"]
+    assert db.tables["campaigns"][0]["status"] == "running"
+
+
+async def test_a_stop_between_the_services_read_and_its_write_leaves_it_stopped_and_pushes_nothing():
+    db, queue = _running_db(new=1), _Queue([True])
+    service = CampaignService(db, queue_service=queue)
+    _change_after_reading(service, _set_campaign(db, status="stopped"))
+
+    with pytest.raises(CampaignStateError):
+        await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True,
+                                     only_lead_ids=["new-0"])
+
+    assert db.tables["campaigns"][0]["status"] == "stopped"
+    assert queue.enqueued == []                                   # no Redis payload
+    # the one job row inserted before the lost write stays 'pending' and inert
+    assert [r["status"] for r in db.tables["dialer_jobs"]] == ["pending"]
+
+
+async def test_the_scoped_status_write_is_always_from_running(monkeypatch):
+    db, queue = _running_db(new=1), _Queue([True])
+    service = CampaignService(db, queue_service=queue)
+    seen = []
+    original = service._update_campaign_status
+
+    async def spy(campaign_id, status, **kw):
+        seen.append(kw.get("from_statuses"))
+        return await original(campaign_id, status, **kw)
+
+    service._update_campaign_status = spy
+    await service.start_campaign("campaign-1", tenant_id="tenant-1", allow_running=True,
+                                 only_lead_ids=["new-0"])
+
+    assert seen == [("running",)]

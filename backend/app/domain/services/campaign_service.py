@@ -509,6 +509,13 @@ class CampaignService:
                     status_code=409,
                 )
 
+            # A contact queued mid-run only adds work to a campaign that IS running as
+            # this read sees it: a stop or completion that landed after the caller's
+            # own check must never be turned back into "running" by an add. Nothing
+            # has been written or queued yet.
+            if only_lead_ids is not None and campaign.get("status") != "running":
+                raise CampaignStateError("Campaign is not running")
+
             # The write that flips the campaign to running is a compare-and-set
             # against the status read here: of two overlapping starts exactly one
             # wins it, and the other is "already running" before it can dispatch
@@ -525,6 +532,8 @@ class CampaignService:
                 if observed_status and (not campaign_was_running or allow_running)
                 else None
             )
+            if only_lead_ids is not None:
+                start_from = ("running",)
 
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
