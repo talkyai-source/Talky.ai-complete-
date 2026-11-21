@@ -1740,10 +1740,9 @@ async def test_every_statement_is_tenant_bound_except_the_listed_ones(env):
     for sql in env.store["sql"]:
         if sql in exceptions:
             continue
-        # Any statement on the tenants table itself is keyed by its id (21 Nov 2026:
-        # the plan-end read "SELECT ... FROM tenants WHERE id = $1::uuid FOR UPDATE").
+        # The plan-end read is the one new tenants SELECT (21 Nov 2026); matched exactly.
         if (sql.startswith(("SELECT id, status, subscription_status", "UPDATE tenants"))
-                or " FROM tenants WHERE " in sql):
+                or sql == plan_end._Q_TENANT):
             assert "WHERE id = $1::uuid" in sql
             continue
         assert ("tenant_id = $" in sql or sql.startswith("INSERT INTO paypal_subscriptions (id, tenant_id")

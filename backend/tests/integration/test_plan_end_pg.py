@@ -8,11 +8,12 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
+import pytest_asyncio
 import stripe
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.minutes_quota import compute_minutes_status
-from app.domain.services.payg import tenant_purchase_audience
+from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
 from app.domain.services.telephony.call_authority import read_call_authority
 from tests.integration.test_billing_checkout import _tenant, checkout_db  # noqa: F401
 from tests.integration.test_billing_price_options import billing_db  # noqa: F401
@@ -190,3 +191,170 @@ async def test_paypal_reversal_after_plan_end_reblocks(pp_db):
     state = await _pp_tenant(fixture)
     assert state["subscription_status"] == "cancelled" and state["plan_id"] == "payg"
     assert (await _row(fixture, rid))["status"] == "cancelled"
+
+
+# -- fixes from the money review (21 Nov 2026) -----------------------------------------
+
+
+@pytest_asyncio.fixture
+async def paypal_read(state_db):
+    """A won dispute looks for a live PayPal plan: the service role must be able to read the row."""
+    fixture = state_db
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(f'GRANT SELECT ON paypal_subscriptions TO "{fixture.role}"')
+    return fixture
+
+
+async def test_won_dispute_before_the_deleted_event_ends_the_plan_allowance(paypal_read):
+    # F1: Stripe cancelled the plan, our deleted receipt has not applied, the dispute is won.
+    fixture = paypal_read
+    _, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    await _apply(fixture, "invoice.paid", invoice)
+    dispute = await _dispute(fixture, invoice, session)
+    await _apply(fixture, "charge.dispute.created", dispute)
+    fixture.objects[("Subscription", subscription["id"])]["status"] = "canceled"
+    fixture.objects[("Dispute", dispute["id"])] = stripe.Dispute.construct_from(
+        dict(dispute, status="won"), "sk_test_synthetic")
+    await _apply(fixture, "charge.dispute.closed", dispute)
+    tenant = await _tenant(fixture)
+    assert (tenant["plan_id"], tenant["subscription_status"], tenant["minutes_allocated"]) == ("payg", "inactive", 0)
+
+
+async def test_won_dispute_never_ends_a_paypal_plan_bought_in_between(paypal_read):
+    # F2: sub ended -> a PayPal plan is bought -> a dispute on the old invoice -> PayPal activates -> won.
+    fixture = paypal_read
+    _, session, invoice, _ = await _ended(fixture)
+    dispute = await _dispute(fixture, invoice, session)
+    await _apply(fixture, "charge.dispute.created", dispute)
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    async with acquire_with_tenant(fixture.pool, None) as conn:  # the PayPal activation
+        await conn.execute("UPDATE tenants SET plan_id=$2, minutes_allocated=120 WHERE id=$1",
+                           fixture.tenants[0], fixture.plan)
+        await conn.execute(
+            """INSERT INTO paypal_subscriptions
+            (id, tenant_id, price_option_id, plan_id, provider_mode, paypal_plan_id, snapshot, status, activated_at)
+            VALUES ($1, $2, $3, $4, 'test', $5, '{}'::jsonb, 'active', NOW())""",
+            uuid4(), fixture.tenants[0], fixture.option, fixture.plan, "P-" + uuid4().hex[:14])
+    fixture.objects[("Dispute", dispute["id"])] = stripe.Dispute.construct_from(
+        dict(dispute, status="won"), "sk_test_synthetic")
+    fixture.objects[("Subscription", _subscription_id(fixture))] = dict(
+        fixture.objects[("Subscription", _subscription_id(fixture))], status="canceled")
+    await _apply(fixture, "charge.dispute.closed", dispute)
+    tenant = await _tenant(fixture)
+    assert (tenant["plan_id"], tenant["subscription_status"], tenant["minutes_allocated"]) == (fixture.plan, "active", 120)
+
+
+async def test_an_archive_is_not_lifted_by_an_old_dispute(paypal_read):
+    # F3 (an admin archive; a PayPal reversal leaves the same state).
+    fixture = paypal_read
+    _, session, invoice, _ = await _ended(fixture)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("UPDATE tenants SET subscription_status='cancelled' WHERE id=$1", fixture.tenants[0])
+    dispute = await _dispute(fixture, invoice, session)
+    await _apply(fixture, "charge.dispute.created", dispute)
+    assert (await _tenant(fixture))["subscription_status"] == "cancelled"
+    fixture.objects[("Dispute", dispute["id"])] = stripe.Dispute.construct_from(
+        dict(dispute, status="won"), "sk_test_synthetic")
+    await _apply(fixture, "charge.dispute.closed", dispute)
+    assert (await _tenant(fixture))["subscription_status"] == "cancelled"
+
+
+async def test_a_deleted_subscription_with_an_open_chargeback_stays_suspended(paypal_read):
+    # F5: an admin resumed the account while the chargeback is open; then the plan ends.
+    fixture = paypal_read
+    _, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    await _apply(fixture, "invoice.paid", invoice)
+    dispute = await _dispute(fixture, invoice, session)
+    await _apply(fixture, "charge.dispute.created", dispute)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("UPDATE tenants SET subscription_status='active' WHERE id=$1", fixture.tenants[0])
+    fixture.objects[("Subscription", subscription["id"])]["status"] = "canceled"
+    await _apply(fixture, "customer.subscription.deleted", {"id": subscription["id"], "status": "active"})
+    tenant = await _tenant(fixture)
+    assert (tenant["plan_id"], tenant["subscription_status"]) == ("payg", "suspended")
+
+
+async def test_usage_beyond_the_plan_is_not_taken_twice(paypal_read):
+    # Plan 120, bought 43 (fixture). 150 minutes used: 30 beyond the plan come from the bought minutes.
+    fixture = paypal_read
+    _, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    campaign = uuid4()
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("INSERT INTO campaigns(id,tenant_id,name,direction) VALUES($1,$2,'Synthetic','outbound')",
+                           campaign, fixture.tenants[0])
+        await conn.execute(
+            "INSERT INTO calls (id, tenant_id, campaign_id, phone_number, status, duration_seconds, direction) "
+            "VALUES ($1, $2, $3, '+15550003002', 'completed', 9000, 'outbound')", uuid4(), fixture.tenants[0], campaign)
+    fixture.objects[("Subscription", subscription["id"])]["status"] = "canceled"
+    await _apply(fixture, "customer.subscription.deleted", {"id": subscription["id"], "status": "active"})
+    _, _, status = await _may_call_and_buy(fixture)
+    assert status.allocated == BOUGHT - 30
+    again = await _apply(fixture, "customer.subscription.deleted", {"id": subscription["id"], "status": "active"})
+    assert again["reason"] == "subscription_replaced"
+    assert (await _may_call_and_buy(fixture))[2].allocated == BOUGHT - 30
+
+
+async def test_a_new_stripe_plan_after_the_fallback(paypal_read):
+    fixture = paypal_read
+    await _ended(fixture)
+    _, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    tenant = await _tenant(fixture)
+    assert tenant["plan_id"] == fixture.plan and tenant["subscription_status"] == "active"
+    assert tenant["minutes_allocated"] == 120
+    assert (await _may_call_and_buy(fixture))[2].allocated == 120 + BOUGHT
+
+
+async def test_incoming_calls_are_admitted_after_the_fallback(paypal_read):
+    # inbound_admission.py:795-806 admits `prepaid` + a status that is not in the blocked set.
+    fixture = paypal_read
+    await _ended(fixture)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        row = await conn.fetchrow(
+            "SELECT t.subscription_status, p.billing_model FROM tenants t JOIN plans p ON p.id=t.plan_id "
+            "WHERE t.id=$1", fixture.tenants[0])
+    assert (row["billing_model"], row["subscription_status"]) == ("prepaid", "inactive")
+
+
+async def test_resume_after_a_plan_ended_while_suspended_gives_no_plan_minutes(paypal_read):
+    fixture = paypal_read
+    _, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("UPDATE tenants SET subscription_status='suspended' WHERE id=$1", fixture.tenants[0])
+    fixture.objects[("Subscription", subscription["id"])]["status"] = "canceled"
+    await _apply(fixture, "customer.subscription.deleted", {"id": subscription["id"], "status": "active"})
+    tenant = await _tenant(fixture)
+    assert (tenant["plan_id"], tenant["subscription_status"], tenant["minutes_allocated"]) == ("payg", "suspended", 0)
+    async with acquire_with_tenant(fixture.pool, None) as conn:  # the admin Resume writes 'active'
+        await conn.execute("UPDATE tenants SET subscription_status='active' WHERE id=$1", fixture.tenants[0])
+    assert (await _may_call_and_buy(fixture))[2].allocated == BOUGHT
+
+
+@pytest.mark.parametrize("status", ["past_due", "unpaid"])
+async def test_past_due_and_unpaid_stay_refused(paypal_read, status):
+    fixture = paypal_read
+    _, subscription, session, _ = await _paid(fixture)
+    await _apply(fixture, "checkout.session.completed", session)
+    fixture.objects[("Subscription", subscription["id"])]["status"] = status
+    await _apply(fixture, "customer.subscription.updated", {"id": subscription["id"], "status": "active"})
+    tenant = await _tenant(fixture)
+    assert tenant["subscription_status"] == status and tenant["plan_id"] == fixture.plan
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        with pytest.raises(PurchaseRefused):
+            await tenant_purchase_audience(conn, str(fixture.tenants[0]))
+
+
+async def test_paypal_suspended_then_cancelled_moves_to_payg(pp_db):
+    fixture = pp_db
+    rid, sid = await _activated(fixture)
+    await fixture.svc.get_attempt(tenant_id=str(fixture.tenants[0]), request_id=str(rid))
+    fixture.client.remote[sid]["status"] = "SUSPENDED"
+    await fixture.svc.sync(sid)
+    assert (await _pp_tenant(fixture))["subscription_status"] == "unpaid"
+    await fixture.svc.cancel_for_tenant(str(fixture.tenants[0]))
+    state = await _pp_tenant(fixture)
+    assert (state["plan_id"], state["subscription_status"], state["minutes_allocated"]) == ("payg", "inactive", 0)

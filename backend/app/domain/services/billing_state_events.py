@@ -17,7 +17,9 @@ from app.domain.services.billing_checkout import (
     subscription_period,
 )
 from app.domain.services.subscription_status import (
+    ACTIVE,
     CANCELLED,
+    CANCELLED_STATUSES,
     INACTIVE,
     INCOMPLETE_EXPIRED,
     KNOWN_STATUSES,
@@ -236,7 +238,9 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
             )
     if canonical(subscription["status"]) == CANCELLED:
         # The plan is over: the account becomes pay as you go and bought minutes stay usable.
-        await end_plan(conn, tenant_id, stripe_subscription_id=subscription_id, stripe_customer_id=customer_id)
+        # A chargeback still open keeps calls off, as the status write above does for a live plan.
+        await end_plan(conn, tenant_id, stripe_subscription_id=subscription_id, stripe_customer_id=customer_id,
+                       ended_status=SUSPENDED if _dispute_open(binding["recorded"]) else INACTIVE)
     return _result("handled", tenant_id)
 
 
@@ -508,6 +512,15 @@ def _dispute_open(recorded):
 # warning_* statuses are card-network inquiries: nothing is taken back.
 _MONEY_DISPUTE_STATUSES = {"needs_response", "under_review", "lost"}
 
+# A dispute suspends the account on the plan's subscription, or (the plan already ended) on the pay as you
+# go account it left behind. An account already closed ($5: the cancelled spellings, passed as a
+# parameter) is never changed: a later win would otherwise lift an archive or a reversal block.
+_Q_SUSPEND_ON_DISPUTE = (
+    "UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid "
+    "AND (stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4 "
+    "AND COALESCE(subscription_status,'') <> ALL($5::text[])))"
+)
+
 
 async def _apply_dispute(conn, billing, event_type, data, source_reference):
     """A chargeback on a plan suspends calls; a won dispute restores them.
@@ -559,11 +572,8 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
                WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
             subscription_id, tenant_id, dispute["id"],
         )
-        await conn.execute(
-            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid
-               AND (stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))""",
-            tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
-        )
+        await conn.execute(_Q_SUSPEND_ON_DISPUTE, tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
+                           sorted(CANCELLED_STATUSES))
         return _result("handled", tenant_id, reason="subscription_dispute_suspended")
     final_status = dispute.get("status")
     if final_status not in {"won", "warning_closed"}:
@@ -584,11 +594,8 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
                WHERE stripe_subscription_id=$1 AND tenant_id=$2::uuid""",
             subscription_id, tenant_id, dispute["id"],
         )
-        await conn.execute(
-            """UPDATE tenants SET subscription_status=$3 WHERE id=$1::uuid
-               AND (stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))""",
-            tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
-        )
+        await conn.execute(_Q_SUSPEND_ON_DISPUTE, tenant_id, subscription_id, SUSPENDED, PAYG_PLAN_ID,
+                           sorted(CANCELLED_STATUSES))
         logger.error("Subscription dispute not won tenant_id=%s dispute_id=%s status=%s: account stays suspended",
                      tenant_id, dispute["id"], final_status)
         return _result("handled", tenant_id, reason="subscription_dispute_lost")
@@ -605,14 +612,22 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
     restored = canonical(subscription.get("status"))
     # A plan that ended while the dispute was open comes back as pay as you go, not as the old plan.
     ended = restored == CANCELLED
+    paypal_plan = False
+    if ended:
+        from app.domain.services.paypal_subscriptions import held_subscription_exists  # lazy: import cycle
+        # The account has since bought a PayPal plan: that plan is not ours to end.
+        paypal_plan = await held_subscription_exists(conn, tenant_id)
     lifted = await conn.execute(
         """UPDATE tenants SET subscription_status=$3
            WHERE id=$1::uuid AND (stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)
              AND subscription_status=$4""",
-        tenant_id, subscription_id, INACTIVE if ended else restored, SUSPENDED,
+        tenant_id, subscription_id, (ACTIVE if paypal_plan else INACTIVE) if ended else restored, SUSPENDED,
     )
-    if ended and lifted == "UPDATE 1":
-        await end_plan(conn, tenant_id, stripe_subscription_id=None)
+    if ended and not paypal_plan and lifted == "UPDATE 1":
+        # Whichever binding the account has: already pay as you go (no Stripe id), or still on the
+        # ended subscription because its deleted event has not been applied yet.
+        await end_plan(conn, tenant_id, stripe_subscription_id=None) or await end_plan(
+            conn, tenant_id, stripe_subscription_id=subscription_id)
     return _result("handled", tenant_id, reason="subscription_dispute_won")
 
 

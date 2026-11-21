@@ -256,8 +256,7 @@ async def test_the_stripe_deleted_webhook_writes_the_canonical_value():
     writes = await _apply_current_provider_cancellation("customer.subscription.deleted")
     # The plan is over: the account becomes pay as you go ("inactive"). Never the American
     # spelling, and never "active" (the stale-event hole).
-    assert writes and writes[-1] == INACTIVE
-    assert not {"canceled", "active"} & set(writes)
+    assert writes == [INACTIVE]
 
 
 @pytest.mark.asyncio
@@ -268,8 +267,7 @@ async def test_a_synced_stripe_status_is_normalised_before_it_is_stored():
     from app.domain.services.subscription_status import INACTIVE
 
     writes = await _apply_current_provider_cancellation("customer.subscription.updated")
-    assert writes and writes[-1] == INACTIVE
-    assert not {"canceled", "active"} & set(writes)
+    assert writes == [INACTIVE]
 
 
 async def _apply_current_provider_cancellation(event_type):

@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.domain.services import billing_state_events as bse
+from app.domain.services import paypal_subscriptions as ps
 from app.domain.services import plan_end
 from app.domain.services.billing_checkout import CheckoutAttempts, CheckoutError
 
@@ -20,10 +21,15 @@ class State:
         self.sub_id = SUB
         self.customer = CUS
         self.plan = "pro"
+        self.paypal_held = False  # a live PayPal plan row
 
 
 def _norm(sql):
     return " ".join(sql.split())
+
+
+_COMPOUND = bse._Q_SUSPEND_ON_DISPUTE.split(" WHERE ", 1)[1].split(" AND ", 1)[1]
+_GUARD = " AND COALESCE(subscription_status,'') <> ALL($5::text[])"
 
 
 def _predicate_holds(pred, st, a):
@@ -34,8 +40,13 @@ def _predicate_holds(pred, st, a):
         return st.sub_id == a[1]
     if pred == "(stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)":
         return st.sub_id == a[1] or st.sub_id is None
-    if pred == "(stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))":
-        return st.sub_id == a[1] or (st.sub_id is None and st.plan == a[3])
+    if pred.startswith("(stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4"):
+        # the NULL branch never matches an account that is already closed ($5 = cancelled spellings)
+        if st.sub_id == a[1]:
+            return True
+        # the guard is evaluated only if the statement carries it
+        closed = _GUARD in pred and (st.tenant or "") in a[4]
+        return st.sub_id is None and st.plan == a[3] and not closed
     if pred == "stripe_customer_id=$3":
         return st.customer == a[2]
     if pred == "subscription_status=$4":
@@ -54,7 +65,11 @@ class Conn:
 
     def __init__(self, st):
         self.st = st
-        self.fetchval = AsyncMock(return_value=True)
+
+    async def fetchval(self, sql, *a):
+        if sql == ps._Q_HELD_EXISTS:
+            return 1 if self.st.paypal_held else None
+        return True  # the advisory lock
 
     async def fetchrow(self, sql, *a):
         if "FROM invoices" in sql:
@@ -71,7 +86,7 @@ class Conn:
         if not m:
             raise AssertionError(f"fake does not understand: {sql!r}")
         set_clause, where = m.groups()
-        compound = "(stripe_subscription_id=$2 OR (stripe_subscription_id IS NULL AND plan_id=$4))"
+        compound = _COMPOUND
         predicates = [compound] if compound in where else []
         predicates += where.replace(compound, "").split(" AND ")
         if not all(_predicate_holds(p, self.st, a) for p in predicates if p.strip()):
@@ -391,3 +406,70 @@ async def test_dispute_after_the_plan_ended_never_suspends_a_newer_plan():
     st.sub_id, st.plan = None, "pro"  # e.g. a PayPal plan bought since
     await _run("charge.dispute.created", "needs_response", st)
     assert st.tenant == "active"
+
+
+# ---- review fixes: free minutes, PayPal plan, archive lift, open chargeback ----
+
+def _open(st):
+    st.meta = {"dispute": {"id": "dp_1", "status": "open"}}
+
+
+@pytest.mark.asyncio
+async def test_won_dispute_before_the_deleted_event_still_ends_the_plan_allowance():
+    # F1: the dispute is won while the tenant is still bound to the ended subscription.
+    st = State("suspended")
+    _open(st)
+    r = await _run_won_ended(st)
+    assert r["reason"] == "subscription_dispute_won"
+    assert (st.tenant, st.plan, st.sub_id) == ("inactive", "payg", None)
+    assert ALLOCATIONS == [(TENANT, 0)]
+
+
+async def _run_won_ended(st):
+    return await bse.apply_billing_event(
+        Conn(st), _billing("won", subscription_status="canceled"), "charge.dispute.closed",
+        {"id": "dp_1"}, source_reference="evt")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("before", ["inactive", "suspended"], ids=["no_admin", "admin_suspended_first"])
+async def test_won_dispute_never_ends_a_paypal_plan_bought_in_between(before):
+    # F2: pay as you go, a PayPal plan is started, a dispute opens on an old invoice, PayPal activates
+    # (plan granted, a suspension stays), the dispute is won.
+    st = State(before)
+    st.sub_id, st.plan = None, "payg"
+    await _run("charge.dispute.created", "needs_response", st)
+    assert st.tenant == "suspended"
+    st.plan, st.paypal_held = "pro", True  # PayPal activation: plan and minutes granted, status kept
+    r = await _run_won_ended(st)
+    assert r["reason"] == "subscription_dispute_won"
+    assert st.plan == "pro" and st.tenant == "active" and ALLOCATIONS == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("closed", ["cancelled", "canceled"])
+async def test_an_archive_or_reversal_block_is_not_lifted_by_an_old_dispute(closed):
+    # F3: admin archive and PayPal reversal both leave a pay as you go account with a cancelled status.
+    st = State(closed)
+    st.sub_id, st.plan = None, "payg"
+    await _run("charge.dispute.created", "needs_response", st)
+    assert st.tenant == closed
+    await _run_won_ended(st)
+    assert st.tenant == closed
+    st2 = State(closed)
+    st2.sub_id, st2.plan = None, "payg"
+    await _run("charge.dispute.created", "needs_response", st2)
+    await bse.apply_billing_event(Conn(st2), _billing("warning_closed", subscription_status="canceled"),
+                                  "charge.dispute.closed", {"id": "dp_1"}, source_reference="evt")
+    assert st2.tenant == closed
+
+
+@pytest.mark.asyncio
+async def test_a_subscription_deleted_while_its_chargeback_is_open_stays_suspended():
+    # F5: an admin resumed the account while the chargeback is open; the plan then ends.
+    st = State("active")
+    binding = _binding_current()
+    binding["recorded"]["metadata"] = {"dispute": {"id": "dp_1", "status": "open"}}
+    await bse._apply_subscription(Conn(st), _billing(), _sub("canceled"), binding)
+    assert (st.tenant, st.plan, st.sub_id) == ("suspended", "payg", None)
+    assert ALLOCATIONS == [(TENANT, 0)]
