@@ -263,7 +263,10 @@ def test_inbound_reports_on_with_the_node_count(caplog):
             {
                 "enabled": True,
                 "mode": "retrieve",
-                "nodes": [{"heading": "Pricing", "content": "x"}],
+                # A pinned section carries its source identity and revision today
+                # (sections.build_section_catalog refuses one without them).
+                "nodes": [{"id": "n1", "source_id": "s1", "source_version": 1, "version": 1,
+                           "heading": "Pricing", "content": "x"}],
                 "tenant_id": "t1",
                 "campaign_id": "c1",
             },
@@ -271,6 +274,36 @@ def test_inbound_reports_on_with_the_node_count(caplog):
     line = [ln for ln in _kb_setup_lines(caplog) if " ON " in ln][0]
     assert "effective=retrieve" in line and "nodes=1" in line
     assert cs.knowledge_mode == "retrieve"
+
+
+def test_the_setup_log_swallows_a_value_it_cannot_write():
+    class _Explodes:
+        def __format__(self, spec):
+            raise RuntimeError("cannot be written")
+
+    # A field that cannot be turned into text must not reach the call.
+    session_inject._log_setup(_session(), "OFF", reason=_Explodes())
+
+
+def test_outbound_warns_when_the_mode_is_on_but_nothing_is_pinned(monkeypatch, caplog):
+    monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
+
+    async def _empty_catalog(pool, tenant_id, campaign_id):
+        return types.SimpleNamespace(nodes=[], checksum="empty")
+
+    monkeypatch.setattr(session_inject, "load_section_catalog", _empty_catalog)
+    cs = _session()
+    with caplog.at_level(logging.INFO, logger=session_inject.logger.name):
+        asyncio.run(
+            session_inject.apply_campaign_knowledge(
+                cs, {"knowledge_mode": "inline", "tenant_id": "t1", "id": "c1"},
+                pool=object(),
+            )
+        )
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING and "KB_SETUP" in r.getMessage()]
+    assert len(warnings) == 1
+    text = warnings[0].getMessage()
+    assert "path=outbound" in text and "reason=no_nodes_pinned" in text
 
 
 def test_the_setup_log_never_breaks_a_call():

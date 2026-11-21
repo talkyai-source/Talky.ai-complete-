@@ -27,6 +27,9 @@ from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.domain.services.voice_pipeline.action_tools import action_results_for_session
 from app.infrastructure.llm.request_profile import _json_default, record_traditional_request
 from app.infrastructure.llm.streaming import LLMStreamStalled
+from app.domain.services.voice_pipeline.contact_recording import CONTACT_TOOL_NAME
+from app.domain.services.voice_pipeline.knowledge_tool import KB_TOOL_NAME
+from app.services.scripts.knowledge.sections import build_section_catalog
 from app.services.scripts.prompts.composer import compose_prompt_document
 
 FIXTURE = "backend/tests/fixtures/conversation/ag04_traditional.json"
@@ -35,6 +38,30 @@ ENGINE = "traditional"
 
 def _json(value):
     return json.loads(json.dumps(value, default=_json_default, sort_keys=True))
+
+
+def _strings(value):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+def _fenced_passage_texts(wire):
+    """Passage texts the actual provider request carries inside its data fence."""
+    texts = []
+    for string in _strings(wire):
+        for block in re.findall(r"<company_knowledge>(.*?)</company_knowledge>", string, re.DOTALL):
+            try:
+                passages = json.loads(block).get("passages", [])
+            except (ValueError, AttributeError):
+                continue  # an empty or non-result fence carries no source
+            texts.extend(p.get("text") for p in passages if isinstance(p, dict))
+    return texts
 
 
 def _load(root):
@@ -255,6 +282,14 @@ async def _run_case(root, data, case, spec):
     }
     session._voice_action_results = {}
     session._knowledge_snapshot_nodes = facts
+    if case.get("catalog"):
+        # Knowledge is read by the model choosing sections from its call-scoped
+        # catalog (633cf0ca / 764502a0); no search or coverage step runs first.
+        session._knowledge_catalog = build_section_catalog(
+            [{"id": fact["id"], "source_id": fact["source_id"], "source_version": fact["source_version"],
+              "version": fact["version"], "heading": fact["heading"], "content": fact["content"],
+              "path": str(index), "depth": 1} for index, fact in enumerate(facts, 1)],
+            tenant_id=session.tenant_id, campaign_id=session.campaign_id, source_policy="call_snapshot")
     session.llm_model, session.llm_temperature, session.llm_max_tokens = spec["model"], 0.2, 300
     session.barge_in_event = asyncio.Event()
     session.conversation_history = [
@@ -279,6 +314,19 @@ async def _run_case(root, data, case, spec):
     service.latency_tracker = MagicMock()
     service.latency_tracker.get_metrics.return_value = None
     service.transcript_service = MagicMock()
+    caller_texts = {}
+    if case.get("caller_evidence"):
+        # Contacts are recorded only by the model's record_contact tool with a
+        # quote of the caller's own words (01195ba4). Resolve each accepted
+        # caller turn to its text, as TranscriptService.caller_evidence does.
+        def resolve(_call_id, order):
+            text = caller_texts.get(order)
+            if text is None:
+                return None
+            return {"text": text, "source": {
+                "provider_item_id": f"traditional:{order}", "caller_turn_order": order,
+                "revision_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}}
+        service.transcript_service.caller_evidence = resolve
     service.transcript_service.flush_to_database = AsyncMock()
     service._barge_in_events[session.call_id] = session.barge_in_event
     websocket = NS(send_json=AsyncMock(), close=AsyncMock())
@@ -379,7 +427,13 @@ async def _run_case(root, data, case, spec):
         )
         patches.enter_context(patch.dict("os.environ", {"TELEPHONY_FILLER_DELAY_MS": "0"}))
         for current_turn in case["turns"]:
-            sdk.begin(current_turn)
+            scripted = current_turn
+            if "read_knowledge" in current_turn:
+                refs = [row["section_id"] for row in session._knowledge_catalog.nodes]
+                chosen = [refs[i - 1] if i <= len(refs) else "missing-section" for i in current_turn["read_knowledge"]]
+                scripted = {**current_turn, "tool": {"name": KB_TOOL_NAME, "arguments": {"section_ids": chosen}}}
+            caller_texts[getattr(session, "_accepted_caller_turn_order", 0) + 1] = current_turn["caller"]
+            sdk.begin(scripted)
             before = len(session.conversation_history)
             prior_submissions, prior_requests = len(submissions), len(requests)
             session._tts_delivery_failed = False
@@ -407,6 +461,7 @@ async def _run_case(root, data, case, spec):
                 {
                     "caller": current_turn["caller"],
                     "requests": len(requests) - prior_requests,
+                    "last_request_index": len(requests) - 1,
                     "raw_output": "".join(current_turn.get("chunks", [])),
                     "submitted_speech": submissions[prior_submissions:],
                     "history_added": [
@@ -477,10 +532,10 @@ async def _run_case(root, data, case, spec):
         check(f"knowledge_identity:{index}", observed_knowledge == expected_knowledge,
               {"expected": expected_knowledge, "observed": observed_knowledge})
         # Gemini carries the system instruction in config, outside contents.
-        request_text = json.dumps(requests[index]["wire"]) if index < len(requests) else ""
-        blocks = re.findall(r"<company_knowledge>(.*?)</company_knowledge>", request_text, re.DOTALL)
+        last_request = turns[index]["last_request_index"] if index < len(turns) else -1
+        fenced = _fenced_passage_texts(requests[last_request]["wire"]) if 0 <= last_request < len(requests) else []
         check(f"knowledge_source_fence:{index}",
-              all(any(p["text"] in block for block in blocks) for p in expected_knowledge["passages"]),
+              all(p["text"] in fenced for p in expected_knowledge["passages"]),
               "Actual provider request must contain the supplied source inside its data fence.")
         assistant_turn = " ".join(m["content"] for m in turns[index]["history_added"]
                                   if m["role"] == "assistant") if index < len(turns) else ""
@@ -591,6 +646,9 @@ async def _run_case(root, data, case, spec):
                 getattr(state, "customer_relationship", None), "value", "unknown"
             ),
             "contact_capture": str(getattr(slots, "email_capture", None)),
+            "email": getattr(getattr(slots, "email_capture", None), "normalized_value", None),
+            "email_source_turn": getattr(getattr(getattr(slots, "email_capture", None), "value_source", None),
+                                         "caller_turn_order", None),
             "email_confirmed": bool(getattr(slots, "email_confirmed", False)),
             "phone_confirmed": bool(getattr(slots, "phone_confirmed", False)),
         },

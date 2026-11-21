@@ -22,21 +22,31 @@ async def test_nonprice_grounding_preserves_source_and_useful_answer_without_sem
     spec = next(p for p in data["profiles"] if p["provider"] == provider)
     row = await _run_case(ROOT, data, case, spec)
     assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    # Today's rule: the model reads the section it chose (633cf0ca, 764502a0).
+    # The evidence is "available" and carries the source identity; there is no
+    # retrieval "matched" status and no coverage score to approve.
     evidence = row["turns"][0]["knowledge_evidence"]
-    assert evidence["status"] == "matched"
-    assert [{k: v for k, v in p.items() if k != "coverage"} for p in evidence["passages"]] == [
+    assert evidence["status"] == "available"
+    assert [{k: v for k, v in p.items() if k != "section_id"} for p in evidence["passages"]] == [
         {"node_id": "synthetic-fact-1", "version": "2026-10-05T00:00:00Z",
         "source_id": "synthetic-source", "source_version": 1,
-        "text": "- " + case["knowledge"][0]["heading"] + ": " + case["knowledge"][0]["content"]}]
-    assert all(0 < p["coverage"] <= 1 for p in evidence["passages"])
-    assert case["knowledge"][0]["content"] in json.dumps(row["requests"][0]["wire"])
+        "text": case["knowledge"][0]["heading"] + "\n" + case["knowledge"][0]["content"]}]
+    assert all("coverage" not in p for p in evidence["passages"])
+    content = case["knowledge"][0]["content"]
+    assert len(row["requests"]) == 2  # the model's section read, then its answer
+    assert content not in json.dumps(row["requests"][0]["wire"])  # nothing pushed before the model chose
+    assert content in json.dumps(row["requests"][-1]["wire"])
     assert [" ".join(t["submitted_speech"]) for t in row["turns"]] == case["expected_turn_speech"]
     assert row["effects"]["attempts"] == [] and row["end"]["shutdown_count"] == 0
     assert row["semantic_ids"] == ["ag04.grounded_answer"]
     assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
     if variant == "absent_link":
+        # No code rewrites the model's wording any more (633cf0ca); the offer
+        # reaches speech and history unchanged and is left to semantic review.
         assert "I can provide a download link" in row["raw_output"][0]
-        assert "I can't confirm an available download link." in " ".join(row["submitted_speech"])
+        assert " ".join(row["submitted_speech"]) == row["raw_output"][0]
+        assert [t["content"] for t in row["turns"][0]["history_added"] if t["role"] == "assistant"] == [
+            row["raw_output"][0]]
     else:
         assert " ".join(row["submitted_speech"]) == case["knowledge"][0]["content"]
         assert [t["content"] for t in row["turns"][0]["history_added"] if t["role"] == "assistant"] == [
@@ -53,7 +63,13 @@ async def test_nonprice_common_controls_fail_when_source_missing_or_answer_only_
         else:
             case["turns"][0]["chunks"] = ["I cannot confirm that."]
         row = await _run_case(ROOT, data, case, data["profiles"][0])
-        assert any(c["pass"] is False for c in row["findings"]["control"])
+        failed = {c["id"] for c in row["findings"]["control"] if c["pass"] is False}
+        # The unmutated case passes every control, so each mutation must be
+        # caught by the control that owns that rule, not by any control.
+        if mutation == "missing_source":
+            assert {"knowledge_identity:0", "knowledge_source_fence:0"} <= failed
+        else:
+            assert "guarded_turn_speech" in failed and "knowledge_identity:0" not in failed
         assert all(f["status"] == "unreviewed" for f in row["findings"]["semantic"])
 
 
@@ -64,7 +80,8 @@ async def test_actual_wire_source_outside_empty_fence_fails_common_control(monke
     data = _load(ROOT)
     case = next(c for c in data["cases"] if c["id"] == "ag04.nonprice_supported")
     spec = next(p for p in data["profiles"] if p["provider"] == provider)
-    expected = case["expected_knowledge"][0]["passages"][0]["text"]
+    # The source as it sits inside the fenced tool-result JSON (newline escaped).
+    expected = json.dumps(case["expected_knowledge"][0]["passages"][0]["text"])[1:-1]
     original_json = runner._json
 
     def corrupt(value):
@@ -198,12 +215,20 @@ async def test_optout_is_separate_from_current_caller_close_authority(caller, cl
     data = _load(ROOT)
     case = deepcopy(next(c for c in data["cases"] if c["id"] == "ag04.dnc_with_question"))
     case["turns"][0]["caller"] = caller
-    # A generated sentinel cannot overrule the caller's continued request.
-    case["turns"][0]["chunks"] = ["Our office opens at nine. [END_CALL]"]
+    # The model asks to end the call in every case; only the caller's words
+    # decide whether that is authorised. Today the model, not a script, writes
+    # the goodbye after the do-not-call entry is saved (f0a04838).
+    reply = "Understood, I have noted that. Goodbye." if closes else "Our office opens at nine."
+    case["turns"][0]["chunks"] = [reply + " [END_CALL]"]
     case["expected"].update(end=closes, dnc=dnc)
     row = await _run_case(ROOT, data, case, data["profiles"][0])
+    # Controls: hang-up count matches `closes`, opt-out flag matches `dnc`, and
+    # the do-not-call entry was written exactly once (0 when no opt-out).
     assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
-    assert bool(row["requests"]) is not closes
+    assert row["end"]["dnc_effect_count"] == int(dnc)
+    assert row["end"]["shutdown_count"] == int(closes)
+    assert len(row["requests"]) == 1  # the model always speaks; no scripted close replaces it
+    assert " ".join(row["submitted_speech"]) == reply  # the model's own words, sentinel stripped
 
 
 async def test_failed_optout_keeps_flag_and_retries_on_later_authorized_close():
@@ -228,6 +253,25 @@ async def test_canonical_explicit_email_correction_parity():
     case = next(c for c in data["cases"] if c["id"] == "ag04.email_correction")
     row = await _run_case(ROOT, data, case, data["profiles"][0])
     assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+    # The caller's corrected address replaces the first one, quoted from the
+    # caller's second turn, and nothing is stored as confirmed (01195ba4).
+    assert row["state"]["email"] == "blair@example.com"
+    assert row["state"]["email_source_turn"] == 2
+    assert row["state"]["email_confirmed"] is False
+
+    # Without the model's record_contact call nothing is stored from the words alone.
+    bare = deepcopy(case)
+    for turn in bare["turns"]:
+        del turn["tool"]
+    row = await _run_case(ROOT, data, bare, data["profiles"][0])
+    assert row["state"]["email"] is None and row["state"]["email_confirmed"] is False
+
+    # A quote that is not the caller's own words is refused: no address is kept.
+    forged = deepcopy(case)
+    for turn in forged["turns"]:
+        turn["tool"]["arguments"]["source_quote"] = "Please use blair at example dot com."
+    row = await _run_case(ROOT, data, forged, data["profiles"][0])
+    assert row["state"]["email"] is None and row["state"]["email_confirmed"] is False
 
 
 @pytest.mark.parametrize("media", [None, "interrupt", "disconnect", "exception"])
