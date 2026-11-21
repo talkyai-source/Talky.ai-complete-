@@ -117,8 +117,11 @@ def _words(fragment: str) -> str:
 
 def _only_farewell(fragment: str) -> bool:
     """Only farewell words. Over 12 words it cannot be one, and the regex's
-    overlapping alternatives would backtrack exponentially on a long non-match."""
-    return len(fragment.split()) <= 12 and bool(_FAREWELL_ONLY.fullmatch(_words(fragment).lstrip()))
+    overlapping alternatives would backtrack exponentially on a long non-match.
+    The count is of the words the regex is given, not of whitespace-separated
+    pieces: "no/thanks/no/thanks" is one piece and many words."""
+    words = _words(fragment).lstrip()
+    return len(words.split()) <= 12 and bool(_FAREWELL_ONLY.fullmatch(words))
 
 
 def _is_standalone_bye_bye(text: str, match: re.Match) -> bool:

@@ -119,6 +119,9 @@ def test_spaced_form_gives_the_same_answer(text, expected):
     "bye bye " + "no thanks " * 30 + "something",
     "bye bye " + "thanks so " * 30 + "something",
     "something " + "no thanks " * 30 + "bye bye",
+    # Joined without spaces: one whitespace-separated piece, sixty words.
+    "bye bye " + "no/thanks/" * 30 + "something",
+    "something" + "1no2thanks" * 30 + " bye bye",
 ])
 def test_long_non_farewell_clauses_cannot_stall_the_event_loop(text):
     started = time.perf_counter()
