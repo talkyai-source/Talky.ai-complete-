@@ -589,7 +589,7 @@ async def test_release_helper_is_tenant_scoped_proves_absence_and_frees_the_atte
     sql = conn.execute.call_args.args[0]
     assert "tenant_id = $2::uuid" in sql
     assert "provider_call_id IS NULL" in sql and "external_call_uuid IS NULL" in sql
-    assert "status IN ('queued', 'initiated')" in sql
+    assert "status IN ('queued', 'initiated', 'termination_pending')" in sql
     assert "'line_not_ready'" in sql
     assert "status = 'cancelled'" in sql and "status = 'failed'" not in sql
     # Frees (job, attempt) for the fresh intent the re-deferred pass creates,
