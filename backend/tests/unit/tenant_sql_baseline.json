@@ -336,7 +336,7 @@
       "id": "09271bb5fb58b7115b19faf06b2ffe892c8e258b11c3452685b769fa6fe425ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2960,
+      "line": 3027,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -1049,7 +1049,7 @@
       "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2640,
+      "line": 2707,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -1098,7 +1098,7 @@
       "id": "1932d77adb490c8554c84be0f3a7d8556dc3795ca145191a722c44b3c9ad77d1",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2881,
+      "line": 2948,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -1660,7 +1660,7 @@
       "id": "30f43b2bcb1d0980e26d85305e0e3a46397ebe3a0be9d478d4f1aaa854e5003b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_campaign_calling_config",
-      "line": 2398,
+      "line": 2465,
       "method": "fetchval",
       "tables": [
         "campaigns"
@@ -1774,7 +1774,7 @@
       "id": "3703ed4d5cef73e13a0043ab6270e6c5415d7574280d93aa94b425943bb3964b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2855,
+      "line": 2922,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2387,7 +2387,7 @@
       "id": "487e1b5192d85f5114fdefaa5f12a6420d06d9830b69191efe80a9d8f607c62c",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_last_called",
-      "line": 2587,
+      "line": 2654,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2436,7 +2436,7 @@
       "id": "4ade25424bc1a3e0f75739755e72548af3e3c7f946f7b1b6f89e46b1357a8945",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._campaign_inflight_calls",
-      "line": 2452,
+      "line": 2519,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -2738,7 +2738,7 @@
       "id": "55946d61b857a13071f79980232feb2e3293c6bcf1e05fa996c177063185be9d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_timezone",
-      "line": 2613,
+      "line": 2680,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2976,7 +2976,7 @@
       "id": "5f9b82e40498a7df8992ba5c19b12602225d936901f5f7b9d10da9ab679dd29e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._load_existing_call_intent",
-      "line": 2756,
+      "line": 2823,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -3901,7 +3901,7 @@
       "id": "782bd5a3321c3ab0dfc79d78ab7634c187ba9191f87e698e2cb89360e76987b5",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_active_tenant_ids",
-      "line": 2101,
+      "line": 2103,
       "method": "fetch",
       "tables": [
         "campaigns"
@@ -4013,10 +4013,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2d872d76b915d9ef7c1736551fdc76abb6ea78aa9c965e81deb5d31c350b8a44",
+      "id": "8ab5d7aa2c3687c578efd2aa9478c155c5b02dc3263665e9786a04b3f2dc284f",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 4087,
+      "line": 4166,
       "method": "execute",
       "tables": [
         "leads"
@@ -4218,7 +4218,7 @@
       "id": "846b0c6d66c0c9f4ec6d237aca4753fc00004d818c2311d5408e2d69b7b2da23",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._attempt_settled_failed_unanswered",
-      "line": 3532,
+      "line": 3611,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -5034,7 +5034,7 @@
       "id": "a1b9751685d701a3e78c01ee999fca8012c790e4b3a0d8d2f72fab2c3e59f3c4",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2906,
+      "line": 2973,
       "method": "execute",
       "tables": [
         "call_events"
@@ -5066,7 +5066,7 @@
       "id": "a345e4856e73f82534509aff07e61ed4c8d684aced80686ec43b5d115f870e09",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._bind_call_intent",
-      "line": 3675,
+      "line": 3754,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -5903,7 +5903,7 @@
       "id": "c1fd75a4915b6aabe45433890d55d5804a3573f7dafe9ecf7081e18bc709142e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2929,
+      "line": 2996,
       "method": "execute",
       "tables": [
         "call_events"
@@ -6656,20 +6656,20 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6c53bbb9a5fca511f1933a57ff1cf59c19221242b4d59cba4d40415ec234a8eb",
+      "id": "6703471c4a5f0065a7e95105b49f7bda885c324174a5df371044b9edad54d6f0",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3766,
+      "line": 3845,
       "method": "execute",
       "tables": [
         "calls"
       ],
-      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='telephony_unavailable'), Constant(value='platform_at_capacity')], ctx=Load())]), body=Name(id='reason', ctx=Load()), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
+      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='telephony_unavailable'), Constant(value='platform_at_capacity')], ctx=Load())]), body=Name(id='reason', ctx=Load()), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated', 'termination_pending')",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged."
+      "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged. 21 Nov 2026: the status list gained 'termination_pending' (a reaped call row that the phone side never claimed); the tenant, job and attempt predicates and both provider-id-NULL checks are unchanged."
     },
     {
       "id": "d715ba8304f393ca434b900f9b6fe3234a0ffce9c11bbd43912502a639cc310c",
@@ -7374,7 +7374,7 @@
       "id": "f314ccbcf229348fd598ef3b2f111cadc3f9356a02c7dc1fa7c54244013a89ba",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._lead_has_live_or_answered_call",
-      "line": 4162,
+      "line": 4241,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -12580,7 +12580,7 @@
       "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._stale_payload_reason",
-      "line": 2287,
+      "line": 2354,
       "method": "fetchrow",
       "tables": [
         "contact_lists",
@@ -12592,7 +12592,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2287.",
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2354.",
       "category": "reviewed_tenant_scoped"
     },
     {
