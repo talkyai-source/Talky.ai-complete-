@@ -271,7 +271,9 @@ async def test_cancel_keeps_access_until_the_period_ends_then_the_sweep_ends_it(
     row = await _row(fixture, rid)
     assert row["status"] == "cancelled" and row["ended_at"] is not None and not row["cancel_at_period_end"]
     state = await _tenant(fixture)
-    assert state["subscription_status"] == "cancelled" and state["plan_id"] == fixture.plan
+    # The plan is over: pay as you go with no plan minutes (bought minutes stay in the ledger).
+    assert state["subscription_status"] == "inactive" and state["plan_id"] == "payg"
+    assert state["minutes_allocated"] == 0
     assert (await fixture.svc.sweep())["ended"] == 0
     # the tenant can buy again once the plan has ended
     assert (await _start(fixture))["state"] == "open"

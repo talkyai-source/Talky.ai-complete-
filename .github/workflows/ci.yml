@@ -304,6 +304,7 @@ jobs:
             tests/integration/test_billing_checkout.py \
             tests/integration/test_paypal_subscriptions_pg.py \
             tests/integration/test_billing_state_events.py \
+            tests/integration/test_plan_end_pg.py \
             tests/integration/test_billing_topup_events.py \
             tests/integration/test_billing_webhook_migration.py \
             tests/integration/test_billing_webhook_http.py \

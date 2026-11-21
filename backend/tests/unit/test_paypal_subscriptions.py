@@ -19,10 +19,11 @@ import asyncpg
 import pytest
 
 from app.domain.services import paypal_subscriptions as ps
+from app.domain.services import plan_end
 from app.domain.services.billing_catalog import BillingCatalogUnavailable
 from app.domain.services.billing_checkout import CheckoutError
 from app.domain.services.paypal_client import PayPalError
-from app.domain.services.subscription_status import ACTIVE, CANCELLED, PAST_DUE, SUSPENDED, UNPAID
+from app.domain.services.subscription_status import ACTIVE, CANCELLED, INACTIVE, PAST_DUE, SUSPENDED, UNPAID
 
 TENANT = str(uuid4())
 OTHER_TENANT = str(uuid4())
@@ -62,6 +63,8 @@ class FakeConn:
         self.s["sql"].append(sql)
         s = self.s
         if sql == ps._Q_TENANT_LOCK:
+            return copy.deepcopy(s["tenants"].get(a[0]))
+        if sql == plan_end._Q_TENANT:
             return copy.deepcopy(s["tenants"].get(a[0]))
         if sql in (ps._Q_ROW_BY_ID, ps._Q_ROW_LOCK):
             r = s["subs"].get(a[0])
@@ -180,6 +183,18 @@ class FakeConn:
         if sql == ps._Q_TENANT_PROJECT:
             t = s["tenants"][a[0]]
             if t["stripe_subscription_id"] is None and t["plan_id"] == a[2]:
+                t["subscription_status"] = a[1]
+            return "UPDATE 1"
+        if sql == plan_end._Q_TO_PAYG:
+            t = s["tenants"][a[0]]
+            if t["stripe_subscription_id"] != a[3]:
+                return "UPDATE 0"
+            t.update(plan_id=a[1], subscription_status=a[2], stripe_subscription_id=None)
+            return "UPDATE 1"
+        if sql == ps._Q_TENANT_REBLOCK:
+            t = s["tenants"][a[0]]
+            if (t["stripe_subscription_id"] is None and t["plan_id"] == a[2]
+                    and t["subscription_status"] != "suspended"):
                 t["subscription_status"] = a[1]
             return "UPDATE 1"
         if sql == ps._Q_TENANT_PLAN_ONLY:
@@ -331,6 +346,14 @@ def env(monkeypatch):
 
     monkeypatch.setattr(ps, "acquire_with_tenant", fake_acquire)
     monkeypatch.setattr(ps, "apply_plan_allocation", fake_allocation)
+    ends: list = []
+
+    async def fake_end_allocation(conn, tenant_id, minutes):
+        # A plan end sets the allowance to 0; kept apart so `not env.grants` still means "no plan granted".
+        ends.append((tenant_id, minutes, store["tenants"][tenant_id]["plan_id"]))
+        store["tenants"][tenant_id]["minutes_allocated"] = minutes
+
+    monkeypatch.setattr(plan_end, "apply_plan_allocation", fake_end_allocation)
     monkeypatch.setattr(ps, "resolve_checkout_option", fake_resolve)
     monkeypatch.setattr(ps, "billing_return_urls", lambda: "https://app.example/billing")
     monkeypatch.setattr(ps, "paypal_provider_mode", lambda: "test")
@@ -338,7 +361,7 @@ def env(monkeypatch):
     monkeypatch.setattr(ps._pc, "subscription_approval_url", _fake_approval, raising=False)
     client = FakeClient()
     svc = ps.PayPalSubscriptionService(object(), client=client)
-    return SimpleNamespace(svc=svc, client=client, store=store, grants=grants, mp=monkeypatch)
+    return SimpleNamespace(svc=svc, client=client, store=store, grants=grants, ends=ends, mp=monkeypatch)
 
 
 def add_row(env, **over):
@@ -1140,8 +1163,10 @@ async def test_cancelled_with_no_time_left_ends(env, over):
     out = await apply(env, row, "CANCELLED", paid=False)
     s = stored(env, row)
     assert out.status == CANCELLED and s["status"] == CANCELLED and s["ended_at"] is not None
-    assert not s["cancel_at_period_end"] and tenant(env)["subscription_status"] == CANCELLED
-    assert tenant(env)["plan_id"] == "pro"  # the plan is not cleared
+    assert not s["cancel_at_period_end"] and tenant(env)["subscription_status"] == INACTIVE
+    # The plan is over: pay as you go, the plan's monthly minutes end (bought minutes stay in the ledger).
+    assert tenant(env)["plan_id"] == "payg" and tenant(env)["minutes_allocated"] == 0
+    assert env.ends == [(TENANT, 0, "pro")] and not env.grants
 
 
 async def test_end_never_overwrites_an_admin_suspension(env):
@@ -1396,7 +1421,9 @@ async def test_accepted_cancel_with_a_lagging_read_back_and_no_time_left_ends_th
         row, "ACTIVE", next_billing=iso(now() - timedelta(minutes=1)))
     out = await env.svc.cancel_for_tenant(TENANT)
     assert out["status"] == CANCELLED and stored(env, row)["status"] == "cancelled"
-    assert tenant(env)["subscription_status"] == CANCELLED
+    assert tenant(env)["subscription_status"] == INACTIVE
+    assert tenant(env)["plan_id"] == "payg" and tenant(env)["minutes_allocated"] == 0
+    assert env.ends == [(TENANT, 0, "pro")]
 
 
 async def test_accepted_cancel_with_a_failing_read_back_still_cancels(env):
@@ -1455,6 +1482,9 @@ async def test_reversal_ends_the_plan_once(env):
     s = stored(env, row)
     assert s["status"] == "cancelled" and s["ended_at"] is not None
     assert env.store["payments"][tid]["status"] == "reversed"
+    # A reversal keeps the account blocked AND ends the plan's allowance.
+    assert tenant(env)["subscription_status"] == CANCELLED
+    assert tenant(env)["plan_id"] == "payg" and tenant(env)["minutes_allocated"] == 0
     assert tenant(env)["subscription_status"] == CANCELLED
     assert ("cancel", row["paypal_subscription_id"], "Payment reversed") in env.client.calls
     assert f"local:review:plan:{row['id']}:dispute" in env.store["reviews"]
@@ -1471,6 +1501,22 @@ async def test_reversal_kind_reversal_and_failed_paypal_cancel(env):
     assert f"local:review:plan:{row['id']}:reversal" in env.store["reviews"]
 
 
+async def test_reversal_after_the_plan_ended_blocks_the_account_again(env):
+    row = add_active(env, status="cancelled", ended_at=now())
+    tenant(env).update(plan_id="payg", subscription_status=INACTIVE)
+    tid = await seed_payment(env, row)
+    assert await env.svc.end_for_reversal(transaction_id=tid, kind="reversal", event_id="e1") == "already"
+    assert tenant(env)["subscription_status"] == CANCELLED and tenant(env)["plan_id"] == "payg"
+
+
+async def test_reversal_after_the_plan_ended_never_touches_a_newer_plan(env):
+    row = add_active(env, status="cancelled", ended_at=now())
+    tenant(env).update(plan_id="pro", subscription_status=ACTIVE)
+    tid = await seed_payment(env, row)
+    await env.svc.end_for_reversal(transaction_id=tid, kind="reversal", event_id="e1")
+    assert tenant(env)["subscription_status"] == ACTIVE
+
+
 async def test_reversal_bad_kind(env):
     with pytest.raises(ValueError):
         await env.svc.end_for_reversal(transaction_id="x", kind="refund", event_id="e1")
@@ -1483,8 +1529,10 @@ async def test_sweep_ends_a_due_row_once(env):
     row = add_active(env, cancel_at_period_end=True, current_period_end=now() - timedelta(minutes=1),
                      checked_at=now())
     assert await env.svc.sweep() == {"ended": 1, "checked": 0, "failed": 0, "unconfirmed": 0}
-    assert stored(env, row)["status"] == "cancelled" and tenant(env)["subscription_status"] == CANCELLED
+    assert stored(env, row)["status"] == "cancelled" and tenant(env)["subscription_status"] == INACTIVE
+    assert tenant(env)["plan_id"] == "payg" and env.ends == [(TENANT, 0, "pro")]
     assert await env.svc.sweep() == {"ended": 0, "checked": 0, "failed": 0, "unconfirmed": 0}
+    assert env.ends == [(TENANT, 0, "pro")]
 
 
 async def test_sweep_rechecks_the_condition_on_the_locked_row(env):
@@ -1692,7 +1740,9 @@ async def test_every_statement_is_tenant_bound_except_the_listed_ones(env):
     for sql in env.store["sql"]:
         if sql in exceptions:
             continue
-        if sql.startswith(("SELECT id, status, subscription_status", "UPDATE tenants")):
+        # The plan-end read is the one new tenants SELECT (21 Nov 2026); matched exactly.
+        if (sql.startswith(("SELECT id, status, subscription_status", "UPDATE tenants"))
+                or sql == plan_end._Q_TENANT):
             assert "WHERE id = $1::uuid" in sql
             continue
         assert ("tenant_id = $" in sql or sql.startswith("INSERT INTO paypal_subscriptions (id, tenant_id")
@@ -1926,6 +1976,7 @@ async def test_end_by_subscription_ends_once_and_touches_no_payment(env):
     s = stored(env, row)
     assert s["status"] == "cancelled" and s["ended_at"] is not None
     assert tenant(env)["subscription_status"] == CANCELLED
+    assert tenant(env)["plan_id"] == "payg" and tenant(env)["minutes_allocated"] == 0
     assert env.store["payments"][tid]["status"] == "completed"
     assert ("cancel", sid, "Payment reversed") in env.client.calls
     assert f"local:review:plan:{row['id']}:reversal" in env.store["reviews"]
