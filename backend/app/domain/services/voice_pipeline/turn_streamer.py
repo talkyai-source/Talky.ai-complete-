@@ -63,6 +63,7 @@ from app.domain.services.voice_pipeline.contact_recording import (
     CONTACT_TOOL_NAME, CONTACT_TOOL_SPEC, record_contact,
 )
 from app.domain.services.voice_pipeline.action_tools import (
+    ACTION_END_CALL,
     ACTION_SCHEDULE_CALLBACK,
     ACTION_SEND_EMAIL,
     ACTION_SUBMIT_FORM,
@@ -151,15 +152,6 @@ _ACTION_ENVELOPE_RE = re.compile(
 )
 
 
-# An end_call's own `reason` (tool argument) naming a mailbox, answering machine
-# or call screening: the only refusal where silence beats "could you say it again?".
-_MACHINE_REASON = re.compile(
-    r"voice\s*-?\s*mail|mail\s*box|answering\s+(?:machine|service)|answer\s*phone"
-    r"|call[\s-]*screen(?:ing|er)|screening\s+assistant|automated\s+(?:greeting|message)",
-    re.IGNORECASE,
-)
-
-
 _ADDRESS_MARKS = "@/"
 
 
@@ -214,14 +206,24 @@ _EOS = _EndOfStream()
 
 
 class _WithEndOfStream:
-    """Async iterator that yields ``_EOS`` once after the provider stream ends."""
+    """Async iterator that yields ``_EOS`` once when the provider stream ends.
+
+    A provider error is held in ``error`` and also ends the stream with ``_EOS``,
+    so text held back at that moment is decided before the error is re-raised.
+    ``pushback`` returns one token to the front (used at a round boundary).
+    """
 
     def __init__(self, iterator) -> None:
         self._it = iterator.__aiter__()
         self._done = False
+        self._pending: list = []
+        self.error: Optional[Exception] = None
 
     def __aiter__(self):
         return self
+
+    def pushback(self, token) -> None:
+        self._pending.append(token)
 
     async def aclose(self):
         close = getattr(self._it, "aclose", None)
@@ -229,12 +231,18 @@ class _WithEndOfStream:
             await close()
 
     async def __anext__(self):
+        if self._pending:
+            return self._pending.pop()
         if self._done:
             raise StopAsyncIteration
         try:
             return await self._it.__anext__()
         except StopAsyncIteration:
             self._done = True
+            return _EOS
+        except Exception as exc:  # noqa: BLE001 - re-raised after the loop
+            self._done = True
+            self.error = exc
             return _EOS
 
 
@@ -243,10 +251,6 @@ _GOODBYE_WORDS = re.compile(
     r"\b(?:good\s*-?\s*bye|bye|take care|have a (?:great|good|nice|lovely)|thanks? for your time)\b",
     re.IGNORECASE,
 )
-
-
-def _is_machine_reason(reason) -> bool:
-    return isinstance(reason, str) and bool(_MACHINE_REASON.search(reason))
 
 
 def _find_action_envelope_start(buf: str) -> int:
@@ -512,11 +516,6 @@ class TurnStreamer:
         # character received, so a next token starting with a letter (real
         # tokens carry their own leading space) is a boundary split across tokens.
         terminator_at_edge: Optional[str] = None
-        # True when an end_call the model requested this turn was refused.
-        refused_end_call = False
-        # ... and True when one of those refusals was NOT a mailbox / answering
-        # machine / screening reason (then a live person may be on the line).
-        refused_end_call_not_machine = False
         # Set when a tool round finished: the next token is the first of a new
         # round of the same turn, never the caller's reply to the last one.
         round_boundary = False
@@ -531,6 +530,28 @@ class TurnStreamer:
         end_call_accepted = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
+
+        def _cut_now() -> bool:
+            """True when a cut has happened, or the boundary held back right now
+            will be decided as a cut as soon as its word is complete."""
+            if model_wrote_caller_turn:
+                return True
+            if not (_held_glued and buf):
+                return False
+            hosts = grounded_url_hosts([
+                *getattr(session, "_knowledge_grounding", []), *turn_grounding,
+            ]) if "." in buf else ()
+            idx = self._p._find_sentence_end(
+                buf, allow_clause=len(buf) >= 80, known_hosts=hosts,
+            )
+            ai = _address_end_glue_index(buf)
+            if ai >= 0 and (idx < 0 or ai < idx):
+                idx = ai
+            if idx < 0 or idx + 1 >= len(buf):
+                return False
+            if not (_is_missing_space_boundary(buf, idx) or idx == ai):
+                return False
+            return _glued_boundary_is_cut(buf, idx)
 
         def _leak_exempt():
             # Read-back values, plus vendor names the campaign's own approved
@@ -577,7 +598,6 @@ class TurnStreamer:
         # going silent, so it must not carry over from a previous turn.
         session._tts_delivery_failed = False
         session._tts_failure_reason = None
-        session._recovery_skipped_for_refused_end_call = False
         # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
         # (stale signal from a previous interruption) must not kill this fresh
         # reply. _barged() below ignores such stale events.
@@ -626,8 +646,21 @@ class TurnStreamer:
             _token_iter = _context_recovery()
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
-                nonlocal round_boundary, refused_end_call_not_machine, end_call_accepted
+                nonlocal round_boundary, end_call_accepted
                 round_boundary = True
+                if _name != ACTION_END_CALL and _cut_now():
+                    # Second lock: once the model has written the caller's side
+                    # of the turn, nothing but end_call may act. The executors
+                    # still re-check the caller's real words.
+                    logger.warning(
+                        "model_wrote_caller_turn call=%s tool=%s — tool not run after a cut",
+                        call_id[:12], _name,
+                    )
+                    return json.dumps({
+                        "success": False, "confirmation_allowed": False,
+                        "status": "caller_turn_cut", "ends_turn": True,
+                        "message": "The action was not run. Do not retry it.",
+                    })
                 # Recording the caller's details is silent bookkeeping, not a wait.
                 # Only a lookup or a slow outside action leaves a wait; end_call
                 # and other control tools return at once (no "One moment" on
@@ -671,12 +704,6 @@ class TurnStreamer:
                         _name,
                     )
                     result = execution_failure_result(session, _name)
-                if (str(result.get("action") or _name) == "end_call"
-                        and result.get("status") == "caller_intent_unconfirmed"):
-                    nonlocal refused_end_call
-                    refused_end_call = True
-                    if not _is_machine_reason(_args.get("reason") if isinstance(_args, dict) else None):
-                        refused_end_call_not_machine = True
                 if (str(result.get("action") or _name) == "end_call"
                         and result.get("status") == "accepted"):
                     end_call_accepted = True
@@ -745,7 +772,14 @@ class TurnStreamer:
                     tts_was_interrupted = True
                     break
 
-                if round_boundary:
+                if round_boundary and _held_glued and buf and not model_wrote_caller_turn:
+                    # A tool round finished while a glued boundary was held:
+                    # its word is complete. Decide it now (a space ends the
+                    # word) and handle this token next, as the round's first.
+                    _token_iter.pushback(token)
+                    token = " "
+                    _eos = True  # a separator only: not part of the model's text
+                elif round_boundary:
                     # A tool round finished. This token starts the next round of
                     # the same turn: it can never be a glued caller turn.
                     round_boundary = False
@@ -830,9 +864,10 @@ class TurnStreamer:
                     # sentence; everything after it is dialogue made up.
                     turn_boundary = False
                     if _is_missing_space_boundary(buf, idx) or idx == _ai:
-                        if not (buf[-1].isspace() or _eos):
+                        if not any(c.isspace() for c in buf[idx + 1:]):
                             # The word after the terminator is still arriving
-                            # ("John." ... "Smith" "@" "gmail.com"): wait.
+                            # ("John." ... "Smith" "@" "gmail.com"): wait for
+                            # whitespace, the end of the stream or a round.
                             _held_glued = True
                             break
                         turn_boundary = _glued_boundary_is_cut(buf, idx)
@@ -932,6 +967,10 @@ class TurnStreamer:
                 # otherwise be spoken as a new sentence.
                 if tts_was_interrupted or (model_wrote_caller_turn and not _drain_after_cut):
                     break
+
+            if _token_iter.error is not None:
+                # The stream failed; text held back was decided above.
+                raise _token_iter.error
 
         except asyncio.CancelledError:
             # The turn task was cancelled (barge-in, hangup): the filler is a
@@ -1086,7 +1125,7 @@ class TurnStreamer:
         from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
         caller_finished = caller_signaled_end(last_user_text,
             previous_assistant_text=previous_assistant_turn(messages))
-        _would_recover = (
+        if (
             not tts_was_interrupted
             and sentences_done == 0
             and t_tts_first is None
@@ -1095,18 +1134,7 @@ class TurnStreamer:
             and not getattr(session, "_tts_delivery_failed", False)
             and not _barged()
             and not tool_filler.interrupted
-        )
-        if (_would_recover and refused_end_call and not refused_end_call_not_machine
-                and not caller_finished):
-            # B1: the turn_runner keeps the caller's message in history.
-            session._recovery_skipped_for_refused_end_call = True
-            # The model's only output was an end_call that was refused (e.g. a
-            # voicemail greeting not yet recognised): stay silent and keep
-            # listening rather than say "could you say it again?" into it.
-            logger.warning(
-                "recovery_line_skipped call=%s reason=refused_end_call", call_id,
-            )
-        elif _would_recover:
+        ):
             recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
             await tool_filler.settle()
             if caller_finished:

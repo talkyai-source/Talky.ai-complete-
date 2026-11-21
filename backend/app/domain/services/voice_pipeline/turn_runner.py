@@ -302,13 +302,6 @@ class TurnRunner:
                 capture_mode.maybe_enter(
                     getattr(self._p, "stt_provider", None), call_id, response_text
                 )
-            elif getattr(session, "_recovery_skipped_for_refused_end_call", False) is True:
-                # The agent stayed silent on purpose after a refused end_call; the
-                # caller's words (maybe their opt-out) must stay in the model's context.
-                logger.warning(
-                    f"Silent turn after a refused end_call for call {call_id} — keeping user message"
-                )
-                session.conversation_history = session.conversation_history[:history_snapshot + 1]
             else:
                 logger.warning(
                     f"Empty LLM response for call {call_id} — rolling back user message"

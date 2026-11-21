@@ -76,6 +76,7 @@ async def _run(llm, monkeypatch, user_text="What are your hours?"):
     service.latency_tracker = MagicMock()
     service.tts_provider._model_id = "deepgram-aura-2"
     service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    getattr(llm, 'bind', lambda svc: None)(service)
     session = _session(user_text)
     service._barge_in_events[session.call_id] = session.barge_in_event
     result = await service._stream_llm_and_tts(session)
@@ -205,6 +206,7 @@ async def test_a1_a_cut_does_not_start_another_provider_round(monkeypatch):
     spoken, _, _ = await _run(llm, monkeypatch)
     assert spoken == ["Okay."]
     assert "Every" not in " ".join(spoken)
+    assert llm.n == 1, "a cut decided at the token must not start another provider round"
 
 
 # ---------------------------------------------------------------- A3
@@ -309,7 +311,8 @@ async def test_n5_capitalised_email_read_back_in_separate_tokens_is_spoken_in_fu
         _Tokens(["Is your email ", "John", ".", "Smith", "@", "gmail.com", "?"]),
         monkeypatch, user_text="It is john.smith at gmail.",
     )
-    assert "".join(spoken) == "Is your email John.Smith@gmail.com?"
+    # What the caller really hears: the segmenter still splits at the dot.
+    assert spoken == ["Is your email John.", "Smith@gmail.com?"]
 
 
 @pytest.mark.asyncio
@@ -385,3 +388,172 @@ async def test_n6_no_farewell_when_the_end_call_was_refused(monkeypatch):
     llm = _RoundsProvider([(["Is that all?", "Yes, that's all."], [end_call])])
     spoken, _, _ = await _run(llm, monkeypatch, user_text="Tell me about pricing.")
     assert spoken == ["Is that all?"]
+
+
+# ---------------------------------------------------------------- R3 (a late-decided cut starts no round)
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tokens", [
+    ["Happy to help for you.Sure"],
+    ["Happy", " to", " help", " for", " you", ".", "Sure"],
+])
+async def test_r3_a_cut_decided_late_does_not_start_another_provider_round(monkeypatch, tokens):
+    # The glued word is the LAST word of the round: the boundary is still held
+    # when the round's tool call runs.
+    llm = _RoundsProvider([(tokens, [_LOOKUP]), (["Every hour."], [])])
+    spoken, _, _ = await _run(llm, monkeypatch)
+    assert llm.n == 1
+    assert spoken == ["Happy to help for you."]
+
+
+# ---------------------------------------------------------------- R2 (hold length, errors)
+
+class _Probe:
+    """Records how many sentences had reached TTS before each token was handed over."""
+
+    def __init__(self, tokens, error=None):
+        self.tokens, self.error, self.counts, self._service = tokens, error, [], None
+
+    def bind(self, service):
+        self._service = service
+
+    def _sent(self):
+        return len(self._service.synthesize_and_send_audio.await_args_list)
+
+    async def stream_chat_with_timeout(self, *a, **k):
+        try:
+            for t in self.tokens:
+                self.counts.append(self._sent())
+                yield t
+            self.counts.append(self._sent())
+            if self.error is not None:
+                raise self.error
+        finally:
+            # also reached when the streamer stops reading (a cut) and closes us
+            if len(self.counts) <= len(self.tokens):
+                self.counts.append(self._sent())
+
+
+@pytest.mark.asyncio
+async def test_r2_a_cut_is_decided_at_the_first_whitespace_not_at_the_end(monkeypatch):
+    probe = _Probe(["We", " open", " at", " 5am", ".", "We", " close", " at", " 9pm", "."])
+    spoken, _, _ = await _run(probe, monkeypatch, user_text="When?")
+    assert spoken == ["We open at 5am."]
+    # counts[i] = sentences sent before token i was handed over: the sentence
+    # is sent while token 6 (" close", the first whitespace after "We") is processed.
+    assert probe.counts[6] == 0 and probe.counts[7] == 1
+
+
+@pytest.mark.asyncio
+async def test_r2_a_held_address_boundary_is_released_at_the_first_whitespace(monkeypatch):
+    probe = _Probe(["Email", " us", " at", " John", ".", "Smith", "@", "gmail.com", ",", " please", "."])
+    spoken, _, _ = await _run(probe, monkeypatch, user_text="How?")
+    assert spoken == ["Email us at John.", "Smith@gmail.com, please."]
+    assert probe.counts[9] == 0 and probe.counts[10] == 1
+
+
+@pytest.mark.asyncio
+async def test_r2_a_stream_error_during_a_hold_does_not_lose_the_sentence(monkeypatch):
+    from app.infrastructure.llm.groq import LLMTimeoutError
+
+    probe = _Probe(["We", " open", " at", " 5am", ".", "We"], error=LLMTimeoutError("stalled"))
+    spoken, session, _ = await _run(probe, monkeypatch, user_text="When?")
+    # main speaks the sentence before the terminator the moment "We" arrives,
+    # then drops the rest on the error; the hold must not turn that into the apology.
+    assert spoken == ["We open at 5am."]
+    assert session._spoken_sentences == ["We open at 5am."]
+
+
+@pytest.mark.asyncio
+async def test_r2_a_plain_stream_error_without_a_hold_is_unchanged(monkeypatch):
+    from app.infrastructure.llm.groq import LLMTimeoutError
+
+    probe = _Probe(["We open at 5am. We close"], error=LLMTimeoutError("stalled"))
+    spoken, _, _ = await _run(probe, monkeypatch, user_text="When?")
+    assert spoken == ["We open at 5am."]
+
+
+# ---------------------------------------------------------------- R4 (only end_call acts after a cut)
+
+class _RecordingProvider(_RoundsProvider):
+    def __init__(self, rounds):
+        super().__init__(rounds)
+        self.results = []
+
+    def stream_chat_with_tools(self, messages, tool_runner=None, **kwargs):
+        async def rec(name, args):
+            result = await tool_runner(name, args)
+            self.results.append((name, result))
+            return result
+
+        return stream_tool_turn(self, messages, tool_runner=rec, **kwargs)
+
+
+_CUT_SHAPES = {
+    "one_token": ["Is that right?Yes"],
+    "edge": ["Is that right?", "Yes"],
+    "late": ["Is", " that", " right", "?", "Yes"],
+}
+_TOOLS = {
+    "schedule_callback": {"requested_time": "2026-12-01T10:00:00Z", "timezone": "Europe/London"},
+    "transfer_call": {"destination": "sales"},
+    "record_contact": {"kind": "email", "operation": "set", "value": "invented@example.com",
+                       "expected_value": None, "source_quote": "yes that is right"},
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", list(_CUT_SHAPES))
+@pytest.mark.parametrize("tool", list(_TOOLS))
+async def test_r4_after_a_cut_no_tool_but_end_call_runs(monkeypatch, shape, tool):
+    action = AsyncMock(return_value={"success": True, "status": "done", "action": tool})
+    contact = AsyncMock(return_value={"saved": True})
+    mod = "app.domain.services.voice_pipeline.turn_streamer"
+    monkeypatch.setattr(f"{mod}.run_voice_action", action)
+    monkeypatch.setattr(f"{mod}.record_contact", contact)
+    llm = _RecordingProvider([
+        (_CUT_SHAPES[shape], [_call(tool, _TOOLS[tool])]),
+        ([], [_call("transfer_call", {"destination": "sales"}, "call_2")]),
+        (["Every hour."], []),
+    ])
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "60000")
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(), llm_provider=llm, tts_provider=AsyncMock(), media_gateway=AsyncMock(),
+    )
+    service.latency_tracker = MagicMock()
+    service.tts_provider._model_id = "deepgram-aura-2"
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    session = _session("What are your hours?")
+    session._contact_turn = object()  # offers the contact tool
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    await service._stream_llm_and_tts(session)
+    spoken = [c.args[1] for c in service.synthesize_and_send_audio.await_args_list]
+    assert action.await_count == 0 and contact.await_count == 0
+    assert [name for name, _ in llm.results] == [tool]
+    assert json.loads(llm.results[0][1])["status"] == "caller_turn_cut"
+    assert llm.n == 1, "no further provider request after the cut"
+    assert spoken == ["Is that right?"]
+
+
+@pytest.mark.asyncio
+async def test_r4_end_call_with_a_do_not_call_runs_once_after_an_edge_cut(monkeypatch):
+    purge = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", purge)
+    end_call = _call("end_call", {"reason": "caller asked not to be called", "do_not_call": True,
+                                  "opt_out_quote": "Don't bother us again"})
+    llm = _RecordingProvider([(["Is that right?", "Yes"], [end_call])])
+    spoken, session, _ = await _run(llm, monkeypatch, user_text="Don't bother us again.")
+    assert purge.await_count == 1
+    assert [n for n, _ in llm.results] == ["end_call"]
+    assert session._end_call_requested is True
+    assert spoken[0] == "Is that right?"
+
+
+@pytest.mark.asyncio
+async def test_r4_a_turn_without_a_cut_still_runs_its_tools(monkeypatch):
+    action = AsyncMock(return_value={"success": True, "status": "done", "action": "send_email"})
+    monkeypatch.setattr("app.domain.services.voice_pipeline.turn_streamer.run_voice_action", action)
+    llm = _RecordingProvider([(["Let me check."], [_LOOKUP]), (["Every hour."], [])])
+    spoken, _, _ = await _run(llm, monkeypatch)
+    assert action.await_count == 1 and llm.n == 2
+    assert " ".join(spoken) == "Let me check. Every hour."
