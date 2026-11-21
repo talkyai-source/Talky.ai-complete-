@@ -91,14 +91,17 @@ async def test_with_no_platform_notice_owed_the_opener_is_spoken_itself(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_an_inbound_caller_first_call_keeps_the_notice_then_the_model(monkeypatch):
+async def test_an_inbound_caller_first_call_keeps_the_notice_then_the_identity_line_then_the_model(monkeypatch):
+    # Since 21 Nov 2026 an incoming caller who spoke first also hears who this is
+    # and that it is an AI before the model's reply (the model still replies:
+    # the helper returns False). Detail tests: test_inbound_first_line_ai_identity_20261121.py
     calls = _speaker(monkeypatch)
     s = _session(tts_active=False, started_ago=None)
     s._call_direction = "inbound"
     vs = _with_voice_session(s)
     assert await speak_disclosure_before_first_reply(s, "Hello?") is False
-    assert calls == [(None, True)] and vs.pipeline.spoken == []
-    assert s.conversation_history == []
+    assert calls == [(None, True)] and vs.pipeline.spoken == ["This is an AI assistant."]
+    assert [m.content for m in s.conversation_history] == ["This is an AI assistant."]
 
 
 @pytest.mark.asyncio

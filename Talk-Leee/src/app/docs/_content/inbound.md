@@ -29,6 +29,8 @@ Each inbound campaign has an opening mode.
 
 On a recorded call the recording notice comes first, and the two seconds are counted after it.
 
+The first thing a caller hears always says that the agent is an AI. If the greeting you saved does not say so, the agent adds a short sentence to it, such as "This is Sarah, an AI assistant." A greeting that already says it is left exactly as you wrote it. When the caller speaks first, the agent first says who it is and that it is an AI assistant, then answers.
+
 ## Recording incoming calls
 
 Each inbound campaign has its own **Record inbound calls** switch and a recording notice.

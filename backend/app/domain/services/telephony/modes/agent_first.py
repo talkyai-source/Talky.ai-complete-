@@ -38,6 +38,7 @@ import logging
 
 from app.domain.services.telephony.config import (
     _build_call_greeting,
+    _call_direction,
     opener_for_log,
     outbound_opener_with_notice,
 )
@@ -557,6 +558,7 @@ async def _send_outbound_greeting(voice_session) -> None:
         # which playback path runs.
         was_interrupted = False
         chunks_sent = 0
+        _slow_undelivered = False
 
         # 2026-07-08: opener-content guard — never speak a bare "Hello?" (or
         # empty text) as the whole opener. If the pre-synth text is degraded,
@@ -666,6 +668,13 @@ async def _send_outbound_greeting(voice_session) -> None:
             greeting = pinned_inbound_greeting or _build_call_greeting(
                 session, first_speaker=first_speaker
             )
+            if _call_direction(session) == "inbound":
+                # An incoming call's first line always says it is an AI.
+                from app.domain.services.voice_pipeline.inbound_answer_greeting import (
+                    ensure_ai_disclosure,
+                )
+
+                greeting = ensure_ai_disclosure(greeting, session)
 
             # 2026-07-08: last-resort opener-content guard. If even the
             # real-time greeting builder produced empty/filler-only text
@@ -701,8 +710,15 @@ async def _send_outbound_greeting(voice_session) -> None:
             # track_latency=False: the greeting is not an LLM turn either
             # (same 6e0e221b reasoning as the disclosure call above) -- it
             # must not stamp turn-0 LatencyMetrics.
-            await voice_session.pipeline.synthesize_and_send_audio(
+            _slow_interrupted = await voice_session.pipeline.synthesize_and_send_audio(
                 session, greeting, websocket=None, track_latency=False,
+            )
+            # Same rule as the caller-first opener (caller_first_disclosure): a
+            # first line that was cut off or not delivered is not recorded as
+            # said, and _has_introduced stays False so the introduction is
+            # still owed on the next turn.
+            _slow_undelivered = _call_direction(session) == "inbound" and (
+                _slow_interrupted is True or getattr(session, "_tts_delivery_failed", False) is True
             )
 
         # Persist the greeting so the LLM sees it as conversation history on the
@@ -718,6 +734,12 @@ async def _send_outbound_greeting(voice_session) -> None:
         # greeting itself, which has nothing left to cut off mid-thought, but
         # this path is shared with the LLM-authored and legacy longer openers,
         # which do.)
+        if _slow_undelivered:
+            logger.warning(
+                "inbound_greeting_unconfirmed call_id=%s — cut off or not delivered; "
+                "not recorded as said, the introduction is still owed", call_id[:12],
+            )
+            return
         try:
             _spoken_text = greeting
             if was_interrupted and presynth_chunks and chunks_sent > 0:
