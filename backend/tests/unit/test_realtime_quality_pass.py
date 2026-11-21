@@ -42,17 +42,26 @@ from app.domain.services.transcript_service import TranscriptService
 # ---------------------------------------------------------------------------
 
 def test_instructions_ai_disclosure_matches_compliance_floor():
-    text = build_realtime_instructions(
-        RealtimePersona(agent_name="Sam", company_name="Acme")
-    )
-    # Aligns with the platform's honesty floor (guardrails.py Rule 1): be honest
-    # about being AI, never claim to be human, and disclose when asked. The old
-    # "Do NOT volunteer that you're an AI" concealment framing must be gone.
+    import inspect
+    from app.domain.services.voice_pipeline.speech_guard import _claims_human
+    from app.services.scripts.prompts.guardrails import compliance_floor
+    text = " ".join(build_realtime_instructions(
+        RealtimePersona(agent_name="Sam", company_name="Acme")).split())
+    # Floor (policies/non_negotiables.md): never conceal being an AI assistant.
+    # Realtime wording (prompts.py, reworded in b4d25876): state it honestly.
+    floor = " ".join(compliance_floor("Acme").split())
+    assert "conceal that you are an AI assistant for Acme" in floor
+    assert "Be honest that you are an AI assistant" in text
+    # The old "Do NOT volunteer that you're an AI" concealment framing stays gone.
     assert "Do NOT volunteer that you're an AI" not in text
-    assert "Be honest about what you are" in text
-    assert "never claim or imply you're human" in text
-    # Still names it's an AI when the caller asks.
-    assert "I'm an AI assistant" in text
+    assert "volunteer" not in text.lower()
+    # "Never claim to be human" is enforced in code (945c6dba): the guard exists,
+    # recognises a human claim, and runs on the playout path before audio.
+    assert _claims_human("I'm a real person, not a robot.")
+    assert not _claims_human("I'm an AI assistant for Acme.")
+    playout = inspect.getsource(RealtimeBridge._play_validated_response)
+    assert "self._admit_ai_identity(" in playout
+    assert playout.index("_admit_ai_identity(") < playout.index("begin_playback")
 
 
 def test_lookup_updates_are_conditional_and_not_forced_filler():
@@ -420,13 +429,15 @@ async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_instructions_preserve_honesty_and_protected_data_rules():
-    text = build_realtime_instructions(RealtimePersona())
-    # Honesty remains explicit while the Realtime wording is independently maintained.
-    assert "Be honest about what you are" in text
-    assert "never claim or imply you're human" in text
-    assert "I'm an AI assistant" in text
-    for protected in ("payment-card", "social-security", "one-time passcodes"):
-        assert protected in text
+    import inspect
+    text = " ".join(build_realtime_instructions(RealtimePersona()).split())
+    # Honesty is explicit; the human-claim rule itself is enforced in code.
+    assert "Be honest that you are an AI assistant and respect requests to stop" in text
+    assert "_admit_ai_identity(" in inspect.getsource(RealtimeBridge._play_validated_response)
+    # Protected data (current wording, b4d25876).
+    assert ("Never request, repeat or retain card numbers, CVV, PINs, full bank or "
+            "national ID numbers, passwords or one-time codes") in text
+    assert "ask them to stop" in text
     # No concealment framing may creep back in.
     assert "Do NOT volunteer" not in text
     assert "don't volunteer" not in text.lower()
