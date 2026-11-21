@@ -311,8 +311,8 @@ async def test_n5_capitalised_email_read_back_in_separate_tokens_is_spoken_in_fu
         _Tokens(["Is your email ", "John", ".", "Smith", "@", "gmail.com", "?"]),
         monkeypatch, user_text="It is john.smith at gmail.",
     )
-    # What the caller really hears: the segmenter still splits at the dot.
-    assert spoken == ["Is your email John.", "Smith@gmail.com?"]
+    # 21 Nov: the address is one spoken piece now (it used to be split at the dot).
+    assert spoken == ["Is your email John.Smith@gmail.com?"]
 
 
 @pytest.mark.asyncio
@@ -445,11 +445,16 @@ async def test_r2_a_cut_is_decided_at_the_first_whitespace_not_at_the_end(monkey
 
 
 @pytest.mark.asyncio
-async def test_r2_a_held_address_boundary_is_released_at_the_first_whitespace(monkeypatch):
-    probe = _Probe(["Email", " us", " at", " John", ".", "Smith", "@", "gmail.com", ",", " please", "."])
+async def test_r2_an_address_is_one_piece_and_does_not_hold_its_sentence_back(monkeypatch):
+    # 21 Nov: an address is one spoken piece now (it used to be held, then split at
+    # the dot); this keeps the timing rule: the sentence is sent at the token after
+    # its real end, not at the end of the stream.
+    probe = _Probe(["Email", " us", " at", " John", ".", "Smith", "@", "gmail.com", ",", " please", ".",
+                    " Thanks", "."])
     spoken, _, _ = await _run(probe, monkeypatch, user_text="How?")
-    assert spoken == ["Email us at John.", "Smith@gmail.com, please."]
-    assert probe.counts[9] == 0 and probe.counts[10] == 1
+    assert spoken == ["Email us at John.Smith@gmail.com, please.", "Thanks."]
+    # token 11 (" Thanks") follows the final "." (token 10): the piece is sent while it is processed
+    assert probe.counts[11] == 0 and probe.counts[12] == 1
 
 
 @pytest.mark.asyncio
