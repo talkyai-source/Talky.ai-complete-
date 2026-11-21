@@ -32,7 +32,6 @@ class LiveConversationState:
     last_tool_success: Optional[bool] = None
     last_tool_code: Optional[str] = None
     customer_relationship: Optional[str] = None  # "denied", "affirmed" or unknown
-    caller_opted_out: bool = False  # a do-not-call was recorded on this call
 
 
 @dataclass(frozen=True)
@@ -155,7 +154,6 @@ def reduce_cascaded_session_live_state(
     relationship = caller_relationship(getattr(session, "conversation_history", ()) or ())
     if relationship is not None:
         state = replace(state, customer_relationship=relationship)
-    state = replace(state, caller_opted_out=getattr(session, "_caller_opted_out", False) is True)
     setattr(session, "_live_structured_state", state)
     return state
 
@@ -192,8 +190,6 @@ def render_live_state_block(state: LiveConversationState, *, opening_interrupted
             f"confirmed_contacts={contact_text}",
             f"last_tool_result={tool_text}",
             *(("customer_relationship=denied",) if state.customer_relationship == "denied" else ()),
-            *(("caller_opted_out=yes (do-not-call recorded: answer only what they ask, make no offer, then end the call)",)
-              if state.caller_opted_out else ()),
             *(("opening=interrupted",) if opening_interrupted else ()),
             LIVE_STATE_BLOCK_END,
         )

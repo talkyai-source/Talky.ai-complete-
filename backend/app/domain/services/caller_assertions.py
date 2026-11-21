@@ -90,36 +90,6 @@ def continuation_after(text: str | None, position: int = -1) -> bool:
     return any(match.start() > position for match in assertion_matches(text, _CONTINUE))
 
 
-_CONTINUE_REQUEST = re.compile(_CONTINUE.pattern.replace(r'|\b(?:what|why|how|where|when)\b', ''), re.I)
-_OPT_OUT_CONNECTOR = re.compile(r'\b(?:but|first|also|and|before|however|actually|instead)\b', re.I)
-_OPT_OUT_QUESTION = re.compile(r'\b(?:what|how|where|when)\b', re.I)
-_HOSTILE_QUESTION = re.compile(
-    r"^\s*(?:many\s+times|part\b|the\b|is\s+wrong|else\b|do\s+i\s+have\s+to)", re.I)
-
-
-def continues_after_opt_out(text: str | None, opt_out_position: int = -1) -> bool:
-    """After an opt-out, only a request for help that follows it keeps the call open.
-
-    Request vocabulary (_CONTINUE without bare question words) after the opt-out
-    counts; so does a what/how/where/when question that follows a connector
-    ("but first, what are your hours?") unless it is a hostile idiom ("how many
-    times", "what part", "what the ..."). "Why" never does. With no opt-out in
-    the current words (position < 0, stored opt-out) any later question counts.
-    """
-    if opt_out_position < 0:
-        return continuation_after(text)
-    if any(m.start() > opt_out_position for m in assertion_matches(text, _CONTINUE_REQUEST)):
-        return True
-    value = _text(text)
-    connector = _OPT_OUT_CONNECTOR.search(value, opt_out_position + 1)
-    if connector is None:
-        return False
-    for m in assertion_matches(text, _OPT_OUT_QUESTION):
-        if m.start() > connector.start() and not _HOSTILE_QUESTION.match(value[m.end():]):
-            return True
-    return False
-
-
 def last_asserted_position(text: str | None, pattern: Pattern[str]) -> int:
     matches = assertion_matches(text, pattern)
     return matches[-1].start() if matches else -1

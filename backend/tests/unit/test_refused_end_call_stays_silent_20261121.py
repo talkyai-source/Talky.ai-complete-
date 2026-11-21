@@ -176,3 +176,18 @@ async def test_b1_an_ordinary_empty_turn_still_rolls_the_message_back(monkeypatc
     service._stream_llm_and_tts = empty
     await service._run_turn(session, "Hello?", AsyncMock(), turn_id=1)
     assert session.conversation_history == []
+
+
+@pytest.mark.asyncio
+async def test_n_machine_learning_in_the_reason_is_not_a_machine(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    spoken, _ = await _run_reason("caller asked about our machine learning product")
+    assert len(spoken) == 1 and RECOVERY in spoken[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["answering machine", "answering service greeting", "screening assistant"])
+async def test_n_answering_machine_reasons_still_skip(monkeypatch, reason):
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    spoken, _ = await _run_reason(reason)
+    assert spoken == []

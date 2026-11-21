@@ -179,8 +179,9 @@ async def test_a1_a_cut_does_not_drop_the_same_rounds_do_not_call(monkeypatch, c
     spoken, session, result = await _run(llm, monkeypatch, user_text="Don't bother us again.")
     assert purge.await_count == 1
     assert session._end_call_requested is True
-    assert spoken == ["Understood."]
-    assert session._spoken_sentences == ["Understood."]
+    # N6: the accepted end_call after the cut gets the one default farewell.
+    assert spoken == ["Understood.", "Goodbye, take care."]
+    assert session._spoken_sentences == spoken
     assert "Sorry" not in str(result)
     assert all("Sorry" not in m.content for m in session.conversation_history)
 
@@ -289,3 +290,98 @@ async def test_a1_envelope_in_the_cut_token_without_caller_words_is_still_ignore
 
     _, _, result = await _run(_S(), monkeypatch, user_text="Tell me about pricing.")
     assert parse_end_session_action(result[0]) is None
+
+
+# ---------------------------------------------------------------- N5 (real token shapes)
+
+class _Tokens:
+    def __init__(self, tokens):
+        self._tokens = tokens
+
+    async def stream_chat_with_timeout(self, *a, **k):
+        for t in self._tokens:
+            yield t
+
+
+@pytest.mark.asyncio
+async def test_n5_capitalised_email_read_back_in_separate_tokens_is_spoken_in_full(monkeypatch):
+    spoken, _, _ = await _run(
+        _Tokens(["Is your email ", "John", ".", "Smith", "@", "gmail.com", "?"]),
+        monkeypatch, user_text="It is john.smith at gmail.",
+    )
+    assert "".join(spoken) == "Is your email John.Smith@gmail.com?"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tokens,expected", [
+    (["Is that john@gmail.com?Yes that's right."], "Is that john@gmail.com?"),
+    (["Is that ", "john", "@", "gmail.com", "?", "Yes", " that's", " right."], "Is that john@gmail.com?"),
+    (["So that's john@example.com.Yes that's right."], "So that's john@example.com."),
+    (["So that's ", "john", "@", "example.com", ".", "Yes", " that's", " right."], "So that's john@example.com."),
+])
+async def test_n5_a_caller_turn_glued_after_an_address_is_cut(monkeypatch, tokens, expected):
+    spoken, session, _ = await _run(_Tokens(tokens), monkeypatch, user_text="Hello")
+    assert "".join(spoken) == expected
+    assert "Yes" not in " ".join(session._spoken_sentences)
+
+
+@pytest.mark.asyncio
+async def test_n5_url_in_small_tokens_is_spoken_in_full(monkeypatch):
+    spoken, _, _ = await _run(
+        _Tokens(["Sign up at ", "https://", "example.com", "/signup", "?", "ref", "=", "abc", " please."]),
+        monkeypatch, user_text="Where?",
+    )
+    assert "".join(spoken) == "Sign up at https://example.com/signup?ref=abc please."
+
+
+@pytest.mark.asyncio
+async def test_n5_query_string_without_a_slash_is_not_cut(monkeypatch):
+    spoken, _, _ = await _run(_Tokens(["Go to acme.com?ref=abc now."]), monkeypatch, user_text="Where?")
+    assert "".join(spoken) == "Go to acme.com?ref=abc now."
+
+
+@pytest.mark.asyncio
+async def test_n5_original_glued_turn_is_still_cut_in_small_tokens(monkeypatch):
+    spoken, _, _ = await _run(
+        _Tokens(["Is that ", "right", "?", "Yes", ", that's", " right."]), monkeypatch, user_text="Hello",
+    )
+    assert spoken == ["Is that right?"]
+
+
+@pytest.mark.asyncio
+async def test_n5_glued_turn_at_the_very_end_of_the_stream_is_still_cut(monkeypatch):
+    spoken, _, _ = await _run(_Tokens(["Is that right?Yes"]), monkeypatch, user_text="Hello")
+    assert spoken == ["Is that right?"]
+
+
+# ---------------------------------------------------------------- N6
+
+@pytest.mark.asyncio
+async def test_n6_accepted_end_call_after_a_cut_gets_one_default_farewell(monkeypatch):
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=True))
+    end_call = _call("end_call", {"reason": "caller asked not to be called", "do_not_call": True,
+                                  "opt_out_quote": "Don't bother us again"})
+    llm = _RoundsProvider([(["Is that all?", "Yes, that's all."], [end_call])])
+    spoken, session, _ = await _run(llm, monkeypatch, user_text="Don't bother us again.")
+    assert spoken == ["Is that all?", "Goodbye, take care."]
+    assert session._spoken_sentences == spoken
+
+
+@pytest.mark.asyncio
+async def test_n6_no_second_farewell_when_the_spoken_words_already_said_goodbye(monkeypatch):
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=True))
+    end_call = _call("end_call", {"reason": "caller asked not to be called", "do_not_call": True,
+                                  "opt_out_quote": "Don't bother us again"})
+    llm = _RoundsProvider([(["Goodbye, take care!", "Yes, thanks."], [end_call])])
+    spoken, _, _ = await _run(llm, monkeypatch, user_text="Don't bother us again.")
+    assert spoken == ["Goodbye, take care!"]
+
+
+@pytest.mark.asyncio
+async def test_n6_no_farewell_when_the_end_call_was_refused(monkeypatch):
+    end_call = _call("end_call", {"reason": "done"})
+    llm = _RoundsProvider([(["Is that all?", "Yes, that's all."], [end_call])])
+    spoken, _, _ = await _run(llm, monkeypatch, user_text="Tell me about pricing.")
+    assert spoken == ["Is that all?"]

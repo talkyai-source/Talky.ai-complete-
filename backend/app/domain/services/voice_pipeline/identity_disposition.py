@@ -5,7 +5,7 @@ Ordinary identity interpretation and spoken responses belong to the model.
 import re
 
 from app.domain.services.caller_assertions import (
-    assertion_matches, continuation_after, last_asserted_position, phrase_pattern,
+    assertion_matches, continuation_after, phrase_pattern,
 )
 
 _DNC_PHRASES = (
@@ -77,14 +77,27 @@ def dnc_assertion_position(transcript: str) -> int:
 _HYPHENATED_BYE_BYE = re.compile(r"\b(bye)[-‐‑](?=bye\b)", re.I)
 
 
-_BYE_BYE_ALLOWED_AFTER = frozenset(
-    "then now for thanks thank you mate love dear darling cheers sir madam".split())
-_BYE_BYE_SAID_BEFORE = re.compile(r"\b(?:said|say|saying|says)\b", re.I)
+# "bye bye" is a farewell only when it stands alone: before it in its clause there
+# is nothing but an interjection or thanks, after it only farewell or courtesy
+# words. Anything else makes it part of a sentence ("kiss your money bye-bye",
+# "we said bye-bye to BT"). Hyphen and spaced forms share this one path.
+_BYE_BYE_BEFORE = re.compile(
+    r"(?:(?:okay|ok|right|alright|all right|yes|yeah|no|well|so|oh|then|lovely|great|fine|cheers|and|"
+    r"(?:thanks|thank you)(?: for (?:calling|your time))?(?: very much| a lot| so much)?)\s*)*")
+_BYE_BYE_AFTER = re.compile(
+    r"(?:(?:then|now|for now|thanks|thank you|very much|a lot|so much|mate|love|dear|darling|cheers|"
+    r"sir|madam|bye|and|again|too|take care|speak soon|see you(?: soon| later)?|all the best|god bless|"
+    r"for calling|for your time|"
+    r"have a (?:good|nice|great|lovely|wonderful) (?:day|evening|night|weekend|one|afternoon|morning))\s*)*")
 _PAUSE_BEFORE = re.compile(
     r"\b(?:hang\s+on|hold\s+on|wait|one\s+moment|just\s+a\s+(?:sec|second|minute))\b", re.I)
 _RESUME_AFTER = re.compile(
     r"\b(?:go\s+on|carry\s+on|go\s+ahead|continue|keep\s+going|you\s+were\s+saying)\b", re.I)
 _CLAUSE_END = re.compile(r"[.!?;\n]")
+
+
+def _words(fragment: str) -> str:
+    return " ".join(re.findall(r"[a-z']+", fragment.lower())) + " "
 
 
 def _is_standalone_bye_bye(text: str, match: re.Match) -> bool:
@@ -95,12 +108,13 @@ def _is_standalone_bye_bye(text: str, match: re.Match) -> bool:
     start = ends[-1] if ends else 0
     after = _CLAUSE_END.search(text, match.end())
     end = after.start() if after else len(text)
-    before_clause, after_clause = text[start:match.start()], text[match.end():end]
-    if _BYE_BYE_SAID_BEFORE.search(before_clause) or _PAUSE_BEFORE.search(text[:match.start()]):
+    if _PAUSE_BEFORE.search(text[:match.start()]) or _RESUME_AFTER.search(text[match.end():]):
         return False
-    if _RESUME_AFTER.search(text[match.end():]):
-        return False
-    return all(w in _BYE_BYE_ALLOWED_AFTER for w in re.findall(r"[a-z']+", after_clause.lower()))
+    return bool(
+        _BYE_BYE_BEFORE.fullmatch(_words(text[start:match.start()]).lstrip() or "")
+        or not text[start:match.start()].strip()
+    ) and bool(_BYE_BYE_AFTER.fullmatch(_words(text[match.end():end]).lstrip())
+               or not text[match.end():end].strip())
 
 
 def contains_explicit_goodbye(transcript: str) -> bool:
