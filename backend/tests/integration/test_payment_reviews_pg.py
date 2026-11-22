@@ -103,9 +103,13 @@ async def _state(fixture, event_id):
 
 async def test_the_state_check_accepts_dismissed_and_still_refuses_unknown_states(rv):
     fixture = rv
+    # Two transactions: a refused statement aborts its transaction, which would
+    # also undo an accepted statement made in the same one.
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute("UPDATE paypal_webhook_events SET state='dismissed' WHERE event_id=$1", fixture.pp_event)
-        with pytest.raises(asyncpg.CheckViolationError):
+    assert (await _state(fixture, fixture.pp_event))["state"] == "dismissed"
+    with pytest.raises(asyncpg.CheckViolationError):
+        async with acquire_with_tenant(fixture.pool, None) as conn:
             await conn.execute("UPDATE paypal_webhook_events SET state='bogus' WHERE event_id=$1", fixture.pp_event)
     assert (await _state(fixture, fixture.pp_event))["state"] == "dismissed"
 
