@@ -455,6 +455,15 @@ function rotatedSuccessor(epoch: number, from: string | null): string | null {
     return cur;
 }
 
+/**
+ * A sibling tab renewed this sign-in's token (same user, tenant and session).
+ * Record it the way this client records its own renewal, so requests already in
+ * flight with `from` stay valid instead of failing as an account change.
+ */
+export function adoptSiblingTabRotation(from: string, to: string) {
+    recordRotation(_identityEpoch, from, to);
+}
+
 /** Test-only: shorten (or, with null, restore) the refresh timeout. */
 export function __setRefreshTimeoutMsForTests(ms: number | null) {
     _refreshTimeoutMs = ms ?? REFRESH_TIMEOUT_MS;
