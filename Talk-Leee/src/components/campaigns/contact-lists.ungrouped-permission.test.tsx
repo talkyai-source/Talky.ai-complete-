@@ -43,7 +43,9 @@ afterEach(() => {
 });
 
 const none = { confirmed: false, basis: null, source: null, permission_date: null, confirmed_at: null } as const;
-const ungrouped: ContactList = { id: "ungrouped", name: "Ungrouped", is_active: true, contact_count: 7, created_at: null, permission: none };
+// Only the newer server sends `queued_for_calling` on a list; that is how the page knows it may ask for the summary.
+const ungroupedOld: ContactList = { id: "ungrouped", name: "Ungrouped", is_active: true, contact_count: 7, created_at: null, permission: none };
+const ungrouped: ContactList = { ...ungroupedOld, queued_for_calling: null, message: null };
 const summaryOn = (over: Partial<ContactPermissionSummary> = {}): ContactPermissionSummary => ({
     dial_gate: "on", statement_version: "2026-11-v1", waiting_without_permission: 7,
     ungrouped_without_permission: 7, queues_on_confirm: false, ...over,
@@ -56,13 +58,15 @@ async function openDialog() {
     return await screen.findByRole("dialog");
 }
 
-test("older server (summary null): the old hint and no button", async () => {
-    dashboardApi.listContactLists = async () => [ungrouped];
-    dashboardApi.getContactPermissionSummary = async () => null;
+test("older server: it is never asked for the summary; the old hint and no button", async () => {
+    let asked = 0;
+    dashboardApi.listContactLists = async () => [ungroupedOld];
+    dashboardApi.getContactPermissionSummary = async () => { asked++; return null; };
     mountLists();
     await screen.findByText(OLD_HINT);
     assert.equal(screen.queryByRole("button", { name: "Confirm permission" }) === null, true);
     assert.equal(screen.queryByText("Contacts added without a list.") === null, true);
+    assert.equal(asked, 0, "an older server is never asked for the summary");
 });
 
 test("new server: the button and the new hint", async () => {

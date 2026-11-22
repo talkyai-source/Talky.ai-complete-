@@ -13,14 +13,17 @@ import { summaryNotice, useContactPermissionSummary } from "@/lib/contact-permis
 export function ContactPermissionNotice({
     campaignId,
     refreshKey,
+    serverHasSummary,
     onShowLists,
 }: {
     campaignId: string;
+    /** False against an older server, which is then never asked. */
+    serverHasSummary: boolean;
     /** Changes whenever the lists change, so the count is read again. */
     refreshKey: string;
     onShowLists: () => void;
 }) {
-    const notice = summaryNotice(useContactPermissionSummary(campaignId, refreshKey));
+    const notice = summaryNotice(useContactPermissionSummary(campaignId, refreshKey, serverHasSummary));
     if (!notice) return null;
     return (
         <div role="status" className="content-card flex items-start gap-3 border-amber-500/30 bg-amber-500/5">

@@ -27,6 +27,7 @@ import { useContactPermissionForm } from "@/components/contacts/use-contact-perm
 import { contactPermissionBasisLabel, type ContactListPermission } from "@/lib/contact-permission";
 import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
 import { dashboardApi, ContactList, type ContactPermissionSummary } from "@/lib/dashboard-api";
+import { serverHasPermissionSummary } from "@/lib/contact-permission-summary";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
@@ -129,12 +130,12 @@ export function ContactLists({
         try {
             setLoading(true);
             setError("");
-            const [data, nextSummary] = await Promise.all([
-                dashboardApi.listContactLists(campaignId),
-                dashboardApi.getContactPermissionSummary(campaignId),
-            ]);
+            const data = await dashboardApi.listContactLists(campaignId);
             // An answer that is not a list is a failed read, not an empty one.
             if (!Array.isArray(data)) throw new Error("Failed to load contact lists");
+            // An older server has no summary route and is never asked for it.
+            const nextSummary = serverHasPermissionSummary(data)
+                ? await dashboardApi.getContactPermissionSummary(campaignId) : null;
             setLists(data);
             setSummary(nextSummary ?? null);
         } catch (err) {
@@ -199,10 +200,9 @@ export function ContactLists({
     // Reads the lists and the summary again behind an open dialog, without the loading flash that would close it.
     async function refreshQuietly() {
         try {
-            const [fresh, nextSummary] = await Promise.all([
-                dashboardApi.listContactLists(campaignId),
-                dashboardApi.getContactPermissionSummary(campaignId),
-            ]);
+            const fresh = await dashboardApi.listContactLists(campaignId);
+            const nextSummary = serverHasPermissionSummary(fresh)
+                ? await dashboardApi.getContactPermissionSummary(campaignId) : null;
             if (Array.isArray(fresh)) setLists(fresh);
             setSummary(nextSummary ?? null);
         } catch {

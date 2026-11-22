@@ -20,6 +20,7 @@ import { useContactPermissionForm } from "@/components/contacts/use-contact-perm
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ContactPermissionNotice } from "@/components/campaigns/contact-permission-notice";
+import { serverHasPermissionSummary } from "@/lib/contact-permission-summary";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
@@ -634,6 +635,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                     {canChange && canStart && <CampaignReadinessNotice readiness={readiness} />}
                     <ContactPermissionNotice
                         campaignId={campaignId}
+                        serverHasSummary={serverHasPermissionSummary(lists)}
                         refreshKey={lists.map((l) => `${l.id}:${l.contact_count}:${l.permission?.confirmed ? 1 : 0}`).join("|")}
                         onShowLists={() => listsSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
                     />
