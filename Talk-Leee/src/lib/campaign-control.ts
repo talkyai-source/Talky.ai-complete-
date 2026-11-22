@@ -146,6 +146,8 @@ export type CampaignStartOutcome = {
     /** Sum of the responses' `jobs_enqueued`; null when no campaign started. */
     queued: number | null;
     startedIds: string[];
+    /** Sum of the responses' `jobs_withheld`; absent when no response carried it (an older server). */
+    withheld?: number;
     notStarted: Array<{ id: string; name: string; reason: string }>;
 };
 
@@ -168,6 +170,8 @@ export async function runCampaignStarts(
                 const response = await dashboardApi.startCampaign(target.id, options);
                 outcome.queued = (outcome.queued ?? 0) + (Number(response?.jobs_enqueued) || 0);
                 outcome.startedIds.push(target.id);
+                const withheld = Number(response?.jobs_withheld) || 0;
+                if (withheld > 0) outcome.withheld = (outcome.withheld ?? 0) + withheld;
             } catch (err) {
                 outcome.notStarted.push({ id: target.id, name: target.name, reason: campaignStartErrorMessage(err) });
                 endCampaignAction("starting", target.id);
@@ -185,13 +189,22 @@ export async function runCampaignStarts(
 }
 
 /** The message for a finished start: the queued count, then every campaign that did not start. */
+export function contactsWithheldText(withheld: number): string {
+    return withheld === 1
+        ? "1 contact was not queued because no permission to call is recorded for it. Confirm permission on its contact list."
+        : `${withheld} contacts were not queued because no permission to call is recorded for them. Confirm permission on their contact list.`;
+}
+
 export function startOutcomeNotice(outcome: CampaignStartOutcome): CampaignControlNotice | null {
+    const withheld = outcome.withheld ?? 0;
     const lines = [
         ...(outcome.queued === null ? [] : [contactsQueuedText(outcome.queued)]),
+        ...(withheld > 0 ? [contactsWithheldText(withheld)] : []),
         ...outcome.notStarted.map((entry) => notStartedText(entry.name, entry.reason)),
     ];
     if (lines.length === 0) return null;
-    return { kind: outcome.notStarted.length === 0 ? "success" : outcome.queued === null ? "error" : "warning", lines };
+    if (outcome.notStarted.length === 0) return { kind: withheld > 0 ? "warning" : "success", lines };
+    return { kind: outcome.queued === null ? "error" : "warning", lines };
 }
 
 // --------------------------------------------------------------- stop / pause

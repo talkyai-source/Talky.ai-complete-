@@ -26,7 +26,7 @@ import { ContactPermissionFields } from "@/components/contacts/contact-permissio
 import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { contactPermissionBasisLabel, type ContactListPermission } from "@/lib/contact-permission";
 import { ErrorState, LoadingState, failedReadRequestId } from "@/components/states/page-states";
-import { dashboardApi, ContactList } from "@/lib/dashboard-api";
+import { dashboardApi, ContactList, type ContactPermissionSummary } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
@@ -54,6 +54,16 @@ function permissionLine(permission: ContactListPermission | undefined): string |
     const when = permission.confirmed_at ?? permission.permission_date;
     const why = permission.basis ? contactPermissionBasisLabel(permission.basis) : "";
     return `Permission confirmed${when ? ` on ${formatPermissionDate(when)}` : ""}${why ? `: ${why}` : ""}`;
+}
+
+/** The server's plain-words message of a refusal: `detail.message`, else the error's own text. */
+function refusalMessage(err: unknown, fallback: string): string {
+    if (isApiClientError(err) && err.details && typeof err.details === "object") {
+        const raw = err.details as Record<string, unknown>;
+        const detail = raw.detail && typeof raw.detail === "object" ? raw.detail as Record<string, unknown> : raw;
+        if (typeof detail.message === "string" && detail.message) return detail.message;
+    }
+    return errText(err, fallback);
 }
 
 function activeStateFromCallError(err: unknown, listId: string): boolean | undefined {
@@ -102,6 +112,8 @@ export function ContactLists({
     const [permissionTarget, setPermissionTarget] = useState<ContactList | null>(null);
     const [savingPermission, setSavingPermission] = useState(false);
     const [permissionNotice, setPermissionNotice] = useState("");
+    // null = the server has no summary (older server): the page then looks as it did before.
+    const [summary, setSummary] = useState<ContactPermissionSummary | null>(null);
     const permissionForm = useContactPermissionForm();
     const readiness = useCampaignReadiness([campaignId], lists.some((list) => list.id !== UNGROUPED_LIST_ID));
 
@@ -117,10 +129,14 @@ export function ContactLists({
         try {
             setLoading(true);
             setError("");
-            const data = await dashboardApi.listContactLists(campaignId);
+            const [data, nextSummary] = await Promise.all([
+                dashboardApi.listContactLists(campaignId),
+                dashboardApi.getContactPermissionSummary(campaignId),
+            ]);
             // An answer that is not a list is a failed read, not an empty one.
             if (!Array.isArray(data)) throw new Error("Failed to load contact lists");
             setLists(data);
+            setSummary(nextSummary ?? null);
         } catch (err) {
             setError("Failed to load contact lists");
             setErrorRequestId(failedReadRequestId(err));
@@ -180,17 +196,62 @@ export function ContactLists({
         setPermissionTarget(null);
     }
 
+    // Reads the lists and the summary again behind an open dialog, without the loading flash that would close it.
+    async function refreshQuietly() {
+        try {
+            const [fresh, nextSummary] = await Promise.all([
+                dashboardApi.listContactLists(campaignId),
+                dashboardApi.getContactPermissionSummary(campaignId),
+            ]);
+            if (Array.isArray(fresh)) setLists(fresh);
+            setSummary(nextSummary ?? null);
+        } catch {
+            /* the cards keep their last state; the message in the dialog still tells the person */
+        }
+    }
+
+    async function handleSaveUngroupedPermission(list: ContactList, confirmation: NonNullable<ReturnType<typeof permissionForm.require>>) {
+        setSavingPermission(true);
+        setPermissionNotice("");
+        try {
+            const result = await dashboardApi.confirmUngroupedPermission(campaignId, confirmation, list.contact_count);
+            closePermissionDialog();
+            await refreshQuietly();
+            createNotification({
+                type: "success",
+                title: "Permission saved",
+                message: result?.message || "Permission recorded.",
+            });
+        } catch (err) {
+            if (isApiClientError(err) && err.status === 409) {
+                setPermissionNotice(refusalMessage(err, "The contacts changed. Check them and confirm again."));
+                await refreshQuietly();
+            } else if (!permissionForm.showServerError(err)) {
+                setPermissionNotice(refusalMessage(err, "Could not save the confirmation."));
+            }
+        } finally {
+            setSavingPermission(false);
+        }
+    }
+
     async function handleSavePermission() {
         if (!permissionTarget || savingPermission) return;
         const confirmation = permissionForm.require();
         if (!confirmation) return;
         const list = permissionTarget;
+        if (list.id === UNGROUPED_LIST_ID) {
+            await handleSaveUngroupedPermission(list, confirmation);
+            return;
+        }
         setSavingPermission(true);
         setPermissionNotice("");
         try {
             const updated = await dashboardApi.recordContactListPermission(list.id, confirmation);
             setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, ...updated } : l)));
             closePermissionDialog();
+            if (updated?.message) {
+                createNotification({ type: "success", title: "Permission saved", message: updated.message });
+            }
         } catch (err) {
             const code = isApiClientError(err) ? err.code : "";
             if (code === ALREADY_RECORDED_CODE || (isApiClientError(err) && err.status === 409)) {
@@ -323,7 +384,7 @@ export function ContactLists({
                                     <span className={list.permission?.confirmed ? "text-muted-foreground" : "font-medium text-amber-700 dark:text-amber-400"}>
                                         {permissionLine(list.permission)}
                                     </span>
-                                    {list.permission?.confirmed === false && !isUngrouped && !readOnly && (
+                                    {list.permission?.confirmed === false && (!isUngrouped || summary !== null) && !readOnly && (
                                         <Button size="sm" variant="outline" onClick={() => openPermissionDialog(list)}>
                                             Confirm permission
                                         </Button>
@@ -369,7 +430,9 @@ export function ContactLists({
                             )}
                             {isUngrouped && (
                                 <p className="mt-4 text-[11px] text-muted-foreground">
-                                    Leads not tied to an uploaded list. Import a CSV to group them.
+                                    {summary !== null
+                                        ? "Contacts added without a list."
+                                        : "Leads not tied to an uploaded list. Import a CSV to group them."}
                                 </p>
                             )}
                         </div>
@@ -380,7 +443,9 @@ export function ContactLists({
                 open={permissionTarget !== null}
                 onOpenChange={(open) => { if (!open) closePermissionDialog(); }}
                 title="Confirm permission"
-                description={permissionTarget ? `“${permissionTarget.name}”` : undefined}
+                description={permissionTarget
+                    ? `“${permissionTarget.name}”: ${permissionTarget.contact_count.toLocaleString()} contact${permissionTarget.contact_count === 1 ? "" : "s"}`
+                    : undefined}
                 size="lg"
                 footer={(
                     <div className="flex justify-end gap-2">
@@ -392,6 +457,11 @@ export function ContactLists({
                     </div>
                 )}
             >
+                {summary?.queues_on_confirm ? (
+                    <p className="mb-3 text-sm font-medium text-foreground">
+                        This campaign is running: saving queues these contacts for calling.
+                    </p>
+                ) : null}
                 <ContactPermissionFields idPrefix="list-permission" disabled={savingPermission} {...permissionForm.fieldProps} />
                 {permissionNotice ? <p role="alert" className="mt-3 text-sm text-destructive">{permissionNotice}</p> : null}
             </Modal>
