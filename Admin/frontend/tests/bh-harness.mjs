@@ -122,7 +122,7 @@ beforeEach(() => {
     globalThis.fetch = async (url, options = {}) => {
         const request = { path: new URL(url).pathname + new URL(url).search, method: options.method ?? 'GET',
             authorization: options.headers?.Authorization, headers: { ...options.headers }, credentials: options.credentials,
-            body: options.body ? JSON.parse(options.body) : undefined };
+            body: typeof options.body === 'string' ? JSON.parse(options.body) : undefined };
         state.requests.push(request);
         const result = await state.route(request);
         if (state.mfaProof && request.path.endsWith('/auth/me') && result?.ok) {
