@@ -22,6 +22,7 @@ import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { sharedHttpClient } from "@/lib/api";
+import { adoptSiblingTabRotation } from "@/lib/http-client";
 import {
     buildCampaignTestWsUrl,
     describeReplyTime,
@@ -492,9 +493,15 @@ export function TestAgentButton({
                             // the case where the cookie specifically is stale.
                             try {
                                 const client = sharedHttpClient();
+                                const before = client.getToken();
                                 const renewed = await client.request({ path: "/auth/refresh", method: "POST" }) as { access_token?: unknown } | null;
-                                // Keep the renewed token as the stored one, as the client does for its own renewals.
-                                if (typeof renewed?.access_token === "string" && renewed.access_token) client.setToken(renewed.access_token);
+                                // Keep the renewed token as the stored one, as the client does for its own
+                                // renewals: recorded as a renewal of the token held before, so this page's
+                                // other requests carry on instead of failing as a change of account.
+                                if (typeof renewed?.access_token === "string" && renewed.access_token) {
+                                    if (before) adoptSiblingTabRotation(before, renewed.access_token);
+                                    client.setToken(renewed.access_token);
+                                }
                             } catch {
                                 /* the retry below reports the real outcome */
                             }

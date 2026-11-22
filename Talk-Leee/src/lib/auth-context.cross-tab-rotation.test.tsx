@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { api, sharedHttpClient } from "@/lib/api";
-import { clearFreshLoginGrace, isApiClientError } from "@/lib/http-client";
+import { adoptSiblingTabRotation, clearFreshLoginGrace, isApiClientError } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
 
 // A renewal in one tab writes the new token to localStorage; every other tab
@@ -117,4 +117,26 @@ test("a removed token still signs this tab out and fails the in-flight request",
     assert.equal(auth.accessToken, null);
     gate.resolve(Response.json({ created: true }));
     await assert.rejects(inFlight, (err: unknown) => isApiClientError(err) && err.code === "identity_changed");
+});
+
+// The Test agent renews the sign-in itself (campaigns/test-agent-button.tsx) and stores the
+// new token. These two cases pin why it must also record the renewal.
+test("a renewal this tab stores WITHOUT recording it fails a request already in flight", async () => {
+    await signedInAs(tokenA1);
+    const { sent, gate } = stubFetch();
+    const inFlight = sharedHttpClient().request({ path: "/campaigns", method: "POST", body: { name: "x" } });
+    await waitFor(() => assert.equal(sent.length, 1));
+    act(() => { sharedHttpClient().setToken(tokenA2); });
+    gate.resolve(Response.json({ created: true }));
+    await assert.rejects(inFlight, (error: unknown) => isApiClientError(error) && error.code === "identity_changed");
+});
+
+test("the same renewal, recorded as one first, lets the request in flight finish", async () => {
+    await signedInAs(tokenA1);
+    const { sent, gate } = stubFetch();
+    const inFlight = sharedHttpClient().request({ path: "/campaigns", method: "POST", body: { name: "x" } });
+    await waitFor(() => assert.equal(sent.length, 1));
+    act(() => { adoptSiblingTabRotation(tokenA1, tokenA2); sharedHttpClient().setToken(tokenA2); });
+    gate.resolve(Response.json({ created: true }));
+    assert.deepEqual(await inFlight, { created: true });
 });

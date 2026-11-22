@@ -587,7 +587,14 @@ export function createHttpClient(config: HttpClientConfig) {
                 throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
                     url: refreshUrl, method: "POST" });
             }
-            if (scope.identity) recordRotation(scope.epoch, scope.token, result.accessToken);
+            if (scope.identity) {
+                recordRotation(scope.epoch, scope.token, result.accessToken);
+                // A sibling tab's renewal may have been adopted while this one was
+                // queued: requests this tab started with THAT token are the same
+                // sign-in too, and must follow on to the new token.
+                const live = getToken();
+                if (live && live !== scope.token) recordRotation(scope.epoch, live, result.accessToken);
+            }
             setToken(result.accessToken);
             scope.token = result.accessToken;
         }
