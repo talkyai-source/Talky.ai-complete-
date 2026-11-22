@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -33,7 +34,13 @@ logger = logging.getLogger(__name__)
 ENV_SWITCH = "REALTIME_OPENING_NOTICE_ENABLED"
 _OFF_VALUES = {"0", "false", "no", "off"}
 _REPAIR_REASON = "This call must open with the required line."
-_WORDS = re.compile(r"[a-z0-9']+")
+# Letters and digits of EVERY script count as words (an account's own notice may be
+# written in Urdu, Arabic, Greek ...): a comparison that dropped them would call a
+# notice delivered that was never said.
+_WORDS = re.compile(r"[^\W_]+(?:'[^\W_]+)*")
+# One reply may carry about 30 seconds of speech (realtime/playout_buffer.py). A required
+# sentence longer than this many words could never be played as one reply.
+MAX_REQUIRED_WORDS = 60
 _AI_DOTTED = re.compile(r"\ba\.i\.?(?!\w)")
 
 
@@ -61,7 +68,7 @@ class OpeningGate:
 
 
 def normalize_words(text: Optional[str]) -> list:
-    t = (text or "").lower().replace("’", "'").replace("&", " and ")
+    t = unicodedata.normalize("NFKC", text or "").casefold().replace("’", "'").replace("&", " and ")
     t = _AI_DOTTED.sub("ai", t)
     return _WORDS.findall(t)
 
@@ -212,6 +219,14 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
         elif is_platform_notice_text(text):
             g = gate(realtime_opening_line(config, recorded_line=True), "platform_in_opener",
                      owed=True, reason=reason)
+        elif len(normalize_words(f"{text} {realtime_opening_line(config)}")) > MAX_REQUIRED_WORDS:
+            # Too long to be one reply: asking for it would end in silence and a hang-up.
+            # The opening is still required; the notice is recorded as NOT confirmed.
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            logger.warning("realtime_opening_notice_text_too_long call_id=%s words=%d limit=%d — the "
+                           "recording is kept and marked notice not confirmed", str(call_id)[:12],
+                           len(normalize_words(text)), MAX_REQUIRED_WORDS)
+            g = gate(realtime_opening_line(config), "tenant_text_too_long", reason=reason)
         else:
             g = gate(f"{text} {realtime_opening_line(config)}", "tenant_text_first",
                      owed=True, reason=reason)

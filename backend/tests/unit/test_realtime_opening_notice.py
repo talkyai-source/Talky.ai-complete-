@@ -425,3 +425,48 @@ async def test_a_recording_gate_closed_by_the_accounts_policy_is_not_reopened_by
     await feed(h.bridge, PLATFORM_OPENER)
     assert all(call.args != (CALL, True) for call in h.gw.set_recording_enabled.call_args_list)
     assert h.vs._recording_policy_decided is True
+
+
+# Added after the independent review, 23 Nov 2026.
+URDU_NOTICE = "یہ کال ریکارڈ کی جا رہی ہے"
+
+
+@pytest.mark.parametrize("heard,required,ok", [
+    # a notice in another script is part of the required words: leaving it out is a mismatch
+    (PLAIN_OPENER, f"{URDU_NOTICE} {PLAIN_OPENER}", False),
+    (f"{URDU_NOTICE} {PLAIN_OPENER}", f"{URDU_NOTICE} {PLAIN_OPENER}", True),
+    ("Η κλήση καταγράφεται. Hi", "Hi", False),
+    # accented letters are letters: two different words stay different
+    ("será grabada", "serí grabada", False),
+    ("Será grabada", "será grabada", True),
+])
+def test_words_of_every_script_count(heard, required, ok):
+    assert on.words_match(heard, required) is ok
+
+
+@pytest.mark.asyncio
+async def test_a_notice_in_another_script_that_the_model_leaves_out_is_never_delivered():
+    h = build()
+    decision = _ANNOUNCE.__class__(**{**_ANNOUNCE.__dict__, "announcement_text": URDU_NOTICE})
+    gate = await start(h, decision)
+    assert gate.notice_owed is True and gate.required_text == f"{URDU_NOTICE} {PLAIN_OPENER}"
+    # the model says only the English opening, twice (first reply and the repaired one)
+    await feed(h.bridge, PLAIN_OPENER, PLAIN_OPENER)
+    assert get_disclosure_state(CALL) == "failed"
+    assert gate.state == "unconfirmed" and gate.reason == "text_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_a_notice_too_long_for_one_reply_is_not_asked_for_and_is_marked_not_confirmed(caplog):
+    h = build()
+    long_text = " ".join(["recorded"] * 70) + "."
+    decision = _ANNOUNCE.__class__(**{**_ANNOUNCE.__dict__, "announcement_text": long_text})
+    with caplog.at_level(logging.WARNING):
+        gate = await start(h, decision)
+    assert gate.notice == "tenant_text_too_long" and gate.notice_owed is False
+    assert gate.required_text == PLAIN_OPENER
+    assert get_disclosure_state(CALL) == "failed"
+    assert "realtime_opening_notice_text_too_long" in caplog.text
+    # the opening itself is still required and is played; the notice stays not confirmed
+    await feed(h.bridge, PLAIN_OPENER)
+    assert len(h.sent) == 1 and get_disclosure_state(CALL) == "failed"
