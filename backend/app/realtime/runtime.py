@@ -281,7 +281,7 @@ async def create_realtime_voice_session(
                 except Exception:
                     logger.debug("Realtime gateway cleanup failed", exc_info=True)
 
-def realtime_opening_line(config: VoiceSessionConfig):
+def realtime_opening_line(config: VoiceSessionConfig, *, recorded_line: bool = False):
     """The identity opener for an outbound Realtime call; None inbound.
 
     Same line as the standard path (owner decision 2026-11-05, QA F12-03),
@@ -300,6 +300,7 @@ def realtime_opening_line(config: VoiceSessionConfig):
         getattr(agent_config, "agent_name", None),
         getattr(agent_config, "company_name", None),
         _sanitize_lead_field(getattr(config, "callee_first_name", None), field="first_name") or None,
+        recorded_line=recorded_line,
     )
 
 

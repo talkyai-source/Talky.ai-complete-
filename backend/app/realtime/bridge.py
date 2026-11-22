@@ -235,6 +235,13 @@ class RealtimeBridge:
         # this exactly once when the opening response completes uninterrupted.
         self._identity_opening_pending = bool(greet_on_start)
         self._opening_interrupted = False
+        # Set only by telephony lifecycle (realtime/opening_notice.py); None = no gate.
+        self._opening_gate = None
+
+    def attach_opening_gate(self, gate) -> None:
+        self._opening_gate = gate
+        if self._greet_on_start:
+            self._opening_line = gate.required_text
 
     # ── Lifecycle ────────────────────────────────────────────────────────
     def set_on_connection_lost(
@@ -858,6 +865,10 @@ class RealtimeBridge:
                 return
             if not self._owns_unfinished_playback(utterance):
                 return
+            if self._opening_gate is not None:
+                from app.realtime.opening_notice import admit_opening
+                if not await admit_opening(self, event, utterance):
+                    return
             if not await self._admit_ai_identity(event, utterance):
                 return
             self._action_session._voice_action_delivered_text = ""
@@ -917,6 +928,9 @@ class RealtimeBridge:
             utterance["receipt"] = receipt
             self._record_turn("assistant", event.text, metadata={"delivery": receipt})
             utterance["transcript_recorded"] = True
+            if utterance.get("opening_gate"):
+                from app.realtime.opening_notice import settle_opening
+                await settle_opening(self, utterance, event.text)
             # Retain delivery evidence for action authorization and history.
             # Contact interpretation is handled by record_contact, not prose parsing.
             if (receipt.get("utterance_id") == utterance["id"]
@@ -947,6 +961,9 @@ class RealtimeBridge:
         finally:
             # A gateway may swallow task cancellation after accepting bytes.
             # Retain uncertain partial delivery even when that await returns.
+            if utterance.get("opening_gate"):
+                from app.realtime.opening_notice import settle_interrupted
+                settle_interrupted(self, utterance)
             if (utterance.get("status") == "interrupted"
                     and utterance.get("submission_started")
                     and not utterance.get("transcript_recorded")):
