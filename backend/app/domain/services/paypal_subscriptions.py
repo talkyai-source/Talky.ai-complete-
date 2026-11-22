@@ -57,9 +57,12 @@ from app.domain.services.paypal_client import (
     minor_units,
 )
 from app.domain.services.paypal_mode import PAYPAL_UNAVAILABLE, paypal_env, paypal_provider_mode
+from app.domain.services.payg import PAYG_PLAN_ID
+from app.domain.services.plan_end import end_plan
 from app.domain.services.subscription_status import (
     ACTIVE,
     CANCELLED,
+    INACTIVE,
     PAST_DUE,
     SUSPENDED,
     UNPAID,
@@ -196,6 +199,12 @@ _SAVED = (
     "ended_at", "checked_at", "approved_at",
 )
 _Q_TENANT_PROJECT = (
+    "UPDATE tenants SET subscription_status = $2 "
+    "WHERE id = $1::uuid AND stripe_subscription_id IS NULL AND plan_id = $3 "
+    "AND subscription_status IS DISTINCT FROM 'suspended'"
+)
+# A reversal after the plan already ended (the tenant is pay as you go): block the account again.
+_Q_TENANT_REBLOCK = (
     "UPDATE tenants SET subscription_status = $2 "
     "WHERE id = $1::uuid AND stripe_subscription_id IS NULL AND plan_id = $3 "
     "AND subscription_status IS DISTINCT FROM 'suspended'"
@@ -377,6 +386,21 @@ async def has_live_subscription(conn, tenant_id) -> bool:
 async def held_subscription_exists(conn, tenant_id) -> bool:
     """A paying PayPal subscriber; an unfinished purchase does not count."""
     return await conn.fetchval(_Q_HELD_EXISTS, str(tenant_id)) is not None
+
+
+# What a held row means for the tenant: the mapping `_decide` projects (a payment that failed is past due,
+# one PayPal suspended is unpaid). Both refuse calls; only a healthy plan is active.
+_HELD_TENANT_STATUS = {ACTIVE: ACTIVE, PAST_DUE: PAST_DUE, SUSPENDED: UNPAID}
+_Q_HELD_STATUS = (
+    "SELECT status FROM paypal_subscriptions WHERE tenant_id = $1::uuid "
+    f"AND status IN {_HELD_SQL} ORDER BY created_at DESC LIMIT 1"
+)
+
+
+async def held_tenant_status(conn, tenant_id) -> str | None:
+    """The tenant status the paying PayPal plan implies, or None when there is no held plan."""
+    status = await conn.fetchval(_Q_HELD_STATUS, str(tenant_id))
+    return None if status is None else _HELD_TENANT_STATUS[status]
 
 
 def _state(row) -> str:
@@ -883,12 +907,16 @@ class PayPalSubscriptionService:
             return
         await conn.execute(_Q_TENANT_PROJECT, str(locked["tenant_id"]), status, locked["plan_id"])
 
-    async def _end(self, conn, tenant, locked, changes: dict | None = None) -> None:
-        """The plan is over. ``plan_id`` and minutes stay: the cancelled status blocks calls."""
+    async def _end(self, conn, tenant, locked, changes: dict | None = None, *, reversal: bool = False) -> None:
+        """The plan is over: the account becomes pay as you go; bought minutes stay usable.
+
+        A reversal keeps the account blocked (``cancelled``) and still ends the plan's allowance.
+        """
         merged = dict(changes or {})
         merged.update(status=CANCELLED, ended_at=datetime.now(UTC), cancel_at_period_end=False)
         await _save(conn, locked, merged)
-        await self._project(conn, tenant, locked, CANCELLED)
+        await end_plan(conn, str(locked["tenant_id"]), stripe_subscription_id=None, plan_id=locked["plan_id"],
+                       ended_status=CANCELLED if reversal else INACTIVE)
 
     async def _cancel_quietly(self, paypal_subscription_id, reason: str) -> None:
         try:
@@ -1068,7 +1096,9 @@ class PayPalSubscriptionService:
                 await conn.execute(_Q_PAYMENT_REVERSE, payment_id, tenant_id)
             ended = locked["status"] in HELD
             if ended:
-                await self._end(conn, tenant, locked)
+                await self._end(conn, tenant, locked, reversal=True)
+            elif locked["activated_at"] is not None:
+                await conn.execute(_Q_TENANT_REBLOCK, tenant_id, CANCELLED, PAYG_PLAN_ID)
         if ended:
             await self._cancel_quietly(locked["paypal_subscription_id"], "Payment reversed")
         await self._record_review(locked, kind)

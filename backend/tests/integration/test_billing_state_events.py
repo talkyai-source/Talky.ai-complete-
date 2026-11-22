@@ -169,7 +169,9 @@ async def test_stale_same_second_subscription_update_cannot_restore_canceled_acc
     for kind in ("customer.subscription.deleted", "customer.subscription.updated"):
         await _apply(fixture, kind, {"id": subscription["id"], "status": "active", "created": 1700000000})
         tenant = await _tenant(fixture)
-        assert tenant["subscription_status"] == "cancelled" and tenant["stripe_subscription_id"] is None
+        # The plan is over: pay as you go, no plan minutes, never restored to the old plan.
+        assert tenant["subscription_status"] == "inactive" and tenant["plan_id"] == "payg"
+        assert tenant["stripe_subscription_id"] is None and tenant["minutes_allocated"] == 0
 
 
 async def test_old_subscription_deletion_does_not_clear_its_replacement(state_db):
@@ -304,7 +306,8 @@ async def test_concurrent_current_state_reads_are_serialized_before_provider_ret
     fixture.billing._stripe_call = read
     fixture.objects[("Subscription", subscription["id"])]["status"] = "canceled"
     await _apply(fixture, "customer.subscription.deleted", subscription)
-    assert (await _tenant(fixture))["subscription_status"] == "cancelled"
+    after_deleted = await _tenant(fixture)
+    assert after_deleted["subscription_status"] == "inactive" and after_deleted["plan_id"] == "payg"
 
 
 @pytest.mark.parametrize("prior_status", ["pending", "failed_before_send", "recipient_missing", "sending", "unknown", "accepted"])
@@ -364,7 +367,7 @@ async def test_existing_invoice_projection_cannot_prove_old_email_was_unsent(sta
     assert repeated["notifications"][0]["delivery_key"] == first["notifications"][0]["delivery_key"]
 
 
-@pytest.mark.parametrize("status,expected", [("past_due", "past_due"), ("unpaid", "unpaid"), ("canceled", "cancelled")])
+@pytest.mark.parametrize("status,expected", [("past_due", "past_due"), ("unpaid", "unpaid"), ("canceled", "inactive")])
 async def test_after_purchase_a_changed_price_never_blocks_a_status_change(state_db, status, expected):
     """A provider-side price/item change after the purchase used to reject
     every later event as a purchase mismatch, so a cancelled or unpaid
@@ -382,7 +385,11 @@ async def test_after_purchase_a_changed_price_never_blocks_a_status_change(state
     after = await _tenant(fixture)
     assert result["status"] == "handled"
     assert after["subscription_status"] == expected
-    assert after["minutes_allocated"] == before["minutes_allocated"], "no minutes from a lifecycle event"
+    if status == "canceled":
+        # The plan ended: pay as you go, and the plan's monthly minutes end with it.
+        assert after["plan_id"] == "payg" and after["minutes_allocated"] == 0 <= before["minutes_allocated"]
+    else:
+        assert after["minutes_allocated"] == before["minutes_allocated"], "no minutes from a lifecycle event"
 
 
 async def _stored_dispute_status(fixture, subscription_id):

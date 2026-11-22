@@ -31,7 +31,7 @@ from __future__ import annotations
 import ast
 import re
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -251,10 +251,12 @@ async def test_cancelling_a_subscription_writes_the_canonical_value():
 async def test_the_stripe_deleted_webhook_writes_the_canonical_value():
     """``customer.subscription.deleted`` is the path a real cancellation takes
     in production — the one that wrote the unblockable spelling."""
-    from app.domain.services.subscription_status import CANCELLED
+    from app.domain.services.subscription_status import INACTIVE
 
     writes = await _apply_current_provider_cancellation("customer.subscription.deleted")
-    assert writes and all(status == CANCELLED for status in writes)
+    # The plan is over: the account becomes pay as you go ("inactive"). Never the American
+    # spelling, and never "active" (the stale-event hole).
+    assert writes == [INACTIVE]
 
 
 @pytest.mark.asyncio
@@ -262,10 +264,10 @@ async def test_a_synced_stripe_status_is_normalised_before_it_is_stored():
     """``_sync_subscription`` passed Stripe's raw status straight through, so
     ``customer.subscription.updated`` could store 'canceled' even after the
     two explicit writes were fixed."""
-    from app.domain.services.subscription_status import CANCELLED
+    from app.domain.services.subscription_status import INACTIVE
 
     writes = await _apply_current_provider_cancellation("customer.subscription.updated")
-    assert writes and all(status == CANCELLED for status in writes)
+    assert writes == [INACTIVE]
 
 
 async def _apply_current_provider_cancellation(event_type):
@@ -276,6 +278,9 @@ async def _apply_current_provider_cancellation(event_type):
         fetchrow=AsyncMock(side_effect=[
             {"tenant_id": TENANT_ID, "stripe_customer_id": "cus_1", "plan_id": "starter"},
             {"id": TENANT_ID, "stripe_subscription_id": "sub_123", "stripe_customer_id": "cus_1", "plan_id": "starter"},
+            # end_plan reads the tenant under its lock
+            {"subscription_status": "active", "plan_id": "starter", "stripe_subscription_id": "sub_123",
+             "stripe_customer_id": "cus_1"},
         ]),
         execute=AsyncMock(side_effect=lambda sql, *args: "INSERT 0 1" if "INSERT INTO" in sql else "UPDATE 1"),
     )
@@ -283,9 +288,17 @@ async def _apply_current_provider_cancellation(event_type):
         "id": "sub_123", "livemode": False, "customer": "cus_1", "status": "canceled",
         "metadata": {}, "current_period_start": 1700000000, "current_period_end": 1700086400,
     }))
-    await apply_billing_event(conn, billing, event_type, {"id": "sub_123", "status": "active"})
+    from app.domain.services import plan_end
+
+    async def allocate(conn, tenant_id, minutes):
+        return None
+
+    with patch.object(plan_end, "apply_plan_allocation", allocate):
+        await apply_billing_event(conn, billing, event_type, {"id": "sub_123", "status": "active"})
     billing._stripe_call.assert_awaited_once_with("Subscription", "retrieve", "sub_123")
-    return [call.args[-1] for call in conn.execute.await_args_list if "UPDATE tenants" in call.args[0]]
+    # The status each tenant write stores (plan_end's write carries it third, not last).
+    return [call.args[3] if call.args[0] == plan_end._Q_TO_PAYG else call.args[-1]
+            for call in conn.execute.await_args_list if "UPDATE tenants" in call.args[0]]
 
 
 # ── the drift guard ─────────────────────────────────────────────────────────
