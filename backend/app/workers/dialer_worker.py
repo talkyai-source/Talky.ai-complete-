@@ -559,7 +559,9 @@ class DialerWorker:
                     # the bridge stamps the planned provider ID before ARI.
                     provider_absent = (
                         call_intent.provider_call_id is None
-                        and call_intent.status in {"queued", "initiated"}
+                        and call_intent.status in {
+                            "queued", "initiated", "termination_pending",
+                        }
                         and await self._mark_call_intent_not_originated(
                             job,
                             call_intent,
@@ -2245,13 +2247,56 @@ class DialerWorker:
             job.job_id, reason=self._CAMPAIGN_NOT_RUNNABLE_SKIP
         )
         await self._update_job_status(job, JobStatus.SKIPPED, error=error)
+        if campaign_status == "stopped":
+            await self._release_lead_of_stopped_campaign_job(job)
+
+    async def _release_lead_of_stopped_campaign_job(self, job: DialerJob) -> None:
+        """Give a ``called`` contact back to ``pending`` once its retry is skipped.
+
+        Stopping a campaign while a call rings lets the hung-up call settle a
+        moment later: settlement schedules a retry and sets the lead
+        ``called``, which no Start selects and no restart reset covers. Same
+        rule as the stop path's own release: only ``called`` moves (never
+        dnc / deleted / contacted / completed / do-not-call), and only when the
+        lead has no other active job. Best effort: the skip stands on failure.
+        """
+        try:
+            from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+
+            async with self._acquire_db() as conn:
+                await conn.execute(
+                    """
+                    UPDATE leads
+                       SET status = 'pending', updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND campaign_id = $3::uuid
+                       AND status = 'called'
+                       AND COALESCE(do_not_call, FALSE) = FALSE
+                       AND NOT EXISTS (
+                           SELECT 1 FROM dialer_jobs j
+                            WHERE j.lead_id = $1::uuid
+                              AND j.tenant_id = $2::uuid
+                              AND j.status = ANY($4::text[]))
+                    """,
+                    str(job.lead_id),
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                    list(ACTIVE_STATUSES),
+                )
+        except Exception as exc:  # noqa: BLE001 - the skip already stands
+            logger.warning(
+                "dialer_lead_release_failed job=%s lead=%s error_type=%s",
+                job.job_id, job.lead_id, type(exc).__name__,
+            )
 
     async def _skip_invalid_number(self, job: DialerJob) -> None:
         """End a job whose stored number is not dialable, with its own reason.
 
-        Terminal for this attempt (no retry can make the number valid); the
-        lead row is left alone so a corrected number can be dialled again.
-        The number itself is never logged.
+        Terminal for this attempt (no retry can make the number valid). The
+        lead is marked ``skipped`` first (best effort, its own statement) so
+        the campaign can complete; a restart resets ``skipped`` to pending, so
+        a corrected number is dialled again. The number itself is never logged.
         """
         reason = "invalid_phone_number"
         logger.warning(
@@ -2260,6 +2305,28 @@ class DialerWorker:
         )
         await self._publish_block(job, reason)
         await self.queue_service.mark_skipped(job.job_id, reason=reason)
+        try:
+            async with self._acquire_db() as conn:
+                await conn.execute(
+                    """
+                    UPDATE leads
+                       SET status = 'skipped',
+                           last_call_result = 'invalid_phone_number',
+                           updated_at = NOW()
+                     WHERE id = $1::uuid
+                       AND tenant_id = $2::uuid
+                       AND campaign_id = $3::uuid
+                       AND status IN ('pending', 'calling')
+                    """,
+                    str(job.lead_id),
+                    str(job.tenant_id),
+                    str(job.campaign_id),
+                )
+        except Exception as exc:  # noqa: BLE001 - the job still ends
+            logger.warning(
+                "dialer_invalid_number_lead_failed job=%s lead=%s error_type=%s",
+                job.job_id, job.lead_id, type(exc).__name__,
+            )
         await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
 
     async def _stale_payload_reason(self, job: DialerJob) -> Optional[str]:
@@ -3020,6 +3087,18 @@ class DialerWorker:
         rules = effective_rules(tenant_rules, campaign_cfg)
         if (
             intent.provider_call_id is None
+            and str(intent.status or "").strip().lower() == "termination_pending"
+        ):
+            # The stuck-call reaper flipped a never-claimed row after 10 min
+            # (the API process was unreachable). The bridge claim needs
+            # queued/initiated, so this row can never ring: the bridge would
+            # answer 409 for ever and nothing settles a row with no provider
+            # id. Release it (CAS on both provider ids NULL) and wait on the
+            # SAME attempt with the existing 5 min..1 h outage back-off.
+            await self._defer_telephony_outage(job, intent, rules)
+            return
+        if (
+            intent.provider_call_id is None
             and str(intent.status or "").strip().lower() in {"queued", "initiated"}
         ):
             # The bridge never claimed this attempt, so this replay is about to
@@ -3716,7 +3795,7 @@ class DialerWorker:
                        AND direction = 'outbound'
                        AND provider_call_id IS NULL
                        AND external_call_uuid IS NULL
-                       AND status IN ('queued', 'initiated')
+                       AND status IN ('queued', 'initiated', 'termination_pending')
                     """,
                     intent.call_id,
                     str(job.tenant_id),
@@ -3779,7 +3858,7 @@ class DialerWorker:
                        AND direction = 'outbound'
                        AND provider_call_id IS NULL
                        AND external_call_uuid IS NULL
-                       AND status IN ('queued', 'initiated')
+                       AND status IN ('queued', 'initiated', 'termination_pending')
                     """,
                     intent.call_id,
                     str(job.tenant_id),

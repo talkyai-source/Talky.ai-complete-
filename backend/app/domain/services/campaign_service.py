@@ -130,6 +130,7 @@ def campaign_progress(
 _LIST_LIVE_CALLS_SQL = """
     SELECT campaign_id, count(*) AS n FROM calls
      WHERE tenant_id = $1::uuid AND campaign_id = ANY($2::uuid[]) AND status = ANY($3::text[])
+       AND is_test IS NOT TRUE
      GROUP BY campaign_id
 """
 _LIST_AWAITING_JOBS_SQL = """
@@ -175,7 +176,8 @@ _COMPLETE_IF_FINISHED_SQL = """
        AND NOT EXISTS (SELECT 1 FROM dialer_jobs
              WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status = ANY($3::text[]))
        AND NOT EXISTS (SELECT 1 FROM calls
-             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status = ANY($4::text[]))
+             WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status = ANY($4::text[])
+               AND is_test IS NOT TRUE)
        AND NOT EXISTS (SELECT 1 FROM leads
              WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid AND status IN ('pending', 'calling'))
        AND NOT EXISTS (SELECT 1 FROM assistant_actions
@@ -431,6 +433,7 @@ class CampaignService:
         first_speaker: Optional[Literal["agent", "user"]] = None,
         list_id: Optional[str] = None,
         allow_running: bool = False,
+        only_lead_ids: Optional[Sequence[str]] = None,
     ) -> StartCampaignResult:
         """
         Start a campaign - enqueue all pending leads as dialer jobs.
@@ -506,6 +509,13 @@ class CampaignService:
                     status_code=409,
                 )
 
+            # A contact queued mid-run only adds work to a campaign that IS running as
+            # this read sees it: a stop or completion that landed after the caller's
+            # own check must never be turned back into "running" by an add. Nothing
+            # has been written or queued yet.
+            if only_lead_ids is not None and campaign.get("status") != "running":
+                raise CampaignStateError("Campaign is not running")
+
             # The write that flips the campaign to running is a compare-and-set
             # against the status read here: of two overlapping starts exactly one
             # wins it, and the other is "already running" before it can dispatch
@@ -513,11 +523,17 @@ class CampaignService:
             # repeat Start only repairs the pending outbox) and allow_running
             # callers re-enter it on purpose, so both keep the plain write.
             observed_status = campaign.get("status")
+            # ``allow_running`` on a campaign read as running is a compare-and-set
+            # too (a contact added mid-run queues work this way): a Pause or Stop
+            # that lands between the read and the write must not be turned back
+            # into "running". The write is running -> running, so it costs nothing.
             start_from = (
                 (observed_status,)
-                if observed_status and not campaign_was_running
+                if observed_status and (not campaign_was_running or allow_running)
                 else None
             )
+            if only_lead_ids is not None:
+                start_from = ("running",)
 
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
@@ -547,17 +563,20 @@ class CampaignService:
             withheld_out: List[int] = []
             leads = await self._get_pending_leads(
                 campaign_id, list_id=list_id, tenant_id=scoping_tenant_id,
-                withheld_out=withheld_out,
+                withheld_out=withheld_out, only_lead_ids=only_lead_ids,
             )
 
             # Contacts the permission check withheld ARE pending work: do not
             # mistake "nothing selected" for "nothing pending" and reset old
             # failed/skipped contacts below.
-            if not leads and list_id is None and not sum(withheld_out):
+            if (not leads and list_id is None and not allow_running
+                    and only_lead_ids is None and not sum(withheld_out)):
                 # No pending/calling leads — reset failed/skipped leads so
                 # a campaign restart actually retries them. Skipped for a
                 # single-list dial: we never want a "call this list" to revive
-                # other lists' failed leads.
+                # other lists' failed leads. Skipped for ``allow_running`` too:
+                # it only adds work to a campaign that is already running (a
+                # contact added mid-run), and must never reopen finished ones.
                 reset_count = await self._reset_leads_for_restart(
                     campaign_id, tenant_id=scoping_tenant_id
                 )
@@ -580,6 +599,7 @@ class CampaignService:
                 await self._update_campaign_status(
                     campaign_id, "running", tenant_id=scoping_tenant_id,
                     from_statuses=start_from,
+                    stamp_started_at=not campaign_was_running,
                 )
                 return StartCampaignResult(
                     success=True,
@@ -738,7 +758,14 @@ class CampaignService:
             # it can neither observe a missing job row nor skip valid work as a
             # stopped campaign. A failed status write leaves only recoverable
             # ``pending`` rows and exposes no Redis payload.
-            if list_id is None:
+            if only_lead_ids is not None:
+                # A contact queued mid-run: the campaign's counters and its
+                # start time stay exactly as they are.
+                await self._update_campaign_status(
+                    campaign_id, status="running", tenant_id=scoping_tenant_id,
+                    stamp_started_at=False, from_statuses=start_from,
+                )
+            elif list_id is None:
                 await self._update_campaign_status(
                     campaign_id,
                     status="running",
@@ -786,13 +813,19 @@ class CampaignService:
                         campaign_id, type(exc).__name__,
                     )
 
+            # A contact added mid-run (running, no list) is queued without
+            # skipping the campaign's own pacing gap; "call this list" and a
+            # plain Start keep resetting it.
+            reset_gap = not (allow_running and campaign_was_running and list_id is None)
+
             # 7a. D3-14: a large start answers now. Every job is already a
             # durable 'pending' row and the campaign is 'running', so the
             # campaign reads "preparing" until they are queued, and a repeat
             # Start replays any the background task could not queue.
             if len(jobs_to_dispatch) > _inline_dispatch_max():
                 task = asyncio.create_task(
-                    self._dispatch_in_background(campaign_id, jobs_to_dispatch)
+                    self._dispatch_in_background(
+                        campaign_id, jobs_to_dispatch, reset_gap=reset_gap)
                 )
                 _BACKGROUND_DISPATCHES.add(task)
                 task.add_done_callback(_BACKGROUND_DISPATCHES.discard)
@@ -818,7 +851,8 @@ class CampaignService:
             # pending so this same endpoint can reconcile them on retry.
             queue_service = await self._get_queue_service()
             try:
-                await self._reset_gap_clock(queue_service, campaign_id)
+                if reset_gap:
+                    await self._reset_gap_clock(queue_service, campaign_id)
 
                 jobs_created = await self._dispatch_durable_jobs(
                     queue_service,
@@ -866,7 +900,9 @@ class CampaignService:
         except Exception as _gap_exc:
             logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
 
-    async def _dispatch_in_background(self, campaign_id: str, jobs: List[DialerJob]) -> None:
+    async def _dispatch_in_background(
+        self, campaign_id: str, jobs: List[DialerJob], reset_gap: bool = True,
+    ) -> None:
         """D3-14: the same durable dispatch as an inline start, after answering.
 
         A failure (or a process restart) leaves the rest 'pending'; the
@@ -875,7 +911,8 @@ class CampaignService:
         try:
             queue_service = await self._get_queue_service()
             try:
-                await self._reset_gap_clock(queue_service, campaign_id)
+                if reset_gap:
+                    await self._reset_gap_clock(queue_service, campaign_id)
                 queued = await self._dispatch_durable_jobs(queue_service, jobs)
             finally:
                 await self._cleanup_queue_service()
@@ -1231,8 +1268,12 @@ class CampaignService:
         list_id: Optional[str] = None,
         tenant_id: Optional[str] = None,
         withheld_out: Optional[List[int]] = None,
+        only_lead_ids: Optional[Sequence[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Get all pending leads for a campaign, ordered by priority.
+
+        ``only_lead_ids`` (default None = every pending lead) narrows the selection
+        to those lead ids, still inside this campaign and tenant.
 
         ``withheld_out``: optional list that receives ONE int, the number of
         leads CONTACT_PERMISSION_DIAL_GATE withheld (nothing is appended when
@@ -1271,6 +1312,8 @@ class CampaignService:
             query = query.eq("tenant_id", scoped_tenant)
         if list_id is not None:
             query = query.eq("list_id", list_id)
+        if only_lead_ids is not None:
+            query = query.in_("id", [str(i) for i in only_lead_ids])
         response = query.order("priority", desc=True)\
             .order("created_at")\
             .execute()
