@@ -133,6 +133,36 @@ def _code(exc: Exception) -> str:
     return str(getattr(exc, "code", None) or type(exc).__name__)
 
 
+_CONFLICT_PLAIN = ("the product only allows an edit while the campaign's number assignment is paused; "
+                   "it is in another state")
+
+
+def _described(exc: Exception) -> str:
+    """The service code, with plain words for assignment_state_conflict."""
+    code = _code(exc)
+    return f"{code} ({_CONFLICT_PLAIN})" if code == "assignment_state_conflict" else code
+
+
+def _assignment(c: dict[str, Any]) -> str:
+    return str(c.get("assignment_status") or "").strip().lower()
+
+
+def _number_words(c: dict[str, Any]) -> str:
+    """Plain words for the campaign's number assignment (states: active, paused, quarantined, archived)."""
+    state = _assignment(c)
+    if state in ("active", "paused"):
+        return "assigned"
+    if state == "archived":
+        return "none (assignment archived)"
+    if state == "quarantined":
+        return "held (quarantined)"
+    return state or "unknown"
+
+
+NO_NUMBER_TEXT = ("has no phone number assigned (its number assignment is archived), so it cannot take calls; "
+                  "nothing to switch. Assign a number on the campaign's page first; recording can be switched on then.")
+
+
 def notice_proof_required() -> bool:
     """The product's own rule (read from the environment at call time)."""
     from app.domain.services.recording_policy_service import notice_proof_required as rule
@@ -154,7 +184,8 @@ def _show_campaign(label: str, c: dict[str, Any]) -> None:
     live = "yes" if str(c["status"]).lower() == "active" else "no"
     print(
         f'{label}: campaign {_short(c["id"])} "{c["name"]}" status={c["status"]} live={live} '
-        f'recording={"on" if c["recording_enabled"] else "off"} notice_saved={saved} version={c["version"]}'
+        f'number={_number_words(c)} recording={"on" if c["recording_enabled"] else "off"} '
+        f'notice_saved={saved} version={c["version"]}'
     )
 
 
@@ -177,12 +208,16 @@ def _print_gap(paused_at: datetime, active_at: Optional[datetime]) -> None:
 def _decide(c: dict[str, Any], state: str, *, controls, mode, notice_arg: str, pause: bool):
     """What --apply would do to one campaign: (kind, reason, notice_to_save).
 
-    kind: "already" | "change" | "refuse" | "needs_flag". Everything that makes a live
+    kind: "already" | "change" | "refuse" | "needs_flag" | "no_number". Everything that makes a live
     campaign unsafe to pause is decided HERE, before anything is written.
     """
     wanted = state == "on"
+    if _assignment(c) == "archived":
+        return "no_number", NO_NUMBER_TEXT, None
     if bool(c["recording_enabled"]) is wanted:
         return "already", "", None
+    if _assignment(c) == "quarantined":
+        return "refuse", "its number is held by a platform quarantine (assignment_quarantined); clear the quarantine first", None
     notice = None
     if wanted:
         if mode == "disabled":
@@ -253,7 +288,7 @@ async def _change(service, who, tenant_id: str, c: dict[str, Any], args, notice:
                 payload=payload, idempotency_key=f"{base}-v{version}",
             )
         except Exception as exc:  # service errors carry a code; the text may name people
-            return f"not changed: {_code(exc)}", False
+            return f"not changed: {_described(exc)}", False
         return await readback()
 
     # Live: pause, update, activate. Nothing else happens between the pause and the activation.
@@ -273,7 +308,7 @@ async def _change(service, who, tenant_id: str, c: dict[str, Any], args, notice:
             payload=payload, idempotency_key=f"{base}-v{version}",
         )
     except Exception as exc:
-        update_code = _code(exc)
+        update_code = _described(exc)
         refused = await _resume_after_failure(service, tenant_id, cid, actor, role, args, base)
         if refused is not None:
             _print_gap(paused_at, None)
@@ -367,6 +402,8 @@ async def run(args: argparse.Namespace, *, service=None, pool=None, db=None) -> 
             _show_campaign("now", c)
             if kind == "already":
                 what = f"already {state}"
+            elif kind == "no_number":
+                what = reason
             elif kind == "needs_flag":
                 what = "would need --pause-and-resume because the campaign is live"
             elif kind == "refuse":
@@ -381,11 +418,16 @@ async def run(args: argparse.Namespace, *, service=None, pool=None, db=None) -> 
 
         lines: list[str] = []
         failed = False
+        already = no_number = switched = 0
         todo = []
         for c, kind, reason, notice in plans:
             head = f'campaign {_short(c["id"])} "{c["name"]}": '
             if kind == "already":
                 lines.append(head + f"already {args.state}; nothing to do")
+                already += 1
+            elif kind == "no_number":
+                lines.append(head + reason)
+                no_number += 1
             elif kind in ("refuse", "needs_flag"):
                 lines.append(head + f"not changed: {reason}")
                 failed = True
@@ -409,8 +451,13 @@ async def run(args: argparse.Namespace, *, service=None, pool=None, db=None) -> 
                 lines.append(head + text)
                 if not ok:
                     failed = True
+                else:
+                    switched += 1
         for line in lines:
             print(line)
+        if args.apply:
+            print(f"switched {args.state}: {switched}; already {args.state}: {already}; "
+                  f"no phone number (cannot take calls): {no_number}")
         if not args.apply and not failed and todo:
             print("nothing written (add --apply)")
         return 1 if failed else 0
