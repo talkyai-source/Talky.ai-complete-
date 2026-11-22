@@ -38,6 +38,17 @@ from tests.unit.test_contact_permission_on_import import (
 )
 from tests.unit.test_w1_dialer_job_lifecycle import _conn_pool, _job
 
+
+@pytest.fixture(autouse=True)
+def _each_test_starts_with_no_decision_logged():
+    """The gate writes a job's decision at INFO once and repeats at DEBUG; these tests
+    reuse one job id, so the record of what was already logged is cleared per test."""
+    from app.domain.services.dialer import permission_gate
+
+    permission_gate._LOGGED.clear()
+    yield
+    permission_gate._LOGGED.clear()
+
 GATE = "CONTACT_PERMISSION_DIAL_GATE"
 CAMPAIGN = "44444444-4444-4444-4444-444444444444"
 TENANT = "11111111-1111-1111-1111-111111111111"
@@ -815,3 +826,56 @@ async def test_summary_and_lead_helpers_pass_the_tenant_first():
     assert conn.fetchrow.call_args.args == (pg._WAITING_SQL, TENANT, CAMPAIGN)
     conn.fetchrow = AsyncMock(return_value={"missing": False})
     assert await pg.permission_missing_for_lead(conn, TENANT, "l1") is False
+
+
+# ── Added after the independent review, 23 Nov 2026 ──────────────────────────
+@pytest.mark.asyncio
+async def test_a_dropped_retry_gives_its_contact_back_so_it_is_not_lost():
+    """A retry queued before the switch went on leaves the lead at 'called'; dropping the
+    job must release it, or no count, Start or confirmation would ever find it again."""
+    w = DialerWorker()
+    w.queue_service = SimpleNamespace(mark_skipped=AsyncMock())
+    w._publish_block = AsyncMock()
+    w._update_job_status = AsyncMock()
+    w._release_lead_of_stopped_campaign_job = AsyncMock()
+    job = _job(attempt=2)
+    await w._drop_stale_payload(job, "contact_permission_missing")
+    w._release_lead_of_stopped_campaign_job.assert_awaited_once_with(job)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["lead_not_dialable", "job_not_active"])
+async def test_other_drop_reasons_still_leave_the_contact_alone(reason):
+    w = DialerWorker()
+    w.queue_service = SimpleNamespace(mark_skipped=AsyncMock())
+    w._publish_block = AsyncMock()
+    w._update_job_status = AsyncMock()
+    w._release_lead_of_stopped_campaign_job = AsyncMock()
+    await w._drop_stale_payload(_job(), reason)
+    w._release_lead_of_stopped_campaign_job.assert_not_awaited()
+
+
+def test_a_job_looked_at_again_logs_its_decision_once_at_info(monkeypatch, caplog):
+    from app.domain.services.dialer import permission_gate as pg
+
+    pg._LOGGED.clear()
+    monkeypatch.delenv(GATE, raising=False)
+    caplog.set_level(logging.DEBUG, logger=LOG)
+    job = _job()
+    for _ in range(5):
+        assert pg.dial_time_decision(job, has_list=True, recorded=True) == "off"
+    lines = [r for r in caplog.records if "contact_permission_gate " in r.getMessage()]
+    assert [r.levelno for r in lines] == [logging.INFO] + [logging.DEBUG] * 4
+    # a different decision for the same job is news again
+    monkeypatch.setenv(GATE, "on")
+    caplog.clear()
+    assert pg.dial_time_decision(job, has_list=False, recorded=False) == "block"
+    assert [r.levelno for r in caplog.records if "contact_permission_gate " in r.getMessage()] == [logging.INFO]
+    assert len(pg._LOGGED) <= pg._LOGGED_MAX
+
+
+def test_contacts_queued_on_confirm_use_the_statuses_start_and_the_count_use():
+    from app.api.v1.endpoints import contact_permission_confirm as cpc
+
+    assert "l.status IN ('pending','calling')" in cpc._PENDING_IDS_SQL
+    assert "tenant_id = $1::uuid" in cpc._PENDING_IDS_SQL

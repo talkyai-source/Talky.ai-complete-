@@ -12,11 +12,15 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import OrderedDict
 from typing import Any, Tuple
 
 logger = logging.getLogger(__name__)
 
 _ON_WORDS = ("1", "true", "yes", "on")
+# (job id, mode, decision) already logged at INFO; bounded, oldest dropped first.
+_LOGGED: "OrderedDict[tuple, None]" = OrderedDict()
+_LOGGED_MAX = 5000
 
 # The calling-permission state of ONE contact. No row (lead not in this tenant)
 # counts as missing. Both tables are matched on the caller's tenant; the list is
@@ -72,10 +76,20 @@ def dial_time_decision(job: Any, *, has_list: bool, recorded: bool) -> str:
         decision = "allow"
     else:
         decision = "block" if mode == "on" else "would_block"
-    logger.info(
+    # A job that waits for a free line is looked at again every second. The line is
+    # written at INFO once per job and decision; repeats go to DEBUG.
+    job_id = getattr(job, "job_id", None)
+    key = (str(job_id), mode, decision)
+    repeat = key in _LOGGED
+    if not repeat:
+        _LOGGED[key] = None
+        if len(_LOGGED) > _LOGGED_MAX:
+            _LOGGED.popitem(last=False)
+    logger.log(
+        logging.DEBUG if repeat else logging.INFO,
         "contact_permission_gate job=%s tenant=%s campaign=%s mode=%s "
         "has_list=%s recorded=%s decision=%s",
-        getattr(job, "job_id", None), _short(getattr(job, "tenant_id", "")),
+        job_id, _short(getattr(job, "tenant_id", "")),
         _short(getattr(job, "campaign_id", "")), mode, has_list, recorded, decision,
     )
     return decision

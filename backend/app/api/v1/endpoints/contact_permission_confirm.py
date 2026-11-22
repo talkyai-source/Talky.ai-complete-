@@ -95,7 +95,7 @@ _CAMPAIGN_STATUS_SQL = (
 _PENDING_IDS_SQL = (
     "SELECT l.id FROM leads AS l "
     "WHERE l.tenant_id = $1::uuid AND l.campaign_id = $2::uuid "
-    "AND l.list_id = $3::uuid AND l.status = 'pending' "
+    "AND l.list_id = $3::uuid AND l.status IN ('pending','calling') "
     "AND l.do_not_call IS NOT TRUE"
 )
 
