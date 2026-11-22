@@ -5083,8 +5083,10 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             # registered above, so any caller audio that arrived during warmup
             # is waiting in input_queue.
             if getattr(voice_session, "realtime_bridge", None) is not None:
+                from app.realtime.opening_notice import run_realtime_bridge
+
                 voice_session.pipeline_task = asyncio.create_task(
-                    voice_session.realtime_bridge.run()
+                    run_realtime_bridge(voice_session)
                 )
                 logger.info(
                     "BRIDGE realtime_pipeline_started call_id=%s",
