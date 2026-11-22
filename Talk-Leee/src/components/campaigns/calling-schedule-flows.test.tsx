@@ -321,19 +321,20 @@ test("FX3a2 classic form (edit): the button reads Save campaign and the voice pr
     assert.equal(screen.queryByRole("button", { name: "Save campaign" }) !== null, true);
     assert.equal(screen.queryByRole("button", { name: "Save Campaign" }) !== null, false);
     const line = await waitFor(() => {
-        const found = screen.getByText(/Campaign voices follow your global AI Options TTS provider/);
+        const found = screen.getByText(/AI Options only sets the default for new campaigns/);
         return found;
     });
     const provider = Array.from(line.querySelectorAll("span")).find((span) => span.textContent === "cartesia");
     assert.equal(provider !== undefined, true);
     assert.equal(provider!.classList.contains("capitalize"), true);
+    assert.equal(screen.queryByText(/follow your global AI Options/) === null, true);
 });
 
 // ── FX3a3 Task 2.5: the model is shown by the name AI Options shows ──────────
 const withTtsModel = async () => ({
     pipeline_mode: "cascaded", tts_provider: "cartesia", tts_model: "sonic-2",
 }) as unknown as Awaited<ReturnType<typeof aiOptionsApi.getConfig>>;
-const providerLine = () => screen.getByText(/Campaign voices follow your global AI Options TTS provider/).textContent ?? "";
+const providerLine = () => screen.getByText(/AI Options only sets the default for new campaigns/).textContent ?? "";
 
 test("FX3a3 classic form: the voice line shows the model's name from the providers list", async () => {
     aiOptionsApi.getConfig = withTtsModel;

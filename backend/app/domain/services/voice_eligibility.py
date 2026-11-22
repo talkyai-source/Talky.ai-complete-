@@ -49,6 +49,16 @@ async def filter_tenant_voices(pool, tenant_id: str | None, voices: list) -> lis
     if not any(voice.provider == "elevenlabs" for voice in voices):
         return voices
     owned, all_clones = await _ownership_ids(pool, tenant_id)
+    missing = owned - {v.id for v in voices if v.provider == "elevenlabs"}
+    if missing:
+        # This tenant's own clone is not in this process's cached catalogue
+        # (cloned via the other API process): refresh once (bounded) and add it.
+        from app.infrastructure.tts.elevenlabs_catalog import refresh_voices_for_missing_clones
+        try:
+            fresh = await refresh_voices_for_missing_clones()
+        except Exception:
+            fresh = []
+        voices = [*voices, *(v for v in fresh if v.id in missing)]
     return [v for v in voices if v.provider != "elevenlabs" or v.id in owned or (
         v.id not in all_clones and getattr(v, "provider_is_public", False) is True
     )]

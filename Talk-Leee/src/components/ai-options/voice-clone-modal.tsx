@@ -26,7 +26,7 @@ export function VoiceCloneModal({
 }: {
     open: boolean;
     onClose: () => void;
-    onCloned?: () => void;
+    onCloned?: (voice: { voiceId: string; name: string }) => void;
 }) {
     const [name, setName] = useState("");
     const [consent, setConsent] = useState(false);
@@ -95,9 +95,15 @@ export function VoiceCloneModal({
         setSubmitting(true);
         setError(null);
         try {
-            await extendedApi.cloneVoice(name.trim(), consent, sample.blob);
-            setDone(true);
-            onCloned?.();
+            const cloned = await extendedApi.cloneVoice(name.trim(), consent, sample.blob);
+            if (onCloned) {
+                // The parent takes over (it offers the new voice to campaigns); clear
+                // this form so a later open starts fresh.
+                reset();
+                onCloned({ voiceId: cloned.voice_id, name: cloned.name || name.trim() });
+            } else {
+                setDone(true);
+            }
         } catch (err) {
             setError(err instanceof Error ? err.message : "Clone failed");
         } finally {

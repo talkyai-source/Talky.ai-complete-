@@ -1352,6 +1352,11 @@ def build_telephony_session_config(
         # default (cartesia→sonic-3, elevenlabs→eleven_flash_v2_5, deepgram→voice).
         if _camp_provider != source_config.tts_provider:
             tts_model = ""
+    logger.info(
+        "tts_voice_resolved source=%s provider=%s model=%s voice=%s campaign=%s",
+        "campaign" if _camp_voice else "account",
+        tts_provider_type, tts_model, str(tts_voice_id or "")[:8], _campaign_id(campaign),
+    )
 
     script_config = _extract_script_config(campaign) or {}
     _pipeline_mode = script_config.get("pipeline_mode") or getattr(source_config, "pipeline_mode", "cascaded") or "cascaded"
