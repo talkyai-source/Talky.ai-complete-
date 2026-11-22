@@ -491,7 +491,10 @@ export function TestAgentButton({
                             // Explicit rotation, not another /auth/me: this is
                             // the case where the cookie specifically is stale.
                             try {
-                                await sharedHttpClient().request({ path: "/auth/refresh", method: "POST" });
+                                const client = sharedHttpClient();
+                                const renewed = await client.request({ path: "/auth/refresh", method: "POST" }) as { access_token?: unknown } | null;
+                                // Keep the renewed token as the stored one, as the client does for its own renewals.
+                                if (typeof renewed?.access_token === "string" && renewed.access_token) client.setToken(renewed.access_token);
                             } catch {
                                 /* the retry below reports the real outcome */
                             }
