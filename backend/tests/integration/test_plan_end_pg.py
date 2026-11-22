@@ -358,3 +358,26 @@ async def test_paypal_suspended_then_cancelled_moves_to_payg(pp_db):
     await fixture.svc.cancel_for_tenant(str(fixture.tenants[0]))
     state = await _pp_tenant(fixture)
     assert (state["plan_id"], state["subscription_status"], state["minutes_allocated"]) == ("payg", "inactive", 0)
+
+
+async def test_won_dispute_keeps_calls_off_for_a_paypal_plan_suspended_at_paypal(paypal_read):
+    # The status comes from the PayPal module's mapping (suspended at PayPal -> unpaid), never a blanket active.
+    fixture = paypal_read
+    _, session, invoice, _ = await _ended(fixture)
+    dispute = await _dispute(fixture, invoice, session)
+    await _apply(fixture, "charge.dispute.created", dispute)
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute("UPDATE tenants SET plan_id=$2, minutes_allocated=120 WHERE id=$1",
+                           fixture.tenants[0], fixture.plan)
+        await conn.execute(
+            """INSERT INTO paypal_subscriptions
+            (id, tenant_id, price_option_id, plan_id, provider_mode, paypal_plan_id, snapshot, status, activated_at)
+            VALUES ($1, $2, $3, $4, 'test', $5, '{}'::jsonb, 'suspended', NOW())""",
+            uuid4(), fixture.tenants[0], fixture.option, fixture.plan, "P-" + uuid4().hex[:14])
+    fixture.objects[("Dispute", dispute["id"])] = stripe.Dispute.construct_from(
+        dict(dispute, status="won"), "sk_test_synthetic")
+    fixture.objects[("Subscription", _subscription_id(fixture))] = dict(
+        fixture.objects[("Subscription", _subscription_id(fixture))], status="canceled")
+    await _apply(fixture, "charge.dispute.closed", dispute)
+    tenant = await _tenant(fixture)
+    assert (tenant["plan_id"], tenant["subscription_status"], tenant["minutes_allocated"]) == (fixture.plan, "unpaid", 120)

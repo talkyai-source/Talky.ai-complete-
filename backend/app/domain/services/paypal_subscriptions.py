@@ -388,6 +388,21 @@ async def held_subscription_exists(conn, tenant_id) -> bool:
     return await conn.fetchval(_Q_HELD_EXISTS, str(tenant_id)) is not None
 
 
+# What a held row means for the tenant: the mapping `_decide` projects (a payment that failed is past due,
+# one PayPal suspended is unpaid). Both refuse calls; only a healthy plan is active.
+_HELD_TENANT_STATUS = {ACTIVE: ACTIVE, PAST_DUE: PAST_DUE, SUSPENDED: UNPAID}
+_Q_HELD_STATUS = (
+    "SELECT status FROM paypal_subscriptions WHERE tenant_id = $1::uuid "
+    f"AND status IN {_HELD_SQL} ORDER BY created_at DESC LIMIT 1"
+)
+
+
+async def held_tenant_status(conn, tenant_id) -> str | None:
+    """The tenant status the paying PayPal plan implies, or None when there is no held plan."""
+    status = await conn.fetchval(_Q_HELD_STATUS, str(tenant_id))
+    return None if status is None else _HELD_TENANT_STATUS[status]
+
+
 def _state(row) -> str:
     if row["activated_at"] is not None:
         return "activated"

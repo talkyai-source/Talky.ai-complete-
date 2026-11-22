@@ -21,7 +21,7 @@ class State:
         self.sub_id = SUB
         self.customer = CUS
         self.plan = "pro"
-        self.paypal_held = False  # a live PayPal plan row
+        self.paypal_row = None  # status of a held PayPal plan row (active / past_due / suspended), or None
 
 
 def _norm(sql):
@@ -67,8 +67,8 @@ class Conn:
         self.st = st
 
     async def fetchval(self, sql, *a):
-        if sql == ps._Q_HELD_EXISTS:
-            return 1 if self.st.paypal_held else None
+        if sql == ps._Q_HELD_STATUS:
+            return self.st.paypal_row
         return True  # the advisory lock
 
     async def fetchrow(self, sql, *a):
@@ -440,7 +440,7 @@ async def test_won_dispute_never_ends_a_paypal_plan_bought_in_between(before):
     st.sub_id, st.plan = None, "payg"
     await _run("charge.dispute.created", "needs_response", st)
     assert st.tenant == "suspended"
-    st.plan, st.paypal_held = "pro", True  # PayPal activation: plan and minutes granted, status kept
+    st.plan, st.paypal_row = "pro", "active"  # PayPal activation: plan and minutes granted, status kept
     r = await _run_won_ended(st)
     assert r["reason"] == "subscription_dispute_won"
     assert st.plan == "pro" and st.tenant == "active" and ALLOCATIONS == []
@@ -473,3 +473,32 @@ async def test_a_subscription_deleted_while_its_chargeback_is_open_stays_suspend
     await bse._apply_subscription(Conn(st), _billing(), _sub("canceled"), binding)
     assert (st.tenant, st.plan, st.sub_id) == ("suspended", "payg", None)
     assert ALLOCATIONS == [(TENANT, 0)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("row", ["active", "past_due", "suspended"])
+async def test_a_won_dispute_restores_the_status_the_paypal_plan_implies(row):
+    from app.domain.services.subscription_status import SUBSCRIPTION_BLOCKED_STATUSES, is_blocked
+
+    st = State("suspended")
+    _open(st)
+    st.sub_id, st.plan, st.paypal_row = None, "pro", row
+    await _run_won_ended(st)
+    expected = ps._HELD_TENANT_STATUS[row]  # the PayPal module's own mapping
+    assert st.tenant == expected and st.plan == "pro" and ALLOCATIONS == []
+    # A plan PayPal reports as failing or suspended must not admit calls (the call guard's check).
+    assert is_blocked(st.tenant, SUBSCRIPTION_BLOCKED_STATUSES) is (row != "active")
+
+
+@pytest.mark.asyncio
+async def test_the_paypal_mapping_is_the_one_the_sync_projects():
+    assert ps._HELD_TENANT_STATUS == {"active": "active", "past_due": "past_due", "suspended": "unpaid"}
+
+
+@pytest.mark.asyncio
+async def test_a_won_dispute_without_a_held_paypal_row_takes_the_ended_plan_path():
+    st = State("suspended")
+    _open(st)
+    st.sub_id, st.plan = None, "payg"
+    await _run_won_ended(st)
+    assert (st.tenant, st.plan) == ("inactive", "payg") and ALLOCATIONS == [(TENANT, 0)]

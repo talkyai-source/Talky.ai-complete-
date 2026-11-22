@@ -17,7 +17,6 @@ from app.domain.services.billing_checkout import (
     subscription_period,
 )
 from app.domain.services.subscription_status import (
-    ACTIVE,
     CANCELLED,
     CANCELLED_STATUSES,
     INACTIVE,
@@ -612,18 +611,19 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
     restored = canonical(subscription.get("status"))
     # A plan that ended while the dispute was open comes back as pay as you go, not as the old plan.
     ended = restored == CANCELLED
-    paypal_plan = False
+    paypal_status = None
     if ended:
-        from app.domain.services.paypal_subscriptions import held_subscription_exists  # lazy: import cycle
-        # The account has since bought a PayPal plan: that plan is not ours to end.
-        paypal_plan = await held_subscription_exists(conn, tenant_id)
+        from app.domain.services.paypal_subscriptions import held_tenant_status  # lazy: import cycle
+        # The account has since bought a PayPal plan: that plan is not ours to end, and the status it
+        # implies (active, past due, unpaid) is the PayPal module's own mapping, not a guess.
+        paypal_status = await held_tenant_status(conn, tenant_id)
     lifted = await conn.execute(
         """UPDATE tenants SET subscription_status=$3
            WHERE id=$1::uuid AND (stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)
              AND subscription_status=$4""",
-        tenant_id, subscription_id, (ACTIVE if paypal_plan else INACTIVE) if ended else restored, SUSPENDED,
+        tenant_id, subscription_id, (paypal_status or INACTIVE) if ended else restored, SUSPENDED,
     )
-    if ended and not paypal_plan and lifted == "UPDATE 1":
+    if ended and paypal_status is None and lifted == "UPDATE 1":
         # Whichever binding the account has: already pay as you go (no Stripe id), or still on the
         # ended subscription because its deleted event has not been applied yet.
         await end_plan(conn, tenant_id, stripe_subscription_id=None) or await end_plan(
