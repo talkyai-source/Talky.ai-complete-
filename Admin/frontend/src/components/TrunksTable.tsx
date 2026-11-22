@@ -45,6 +45,15 @@ function registrationLabel(status: string | null): string {
     return REGISTRATION_STATES.find(([value]) => value === status)?.[1] ?? status;
 }
 
+/** "last checked 3 hours ago" for a status the updater has not refreshed. */
+function ageWords(seconds: number | null | undefined): string {
+    if (seconds == null) return 'never checked';
+    const unit = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'} ago`;
+    if (seconds < 3600) return `last checked ${unit(Math.max(1, Math.round(seconds / 60)), 'minute')}`;
+    if (seconds < 86400) return `last checked ${unit(Math.round(seconds / 3600), 'hour')}`;
+    return `last checked ${unit(Math.round(seconds / 86400), 'day')}`;
+}
+
 // Same date format as the Campaigns table; an unknown date is said, not left blank.
 function formatDate(dateStr: string | null): string {
     if (!dateStr) return NOT_AVAILABLE;
@@ -219,7 +228,14 @@ function OwnedTrunksTable({ generation }: { generation: number }) {
                                     <td>{trunk.is_active ? 'Yes' : 'No'}</td>
                                     <td>{trunk.auth_configured ? 'Yes' : 'No'}</td>
                                     <td>
-                                        <span className={`call-status-badge ${registrationClass(trunk.live_registration_status)}`}>{registrationLabel(trunk.live_registration_status)}</span>
+                                        {trunk.stale === true ? (
+                                            <>
+                                                <span className="call-status-badge status-default">Not current</span>
+                                                <small> {ageWords(trunk.live_status_age_seconds)}</small>
+                                            </>
+                                        ) : (
+                                            <span className={`call-status-badge ${registrationClass(trunk.live_registration_status)}`}>{registrationLabel(trunk.live_registration_status)}</span>
+                                        )}
                                     </td>
                                     <td className="campaigns-table-wrap">{trunk.live_status_detail || NOT_AVAILABLE}</td>
                                     <td>{formatDate(trunk.live_status_checked_at)}</td>
