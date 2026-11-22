@@ -198,11 +198,26 @@ async def test_paypal_reversal_after_plan_end_reblocks(pp_db):
 
 @pytest_asyncio.fixture
 async def paypal_read(state_db):
-    """A won dispute looks for a live PayPal plan: the service role must be able to read the row."""
+    """Rights the plan-end path needs, and removal of the rows these cases add.
+
+    A won dispute looks for a live PayPal plan (SELECT on paypal_subscriptions); a plan end that closes
+    a window with usage beyond the plan writes the top-up usage row (INSERT on billing_ledger, as the
+    top-up fixture grants in test_billing_topup_events.py). Rows added by the cases (a bare PayPal row,
+    a campaign and a call) are deleted before the shared fixture's own cleanup, which would otherwise trip
+    over their foreign keys.
+    """
     fixture = state_db
     async with acquire_with_tenant(fixture.pool, None) as conn:
         await conn.execute(f'GRANT SELECT ON paypal_subscriptions TO "{fixture.role}"')
-    return fixture
+        await conn.execute(f'GRANT INSERT ON billing_ledger TO "{fixture.role}"')
+        await conn.execute(f'GRANT USAGE ON SEQUENCE billing_ledger_id_seq TO "{fixture.role}"')  # id is BIGSERIAL
+    try:
+        yield fixture
+    finally:
+        async with acquire_with_tenant(fixture.pool, None) as conn:
+            await conn.execute("DELETE FROM paypal_subscriptions WHERE tenant_id=ANY($1::uuid[])", fixture.tenants)
+            await conn.execute("DELETE FROM calls WHERE tenant_id=ANY($1::uuid[])", fixture.tenants)
+            await conn.execute("DELETE FROM campaigns WHERE tenant_id=ANY($1::uuid[])", fixture.tenants)
 
 
 async def test_won_dispute_before_the_deleted_event_ends_the_plan_allowance(paypal_read):
