@@ -32,8 +32,14 @@ from app.domain.services.voice_pipeline.spoken_pronunciations import apply_pronu
 
 logger = logging.getLogger(__name__)
 
-OPENER_PREMADE_TIMEOUT_S = 2.5
+# The notice line is made in the background while the phone rings; nothing waits
+# for it. 8 s = about 2.5x the ~3 s the production voice (ElevenLabs eleven_v4)
+# needed for the shorter plain greeting on 20 Nov, so the longer line normally
+# finishes, while a stuck provider is released well before a typical ring ends.
+OPENER_PREMADE_BACKGROUND_TIMEOUT_S = 8.0
 _STORE_ATTR = "_premade_opener_lines"
+_PENDING_ATTR = "_premade_opener_pending"
+_CONSUMED_ATTR = "_premade_opener_consumed"
 
 
 @dataclass(frozen=True)
@@ -86,10 +92,56 @@ async def _collect(provider, spoken: str, voice_id, sample_rate, call_id) -> lis
     return chunks
 
 
+async def _make_notice_line(pre_warm_session, store, consumed, notice_text, spoken,
+                            provider, voice_id, sample_rate, call_id) -> None:
+    """Background task: make the notice opener's audio and store it. Never raises.
+
+    A result that arrives after the opener was already spoken live (its text is in
+    ``consumed``) is dropped, never stored. A provider closed under the task by a
+    call that ended early is one calm INFO line, not a fault.
+    """
+    started = time.monotonic()
+    try:
+        chunks = await asyncio.wait_for(
+            _collect(provider, spoken, voice_id, sample_rate,
+                     getattr(pre_warm_session, "call_id", None)),
+            timeout=OPENER_PREMADE_BACKGROUND_TIMEOUT_S,
+        )
+    except asyncio.CancelledError:
+        logger.debug("opener_premade_cancelled call_id=%s", call_id)
+        raise
+    except asyncio.TimeoutError:
+        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=timeout", call_id)
+        return
+    except Exception as exc:  # noqa: BLE001 - a background task never raises
+        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=error:%s",
+                    call_id, type(exc).__name__)
+        return
+    finally:
+        getattr(pre_warm_session, _PENDING_ATTR, {}).pop(notice_text, None)
+    if not chunks:
+        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=empty", call_id)
+        return
+    if notice_text in consumed:
+        logger.info("opener_premade_dropped call_id=%s kind=notice_opener reason=late_after_live", call_id)
+        return
+    store[notice_text] = PremadeLine(
+        "notice_opener", notice_text, spoken, tuple(chunks), voice_id, sample_rate, provider,
+    )
+    logger.info(
+        "opener_premade_ready call_id=%s kind=notice_opener chunks=%d bytes=%d synth_ms=%d text=%r",
+        call_id, len(chunks), sum(len(c) for c in chunks),
+        int((time.monotonic() - started) * 1000), _log_text(notice_text),
+    )
+
+
 async def premake_caller_first_lines(
     pre_warm_session, effective_first_speaker, greeting_text, greeting_chunks,
 ) -> None:
-    """Register the plain opener's audio and make the notice opener's. Never fatal."""
+    """Register the plain opener's audio and START the notice opener's synthesis.
+
+    Returns at once: the phone rings no later than without this feature. Never fatal.
+    """
     if effective_first_speaker != "user":
         return
     notice_text = getattr(pre_warm_session, "_opener_with_notice_text", None)
@@ -108,7 +160,11 @@ async def premake_caller_first_lines(
         voice_id = config.voice_id if config else "default"
         sample_rate = config.tts_sample_rate if config else 8000
         store: Dict[str, PremadeLine] = {}
+        pending: Dict[str, Any] = {}
+        consumed: set = set()
         setattr(pre_warm_session, _STORE_ATTR, store)
+        setattr(pre_warm_session, _PENDING_ATTR, pending)
+        setattr(pre_warm_session, _CONSUMED_ATTR, consumed)
         store[greeting_text] = PremadeLine(
             "opener", greeting_text, greeting_text, tuple(greeting_chunks),
             voice_id, sample_rate, provider,
@@ -116,31 +172,12 @@ async def premake_caller_first_lines(
         if notice_text == greeting_text:
             return
         spoken = apply_pronunciations(notice_text, getattr(call_session, "tts_pronunciations", None))
-        started = time.monotonic()
-        try:
-            chunks = await asyncio.wait_for(
-                _collect(provider, spoken, voice_id, sample_rate,
-                         getattr(pre_warm_session, "call_id", None)),
-                timeout=OPENER_PREMADE_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("opener_premade_failed call_id=%s kind=notice_opener reason=timeout", call_id)
-            return
-        except Exception as exc:  # noqa: BLE001 - never fatal; CancelledError is not an Exception
-            logger.warning("opener_premade_failed call_id=%s kind=notice_opener reason=error:%s",
-                           call_id, type(exc).__name__)
-            return
-        if not chunks:
-            logger.warning("opener_premade_failed call_id=%s kind=notice_opener reason=empty", call_id)
-            return
-        store[notice_text] = PremadeLine(
-            "notice_opener", notice_text, spoken, tuple(chunks), voice_id, sample_rate, provider,
-        )
-        logger.info(
-            "opener_premade_ready call_id=%s kind=notice_opener chunks=%d bytes=%d synth_ms=%d text=%r",
-            call_id, len(chunks), sum(len(c) for c in chunks),
-            int((time.monotonic() - started) * 1000), _log_text(notice_text),
-        )
+        task = asyncio.ensure_future(_make_notice_line(
+            pre_warm_session, store, consumed, notice_text, spoken,
+            provider, voice_id, sample_rate, call_id))
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())  # never "not retrieved"
+        pending[notice_text] = task
+        setattr(pre_warm_session, "_premade_opener_task", task)  # keeps it alive mid-flight
     except Exception as exc:  # noqa: BLE001 - the call must ring whatever happens here
         logger.warning("opener_premade_failed call_id=%s kind=any reason=error:%s",
                        call_id, type(exc).__name__)
@@ -159,9 +196,16 @@ def premade_kwargs(voice_session, session, text) -> dict:
         call_id = str(getattr(session, "call_id", ""))[:12]
         line = store.pop(text, None)
         left = ",".join(sorted(v.kind for v in store.values())) or "-"
+        # Whatever happens next, this text is spoken now: a result that arrives
+        # later is dropped by the background task and can never serve a later sentence.
+        consumed = getattr(voice_session, _CONSUMED_ATTR, None)
+        if isinstance(consumed, set):
+            consumed.add(text)
         if line is None:
-            logger.info("opener_premade_skipped call_id=%s kind=other reason=no_matching_text stored=%s",
-                        call_id, left)
+            pending = getattr(voice_session, _PENDING_ATTR, None)
+            reason = "not_ready_yet" if isinstance(pending, dict) and text in pending else "no_matching_text"
+            logger.info("opener_premade_skipped call_id=%s kind=%s reason=%s stored=%s",
+                        call_id, "notice_opener" if reason == "not_ready_yet" else "other", reason, left)
             return {}
         pipeline = getattr(voice_session, "pipeline", None)
         reason = None

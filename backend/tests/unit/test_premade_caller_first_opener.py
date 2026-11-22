@@ -71,15 +71,16 @@ class Provider:
 
     name = "fake"
 
-    def __init__(self, fail_on=None, delay=0.0):
+    def __init__(self, fail_on=None, delay=0.0, delay_on=None):
         self.texts = []
         self.fail_on = fail_on
         self.delay = delay
+        self.delay_on = delay_on  # None = every call; n = only the n-th call
 
     async def stream_synthesize(self, text, **kw):
         n = len(self.texts) + 1
         self.texts.append(text)
-        if self.delay:
+        if self.delay and (self.delay_on is None or self.delay_on == n):
             await asyncio.sleep(self.delay)
         if self.fail_on == n:
             raise RuntimeError("boom")
@@ -162,6 +163,14 @@ def make_voice(monkeypatch, *, gateway=None, provider=None, direction="outbound"
     return voice, session, gateway, provider, pipe
 
 
+async def _ring(voice):
+    """Pre-originate, then let the background notice synthesis finish (the phone rings for seconds)."""
+    await prepare_pre_originate_greeting(voice, "user")
+    task = getattr(voice, "_premade_opener_task", None)
+    if task is not None:
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def _answer(decision, fn):
     container = types.SimpleNamespace(is_initialized=True, db_pool=object())
     with patch("app.core.container.get_container", return_value=container), patch.object(
@@ -175,7 +184,7 @@ async def _answer(decision, fn):
 async def test_ringing_premakes_both_openers_on_caller_first_calls(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     voice, session, _, provider, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert provider.texts == [PLAIN, NOTICE_OPENER]
     store = voice._premade_opener_lines
     assert store[PLAIN].kind == "opener"
@@ -196,60 +205,102 @@ async def test_agent_first_calls_premake_nothing_new(monkeypatch):
 @pytest.mark.parametrize("how", ["raise", "timeout"])
 async def test_a_failed_or_slow_notice_premake_never_stops_the_call(monkeypatch, caplog, how):
     caplog.set_level(logging.INFO)
-    monkeypatch.setattr(premade_opener, "OPENER_PREMADE_TIMEOUT_S", 0.05)
-    provider = Provider(fail_on=2) if how == "raise" else Provider()
+    monkeypatch.setattr(premade_opener, "OPENER_PREMADE_BACKGROUND_TIMEOUT_S", 0.05)
+    provider = Provider(fail_on=2) if how == "raise" else Provider(delay=5, delay_on=2)
     voice, *_ = make_voice(monkeypatch, provider=provider)
-    if how == "timeout":
-        real = provider.stream_synthesize
-
-        async def slow(text, **kw):
-            if len(provider.texts) >= 1:
-                await asyncio.sleep(5)
-            async for c in real(text, **kw):
-                yield c
-
-        provider.stream_synthesize = slow
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert voice._presynth_greeting_audio
     assert NOTICE_OPENER not in voice._premade_opener_lines
     assert PLAIN in voice._premade_opener_lines
     assert "opener_premade_failed" in caplog.text
+    assert ("reason=timeout" if how == "timeout" else "reason=error:RuntimeError") in caplog.text
 
 
-async def test_cancellation_during_the_notice_premake_still_propagates(monkeypatch):
-    voice, session, _, provider, _ = make_voice(monkeypatch)
+async def test_pre_origination_returns_before_the_notice_audio_is_finished(monkeypatch):
+    provider = Provider(delay=1.0, delay_on=2)
+    voice, *_ = make_voice(monkeypatch, provider=provider)
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    await prepare_pre_originate_greeting(voice, "user")
+    assert loop.time() - t0 < 0.4                              # the provider needs 1.0 s
+    task = voice._premade_opener_task
+    assert not task.done()
+    assert NOTICE_OPENER not in voice._premade_opener_lines and PLAIN in voice._premade_opener_lines
+    await task                                                 # finishes by itself and stores the line
+    assert NOTICE_OPENER in voice._premade_opener_lines
 
-    async def cancelled(text, **kw):
-        if provider.texts:
-            raise asyncio.CancelledError()
-        provider.texts.append(text)
-        yield b"\x01\x00" * 4
 
-    provider.stream_synthesize = cancelled
-    with pytest.raises(asyncio.CancelledError):
-        await prepare_pre_originate_greeting(voice, "user")
-
-
-async def test_the_premake_is_bounded_to_2_5_seconds_and_leaves_a_failed_line(monkeypatch, caplog):
+async def test_a_line_finished_before_the_opener_is_due_is_used(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
-    assert premade_opener.OPENER_PREMADE_TIMEOUT_S == 2.5
-    monkeypatch.setattr(premade_opener, "OPENER_PREMADE_TIMEOUT_S", 0.2)
+    voice, s, gw, provider, _ = make_voice(monkeypatch, provider=Provider(delay=0.05, delay_on=2))
+    await prepare_pre_originate_greeting(voice, "user")
+    await asyncio.sleep(0.3)                                   # the phone rings
+    n = len(provider.texts)
+    assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
+    assert len(provider.texts) == n and "opener_premade_used" in caplog.text
+
+
+async def test_not_ready_yet_speaks_live_and_the_late_result_is_never_played(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    voice, s, gw, provider, pipe = make_voice(monkeypatch, provider=Provider(delay=0.4, delay_on=2))
+    await prepare_pre_originate_greeting(voice, "user")
+    n = len(provider.texts)
+    assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
+    assert provider.texts == [PLAIN, NOTICE_OPENER, NOTICE_OPENER]  # ringing, the background one, then LIVE
+    assert "reason=not_ready_yet" in caplog.text
+    assert "premade_chunks" not in pipe.calls[0][1]
+    await voice._premade_opener_task                           # the late result arrives ...
+    assert NOTICE_OPENER not in voice._premade_opener_lines    # ... and is dropped
+    assert "opener_premade_dropped" in caplog.text and "opener_premade_ready" not in caplog.text
+    assert premade_kwargs(voice, s, NOTICE_OPENER) == {}       # no later sentence with that text can use it
+
+
+async def test_the_background_bound_is_8_seconds_and_a_stuck_provider_fails_calmly(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    assert premade_opener.OPENER_PREMADE_BACKGROUND_TIMEOUT_S == 8.0
+    monkeypatch.setattr(premade_opener, "OPENER_PREMADE_BACKGROUND_TIMEOUT_S", 0.2)
+    voice, *_ = make_voice(monkeypatch, provider=Provider(delay=30, delay_on=2))
+    await _ring(voice)
+    assert "opener_premade_failed" in caplog.text and "reason=timeout" in caplog.text
+    assert not [r for r in caplog.records if r.name == LOGGER and r.levelno >= logging.WARNING]
+
+
+async def test_a_session_ended_early_leaves_one_calm_info_line(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
     provider = Provider()
     voice, *_ = make_voice(monkeypatch, provider=provider)
     real = provider.stream_synthesize
 
-    async def slow(text, **kw):
+    async def closed(text, **kw):
         if provider.texts:
-            await asyncio.sleep(30)
+            raise ConnectionError("provider closed under the task")
         async for c in real(text, **kw):
             yield c
 
-    provider.stream_synthesize = slow
-    loop = asyncio.get_running_loop()
-    t0 = loop.time()
-    await prepare_pre_originate_greeting(voice, "user")
-    assert loop.time() - t0 < 1.0
-    assert "opener_premade_failed" in caplog.text and "reason=timeout" in caplog.text
+    provider.stream_synthesize = closed
+    await _ring(voice)                                         # nothing escapes
+    lines = [r for r in caplog.records if r.name == LOGGER and "opener_premade_failed" in r.getMessage()]
+    assert len(lines) == 1 and lines[0].levelno == logging.INFO
+    assert "error:ConnectionError" in lines[0].getMessage()
+
+
+async def test_a_cancelled_background_task_ends_quietly_and_the_caller_is_not_hurt(monkeypatch, caplog):
+    caplog.set_level(logging.DEBUG)
+    voice, *_ = make_voice(monkeypatch, provider=Provider(delay=30, delay_on=2))
+    await prepare_pre_originate_greeting(voice, "user")        # returns; no exception
+    voice._premade_opener_task.cancel()
+    await asyncio.gather(voice._premade_opener_task, return_exceptions=True)
+    assert voice._premade_opener_task.cancelled()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+async def test_cancelling_the_pre_origination_itself_still_propagates(monkeypatch):
+    voice, *_ = make_voice(monkeypatch, provider=Provider(delay=30, delay_on=1))
+    task = asyncio.ensure_future(prepare_pre_originate_greeting(voice, "user"))
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 # ---------------------------------------------------------------- the proof
@@ -271,7 +322,7 @@ async def _run_notice_opener(monkeypatch, row, *, premade):
     status, evidence, mismatch, _ = row
     voice, session, gw, provider, pipe = make_voice(
         monkeypatch, gateway=Gateway(status, evidence, mismatch=mismatch))
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     if not premade:
         del voice._premade_opener_lines
     before = len(provider.texts)
@@ -314,7 +365,7 @@ async def test_premade_and_live_outcomes_are_identical(monkeypatch, row):
 async def test_through_the_real_caller_first_helper_the_notice_opener_is_premade(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     voice, s, gw, provider, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n = len(provider.texts)
     assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
     assert len(provider.texts) == n
@@ -329,7 +380,7 @@ async def test_through_the_real_caller_first_helper_the_notice_opener_is_premade
 async def test_no_notice_owed_the_plain_opener_uses_the_ringing_audio(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     voice, s, gw, provider, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n = len(provider.texts)
     assert await _answer(NO_NOTICE, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
     assert len(provider.texts) == n
@@ -341,7 +392,7 @@ async def test_no_notice_owed_the_plain_opener_uses_the_ringing_audio(monkeypatc
 
 async def test_a_tenants_own_notice_is_live_then_the_opener_is_premade(monkeypatch):
     voice, s, gw, provider, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n = len(provider.texts)
     assert await _answer(TENANT_NOTICE, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
     assert provider.texts[n:] == [TENANT_TEXT]                # one live synthesis, the tenant text
@@ -361,7 +412,7 @@ async def test_a_tenants_own_notice_is_live_then_the_opener_is_premade(monkeypat
 async def test_any_difference_speaks_live(monkeypatch, caplog, change, reason):
     caplog.set_level(logging.INFO)
     voice, s, gw, provider, pipe = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     live_provider = provider
     if change == "name":
         s.config.callee_first_name = "Jane"
@@ -392,19 +443,19 @@ def apply_expected(text, session):
 
 async def test_each_premade_line_is_used_at_most_once(monkeypatch):
     voice, s, gw, provider, pipe = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert "premade_chunks" in premade_kwargs(voice, s, NOTICE_OPENER)
     assert premade_kwargs(voice, s, NOTICE_OPENER) == {}
     # after the caller-first opener, the silent-pickup greeting speaks nothing
     voice2, s2, gw2, provider2, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice2, "user")
+    await _ring(voice2)
     await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s2, "Hello?"))
     sent, texts = list(gw2.sent), list(provider2.texts)
     await _answer(PLATFORM, lambda: _send_outbound_greeting(voice2))
     assert gw2.sent == sent and provider2.texts == texts
     # and the other way round: the silent-pickup greeting ran, the helper then speaks nothing
     voice3, s3, gw3, provider3, _ = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice3, "user")
+    await _ring(voice3)
     await _answer(PLATFORM, lambda: _send_outbound_greeting(voice3))
     sent, texts = list(gw3.sent), list(provider3.texts)
     assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s3, "Hello?")) is False
@@ -413,7 +464,7 @@ async def test_each_premade_line_is_used_at_most_once(monkeypatch):
 
 async def test_barge_in_during_the_premade_opener_keeps_the_caller_first_rule(monkeypatch):
     voice, s, gw, provider, pipe = make_voice(monkeypatch, gateway=Gateway(interrupt_after=1))
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n, sent_before = len(provider.texts), 0
     assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
     assert rps.get_disclosure_state(CALL) == "failed"
@@ -427,7 +478,7 @@ async def test_barge_in_during_the_premade_opener_keeps_the_caller_first_rule(mo
 
 async def test_a_partial_premade_playback_is_never_finished_live(monkeypatch):
     voice, s, gw, provider, pipe = make_voice(monkeypatch, gateway=Gateway(fail_after=1))
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n = len(provider.texts)
     await _answer(PLATFORM, lambda: _speak_recording_disclosure(
         voice, opener_with_notice=NOTICE_OPENER))
@@ -438,7 +489,7 @@ async def test_a_partial_premade_playback_is_never_finished_live(monkeypatch):
 
 async def test_the_silent_pickup_greeting_uses_the_premade_notice_opener(monkeypatch):
     voice, s, gw, provider, pipe = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     n = len(provider.texts)
     await _answer(PLATFORM, lambda: _send_outbound_greeting(voice))
     assert len(provider.texts) == n
@@ -453,7 +504,7 @@ async def test_sessions_without_a_store_are_untouched(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     # agent-first, an inbound-shaped call and a Test-agent-shaped session: no store
     voice, s, gw, provider, pipe = make_voice(monkeypatch, direction="inbound")
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert not hasattr(voice, "_premade_opener_lines")
     assert premade_kwargs(voice, s, PLAIN) == {}
     assert premade_kwargs(types.SimpleNamespace(), s, PLAIN) == {}
@@ -465,7 +516,7 @@ async def test_sessions_without_a_store_are_untouched(monkeypatch, caplog):
 async def test_an_incoming_call_never_uses_or_makes_premade_opener_audio(monkeypatch):
     voice, s, gw, provider, pipe = make_voice(monkeypatch, direction="inbound")
     s._inbound_greeting = None
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert not hasattr(voice, "_premade_opener_lines")
     assert provider.texts and len(provider.texts) == 1        # only today's single ringing synthesis
     # even a store planted by mistake is never reached by the incoming identity line
@@ -478,9 +529,10 @@ async def test_the_kill_switch_off_runs_todays_live_path(monkeypatch, caplog):
     caplog.set_level(logging.INFO)
     monkeypatch.setenv("OPENER_PREMADE_ENABLED", "false")
     voice, s, gw, provider, pipe = make_voice(monkeypatch)
-    await prepare_pre_originate_greeting(voice, "user")
+    await _ring(voice)
     assert provider.texts == [PLAIN]                          # no extra synthesis
     assert not hasattr(voice, "_premade_opener_lines")
+    assert not hasattr(voice, "_premade_opener_task")         # no task started at all
     assert "opener_premade_wiring" in caplog.text and "enabled=False" in caplog.text
     assert "opener_premade_off" in caplog.text
     assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
@@ -530,3 +582,90 @@ async def test_the_pipeline_passes_premade_chunks_only_when_given(monkeypatch):
     first, second = svc.__dict__["_tts_playback_inst"].synthesize_and_send.await_args_list
     assert "premade_chunks" not in first.kwargs
     assert second.kwargs["premade_chunks"] == [b"\x00\x00"]
+
+
+# ------------------------------------------------- the reviewer's two extra cases
+
+async def _real_gateway(hook=None):
+    from app.infrastructure.telephony.telephony_media_gateway import TelephonyMediaGateway
+
+    gw = TelephonyMediaGateway()
+    await gw.initialize({"sample_rate": 16000, "tts_source_format": "s16le"})
+    loop = asyncio.get_running_loop()
+    sends = []
+
+    async def send_tts_audio(pbx, packet):
+        sends.append((loop.time(), len(packet)))
+        if hook:
+            hook(len(sends))
+
+    async def finish(call_id, uid):
+        return {"utterance_id": uid, "status": "completed", "evidence": "transmitted", "played_ms": 20}
+
+    adapter = types.SimpleNamespace(
+        begin_tts_utterance=AsyncMock(), send_tts_audio=send_tts_audio, finish_tts_utterance=finish,
+        interrupt_tts=AsyncMock(return_value={"ok": True}),
+    )
+    await gw.on_call_started(CALL, {"adapter": adapter, "pbx_call_id": "pbx"})
+    return gw, adapter, sends
+
+
+def _playback_over(gw, provider):
+    pipe = types.SimpleNamespace(
+        tts_provider=provider, media_gateway=gw, stt_provider=object(), latency_tracker=MagicMock(),
+        tts_sample_rate=16000, _record_silent_turn=MagicMock())
+    return TtsPlayback(pipe)
+
+
+_TONE20MS = (3000).to_bytes(2, "little", signed=True) * 320      # 20 ms at 16 kHz s16le
+
+
+async def test_premade_audio_through_the_real_gateway_is_paced_with_one_begin_and_finish():
+    gw, adapter, sends = await _real_gateway()
+    provider = Provider()
+    s = _call_session()
+    gw.set_barge_in_event(CALL, s.barge_in_event)
+    interrupted = await _playback_over(gw, provider).synthesize_and_send(
+        s, "x", barge_in_event=s.barge_in_event, track_latency=False,
+        premade_chunks=[_TONE20MS] * 60)                          # 1.2 s of audio, all ready at once
+    assert interrupted is False and provider.texts == []
+    t0, sent_ms = sends[0][0], 0
+    for t, size in sends:
+        sent_ms += size / 8                                       # 8 bytes per ms of 8 kHz mu-law
+        assert sent_ms - (t - t0) * 1000 <= 300 + 40, "audio sent more than ~300 ms ahead of real time"
+    assert sent_ms == 1200
+    adapter.begin_tts_utterance.assert_awaited_once()
+    assert s._tts_playback_receipt["evidence"] == "transmitted"
+
+
+async def test_a_barge_in_in_the_middle_of_premade_audio_stops_it_on_the_real_gateway():
+    s = _call_session()
+    gw, adapter, sends = await _real_gateway(
+        hook=lambda n: s.barge_in_event.set() if n == 5 else None)
+    gw.set_barge_in_event(CALL, s.barge_in_event)
+    interrupted = await _playback_over(gw, Provider()).synthesize_and_send(
+        s, "x", barge_in_event=s.barge_in_event, track_latency=False, premade_chunks=[_TONE20MS] * 60)
+    assert interrupted is True
+    assert len(sends) < 12                                        # stopped, not played out (60 chunks)
+    adapter.begin_tts_utterance.assert_awaited_once()
+    assert s._tts_delivery_status != "submitted" and s._tts_playback_receipt is None
+
+
+async def test_the_store_is_found_through_the_session_the_helper_receives(monkeypatch, caplog):
+    from app.domain.services.voice_orchestrator import VoiceSession, VoiceSessionConfig
+
+    caplog.set_level(logging.INFO)
+    fake, s, gw, provider, pipe = make_voice(monkeypatch)
+    # The real VoiceSession dataclass, wired as voice_orchestrator wires it: the ringing
+    # code reads provider/voice/rate from the session and its config, the speaking code
+    # from the call session and the pipeline.
+    voice = VoiceSession(
+        call_id=CALL, talklee_call_id="t", call_session=s, tts_provider=provider,
+        media_gateway=gw, pipeline=pipe, config=VoiceSessionConfig(voice_id="v", tts_sample_rate=16000))
+    voice._dialer_tenant_id = TENANT
+    s._voice_session_ref = voice
+    await _ring(voice)
+    assert s._voice_session_ref is voice and NOTICE_OPENER in voice._premade_opener_lines
+    n = len(provider.texts)
+    assert await _answer(PLATFORM, lambda: speak_disclosure_before_first_reply(s, "Hello?")) is True
+    assert len(provider.texts) == n and "opener_premade_used" in caplog.text
