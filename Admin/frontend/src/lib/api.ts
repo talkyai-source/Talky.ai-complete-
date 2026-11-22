@@ -2389,6 +2389,16 @@ class ApiClient {
         return this.request<BillingConfig>('/billing/config', { timeoutMs: 15_000 });
     }
 
+    // Stripe and PayPal messages parked as "needs review". Validated by the caller (payment-reviews.ts).
+    async getPaymentReviews() {
+        return this.request<unknown>('/admin/billing/payment-reviews', { timeoutMs: 20_000 });
+    }
+
+    // Marks one as handled. The server takes the operator from the signed-in admin; none is sent.
+    async closePaymentReview(body: { provider: 'stripe' | 'paypal'; event_id: string; seen_attempt_count: number; reason: string }) {
+        return this.request<unknown>('/admin/billing/payment-reviews/close', { method: 'POST', body, timeoutMs: 20_000 });
+    }
+
     /**
      * Report one panel error. Deliberately NOT routed through request(): a 401 here must
      * not start the refresh-and-retry, sign the person out or raise any global signal, and

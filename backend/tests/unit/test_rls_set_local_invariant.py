@@ -264,6 +264,7 @@ _RLS_TABLES = (
     "paypal_subscription_payments",
     "paypal_subscriptions",
     "paypal_webhook_events",
+    "paypal_webhook_review_log",
     "plan_price_options",
     "processed_webhook_events",
     "public_contact_enquiries",
