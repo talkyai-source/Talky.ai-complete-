@@ -12406,10 +12406,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "415e98252b3af58ac66606adb05e5d39b5d1e745111998d227a0738119053d37",
+      "id": "72e660c9ed78befe1914d00f735cb7c2085b4b8ed533e4513f713585eae04317",
       "file": "app/api/v1/endpoints/admin/sip_trunks.py",
       "function": "list_admin_sip_trunks",
-      "line": 77,
+      "line": 84,
       "method": "fetchval",
       "tables": [
         "tenant_sip_trunks"
@@ -12419,14 +12419,14 @@
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/sip_trunks.py:77.",
+      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/sip_trunks.py:84.",
       "category": "platform_admin"
     },
     {
-      "id": "5187a11c6d44215725f8d672f251575e870063490d4e6fc39fb7d69178230446",
+      "id": "a25d402d767e5a3f7eeb06913cf609d8da9af3e8b6f323ce4b492ba443575c28",
       "file": "app/api/v1/endpoints/admin/sip_trunks.py",
       "function": "list_admin_sip_trunks",
-      "line": 79,
+      "line": 86,
       "method": "fetch",
       "tables": [
         "tenant_sip_trunks"
@@ -12436,7 +12436,7 @@
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/sip_trunks.py:79.",
+      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/sip_trunks.py:86.",
       "category": "platform_admin"
     },
     {

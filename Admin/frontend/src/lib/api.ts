@@ -306,6 +306,9 @@ export interface AdminSipTrunkItem {
     live_registration_status: string | null;
     live_status_detail: string | null;
     live_status_checked_at: string | null;
+    /** True when the stored status is older than the updater's freshness limit (or was never written). */
+    stale?: boolean;
+    live_status_age_seconds?: number | null;
     last_tested_at: string | null;
     created_at: string | null;
     updated_at: string | null;
@@ -1375,6 +1378,16 @@ export interface DetailedHealthResponse {
     checked_at: string;
     last_updated: string;
     metrics_scope: string;
+    /** The server health watch's last result (talky-healthwatch). */
+    health_watch?: HealthWatchState | null;
+}
+
+export interface HealthWatchState {
+    overall: 'ok' | 'alert' | 'unknown';
+    last_run_at: number | null;
+    age_seconds: number | null;
+    interval_seconds: number;
+    alerting: Array<{ name: string; status: string; sentence: string }>;
 }
 
 export interface WorkerStatus {

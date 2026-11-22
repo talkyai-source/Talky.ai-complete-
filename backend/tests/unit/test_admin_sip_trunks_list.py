@@ -96,3 +96,30 @@ async def test_a_bad_tenant_id_is_a_422(conn):
         await _list(tenant_id="nope")
     assert refused.value.status_code == 422
     assert conn.fetch == []
+
+
+async def test_a_status_older_than_the_limit_is_stale_with_its_age_and_a_fresh_one_is_not(conn, monkeypatch):
+    from datetime import timedelta
+    from app.domain.services.telephony.trunk_runtime import DEFAULT_FRESHNESS_SECONDS
+    monkeypatch.delenv("TELEPHONY_TRUNK_STATUS_FRESHNESS_SECONDS", raising=False)
+    now = datetime.now(timezone.utc)
+    rows = [dict(ROW, live_status_checked_at=now - timedelta(hours=3)),
+            dict(ROW, live_status_checked_at=now - timedelta(seconds=5)),
+            dict(ROW, live_status_checked_at=None)]
+
+    class Conn:
+        async def fetchval(self, query, *args):
+            return 3
+
+        async def fetch(self, query, *args):
+            return rows
+
+    @asynccontextmanager
+    async def acquire(pool, tenant_id):
+        yield Conn()
+
+    monkeypatch.setattr(admin_trunks, "acquire_with_tenant", acquire)
+    old, fresh, never = (await _list()).items
+    assert old.stale is True and 3 * 3600 - 5 <= old.live_status_age_seconds <= 3 * 3600 + 60
+    assert fresh.stale is False and 0 <= fresh.live_status_age_seconds < DEFAULT_FRESHNESS_SECONDS
+    assert never.stale is True and never.live_status_age_seconds is None

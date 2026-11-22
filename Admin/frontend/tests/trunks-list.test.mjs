@@ -252,3 +252,18 @@ test('paging: 20 per page, next and previous send the page, the last page stops,
     await changeSelect('select[aria-label="Switched on"]', 'true');
     assert.deepEqual(Object.fromEntries(lastQuery()), { page: '1', page_size: '20', is_active: 'true' });
 });
+
+test('table: a stale status reads "Not current" with its age, never green; a fresh one is unchanged', async () => {
+    route(() => response(pageOf([
+        trunk(1, { stale: true, live_status_age_seconds: 3 * 3600 + 120 }),
+        trunk(2, { stale: false, live_status_age_seconds: 4 }),
+    ])));
+    await draw();
+    const badge = (row) => state.host.querySelectorAll('tbody tr')[row].querySelector('.call-status-badge');
+    assert.equal(badge(0).textContent, 'Not current');
+    assert.equal(badge(0).classList.contains('status-completed'), false);
+    assert.match(cells(0)[7], /Not current\s+last checked 3 hours ago/);
+    assert.equal(badge(1).textContent, 'Registered');
+    assert.equal(badge(1).classList.contains('status-completed'), true);
+    assert.doesNotMatch(cells(1)[7], /last checked/);
+});

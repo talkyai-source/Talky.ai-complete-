@@ -3,6 +3,7 @@
 Credentials never leave the table: the query reads only whether a password
 is stored, not the username or the encrypted password.
 """
+from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
@@ -12,6 +13,7 @@ from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform
 from app.api.v1.validation import pagination_offset
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.domain.services.telephony.trunk_runtime import trunk_status_freshness_seconds
 
 from ._serialization import AdminResponseModel
 
@@ -34,6 +36,11 @@ class AdminSipTrunkItem(AdminResponseModel):
     live_registration_status: Optional[str] = None
     live_status_detail: Optional[str] = None
     live_status_checked_at: Optional[str] = None
+    # True when the stored status is older than trunk_status_freshness_seconds()
+    # (60 s = six passes of the 10 s talky-trunk-status loop, the same limit call
+    # admission uses) or was never written: the updater may have stopped.
+    stale: bool = True
+    live_status_age_seconds: Optional[int] = None
     last_tested_at: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -87,7 +94,21 @@ async def list_admin_sip_trunks(
                 *args, page_size, offset)
     except Exception as exc:
         raise HTTPException(status_code=503, detail="SIP trunk list is temporarily unavailable") from exc
+    limit = trunk_status_freshness_seconds()
+    now = datetime.now(timezone.utc)
+    items = []
+    for row in rows:
+        data = dict(row)
+        checked = data.get("live_status_checked_at")
+        if isinstance(checked, datetime):
+            if checked.tzinfo is None:
+                checked = checked.replace(tzinfo=timezone.utc)
+            age = max(0, int((now - checked).total_seconds()))
+            data["live_status_age_seconds"], data["stale"] = age, age > limit
+        else:
+            data["live_status_age_seconds"], data["stale"] = None, True
+        items.append(AdminSipTrunkItem(**data))
     return AdminSipTrunkListResponse(
-        items=[AdminSipTrunkItem(**dict(row)) for row in rows],
+        items=items,
         total=int(total or 0), page=page, page_size=page_size,
     )
