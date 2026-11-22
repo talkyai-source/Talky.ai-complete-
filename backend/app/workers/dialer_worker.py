@@ -2344,10 +2344,8 @@ class DialerWorker:
         A failed read raises ``ComplianceLookupUnavailable`` (the caller
         defers; an unreadable state is never a licence to dial).
         """
-        from app.domain.services.dialer.block_reasons import (
-            contact_permission_dial_gate_enabled,
-        )
         from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+        from app.domain.services.dialer.permission_gate import dial_time_decision
 
         try:
             async with self._acquire_db() as conn:
@@ -2389,9 +2387,12 @@ class DialerWorker:
             return "lead_not_dialable"
         # CONTACT_PERMISSION_DIAL_GATE (off by default): a contact whose list has
         # no calling-permission confirmation, or that has no list, is not dialled.
-        if contact_permission_dial_gate_enabled() and (
-            row.get("lead_list_id") is None or row.get("list_confirmed_at") is None
-        ):
+        # ``warn`` runs the same check and logs it, but never blocks.
+        if dial_time_decision(
+            job,
+            has_list=row.get("lead_list_id") is not None,
+            recorded=row.get("list_confirmed_at") is not None,
+        ) == "block":
             return "contact_permission_missing"
         return None
 

@@ -105,7 +105,7 @@ _RULES: list[tuple[str, IssueAdvice]] = [
     )),
     ("contact_permission_missing", IssueAdvice(
         "Permission to call not confirmed",
-        "Open the contact list and confirm you have permission to call these contacts, then start the campaign again.",
+        "Confirm permission on the contact list. While the campaign runs, its contacts are then queued straight away.",
         "warning", "contact",
     )),
     # Phone line / route refusals (trunk_resolver + outbound readiness).

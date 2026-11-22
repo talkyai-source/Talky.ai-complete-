@@ -336,7 +336,7 @@
       "id": "09271bb5fb58b7115b19faf06b2ffe892c8e258b11c3452685b769fa6fe425ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 3027,
+      "line": 3028,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -956,7 +956,7 @@
       "id": "11a163d6a57788f503a712047df0579592a0920270b7f6a971151ccae4008680",
       "file": "app/domain/services/call_redial_service.py",
       "function": "_job_state",
-      "line": 83,
+      "line": 87,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -1049,7 +1049,7 @@
       "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2707,
+      "line": 2708,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -1098,7 +1098,7 @@
       "id": "1932d77adb490c8554c84be0f3a7d8556dc3795ca145191a722c44b3c9ad77d1",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2948,
+      "line": 2949,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -1241,7 +1241,7 @@
       "id": "1e260247763be722441145ca86be4b835a02ddea8fa607c6ceebe98137452245",
       "file": "app/infrastructure/assistant/tools/calls.py",
       "function": "initiate_call",
-      "line": 105,
+      "line": 125,
       "method": "fetchval",
       "tables": [
         "dialer_jobs"
@@ -1660,7 +1660,7 @@
       "id": "30f43b2bcb1d0980e26d85305e0e3a46397ebe3a0be9d478d4f1aaa854e5003b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_campaign_calling_config",
-      "line": 2465,
+      "line": 2466,
       "method": "fetchval",
       "tables": [
         "campaigns"
@@ -1774,7 +1774,7 @@
       "id": "3703ed4d5cef73e13a0043ab6270e6c5415d7574280d93aa94b425943bb3964b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2922,
+      "line": 2923,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2387,7 +2387,7 @@
       "id": "487e1b5192d85f5114fdefaa5f12a6420d06d9830b69191efe80a9d8f607c62c",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_last_called",
-      "line": 2654,
+      "line": 2655,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2436,7 +2436,7 @@
       "id": "4ade25424bc1a3e0f75739755e72548af3e3c7f946f7b1b6f89e46b1357a8945",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._campaign_inflight_calls",
-      "line": 2519,
+      "line": 2520,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -2738,7 +2738,7 @@
       "id": "55946d61b857a13071f79980232feb2e3293c6bcf1e05fa996c177063185be9d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_timezone",
-      "line": 2680,
+      "line": 2681,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2976,7 +2976,7 @@
       "id": "5f9b82e40498a7df8992ba5c19b12602225d936901f5f7b9d10da9ab679dd29e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._load_existing_call_intent",
-      "line": 2823,
+      "line": 2824,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -4013,10 +4013,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8ab5d7aa2c3687c578efd2aa9478c155c5b02dc3263665e9786a04b3f2dc284f",
+      "id": "24f939aebc1aa568c98e30ffaf03a80a020e29f4020550df55ce6afd2de753bb",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 4166,
+      "line": 4167,
       "method": "execute",
       "tables": [
         "leads"
@@ -4218,7 +4218,7 @@
       "id": "846b0c6d66c0c9f4ec6d237aca4753fc00004d818c2311d5408e2d69b7b2da23",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._attempt_settled_failed_unanswered",
-      "line": 3611,
+      "line": 3612,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -4630,10 +4630,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9456c53d360a189d4dfde4d9fe8f3c7505e131a5f4c92e48568f45d40f426b87",
+      "id": "b29c164721fbf4ff36046497983b04207e2c4c0f142d64a189a18607d9ee16cf",
       "file": "app/domain/services/call_redial_service.py",
       "function": "_context",
-      "line": 41,
+      "line": 45,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -5034,7 +5034,7 @@
       "id": "a1b9751685d701a3e78c01ee999fca8012c790e4b3a0d8d2f72fab2c3e59f3c4",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2973,
+      "line": 2974,
       "method": "execute",
       "tables": [
         "call_events"
@@ -5066,7 +5066,7 @@
       "id": "a345e4856e73f82534509aff07e61ed4c8d684aced80686ec43b5d115f870e09",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._bind_call_intent",
-      "line": 3754,
+      "line": 3755,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -5903,7 +5903,7 @@
       "id": "c1fd75a4915b6aabe45433890d55d5804a3573f7dafe9ecf7081e18bc709142e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2996,
+      "line": 2997,
       "method": "execute",
       "tables": [
         "call_events"
@@ -6656,10 +6656,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6703471c4a5f0065a7e95105b49f7bda885c324174a5df371044b9edad54d6f0",
+      "id": "545296be15f1ab3f7ba06786cebf9e1191aebb886b03d8edd6c0f8b0aef10dce",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3845,
+      "line": 3846,
       "method": "execute",
       "tables": [
         "calls"
@@ -7374,7 +7374,7 @@
       "id": "f314ccbcf229348fd598ef3b2f111cadc3f9356a02c7dc1fa7c54244013a89ba",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._lead_has_live_or_answered_call",
-      "line": 4241,
+      "line": 4242,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -9122,7 +9122,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "ef3d9345137cb2c2db53d12d28b9afa3070678045f7503d5b2be7ca1db2b4c67",
+      "id": "8b5c623ff8146dd5e18be34d9c3a4b00339deee3d293e27e53a93173f9bd07cf",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1321,
@@ -9288,7 +9288,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "26c0e7c8b1dcf34adb90c574a15f37e7300f13ca7c719a869d93ba381130fd0f",
+      "id": "4592eaba182f859d5a2e2e6975873a91f9df4b7c76b29bb9064dac8563b87338",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 871,
@@ -9856,10 +9856,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "e94056afaf494070450de25d27c68d7ed6df9f7dbfddebdc0f27af25ee9bfd34",
+      "id": "0a0bd9085d4cf0dd9795402113bacfebd217c37033d58ad9ac3fd4398d8b02ef",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1690,
+      "line": 1691,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -10166,10 +10166,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "21d8a424090eeeca6e6de10ed406e0213843c90857ffafc198c8e15c891efbae",
+      "id": "40f935e2de6a54fb5b9219fc550fade57fce94372674c587e567054df09e4802",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2440,
+      "line": 2441,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10337,7 +10337,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "112bd17c3bcd01d7e02caa36b487fc4438577be973b87488a16ccf1a3a014ffd",
+      "id": "40b3d919770f6774ede94777cb63745a2a5ad2d036edaacd3b242ce9cf235393",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1148,
@@ -10435,10 +10435,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "9dbd52280548b77d6e9c12069c3babb2d85695ab91d6171bb38bf0661f472c03",
+      "id": "dbe55d53180073f4daf5bede29ad784ce473b4783b33113c0be8d26433b070f0",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2277,
+      "line": 2278,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -12580,7 +12580,7 @@
       "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._stale_payload_reason",
-      "line": 2354,
+      "line": 2352,
       "method": "fetchrow",
       "tables": [
         "contact_lists",
@@ -12592,7 +12592,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2354.",
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2352.",
       "category": "reviewed_tenant_scoped"
     },
     {

@@ -1371,6 +1371,7 @@ async def start_campaign(
             "jobs_enqueued": result.jobs_enqueued,
             # D3-14: a large start answers before queueing; GET shows progress.
             "jobs_dispatching": getattr(result, "jobs_dispatching", 0),
+            "jobs_withheld": int(getattr(result, "jobs_withheld", 0) or 0),
             "queue_stats": result.queue_stats,
             "campaign": {"id": result.campaign_id, "status": "running"}
         }

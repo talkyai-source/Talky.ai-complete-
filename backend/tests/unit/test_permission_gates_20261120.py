@@ -25,6 +25,9 @@ from app.api.v1.endpoints.assistant_config import router as assistant_router
 from app.api.v1.endpoints.campaigns import router as campaigns_router
 from app.api.v1.endpoints.connectors import router as connectors_router
 from app.api.v1.endpoints.contact_lists import router as contact_lists_router
+from app.api.v1.endpoints.contact_permission_confirm import (
+    router as contact_permission_router,
+)
 from app.api.v1.endpoints.dnc import router as dnc_router
 from app.api.v1.endpoints.tenant_ai_credentials import router as credentials_router
 from app.domain.services import call_feedback_service as fb_service
@@ -91,6 +94,8 @@ _PERM_ROUTES = [
     (campaigns_router, "GET", "/campaigns/{campaign_id}/stats", {Permission.CAMPAIGNS_READ}),
     (campaigns_router, "GET", "/campaigns/{campaign_id}/contacts", {Permission.CAMPAIGNS_READ}),
     (contact_lists_router, "GET", "/campaigns/{campaign_id}/contact-lists", {Permission.CAMPAIGNS_READ}),
+    (contact_permission_router, "GET", "/campaigns/{campaign_id}/contact-permission",
+     {Permission.CAMPAIGNS_READ}),
     (connectors_router, "GET", "/connectors", {Permission.CONNECTORS_READ}),
     (connectors_router, "GET", "/connectors/status", {Permission.CONNECTORS_READ}),
     (connectors_router, "GET", "/connectors/{connector_id}", {Permission.CONNECTORS_READ}),

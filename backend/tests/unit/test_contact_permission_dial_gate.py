@@ -462,9 +462,10 @@ def test_reason_has_advice_in_the_exact_user_words():
         assert advice is not call_issue_advice._FALLBACK
         assert advice.title == "Permission to call not confirmed"
         assert advice.suggestion == (
-            "Open the contact list and confirm you have permission to call these "
-            "contacts, then start the campaign again."
+            "Confirm permission on the contact list. While the campaign runs, its "
+            "contacts are then queued straight away."
         )
+        assert "start the campaign again" not in advice.suggestion
         assert advice.severity == "warning"
 
 
@@ -497,12 +498,14 @@ from tests.unit.test_campaign_start_dispatch_truth import _DB as _StartDB  # noq
 from tests.unit.test_campaign_start_dispatch_truth import _Queue as _StartQueue  # noqa: E402
 
 NOTE_MANY = (
-    "{n} contacts were not queued because their list has no confirmed permission "
-    "to call. Open the contact list and confirm it, then start the campaign again."
+    "{n} contacts were not queued because no permission to call is recorded for "
+    "their list. Confirm permission on the contact list; while the campaign runs, "
+    "they are then queued straight away."
 )
 NOTE_ONE = (
-    "1 contact was not queued because its list has no confirmed permission "
-    "to call. Open the contact list and confirm it, then start the campaign again."
+    "1 contact was not queued because no permission to call is recorded for "
+    "its list. Confirm permission on the contact list; while the campaign runs, "
+    "they are then queued straight away."
 )
 PLAIN = "Campaign campaign-1 started"
 PLAIN_EMPTY = "Campaign campaign-1 started (no pending leads)"
@@ -688,7 +691,7 @@ async def test_call_this_list_says_why_when_its_contacts_were_withheld(monkeypat
     out = await _call_one_list(monkeypatch, withheld=3)
     assert out.jobs_enqueued == 0
     assert out.message.startswith("List activated")
-    assert "3 contacts were not queued because their list has no confirmed permission to call." in out.message
+    assert "3 contacts were not queued because no permission to call is recorded for their list." in out.message
 
 
 @pytest.mark.asyncio

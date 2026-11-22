@@ -57,6 +57,8 @@ UUID_ROUTES = {
     "clients": dict.fromkeys(["get_client", "delete_client"], ("client_id",)),
     "meetings": dict.fromkeys(["get_meeting", "update_meeting", "cancel_meeting"], ("meeting_id",)),
     "contacts": dict.fromkeys(["upload_campaign_contacts", "paste_campaign_contacts"], ("campaign_id",)),
+    "contact_permission_confirm": dict.fromkeys(
+        ["get_contact_permission_summary", "confirm_ungrouped_permission"], ("campaign_id",)),
     "connectors": dict.fromkeys(["get_connector", "delete_connector", "refresh_connector_tokens"], ("connector_id",)),
     "lead_details": {"get_lead_fields": ("campaign_id",), "set_lead_fields": ("campaign_id",),
         "get_lead_details": ("call_id",), "get_contact_lead_details": ("lead_id",),
