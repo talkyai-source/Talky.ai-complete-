@@ -75,14 +75,17 @@ _CAMPAIGN_STATS_TTL = 10.0
 _CAMPAIGN_STATS_MAX = 128
 
 
-async def _count_new_contact_if_running(db_client, campaign: dict, campaign_id: str, tenant_id: str) -> None:
+async def _count_new_contact_if_running(
+    db_client, campaign: dict, campaign_id: str, tenant_id: str, do_not_call: bool = False,
+) -> None:
     """A brand-new contact on a running campaign counts once in ``total_leads``.
 
     The add endpoint never touched that column, so the campaign list and detail
     showed the old total. One atomic, tenant-scoped, status-guarded increment;
     best effort. Completed/failed counters are never touched.
     """
-    if str(campaign.get("status") or "") != "running":
+    if str(campaign.get("status") or "") != "running" or do_not_call:
+        # A do-not-call contact can never be selected, so it never counts toward 100%.
         return
     try:
         async with acquire_with_tenant(db_client.pool, str(tenant_id)) as conn:
@@ -94,6 +97,18 @@ async def _count_new_contact_if_running(db_client, campaign: dict, campaign_id: 
     except Exception as exc:  # noqa: BLE001 - the contact write stands
         logger.warning("contact_total_not_counted campaign=%s error=%s",
                        str(campaign_id)[:8], type(exc).__name__)
+
+
+async def _contact_has_live_call(db_client, tenant_id: str, lead_id: str) -> bool:
+    """True when a real (non-test) call of this contact is live. Raises on a failed read."""
+    from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+    async with acquire_with_tenant(db_client.pool, str(tenant_id)) as conn:
+        # A plain SELECT ... LIMIT 1 (not SELECT EXISTS(...)): the tenant-SQL scanner reads the
+        # tenant predicate of a top-level WHERE, not of a sub-select.
+        return await conn.fetchval(
+            "SELECT 1 FROM calls WHERE tenant_id = $1::uuid AND lead_id = $2::uuid"
+            " AND status = ANY($3::text[]) AND is_test IS NOT TRUE LIMIT 1",
+            str(tenant_id), str(lead_id), list(CAMPAIGN_LIVE_CALL_STATUSES)) is not None
 
 
 async def _queue_new_contacts_if_running(
@@ -109,6 +124,17 @@ async def _queue_new_contacts_if_running(
     A lost race on the job insert (two contacts added at once) is retried once.
     """
     if str(campaign.get("status") or "") != "running":
+        return
+    # The start path only sees active JOBS. A contact removed during its live call and
+    # added back, or renumbered while its first call is still up, has no active job yet
+    # a live call: queueing it would ring the same person twice. Unreadable counts as
+    # live. The contact then waits for the next Start, as before.
+    try:
+        live = await _contact_has_live_call(db_client, tenant_id, lead_id)
+    except Exception:  # noqa: BLE001 - never queue on an unknown
+        live = True
+    if live:
+        logger.warning("contact_queue_skipped_live_call campaign=%s", str(campaign_id)[:8])
         return
     for attempt in (1, 2):
         try:
@@ -2252,7 +2278,8 @@ async def add_contact_to_campaign(
 
         logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
         await _count_new_contact_if_running(
-            db_client, campaign, campaign_id, current_user.tenant_id)
+            db_client, campaign, campaign_id, current_user.tenant_id,
+            do_not_call=bool(expanded_values["do_not_call"]))
         await _queue_new_contacts_if_running(
             db_client, campaign, campaign_id, current_user.tenant_id, lead_id)
 
@@ -2380,14 +2407,27 @@ async def update_contact_in_campaign(
             ).in_(
                 "status", list(NOT_ORIGINATED_JOB_STATUSES),
             ).execute()
-            if getattr(cancelled_jobs, "data", None):
-                # A cancelled retry leaves the lead 'called', which no Start
-                # selects: move it back so the new number is dialled (G-F8).
+            try:
+                if getattr(cancelled_jobs, "data", None):
+                    # A cancelled retry leaves the lead 'called', which no Start
+                    # selects: move it back so the new number is dialled (G-F8).
+                    db_client.table("leads").update({"status": "pending"}).eq(
+                        "id", contact_id,
+                    ).eq("tenant_id", current_user.tenant_id).eq(
+                        "campaign_id", campaign_id,
+                    ).eq("status", "called").execute()
+                # A contact skipped for an invalid number is dialled again once the
+                # number is corrected (only that exact reason).
                 db_client.table("leads").update({"status": "pending"}).eq(
                     "id", contact_id,
                 ).eq("tenant_id", current_user.tenant_id).eq(
                     "campaign_id", campaign_id,
-                ).eq("status", "called").execute()
+                ).eq("status", "skipped").eq(
+                    "last_call_result", "invalid_phone_number",
+                ).execute()
+            except Exception as exc:  # noqa: BLE001 - the edit stands
+                logger.warning("contact_requeue_status_not_reset campaign=%s error=%s",
+                               str(campaign_id)[:8], type(exc).__name__)
 
         resp = (
             db_client.table("leads")

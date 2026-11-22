@@ -27,6 +27,12 @@ from tests.unit.test_campaign_start_dispatch_truth import _DB, _Queue
 from tests.unit.test_live_risk_contacts import _JobsDB, _status
 from tests.unit.test_bh_campaigns_contacts_contact_writes import _DB as _ContactDB, _User
 
+@pytest.fixture(autouse=True)
+def _no_live_call(monkeypatch):
+    """These tests are about queueing; the live-call guard has its own file."""
+    monkeypatch.setattr(campaigns_ep, "_contact_has_live_call", AsyncMock(return_value=False))
+
+
 PERMISSION = {
     "basis": "express_consent",
     "source": "Customer sign-up form, March 2026",
