@@ -9425,7 +9425,7 @@
       "id": "4faddfc1ffe82d25a4f2adb64aeb12b997df7a04e55366b06ee508f4b4bb79ad",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 371,
+      "line": 335,
       "method": "execute",
       "tables": [
         "billing_webhook_notifications"
@@ -9435,7 +9435,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:371.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:335.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -9631,7 +9631,7 @@
       "id": "5a14ccff4ee66446d46d39d3827652454673b3a60148408f9cf08867257a7e27",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 356,
+      "line": 320,
       "method": "fetchrow",
       "tables": [
         "billing_webhook_notifications"
@@ -9641,7 +9641,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:356.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:320.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -10686,7 +10686,7 @@
       "id": "8ea4b7a88f764f08546b67a938345caccb0d110ded3e36d0d3aa11582e814fce",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.refresh_details",
-      "line": 321,
+      "line": 285,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -10696,7 +10696,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:321.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:285.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -11416,7 +11416,7 @@
       "id": "b89f6a6101b666ea8ef2938af6b6a94ed20bff70260202a348404e18af819a54",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.retry_unsent_notification",
-      "line": 364,
+      "line": 328,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -11426,7 +11426,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:364.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:328.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -12526,10 +12526,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "ef803cffb88f79e5e1c8f08c986dcf09f735f8a12ca3a64821d62fa0311413e3",
+      "id": "326791cfccd90424cb00a6c283a6c0a34e68988c2f44030a2b81112e92673f73",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
-      "function": "BillingReconciliation.dismiss",
-      "line": 263,
+      "function": "dismiss_receipt",
+      "line": 353,
       "method": "fetchrow",
       "tables": [
         "processed_webhook_events"
@@ -12537,16 +12537,16 @@
       "sql": "SELECT state, received_at < NOW() - INTERVAL '6 hours' AS stuck FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE",
       "scoped": false,
       "unresolved": false,
-      "bypass": true,
+      "bypass": null,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only (scripts/reconcile_billing_webhooks.py dismiss). Locks ONE global provider-event receipt by its event_id before deciding; receipts are platform rows whose tenant_id is NULL until reconciliation, so a tenant filter would hide exactly the receipts that need review. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:263. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused."
+      "reason": "Operator CLI only (scripts/reconcile_billing_webhooks.py dismiss). Locks ONE global provider-event receipt by its event_id before deciding; receipts are platform rows whose tenant_id is NULL until reconciliation, so a tenant filter would hide exactly the receipts that need review. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:353. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused. 23 Nov 2026: the body of BillingReconciliation.dismiss moved, unchanged, into the module function dismiss_receipt so that the platform-admin route POST /admin/billing/payment-reviews/close (app/api/v1/endpoints/admin/payment_reviews.py) can run it on its own audited transaction. That route requires a platform admin, re-checks the role and the signed-in session in the same transaction, takes the operator from the signed-in admin, and writes an audit row; the statement and its rules are the same."
     },
     {
-      "id": "6673aaa6bec14521464cb1a2eb9964c1be1b2901e751da8371a42d313274497a",
+      "id": "e879e8ed01fc09f565813a0a8a038aca774a4721324ff7376c6cbbc5965cfe5b",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
-      "function": "BillingReconciliation.dismiss",
-      "line": 280,
+      "function": "dismiss_receipt",
+      "line": 370,
       "method": "execute",
       "tables": [
         "billing_webhook_review_log"
@@ -12554,16 +12554,16 @@
       "sql": "INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason) VALUES($1,$2,'dismiss',$3)",
       "scoped": false,
       "unresolved": false,
-      "bypass": true,
+      "bypass": null,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only. Writes the audit row (operator, decision, reason) for ONE receipt named by event_id, in the same transaction as the state change; the review log is a platform table with no tenant column. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:280."
+      "reason": "Operator CLI only. Writes the audit row (operator, decision, reason) for ONE receipt named by event_id, in the same transaction as the state change; the review log is a platform table with no tenant column. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:370. 23 Nov 2026: the body of BillingReconciliation.dismiss moved, unchanged, into the module function dismiss_receipt so that the platform-admin route POST /admin/billing/payment-reviews/close (app/api/v1/endpoints/admin/payment_reviews.py) can run it on its own audited transaction. That route requires a platform admin, re-checks the role and the signed-in session in the same transaction, takes the operator from the signed-in admin, and writes an audit row; the statement and its rules are the same."
     },
     {
-      "id": "9e8ab92d4356bac969270d46cb4f3c001f0b59c4a24c0b07f0985751d8b96826",
+      "id": "cc899b60e61014f8377ffc78a7811dae0fadeb5de404053bb0a7f7455776a994",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
-      "function": "BillingReconciliation.dismiss",
-      "line": 285,
+      "function": "dismiss_receipt",
+      "line": 375,
       "method": "fetch",
       "tables": [
         "processed_webhook_events"
@@ -12571,10 +12571,10 @@
       "sql": "UPDATE processed_webhook_events SET state='dismissed' WHERE event_id=$1 AND state IN ('needs_review','failed','pending') RETURNING event_id",
       "scoped": false,
       "unresolved": false,
-      "bypass": true,
+      "bypass": null,
       "category": "operator_billing_reconciliation",
       "count": 1,
-      "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:285. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused."
+      "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:375. 20 Nov 2026: a receipt stuck in 'failed' or 'pending' for more than 6 hours can also be dismissed, under the same operator and reason rules and with the same audit row; a younger one is refused. 23 Nov 2026: the body of BillingReconciliation.dismiss moved, unchanged, into the module function dismiss_receipt so that the platform-admin route POST /admin/billing/payment-reviews/close (app/api/v1/endpoints/admin/payment_reviews.py) can run it on its own audited transaction. That route requires a platform admin, re-checks the role and the signed-in session in the same transaction, takes the operator from the signed-in admin, and writes an audit row; the statement and its rules are the same."
     },
     {
       "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
@@ -12650,7 +12650,7 @@
       "id": "7bfcc00032005fcf66a7719be11d344221ba65575b12c2510d3f70054ffd129c",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.settle_paypal_order",
-      "line": 323,
+      "line": 324,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12660,14 +12660,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_session_id (the PayPal order id). Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:323.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_session_id (the PayPal order id). Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:324.",
       "category": "individually_reviewed"
     },
     {
       "id": "67b9d414c0327f544625c4b7a98df3542fc5927150b803a386a39288966351e7",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.reverse_capture",
-      "line": 367,
+      "line": 368,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12677,7 +12677,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_payment_id (the PayPal capture id) for a refund or a dispute. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:367.",
+      "reason": "PayPal webhook path: no tenant is signed in, so the order is found by the PayPal id that this product itself stored on the order when it created the PayPal order (or credited the capture), together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the notice. The row is used to decide which of OUR orders the notice is about; every money decision then re-reads PayPal and goes through TopupService (credit once by the unique ledger event id; reverse once per order). Lookup by provider_payment_id (the PayPal capture id) for a refund or a dispute. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:368.",
       "category": "individually_reviewed"
     },
     {
@@ -12783,7 +12783,7 @@
       "category": "system_provider_receipt"
     },
     {
-      "id": "3cfd99bc3920bf870305a250a96a6a6bb61ff8dfaaa67b35c6120dd7ff2756e1",
+      "id": "741535161408e06bfb10acba5f18dd1c21415a6c508ae898ef6196e90d0efe92",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService._record_review",
       "line": 278,
@@ -12791,19 +12791,19 @@
       "tables": [
         "paypal_webhook_events"
       ],
-      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.CAPTURE.REVIEW', 'order', $2, $3::uuid, $4, 'needs_review', $5, $6) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1",
+      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.CAPTURE.REVIEW', 'order', $2, $3::uuid, $4, 'needs_review', $5, $6) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1, state = 'needs_review'",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Review marker for a PayPal payment that was taken but did not match its order (browser-return path). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch can count it. It is written only after capture_for_tenant has read the order with id AND tenant_id of the signed-in account, and it carries our order id, the PayPal order id, the failed rule and a hash of its own key: no payer data and nothing chosen by the caller. Source: paypal_topups.PayPalTopupService._record_review. Exact reviewed operation: execute; app/domain/services/paypal_topups.py:278.",
+      "reason": "Review marker for a PayPal payment that was taken but did not match its order (browser-return path). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch can count it. It is written only after capture_for_tenant has read the order with id AND tenant_id of the signed-in account, and it carries our order id, the PayPal order id, the failed rule and a hash of its own key: no payer data and nothing chosen by the caller. Source: paypal_topups.PayPalTopupService._record_review. Exact reviewed operation: execute; app/domain/services/paypal_topups.py:278. 23 Nov 2026: when the same local review happens again, the row's state is set back to 'needs_review' (it may have been closed by a platform admin as 'dismissed'), so a repeated problem, such as a second charge after a cancel, is shown again instead of staying silent. Nothing else in the statement changed; it still writes only this product's own review row.",
       "category": "system_provider_receipt"
     },
     {
       "id": "51493848011df758a04b95c656bd74058dea8f9ecb355e8e8a6dbbebe33e95ef",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.reverse_capture",
-      "line": 393,
+      "line": 394,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -12813,14 +12813,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:393.",
+      "reason": "PayPal webhook path (refund or dispute): after TopupService.reverse answered that nothing moved, the status of the SAME order is read again to tell 'already reversed' from 'never paid'. The id is the one returned by the lookup just above in this function (by the PayPal capture id this product stored, with provider = 'paypal'); it never comes from a caller. Read only; it returns the status and nothing else. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:394.",
       "category": "individually_reviewed"
     },
     {
       "id": "24b315bdd7dca75b6658aed78f539b365d826ec3bba12da867063424b3ceaad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sync",
-      "line": 684,
+      "line": 710,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12830,14 +12830,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:684.",
+      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:710.",
       "category": "individually_reviewed"
     },
     {
       "id": "7dbfc5af78dc6c9ff445f5734ad8280814cfba54b7967ce7d3b1ff0eda592704",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_for_reversal",
-      "line": 1034,
+      "line": 1064,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments"
@@ -12847,14 +12847,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1034.",
+      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1064.",
       "category": "individually_reviewed"
     },
     {
       "id": "d517413e429d2f424f1200b7bce68e0eb8eb293f5324d5ec373276437f2df6d1",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._plan_option",
-      "line": 508,
+      "line": 534,
       "method": "fetchrow",
       "tables": [
         "paypal_plan_options"
@@ -12864,31 +12864,31 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:508.",
+      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:534.",
       "category": "platform_catalog"
     },
     {
-      "id": "751c47bfec7a9903977c065e4ca98c85319ae5f63703c95e95d1962fc3fa5d7d",
+      "id": "cfb3316ca1f11660de2cf3957dd3304975210763c9c122281113bf1e18da9335",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._record_review",
-      "line": 904,
+      "line": 934,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
       ],
-      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.PLAN.REVIEW', 'subscription', $2, NULL, $3, 'needs_review', $4, $5) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1",
+      "sql": "INSERT INTO paypal_webhook_events (event_id, event_type, resource_type, resource_id, order_id, provider_mode, state, detail, payload_hash) VALUES ($1, 'LOCAL.PLAN.REVIEW', 'subscription', $2, NULL, $3, 'needs_review', $4, $5) ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1, state = CASE WHEN paypal_webhook_events.state = 'dismissed' AND paypal_webhook_events.detail IN ('binding', 'not_confirmed_with_paypal') THEN 'dismissed' ELSE 'needs_review' END",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:904.",
+      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:934. 23 Nov 2026: when the same local review happens again, the row's state is set back to 'needs_review' (it may have been closed by a platform admin as 'dismissed'), so a repeated problem, such as a second charge after a cancel, is shown again instead of staying silent. Nothing else in the statement changed; it still writes only this product's own review row. The two plan rules that the sweep records again on every tick while their condition lasts ('binding' and 'not_confirmed_with_paypal') are the exception: once closed they stay 'dismissed', otherwise a closed review would reopen within minutes and could never be closed.",
       "category": "system_provider_receipt"
     },
     {
       "id": "92b36a0f21b827a1e8ffb9ab4ea259295286cbd1e29e66da76421d506dc7da33",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1084,
+      "line": 1116,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12898,14 +12898,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1084.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1116.",
       "category": "system_discovery"
     },
     {
       "id": "a58656db090728cb8108aed77ea9e8fa7dc90ae259b5bd24621a57f8101a0100",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1085,
+      "line": 1117,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12915,7 +12915,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1085.",
+      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1117.",
       "category": "system_discovery"
     },
     {
@@ -12958,7 +12958,7 @@
       "id": "461751b083aef4dbdf6d94e1f20aa3961efe41546152fc58ee16af7b98b33206",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_subscription_for_reversal",
-      "line": 1058,
+      "line": 1088,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12968,14 +12968,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1058.",
+      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1088.",
       "category": "individually_reviewed"
     },
     {
       "id": "f27b597611809426dc307f3c9163b3511ce2531e64d917830d77ec5d4e301bb6",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1086,
+      "line": 1118,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12985,14 +12985,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1086.",
+      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1118.",
       "category": "system_discovery"
     },
     {
       "id": "ec8dfe3b69ee2b9d30b17497f962cfce5bd026f0369ba1942b0354a48e83fe68",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1087,
+      "line": 1119,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13002,14 +13002,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1087.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1119.",
       "category": "system_discovery"
     },
     {
       "id": "6a7283106e60f9ebd4c935eb5f737feffb595555472efbc398b853fe51932ad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1110,
+      "line": 1142,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13019,7 +13019,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1110.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1142.",
       "category": "system_discovery"
     },
     {
@@ -13058,7 +13058,7 @@
       "id": "dd90e8713218ebcbae976c7fbb3fe07000f7a623fd3ba4698654cb6611655a0c",
       "file": "app/domain/services/paypal_topups.py",
       "function": "PayPalTopupService.capture_approved_order",
-      "line": 310,
+      "line": 311,
       "method": "fetchrow",
       "tables": [
         "topup_orders"
@@ -13068,14 +13068,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (CHECKOUT.ORDER.APPROVED): no tenant is signed in, so the order is found by the PayPal order id that this product itself stored on the order when it created the PayPal order, together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the event. The statement only reads the order's id and tenant; every write happens in capture_for_tenant, which re-reads the order with id AND tenant_id on a tenant-bound connection. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:310.",
+      "reason": "PayPal webhook path (CHECKOUT.ORDER.APPROVED): no tenant is signed in, so the order is found by the PayPal order id that this product itself stored on the order when it created the PayPal order, together with provider = 'paypal' so a Stripe order can never match. It is reached only from handle_paypal_webhook, after PayPal verified the event. The statement only reads the order's id and tenant; every write happens in capture_for_tenant, which re-reads the order with id AND tenant_id on a tenant-bound connection. Exact reviewed operation: fetchrow; app/domain/services/paypal_topups.py:311.",
       "category": "individually_reviewed"
     },
     {
       "id": "615ab944ed391d9a05795b79b0fb967dc417847919897d8f27a723b16a316c4c",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.owns_transaction",
-      "line": 1048,
+      "line": 1078,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments"
@@ -13085,8 +13085,112 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a dispute at the inquiry stage): no tenant is signed in, so a plan payment is recognised by the PayPal transaction id this product stored when it recorded the payment; it is the same lookup end_for_reversal uses. It is reached only from handle_paypal_webhook, after PayPal verified the event. The method is read-only and only a boolean leaves it (ours / not ours): the dispute is flagged for a person's review, no plan is ended and nothing is written. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1048.",
+      "reason": "PayPal webhook path (a dispute at the inquiry stage): no tenant is signed in, so a plan payment is recognised by the PayPal transaction id this product stored when it recorded the payment; it is the same lookup end_for_reversal uses. It is reached only from handle_paypal_webhook, after PayPal verified the event. The method is read-only and only a boolean leaves it (ours / not ours): the dispute is flagged for a person's review, no plan is ended and nothing is written. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1078.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "487664a710b847348dab9a269c88326e2510161e6eaa424cca1eab371800a194",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "list_payment_reviews",
+      "line": 258,
+      "method": "fetch",
+      "tables": [
+        "paypal_subscriptions",
+        "paypal_webhook_events",
+        "topup_orders"
+      ],
+      "sql": "SELECT e.event_id, e.event_type, e.state, e.detail, e.attempt_count, e.received_at, e.resource_id, FLOOR(EXTRACT(EPOCH FROM (NOW() - e.received_at)) / 3600)::int AS waiting_hours, e.received_at < NOW() - INTERVAL '4 days' AS past_redelivery, o.tenant_id AS order_tenant_id, o.price_cents, o.currency AS order_currency, s.tenant_id AS plan_tenant_id, s.snapshot->'option'->>'amount_minor' AS plan_amount_text, s.snapshot->'option'->>'currency' AS plan_currency FROM paypal_webhook_events e LEFT JOIN LATERAL (SELECT t.tenant_id, t.price_cents, t.currency FROM topup_orders t WHERE t.provider = 'paypal' AND (t.id = e.order_id OR (e.order_id IS NULL AND (t.provider_session_id = e.resource_id OR t.provider_payment_id = e.resource_id))) ORDER BY t.created_at LIMIT 1) o ON TRUE LEFT JOIN paypal_subscriptions s ON s.paypal_subscription_id = e.resource_id WHERE e.state = 'needs_review' OR (e.state IN ('failed', 'received') AND e.received_at < NOW() - INTERVAL '1 hour') ORDER BY e.received_at, e.event_id LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). Lists the PayPal receipts that need a person: state 'needs_review', or 'failed'/'received' for more than an hour, the same rows the health watch counts. paypal_webhook_events has no tenant column; the account is found by joining exactly one order (by our own order id, else by the PayPal id this product stored on the order, with provider = 'paypal') or exactly one plan (by the PayPal subscription id this product stored). Read-only. Exact reviewed operation: fetch; app/domain/services/payment_reviews.py:258.",
+      "category": "operator_billing_reconciliation"
+    },
+    {
+      "id": "915a832e645413baebf9953e27302530b61da3c0f1337f0164b6201b361395a6",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "close_payment_review",
+      "line": 345,
+      "method": "execute",
+      "tables": [
+        "paypal_webhook_review_log"
+      ],
+      "sql": "INSERT INTO paypal_webhook_review_log (event_id, operator, operator_id, decision, reason, attempt_count_seen) VALUES ($1, $2, $3::uuid, 'dismiss', $4, $5)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). The close route also runs require_platform_admin_mutation and writes an audit row in the same transaction; the operator is the signed-in admin, never a value sent by the client. Closing never grants, refunds or changes a ledger. Records who closed ONE PayPal receipt, why, and the attempt count they saw; the log is a platform table keyed by the receipt's event id. Exact reviewed operation: execute; app/domain/services/payment_reviews.py:345.",
+      "category": "operator_billing_reconciliation"
+    },
+    {
+      "id": "1630b8939b88966d17a77b1700136a0ba4a057448cd5a27cc2f0be94f47319ce",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "close_payment_review",
+      "line": 348,
+      "method": "fetch",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "UPDATE paypal_webhook_events SET state = 'dismissed' WHERE event_id = $1 AND state = $2 AND attempt_count = $3 RETURNING event_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). The close route also runs require_platform_admin_mutation and writes an audit row in the same transaction; the operator is the signed-in admin, never a value sent by the client. Closing never grants, refunds or changes a ledger. Closes ONE PayPal receipt, only if its state and attempt count are still the ones just locked and shown to the admin; exactly one row must change or the transaction is rolled back. Exact reviewed operation: fetch; app/domain/services/payment_reviews.py:348.",
+      "category": "operator_billing_reconciliation"
+    },
+    {
+      "id": "c8f1ed73b571b3153b2cd70f1b8d061de9f801f35d49ff3b7229cf62956be73c",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "list_payment_reviews",
+      "line": 257,
+      "method": "fetch",
+      "tables": [
+        "processed_webhook_events"
+      ],
+      "sql": "SELECT event_id, event_type, state, attempt_count, last_error_code, received_at, FLOOR(EXTRACT(EPOCH FROM (NOW() - received_at)) / 3600)::int AS waiting_hours, received_at < NOW() - INTERVAL '4 days' AS past_redelivery, event_payload->'data'->'object'->>'id' AS object_id, event_payload->'data'->'object'->'metadata'->>'tenant_id' AS metadata_tenant_id, event_payload->'data'->'object'->'metadata'->>'purpose' AS purpose, event_payload->'data'->'object'->>'mode' AS checkout_mode, event_payload->'data'->'object'->>'customer' AS customer_id, COALESCE(event_payload->'data'->'object'->>'amount_total', event_payload->'data'->'object'->>'amount_paid', event_payload->'data'->'object'->>'amount') AS amount_text, event_payload->'data'->'object'->>'currency' AS currency FROM processed_webhook_events WHERE state = 'needs_review' OR (state IN ('failed', 'pending') AND received_at < NOW() - INTERVAL '6 hours') ORDER BY received_at, event_id LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). Lists the Stripe receipts that need a person: state 'needs_review', or 'failed'/'pending' for more than 6 hours, the same rows the health watch counts. A receipt's tenant_id is NULL until it is processed, so a tenant filter would hide exactly these rows. Read-only; the stored payload is used only to pick the object id, the account hint, the purpose and the amount, and neither the payload nor a provider customer id leaves the service. Exact reviewed operation: fetch; app/domain/services/payment_reviews.py:257.",
+      "category": "operator_billing_reconciliation"
+    },
+    {
+      "id": "8a4680d9b71b94873a50c16a997535a5f1e79f5c4d169d7189ab10eeac140f4a",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "close_payment_review",
+      "line": 331,
+      "method": "fetchrow",
+      "tables": [
+        "paypal_webhook_events"
+      ],
+      "sql": "SELECT state, detail, attempt_count, received_at < NOW() - INTERVAL '4 days' AS past_redelivery FROM paypal_webhook_events WHERE event_id = $1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). The close route also runs require_platform_admin_mutation and writes an audit row in the same transaction; the operator is the signed-in admin, never a value sent by the client. Closing never grants, refunds or changes a ledger. Locks ONE PayPal receipt by its event id before deciding whether it may be closed (a merely stuck one only 4 days after it arrived, when PayPal no longer resends it; its detail tells the two plan rules that the sweep records again on every tick); the table has no tenant column. Exact reviewed operation: fetchrow; app/domain/services/payment_reviews.py:331.",
+      "category": "operator_billing_reconciliation"
+    },
+    {
+      "id": "1744c0435d3f20b0614ba06c59a26652dcadab01266ac5b327d49e8f823942f0",
+      "file": "app/domain/services/payment_reviews.py",
+      "function": "close_payment_review",
+      "line": 355,
+      "method": "fetchrow",
+      "tables": [
+        "processed_webhook_events"
+      ],
+      "sql": "SELECT state, attempt_count, received_at < NOW() - INTERVAL '4 days' AS past_redelivery FROM processed_webhook_events WHERE event_id = $1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reached only from the platform-admin routes in app/api/v1/endpoints/admin/payment_reviews.py (require_platform_admin, plus a check of the signed-in session's role on the same connection). The close route also runs require_platform_admin_mutation and writes an audit row in the same transaction; the operator is the signed-in admin, never a value sent by the client. Closing never grants, refunds or changes a ledger. Locks ONE Stripe receipt by its event id, after the per-event advisory lock, to compare the attempt count with the one the admin saw and to refuse a merely stuck receipt younger than 4 days (Stripe may still resend it) before dismiss_receipt applies its own rules; a receipt's tenant_id is NULL until it is processed. Exact reviewed operation: fetchrow; app/domain/services/payment_reviews.py:355.",
+      "category": "operator_billing_reconciliation"
     }
   ]
 }

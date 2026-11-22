@@ -40,7 +40,7 @@ _PLAN_EVENTS = frozenset(
         "BILLING.SUBSCRIPTION.PAYMENT.FAILED",
     }
 )
-_FINISHED = frozenset({"completed", "ignored", "needs_review"})
+_FINISHED = frozenset({"completed", "ignored", "needs_review", "dismissed"})
 _MAX_VERIFICATIONS_IN_FLIGHT = 4
 _verifications_in_flight = 0
 _RANK = {"ignored": 0, "completed": 1, "needs_review": 2}

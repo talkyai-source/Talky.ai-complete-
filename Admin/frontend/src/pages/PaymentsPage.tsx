@@ -6,10 +6,11 @@ import { NOT_AVAILABLE, PAYMENT_KINDS, PaymentsTable } from '../components/Payme
 import { formatMinorAmount } from '../lib/money-format';
 import { api, type BillingConfig, type BillingReconciliation } from '../lib/api';
 import { useAdminRead } from '../lib/use-admin-read';
+import { PaymentReviewsCard } from '../components/PaymentReviewsCard';
 import { useAuthGeneration } from '../lib/use-auth-generation';
 
-// Read-only view of the minute ledger. Every value comes from GET /admin/billing/reconciliation
-// and GET /billing/config; nothing on this page changes anything. There is no CSV button: the
+// The ledger part is read-only. Every ledger value comes from GET /admin/billing/reconciliation
+// and GET /billing/config; only the review card can write, and it never moves money. There is no CSV button: the
 // panel has no download helper for a plain file, and this page may not add one.
 
 const isCount = (value: unknown) => typeof value === 'number' && Number.isFinite(value);
@@ -84,6 +85,8 @@ function PaymentsContent() {
                     </div>
 
                     <ModeBanner />
+
+                    <PaymentReviewsCard />
 
                     <div className="table-toolbar">
                         <div className="date-filter-group">

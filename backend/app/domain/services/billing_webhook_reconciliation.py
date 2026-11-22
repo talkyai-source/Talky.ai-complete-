@@ -253,44 +253,8 @@ class BillingReconciliation:
         """Close one needs_review receipt, or a failed/pending one older than 6 hours (the
         age at which the payments alert counts it as stuck), WITHOUT replay; no business
         effect is applied."""
-        if not operator.strip() or len(operator) > 200 or not 12 <= len(reason.strip()) <= 2000:
-            raise ValueError(
-                "An identified operator and substantive reconciliation reason are required"
-            )
         async with acquire_with_tenant(self.pool, None, timeout=5) as conn:
-            if not await lock_event(conn, event_id):
-                raise BillingWebhookRetryable("event_busy")
-            receipt = await conn.fetchrow(
-                "SELECT state, received_at < NOW() - INTERVAL '6 hours' AS stuck "
-                "FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE", event_id
-            )
-            if receipt is None:
-                raise ValueError("No receipt exists for this event")
-            if receipt["state"] == "dismissed":
-                return {"event_id": event_id, "state": "dismissed", "changed": False,
-                        "financial_effects_applied": False}
-            if receipt["state"] in {"failed", "pending"}:
-                if not receipt["stuck"]:
-                    raise ValueError(
-                        "A failed or pending receipt younger than 6 hours may still be retried "
-                        "by Stripe; wait before dismissing it")
-            elif receipt["state"] != "needs_review":
-                raise ValueError("Only a needs_review receipt, or a failed or pending one older "
-                                 "than 6 hours, can be dismissed")
-            await conn.execute(
-                """INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
-                   VALUES($1,$2,'dismiss',$3)""",
-                event_id, operator.strip(), reason.strip(),
-            )
-            updated = await conn.fetch(
-                """UPDATE processed_webhook_events SET state='dismissed'
-                   WHERE event_id=$1 AND state IN ('needs_review','failed','pending') RETURNING event_id""",
-                event_id,
-            )
-            if len(updated) != 1:
-                raise ValueError("Exactly one receipt must change; nothing was recorded")
-        return {"event_id": event_id, "state": "dismissed", "changed": True,
-                "financial_effects_applied": False}
+            return await dismiss_receipt(conn, event_id, operator=operator, reason=reason)
 
     async def refresh_details(self, event_id, *, operator, reason):
         """Append current provider observations; never replay financial handlers."""
@@ -374,6 +338,49 @@ class BillingReconciliation:
                 notification_id,
             )
         return {"notification_id": str(notification_id), "status": "pending", "sent": False}
+
+
+async def dismiss_receipt(conn, event_id, *, operator, reason):
+    """Close one needs_review receipt, or a failed/pending one older than 6 hours (the
+    age at which the payments alert counts it as stuck), WITHOUT replay; no business
+    effect is applied."""
+    if not operator.strip() or len(operator) > 200 or not 12 <= len(reason.strip()) <= 2000:
+        raise ValueError(
+            "An identified operator and substantive reconciliation reason are required"
+        )
+    if not await lock_event(conn, event_id):
+        raise BillingWebhookRetryable("event_busy")
+    receipt = await conn.fetchrow(
+        "SELECT state, received_at < NOW() - INTERVAL '6 hours' AS stuck "
+        "FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE", event_id
+    )
+    if receipt is None:
+        raise ValueError("No receipt exists for this event")
+    if receipt["state"] == "dismissed":
+        return {"event_id": event_id, "state": "dismissed", "changed": False,
+                "financial_effects_applied": False}
+    if receipt["state"] in {"failed", "pending"}:
+        if not receipt["stuck"]:
+            raise ValueError(
+                "A failed or pending receipt younger than 6 hours may still be retried "
+                "by Stripe; wait before dismissing it")
+    elif receipt["state"] != "needs_review":
+        raise ValueError("Only a needs_review receipt, or a failed or pending one older "
+                         "than 6 hours, can be dismissed")
+    await conn.execute(
+        """INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
+           VALUES($1,$2,'dismiss',$3)""",
+        event_id, operator.strip(), reason.strip(),
+    )
+    updated = await conn.fetch(
+        """UPDATE processed_webhook_events SET state='dismissed'
+           WHERE event_id=$1 AND state IN ('needs_review','failed','pending') RETURNING event_id""",
+        event_id,
+    )
+    if len(updated) != 1:
+        raise ValueError("Exactly one receipt must change; nothing was recorded")
+    return {"event_id": event_id, "state": "dismissed", "changed": True,
+            "financial_effects_applied": False}
 
 
 def _id(value):

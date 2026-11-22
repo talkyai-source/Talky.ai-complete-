@@ -165,6 +165,9 @@ for path, function in (("/admin/usage/statements", "import_statement"),
     AUDITED["POST", path] = record("admin.supplier_evidence", function,
         "integration/test_supplier_evidence.py", "app.api.v1.endpoints.admin.supplier_evidence._record")
 
+AUDITED["POST", "/admin/billing/payment-reviews/close"] = record(
+    "admin.payment_reviews", "close_review", "unit/test_payment_reviews.py")
+
 for path, function, service_method in (
     ("/admin/dsar/preview", "preview_dsar", "preview"),
     ("/admin/dsar/export", "export_dsar", "export"),

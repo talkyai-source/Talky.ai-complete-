@@ -282,7 +282,8 @@ class PayPalTopupService:
                     "VALUES ($1, 'LOCAL.CAPTURE.REVIEW', 'order', $2, $3::uuid, $4, "
                     "'needs_review', $5, $6) "
                     "ON CONFLICT (event_id) DO UPDATE SET "
-                    "attempt_count = paypal_webhook_events.attempt_count + 1",
+                    "attempt_count = paypal_webhook_events.attempt_count + 1, "
+                    "state = 'needs_review'",
                     event_id, str(order["provider_session_id"])[:255], str(order["id"]),
                     paypal_provider_mode() or "live", rule[:255],
                     hashlib.sha256(event_id.encode()).hexdigest(),

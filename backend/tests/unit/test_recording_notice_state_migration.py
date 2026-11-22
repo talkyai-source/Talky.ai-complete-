@@ -24,8 +24,9 @@ def _run(monkeypatch, operation):
     return statements
 
 
-def test_single_head_is_0103_on_top_of_0102():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0103_sits_on_top_of_0102_and_under_0104():
+    assert SCRIPTS.get_heads() == ["0104_paypal_review_dismissed"]
+    assert SCRIPTS.get_revision("0104_paypal_review_dismissed").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0102_paypal_subscriptions"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 
