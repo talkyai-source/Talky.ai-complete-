@@ -245,7 +245,8 @@ _Q_REVIEW = (
     "payload_hash) VALUES ($1, 'LOCAL.PLAN.REVIEW', 'subscription', $2, NULL, $3, "
     "'needs_review', $4, $5) "
     "ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1, "
-    "state = 'needs_review'"
+    "state = CASE WHEN paypal_webhook_events.state = 'dismissed' AND paypal_webhook_events.detail "
+    "IN ('binding', 'not_confirmed_with_paypal') THEN 'dismissed' ELSE 'needs_review' END"
 )
 # Sweep: service-wide reads by design (platform scope), every write after them is tenant-bound.
 _Q_SWEEP_DUE = (

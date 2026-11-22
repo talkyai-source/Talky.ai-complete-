@@ -73,7 +73,8 @@ class PG:
             return None if r is None else dict(r)
         if sql == m._Q_STRIPE_LOCK:
             r = self.st.get(a[0])
-            return None if r is None else {"state": r["state"], "attempt_count": r["attempt_count"]}
+            return None if r is None else {"state": r["state"], "attempt_count": r["attempt_count"],
+                                           "past_redelivery": r["age_h"] >= 96}
         if "FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE" in sql:
             r = self.st.get(a[0])
             return None if r is None else {"state": r["state"], "stuck": r["age_h"] >= 6}
@@ -94,8 +95,8 @@ class PG:
             raise AssertionError(sql)
 
 
-def pp_receipt(state="needs_review", attempts=1, past=False):
-    return {"state": state, "attempt_count": attempts, "past_redelivery": past}
+def pp_receipt(state="needs_review", attempts=1, past=False, detail="amount_mismatch"):
+    return {"state": state, "attempt_count": attempts, "past_redelivery": past, "detail": detail}
 
 
 def pp_row(**kw):
@@ -111,7 +112,7 @@ def pp_row(**kw):
 def st_row(**kw):
     base = dict(event_id="evt_1", event_type="checkout.session.completed", state="needs_review", attempt_count=1,
                 last_error_code="credit_not_confirmed", received_at=NOW - timedelta(hours=30),
-                waiting_hours=30, object_id="cs_1", metadata_tenant_id=T2, purpose="minute_topup",
+                waiting_hours=30, past_redelivery=False, object_id="cs_1", metadata_tenant_id=T2, purpose="minute_topup",
                 checkout_mode="payment", customer_id="cus_ABC123", amount_text="1900", currency="usd")
     base.update(kw)
     return base
@@ -171,7 +172,7 @@ async def test_stuck_rows_and_the_four_day_rule_for_paypal():
     db = PG()
     db.paypal = [pp_row(event_id="a", state="failed", detail="topup_x", past_redelivery=False),
                  pp_row(event_id="b", state="received", detail=None, past_redelivery=True)]
-    db.stripe = [st_row(state="failed")]
+    db.stripe = [st_row(state="failed", past_redelivery=True)]
     items = {i["event_id"]: i for i in (await pr().list_payment_reviews(db))["items"]}
     assert items["a"]["state"] == "stuck" and items["a"]["can_close"] is False
     assert items["a"]["close_blocked_reason"].startswith("PayPal may still send this message again")
@@ -298,10 +299,7 @@ async def test_stripe_close_dismisses_a_needs_review_receipt_and_logs_it():
 
 async def test_stripe_close_rules_young_failed_completed_moved_and_busy():
     db = PG()
-    db.st["e1"] = dict(state="failed", attempt_count=1, age_h=2)
-    with pytest.raises(ValueError, match="younger than 6 hours"):
-        await close(db, provider="stripe")
-    db.st["e1"] = dict(state="failed", attempt_count=1, age_h=7)
+    db.st["e1"] = dict(state="failed", attempt_count=1, age_h=100)
     assert (await close(db, provider="stripe"))["changed"] is True
     assert (await close(db, provider="stripe"))["changed"] is False
     db.st["e2"] = dict(state="completed", attempt_count=1, age_h=99)
@@ -315,6 +313,58 @@ async def test_stripe_close_rules_young_failed_completed_moved_and_busy():
     with pytest.raises(BillingWebhookRetryable):
         await close(db, provider="stripe", event_id="e3", seen=4)
     assert len(db.st_log) == 1
+
+
+async def test_a_stuck_stripe_row_is_not_closable_while_stripe_may_resend_it():
+    db = PG()
+    db.stripe = [st_row(event_id="young", state="failed", received_at=NOW - timedelta(hours=7), waiting_hours=7),
+                 st_row(event_id="old", state="pending", past_redelivery=True, waiting_hours=120),
+                 st_row(event_id="review", state="needs_review", waiting_hours=1000, past_redelivery=True),
+                 st_row(event_id="review_young", state="needs_review", waiting_hours=1)]
+    items = {i["event_id"]: i for i in (await pr().list_payment_reviews(db))["items"]}
+    assert items["young"]["state"] == "stuck" and items["young"]["can_close"] is False
+    assert items["young"]["close_blocked_reason"] == (
+        "Stripe may still send this message again (it keeps trying for up to 3 days). "
+        "It can be closed 4 days after it arrived.")
+    assert items["old"]["can_close"] is True and items["old"]["close_blocked_reason"] is None
+    assert items["review"]["can_close"] is True and items["review_young"]["can_close"] is True
+
+
+@pytest.mark.parametrize("state", ["failed", "pending"])
+async def test_the_stripe_close_refuses_a_young_stuck_row_before_dismiss_receipt(state):
+    db = PG()
+    db.st["e1"] = dict(state=state, attempt_count=1, age_h=7)
+    with pytest.raises(ValueError, match="Stripe may still send this message again"):
+        await close(db, provider="stripe")
+    assert db.st_log == [] and db.st["e1"]["state"] == state
+    db.st["e1"] = dict(state=state, attempt_count=1, age_h=120)
+    assert (await close(db, provider="stripe"))["prior_state"] == state and len(db.st_log) == 1
+    db.st["e2"] = dict(state="needs_review", attempt_count=1, age_h=1)
+    assert (await close(db, provider="stripe", event_id="e2"))["changed"] is True
+
+
+async def test_the_command_line_dismiss_still_allows_a_failed_receipt_after_six_hours():
+    db = PG()
+    db.st["e1"] = dict(state="failed", attempt_count=1, age_h=7)
+    from app.domain.services.billing_webhook_reconciliation import dismiss_receipt
+    assert (await dismiss_receipt(db, "e1", operator="op", reason=REASON))["changed"] is True
+
+
+@pytest.mark.parametrize("rule", ["binding", "not_confirmed_with_paypal"])
+async def test_a_recurring_plan_rule_closes_even_though_its_count_moved(rule):
+    db = PG()
+    db.pp["e1"] = pp_receipt(attempts=9, detail=rule)
+    assert (await close(db, seen=2))["changed"] is True
+    assert db.pp_log[0][4] == 9 and db.pp["e1"]["state"] == "dismissed"
+    assert pr()._RECURRING_RULES == {"binding", "not_confirmed_with_paypal"}
+
+
+async def test_another_plan_rule_whose_count_moved_is_still_refused():
+    db = PG()
+    db.pp["e1"] = pp_receipt(attempts=9, detail="superseded")
+    with pytest.raises(ValueError, match="changed after the list was read"):
+        await close(db, seen=2)
+    assert db.pp_log == []
 
 
 # -- redelivery and recurrence -----------------------------------------------------------
@@ -338,16 +388,25 @@ async def test_a_changed_body_for_a_dismissed_event_reopens_it(world):  # noqa: 
     assert webhook_row(world)["state"] == "needs_review" and webhook_row(world)["detail"] == "payload_changed"
 
 
-@pytest.mark.parametrize("path", ["app/domain/services/paypal_topups.py",
-                                  "app/domain/services/paypal_subscriptions.py"])
-def test_a_recurring_local_review_reopens_the_row(path):
+def _local_review_sql(path):
     tree = ast.parse((BACKEND / path).read_text(encoding="utf-8"))
     sql = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)
            and "LOCAL." in n.value and "ON CONFLICT (event_id)" in n.value]
     assert len(sql) == 1
-    assert _norm(sql[0]).endswith(
+    return _norm(sql[0])
+
+
+def test_a_recurring_minutes_review_reopens_the_row():
+    assert _local_review_sql("app/domain/services/paypal_topups.py").endswith(
         "ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1, "
         "state = 'needs_review'")
+
+
+def test_a_recurring_plan_review_reopens_except_the_two_rules_the_sweep_rewrites_every_tick():
+    assert _local_review_sql("app/domain/services/paypal_subscriptions.py").endswith(
+        "ON CONFLICT (event_id) DO UPDATE SET attempt_count = paypal_webhook_events.attempt_count + 1, "
+        "state = CASE WHEN paypal_webhook_events.state = 'dismissed' AND paypal_webhook_events.detail "
+        "IN ('binding', 'not_confirmed_with_paypal') THEN 'dismissed' ELSE 'needs_review' END")
 
 
 # -- every PayPal rule literal has specific words ----------------------------------------
@@ -469,6 +528,24 @@ async def test_endpoint_unknown_failure_is_503_and_list_failure_never_looks_empt
     with pytest.raises(HTTPException) as err:
         await ep.get_payment_reviews(SimpleNamespace(), user, SimpleNamespace(pool=object()))
     assert err.value.status_code == 503 and "does not mean there are none" in err.value.detail
+
+
+@pytest.mark.parametrize("name", ["DataError", "InvalidTextRepresentationError", "UniqueViolationError"])
+async def test_an_asyncpg_error_from_the_service_answers_503_not_409(monkeypatch, name):
+    import asyncpg
+    order = []
+    ep, audit = _endpoint(monkeypatch, object(), order)
+
+    async def boom(conn, **kw):
+        raise getattr(asyncpg.exceptions, name)("invalid input syntax for type uuid: technical text")
+
+    monkeypatch.setattr(ep, "close_payment_review", boom)
+    user = SimpleNamespace(id="u1", email="staff@example.com", tenant_id=None)
+    with pytest.raises(HTTPException) as err:
+        await ep.close_review(
+            ep.ClosePaymentReview(provider="paypal", event_id="e1", seen_attempt_count=0, reason=REASON),
+            SimpleNamespace(), user, SimpleNamespace(pool=object()), audit)
+    assert err.value.status_code == 503 and "technical" not in err.value.detail
 
 
 async def test_endpoint_list_response_matches_the_model(monkeypatch):

@@ -17,6 +17,7 @@ import pytest_asyncio
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services import paypal_subscriptions as ps
+from app.domain.services.paypal_topups import PayPalTopupService
 from app.domain.services import payment_reviews as pr
 from tests.integration.test_paypal_subscriptions_pg import pp_db  # noqa: F401
 from tests.integration.test_billing_price_options import billing_db  # noqa: F401
@@ -40,6 +41,7 @@ async def rv(pp_db):  # noqa: F811 - imported pytest fixture
     fixture.pp_stuck = f"pgreview:{suffix}:stuck"
     fixture.st_event = f"evt_pgreview_{suffix}"
     fixture.order_id = uuid4()
+    fixture.extra_events = []
     async with acquire_with_tenant(fixture.pool, None) as conn:
         for grant in (
             f'GRANT SELECT,INSERT ON paypal_webhook_review_log TO "{fixture.role}"',
@@ -79,7 +81,7 @@ async def rv(pp_db):  # noqa: F811 - imported pytest fixture
     try:
         yield fixture
     finally:
-        ids = [fixture.pp_event, fixture.pp_stuck]
+        ids = [fixture.pp_event, fixture.pp_stuck, *fixture.extra_events]
         async with acquire_with_tenant(fixture.pool, None) as conn:
             await conn.execute("DELETE FROM paypal_webhook_review_log WHERE event_id=ANY($1::text[])", ids)
             await conn.execute("DELETE FROM paypal_webhook_events WHERE event_id=ANY($1::text[])", ids)
@@ -176,3 +178,58 @@ async def test_a_recurring_local_review_reopens_a_closed_row(rv):
         await conn.execute(ps._Q_REVIEW, fixture.pp_event, "I-X", "test", "charged_after_cancel", "d" * 64)
     row = await _state(fixture, fixture.pp_event)
     assert row["state"] == "needs_review" and row["attempt_count"] == 2
+
+
+async def _plan_review_recorded_again(fixture, rule):
+    """The real subscription service writes the review; it is closed; then it is written again."""
+    row = {"id": uuid4(), "paypal_subscription_id": "I-pgreview", "provider_mode": "test"}
+    event_id = f"local:review:plan:{row['id']}:{rule}"
+    fixture.extra_events.append(event_id)
+    await fixture.svc._record_review(row, rule)
+    first = await _state(fixture, event_id)
+    assert first["state"] == "needs_review"
+    # the list was read at attempt_count 1; the sweep may already have written it again
+    await fixture.svc._record_review(row, rule)
+    closed = await _close(fixture, "paypal", event_id, seen_attempt_count_for(rule, first))
+    assert closed["changed"] is True
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        counted_after_close = await conn.fetchval(_ALERT_COUNT)
+    await fixture.svc._record_review(row, rule)  # the next sweep tick
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        counted_after_tick = await conn.fetchval(_ALERT_COUNT)
+    return event_id, counted_after_close, counted_after_tick
+
+
+def seen_attempt_count_for(rule, first):
+    # a recurring rule is closed with a stale count; any other rule needs the current one
+    return first["attempt_count"] if rule in pr._RECURRING_RULES else first["attempt_count"] + 1
+
+
+@pytest.mark.parametrize("rule", ["binding", "not_confirmed_with_paypal"])
+async def test_a_closed_recurring_plan_review_stays_closed_and_the_alert_stays_down(rv, rule):
+    fixture = rv
+    event_id, after_close, after_tick = await _plan_review_recorded_again(fixture, rule)
+    row = await _state(fixture, event_id)
+    assert row["state"] == "dismissed" and row["attempt_count"] == 3
+    assert after_tick == after_close
+
+
+async def test_a_closed_review_of_another_plan_rule_reopens_when_recorded_again(rv):
+    fixture = rv
+    event_id, after_close, after_tick = await _plan_review_recorded_again(fixture, "superseded")
+    assert (await _state(fixture, event_id))["state"] == "needs_review"
+    assert after_tick == after_close + 1
+
+
+async def test_a_closed_minutes_review_reopens_when_recorded_again(rv):
+    fixture = rv
+    order = {"id": fixture.order_id, "provider_session_id": "PPO-again"}
+    service = PayPalTopupService(fixture.service_pool)
+    event_id = f"local:review:{fixture.order_id}:amount_mismatch"
+    fixture.extra_events.append(event_id)
+    await service._record_review(order, "amount_mismatch")
+    first = await _state(fixture, event_id)
+    await _close(fixture, "paypal", event_id, first["attempt_count"])
+    assert (await _state(fixture, event_id))["state"] == "dismissed"
+    await service._record_review(order, "amount_mismatch")
+    assert (await _state(fixture, event_id))["state"] == "needs_review"

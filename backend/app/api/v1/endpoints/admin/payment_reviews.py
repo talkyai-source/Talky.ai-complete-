@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 from typing import Literal
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -130,6 +131,9 @@ async def close_review(
         return result
     except HTTPException:
         raise
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, asyncpg.exceptions.ClientConfigurationError) as exc:
+        # asyncpg's own failures (not the service's refusals) never show their text.
+        raise HTTPException(503, _UNCONFIRMED) from exc
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     except BillingWebhookRetryable as exc:

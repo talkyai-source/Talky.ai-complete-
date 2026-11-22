@@ -27,6 +27,7 @@ from app.domain.services.billing_webhooks import BillingWebhookRetryable, lock_e
 _Q_STRIPE = (
     "SELECT event_id, event_type, state, attempt_count, last_error_code, received_at, "
     "FLOOR(EXTRACT(EPOCH FROM (NOW() - received_at)) / 3600)::int AS waiting_hours, "
+    "received_at < NOW() - INTERVAL '4 days' AS past_redelivery, "
     "event_payload->'data'->'object'->>'id' AS object_id, "
     "event_payload->'data'->'object'->'metadata'->>'tenant_id' AS metadata_tenant_id, "
     "event_payload->'data'->'object'->'metadata'->>'purpose' AS purpose, "
@@ -61,7 +62,7 @@ _Q_NAMES = (
     "WHERE id = ANY($1::uuid[]) OR stripe_customer_id = ANY($2::text[])"
 )
 _Q_PP_LOCK = (
-    "SELECT state, attempt_count, received_at < NOW() - INTERVAL '4 days' AS past_redelivery "
+    "SELECT state, detail, attempt_count, received_at < NOW() - INTERVAL '4 days' AS past_redelivery "
     "FROM paypal_webhook_events WHERE event_id = $1 FOR UPDATE"
 )
 _Q_PP_LOG = (
@@ -72,7 +73,10 @@ _Q_PP_CLOSE = (
     "UPDATE paypal_webhook_events SET state = 'dismissed' "
     "WHERE event_id = $1 AND state = $2 AND attempt_count = $3 RETURNING event_id"
 )
-_Q_STRIPE_LOCK = "SELECT state, attempt_count FROM processed_webhook_events WHERE event_id = $1 FOR UPDATE"
+_Q_STRIPE_LOCK = (
+    "SELECT state, attempt_count, received_at < NOW() - INTERVAL '4 days' AS past_redelivery "
+    "FROM processed_webhook_events WHERE event_id = $1 FOR UPDATE"
+)
 
 _CUSTOMER = re.compile(r"^cus_[A-Za-z0-9]+$")
 _DIGITS = re.compile(r"^[0-9]{1,15}$")
@@ -80,6 +84,14 @@ _BLOCKED = (
     "PayPal may still send this message again (it keeps trying for up to 3 days). "
     "It can be closed 4 days after it arrived."
 )
+_BLOCKED_STRIPE = (
+    "Stripe may still send this message again (it keeps trying for up to 3 days). "
+    "It can be closed 4 days after it arrived."
+)
+# These two plan rules are written again by the 5-minute sweep on every tick while the
+# condition lasts, so their attempt count moves without any new information: a close
+# prepared over a normal read must not be refused for it.
+_RECURRING_RULES = frozenset({"binding", "not_confirmed_with_paypal"})
 _OPERATOR_REASON = "An identified operator and substantive reconciliation reason are required"
 
 _CHANGED_PAIR = (
@@ -251,10 +263,12 @@ async def list_payment_reviews(conn, *, limit: int = 100) -> dict:
     for row in stripe_rows:
         state = "needs_review" if row["state"] == "needs_review" else "stuck"
         amount = _digits(row["amount_text"])
+        can_close = state == "needs_review" or bool(row["past_redelivery"])
         item = _item(
             "stripe", row, state=state, kind=_stripe_kind(row),
             tenant_id=_uuid(row["metadata_tenant_id"]), amount=amount, currency=row["currency"],
-            code=row["last_error_code"], reference=row["object_id"], can_close=True, blocked=None,
+            code=row["last_error_code"], reference=row["object_id"],
+            can_close=can_close, blocked=None if can_close else _BLOCKED_STRIPE,
         )
         item["_customer"] = row["customer_id"] if _CUSTOMER.match(row["customer_id"] or "") else None
         stripe_items.append(item)
@@ -319,7 +333,7 @@ async def close_payment_review(
             raise ValueError("No such payment message.")
         if row["state"] == "dismissed":
             return _closed(provider, event_id, "dismissed", False)
-        if row["attempt_count"] != seen_attempt_count:
+        if row["attempt_count"] != seen_attempt_count and row["detail"] not in _RECURRING_RULES:
             raise ValueError(changed_text)
         if row["state"] == "needs_review":
             pass
@@ -343,6 +357,8 @@ async def close_payment_review(
             raise ValueError("No such payment message.")
         if row["state"] != "dismissed" and row["attempt_count"] != seen_attempt_count:
             raise ValueError(changed_text)
+        if row["state"] in ("failed", "pending") and not row["past_redelivery"]:
+            raise ValueError(_BLOCKED_STRIPE)
         result = await dismiss_receipt(conn, event_id, operator=operator, reason=reason)
         return _closed(provider, event_id, row["state"], bool(result["changed"]))
     raise ValueError("Unknown payment provider.")
