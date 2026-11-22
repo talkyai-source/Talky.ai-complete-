@@ -103,9 +103,12 @@ async def speak_disclosure_before_first_reply(
     if getattr(voice_session, "_opener_spoken_as_notice", False):
         return True
 
+    from app.domain.services.voice_pipeline.premade_opener import premade_kwargs
+
     opener = _build_call_greeting(session, first_speaker="user")
     interrupted = await voice_session.pipeline.synthesize_and_send_audio(
         session, opener, websocket=None, track_latency=False,
+        **premade_kwargs(voice_session, session, opener),
     )
     if not interrupted and not getattr(session, "_tts_delivery_failed", False):
         session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content=opener))

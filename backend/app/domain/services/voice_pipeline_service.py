@@ -919,10 +919,12 @@ class VoicePipelineService:
         websocket: Optional[WebSocket] = None,
         *,
         track_latency: bool = True,
+        premade_chunks=None,
     ) -> bool:
         """
         Synthesize TTS audio and stream it to the media gateway.
         Returns True if TTS was interrupted by barge-in, False on normal completion.
+        ``premade_chunks`` (caller-first opener only) replaces the provider stream.
 
         Implementation extracted to voice_pipeline.tts_playback (item 2, slice 3).
         Kept as a method so external callers (pipeline.synthesize_and_send_audio)
@@ -942,10 +944,12 @@ class VoicePipelineService:
         carrying this token, so there is nothing left for this method to
         strip.
         """
+        extra = {} if premade_chunks is None else {"premade_chunks": premade_chunks}
         return await self._tts_playback.synthesize_and_send(
             session,
             text,
             websocket,
             barge_in_event=self._barge_in_event_for(session),
             track_latency=track_latency,
+            **extra,
         )
