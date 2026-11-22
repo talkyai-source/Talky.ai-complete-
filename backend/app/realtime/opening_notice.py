@@ -255,14 +255,20 @@ async def admit_opening(bridge, event, utterance) -> bool:
                 _set_gate_recording(gate, False)
                 _set_gate_recording(gate, True)
             gate.voice_session._recording_policy_decided = True
+        # The words equal the required sentence here; it is logged the way the normal
+        # path logs its own opening (through the opener's log helper), never the model's text.
         logger.info("realtime_opening_notice_speaking call_id=%s utterance=%s text=%r",
-                    _cid(gate), utterance["id"], _log_text(event.text))
+                    _cid(gate), utterance["id"], _log_text(gate.required_text))
         return True
     if gate.repairs_left > 0:
         gate.repairs_left -= 1
+        # The model's own words are never written to the log (they may carry personal
+        # details): only the counts and where the two sentences first differ.
+        want, got = normalize_words(gate.required_text), normalize_words(event.text)
+        differs_at = next((i for i, (a, b) in enumerate(zip(want, got)) if a != b), min(len(want), len(got)))
         logger.warning("realtime_opening_notice_withheld call_id=%s attempt=%d reason=text_mismatch "
-                       "expected=%r heard=%r", _cid(gate), 1 - gate.repairs_left,
-                       _log_text(gate.required_text), _log_text(event.text))
+                       "required_words=%d heard_words=%d first_difference_at_word=%d",
+                       _cid(gate), 1 - gate.repairs_left, len(want), len(got), differs_at + 1)
         await bridge._rt.repair_unspoken_response(
             (event.raw or {}).get("response") or {},
             required_text=gate.required_text, required_reason=_REPAIR_REASON)
