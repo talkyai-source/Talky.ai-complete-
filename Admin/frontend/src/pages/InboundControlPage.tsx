@@ -706,7 +706,14 @@ export function InboundControlPage() {
                                 <h2 id="runtime-controls-heading" className="card-title">Independent runtime kill switches</h2>
                                 <p className="section-help">Admission remains the master switch. Recording, transfer, and settlement can be stopped independently.</p>
                             </div>
-                            <StatusBadge value={draftControls?.inbound_enabled ? 'inbound enabled' : 'inbound disabled'} />
+                            <div>
+                                <StatusBadge value={controls?.inbound_enabled ? 'inbound enabled' : 'inbound disabled'} />
+                                {controls && draftControls && controls.inbound_enabled !== draftControls.inbound_enabled && (
+                                    <small role="status" className="section-help">
+                                        {` Not saved yet: incoming calls are still ${controls.inbound_enabled ? 'enabled' : 'disabled'}.`}
+                                    </small>
+                                )}
+                            </div>
                         </div>
                         <div className="card-body">
                             {draftControls && controls ? (
