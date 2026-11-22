@@ -69,6 +69,12 @@ function esc(s: string): string {
 
 export function buildContactsUpload(rows: UploadRow[]): ContactsUpload {
     const rowMap = new Map<number, number>();
+    // Columns the reader did not recognise travel under their own heading, so
+    // the server keeps them as custom fields instead of losing them.
+    const extraHeaders: string[] = [];
+    for (const { row } of rows) {
+        for (const h of Object.keys(row.extras ?? {})) if (!extraHeaders.includes(h)) extraHeaders.push(h);
+    }
     const lines = rows.map(({ numbers, row }, index) => {
         rowMap.set(index + UPLOAD_FIRST_DATA_ROW, row.source_row);
         return [
@@ -86,9 +92,11 @@ export function buildContactsUpload(rows: UploadRow[]): ContactsUpload {
             row.calling_notes,
             row.preferred_contact_method,
             row.do_not_call,
+            ...extraHeaders.map((h) => row.extras?.[h] ?? ""),
         ].map(esc).join(",");
     });
-    return { csv: [CONTACT_UPLOAD_COLUMNS.join(",")].concat(lines).join("\n"), rowMap };
+    const header = [...CONTACT_UPLOAD_COLUMNS, ...extraHeaders].map(esc).join(",");
+    return { csv: [header].concat(lines).join("\n"), rowMap };
 }
 
 export function uploadFileFromCsv(csv: string): File {

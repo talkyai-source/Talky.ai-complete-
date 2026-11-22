@@ -145,7 +145,8 @@ CONTACT_FIELDS: tuple[ContactField, ...] = (
     # generated leads.full_name column can never drift from its parts.
     ContactField(
         "full_name", "Full name", None,
-        aliases=("fullname", "contact name", "customer name", "lead name"),
+        aliases=("fullname", "contact name", "customer name", "lead name",
+                 "name", "customer", "client", "client name", "person"),
         # Deliberately blank in the template: every write path derives it from
         # first_name/last_name, so a filled-in example would teach people to
         # supply a value we then ignore.
@@ -212,7 +213,9 @@ BY_KEY = {f.key: f for f in CONTACT_FIELDS}
 def normalise_header(header: str) -> str:
     """Collapse spacing, underscores and hyphens so "E-Mail", "e_mail" and
     "E Mail" are all the same thing."""
-    return re.sub(r"[\s_\-]+", " ", (header or "").strip().lower())
+    # U+FEFF (a byte-order mark Excel leaves on the first header) is not
+    # whitespace to Python, so it is removed explicitly.
+    return re.sub(r"[\s_\-]+", " ", (header or "").replace(chr(0xFEFF), "").strip().lower())
 
 
 # alias -> key, built once.
@@ -237,6 +240,18 @@ def map_column(header: str) -> Optional[str]:
     offer a manual mapping for it.
     """
     return _ALIAS_INDEX.get(normalise_header(header))
+
+
+SEMICOLON_FILE_MESSAGE = (
+    "This file uses semicolons between columns (some Excel settings do this). "
+    "Please save it again as \"CSV (Comma delimited)\" and upload it."
+)
+
+
+def looks_semicolon_separated(headers: list[str]) -> bool:
+    """True when the whole header row came back as ONE cell that contains ``;``
+    - a semicolon-separated file read as comma-separated."""
+    return len(headers) == 1 and ";" in (headers[0] or "")
 
 
 def map_headers(headers: list[str]) -> dict[str, Optional[str]]:

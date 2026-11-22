@@ -97,7 +97,7 @@ test("upload card: a 422 for the date shows beside the date field and no generic
 test("mapper Import: nothing is sent until the same block is complete, then the upload carries it", async () => {
     mockHome();
     mock.method(leadDetailsApi, "previewImport", async () => ({
-        headers: { Phone: "phone_number", "First Name": "first_name", "Last Name": "last_name", Email: "email" },
+        headers: { Phone: "phone_number", "First Name": "first_name", "Last Name": "last_name", Email: "email" }, dial_column: "Phone",
         unmapped: [], total_rows: 1, valid_rows: 1, issues: [], duplicates_in_file: [], sample: [],
     }));
     const calls: Array<unknown[]> = [];

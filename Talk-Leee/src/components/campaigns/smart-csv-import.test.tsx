@@ -152,3 +152,15 @@ test("EP3 CSV tab: an invalid mobile_number cell is a column-named row error and
     assert.equal(lines[1].split(",")[6], "+447400123457");
     assert.ok(!lines[1].split(",").includes(BAD_NUMBER));
 });
+
+test("EP3 CSV tab result says how many existing contacts were given a name", async () => {
+    mock.method(extendedApi, "uploadCSV", async () => ({ total_rows: 1, imported: 0, failed: 0, duplicates_skipped: 1, names_added: 1, errors: [] }));
+    render(<SmartCsvImport open campaignId="camp-1" onClose={() => {}} />);
+    fireEvent.change(screen.getByTestId("campaign-import-file"), { target: { files: [csvFile(FILE_TEXT)] } });
+    await screen.findAllByTestId("campaign-import-row", undefined, { timeout: SLOW });
+    await chooseUnitedKingdom("campaign-import-country");
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Import 1 contact$/ })), { timeout: SLOW });
+    fillContactPermission();
+    fireEvent.click(screen.getByRole("button", { name: /Import 1 contact$/ }));
+    await screen.findByText("Names added to 1 contact that were already in this campaign.", undefined, { timeout: SLOW });
+});

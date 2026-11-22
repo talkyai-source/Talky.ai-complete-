@@ -14,7 +14,7 @@ import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequ
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
-import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
+import { parseContactsCsv, semicolonFileMessage, type ContactRow } from "@/lib/contact-csv";
 import { contactOptionalFieldProblem, contactPayload, contactTimezoneError, EMPTY_CONTACT_FORM, supportedTimeZones, type ContactFormState } from "@/lib/contact-form";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
 import { campaignActions, useKnownPermissions } from "@/lib/permissions";
@@ -166,9 +166,9 @@ function parseCsvText(text: string, country: CountrySelection): ParseSummary {
             rows: [],
             valid: 0,
             invalid: 0,
-            headerError: headers.length
+            headerError: semicolonFileMessage(headers) ?? (headers.length
                 ? `Couldn't find a phone column. Found: ${headers.join(", ")}. Add a column like 'phone number', 'Phone', 'Mobile', or 'To Number'.`
-                : "File is empty.",
+                : "File is empty."),
         };
     }
 
@@ -952,6 +952,12 @@ export default function ContactsPage() {
                                     <p className="text-xs font-semibold uppercase tracking-wide text-red-700/80 dark:text-red-300/80">Failed</p>
                                 </div>
                             </div>
+                            )}
+
+                            {result && (result.names_added ?? 0) > 0 && (
+                                <p className="mb-4 text-sm text-foreground" data-testid="contacts-import-names-added">
+                                    Names added to {result.names_added} {result.names_added === 1 ? "contact" : "contacts"} that were already in this campaign.
+                                </p>
                             )}
 
                             {result && result.imported > 0 && (

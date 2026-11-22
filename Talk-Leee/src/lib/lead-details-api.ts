@@ -111,6 +111,8 @@ export interface ImportPreview {
     issues: ImportIssue[];
     duplicates_in_file: { row: number; first_seen_row: number; key: string }[];
     sample: Record<string, string>[];
+    /** The column the import will dial (phone, else mobile), as the server reads it. */
+    dial_column?: string | null;
 }
 
 export const leadDetailsApi = {

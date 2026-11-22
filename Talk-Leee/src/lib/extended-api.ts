@@ -65,6 +65,8 @@ export interface BulkImportResponse {
     imported: number;
     failed: number;
     duplicates_skipped: number;
+    /** Contacts already in the campaign with no name that this file gave one to. */
+    names_added?: number;
     errors: Array<{ row: number; error: string; phone?: string }>;
 }
 

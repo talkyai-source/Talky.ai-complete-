@@ -193,6 +193,8 @@ class IngestResult:
     revived: int = 0
     duplicates_skipped: int = 0
     invalid: int = 0
+    # Existing live contacts that had no name and were given one by this file.
+    names_added: int = 0
     errors: list = field(default_factory=list)
 
 
@@ -252,17 +254,21 @@ def parse_pasted_numbers(text: str) -> list[str]:
 
 def _load_existing(
     db_client, campaign_id: str, tenant_id: Optional[str]
-) -> tuple[set, dict]:
-    """Return (live_phones, deleted_lead_by_phone) for the campaign.
+) -> tuple[set, dict, dict]:
+    """Return (live_phones, deleted_lead_by_phone, nameless_live_by_phone).
+
+    ``nameless_live_by_phone`` maps a live contact's phone to its id when both
+    its first and last name are NULL, so a re-import can fill the name in.
 
     Always loaded so we never create a second live row for a phone and so
     a phone matching a soft-deleted row is revived in place.
     """
     live_phones: set[str] = set()
     deleted_by_phone: dict[str, str] = {}
+    nameless_live: dict[str, str] = {}
     resp = (
         db_client.table("leads")
-        .select("id, phone_number, status, is_lead")
+        .select("id, phone_number, status, is_lead, first_name, last_name")
         .eq("campaign_id", campaign_id)
         .eq("tenant_id", tenant_id)
         .execute()
@@ -276,7 +282,36 @@ def _load_existing(
                 deleted_by_phone[row["phone_number"]] = row["id"]
         else:
             live_phones.add(row["phone_number"])
-    return live_phones, deleted_by_phone
+            if row.get("first_name") is None and row.get("last_name") is None:
+                nameless_live[row["phone_number"]] = row["id"]
+    return live_phones, deleted_by_phone, nameless_live
+
+
+def _fill_missing_name(db_client, *, lead_id: str, campaign_id: str,
+                       tenant_id: Optional[str], rec: "LeadRecord") -> bool:
+    """Give an existing, nameless live contact the name from a re-imported row.
+
+    ONE statement that touches only first_name and last_name. The tenant,
+    campaign and contact id are in its predicates, and both names must still be
+    NULL, so a name someone typed in the meantime is never overwritten.
+    """
+    try:
+        resp = (
+            db_client.table("leads")
+            .update({"first_name": rec.first_name, "last_name": rec.last_name})
+            .eq("id", lead_id)
+            .eq("campaign_id", campaign_id)
+            .eq("tenant_id", tenant_id)
+            .is_("first_name", None)
+            .is_("last_name", None)
+            .execute()
+        )
+        if getattr(resp, "error", None):
+            raise RuntimeError(str(resp.error))
+        return bool(getattr(resp, "data", None))
+    except Exception as e:  # noqa: BLE001 - a name is a bonus; never fail the import
+        logger.error("bulk_ingest name fill %s failed: %s", lead_id, redact_log_detail(e))
+        return False
 
 
 def ingest_lead_records(
@@ -303,7 +338,7 @@ def ingest_lead_records(
     old one.
     """
     result = IngestResult(total=len(records))
-    live_phones, deleted_by_phone = _load_existing(
+    live_phones, deleted_by_phone, nameless_live = _load_existing(
         db_client, campaign_id, tenant_id
     )
 
@@ -332,6 +367,14 @@ def ingest_lead_records(
 
         if phone in seen or phone in live_phones:
             result.duplicates_skipped += 1
+            # A re-import fills a missing name (first row with a name wins).
+            lead_id = nameless_live.get(phone)
+            if lead_id and (rec.first_name or rec.last_name):
+                del nameless_live[phone]
+                if _fill_missing_name(db_client, lead_id=lead_id,
+                                      campaign_id=campaign_id,
+                                      tenant_id=tenant_id, rec=rec):
+                    result.names_added += 1
             continue
         seen.add(phone)
 
