@@ -35,11 +35,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
 import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
-import {
-    buildCsvTemplate,
-    leadDetailsApi,
-    type ImportPreview,
-} from "@/lib/lead-details-api";
+import { leadDetailsApi, type ImportPreview } from "@/lib/lead-details-api";
+import { mapHeaders } from "@/lib/contact-csv";
+import { SAMPLE_CSV_FILENAME, SAMPLE_CSV_HELP, buildSampleCsv } from "@/lib/contact-sample-csv";
 import { PHONE_HELP_TEXT, type CountrySelection } from "@/lib/phone-number";
 
 export function CsvImportMapper({
@@ -76,25 +74,33 @@ export function CsvImportMapper({
         }
     }, []);
 
-    const downloadTemplate = useCallback(async () => {
-        try {
-            const spec = await leadDetailsApi.fieldSpec();
-            const blob = new Blob([buildCsvTemplate(spec.csv_template_headers)], {
-                type: "text/csv",
-            });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "talklee-contacts-template.csv";
-            a.click();
-            URL.revokeObjectURL(url);
-        } catch {
-            setError("Couldn't build the template just now.");
-        }
+    const downloadSample = useCallback(() => {
+        const blob = new Blob([buildSampleCsv()], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = SAMPLE_CSV_FILENAME;
+        a.click();
+        URL.revokeObjectURL(url);
     }, []);
 
     const mappedPairs = Object.entries(preview?.headers ?? {});
-    const hasPhone = mappedPairs.some(([, key]) => key === "phone_number");
+    // The Import button re-reads the file with the browser reader, so the two
+    // notes below say what THAT reader will do with these headings.
+    const headerNames = mappedPairs.map(([header]) => header);
+    const read = mapHeaders(headerNames);
+    const readerDial = read.phone >= 0 ? read.phone : read.mobile;
+    // The server says which column it will dial (a Mobile-only file is fine).
+    // A server from before 22 November 2026 does not send the field at all:
+    // then the reader's own answer is used, so Import is never switched off
+    // just because the website went live before the server did.
+    const dialColumn = preview?.dial_column === undefined
+        ? (readerDial >= 0 ? headerNames[readerDial] : null)
+        : preview.dial_column;
+    const hasPhone = Boolean(dialColumn);
+    const nameColumns = (read.first >= 0 || read.last >= 0 ? [read.first, read.last] : [read.full])
+        .filter((index) => index >= 0)
+        .map((index) => headerNames[index].trim());
 
     return (
         <div className="space-y-4">
@@ -122,15 +128,15 @@ export function CsvImportMapper({
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                     Choose a CSV
                 </Button>
-                <Button variant="outline" onClick={downloadTemplate}>
+                <Button variant="outline" onClick={downloadSample}>
                     <Download className="h-4 w-4" />
-                    Download template
+                    Download a sample file
                 </Button>
-                <InfoTip label="About the import template">
-                    The template uses our own column names, so a file built from it maps
+                <InfoTip label="About the sample file">
+                    The sample uses our own column names, so a file built from it maps
                     with no guessing. Your own headings usually work too — we recognise
-                    things like &ldquo;Mobile&rdquo;, &ldquo;Organisation&rdquo; and
-                    &ldquo;Job Title&rdquo;.
+                    things like &ldquo;Name&rdquo;, &ldquo;Mobile&rdquo;,
+                    &ldquo;Organisation&rdquo; and &ldquo;Job Title&rdquo;.
                 </InfoTip>
                 {file && (
                     <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -138,6 +144,8 @@ export function CsvImportMapper({
                     </span>
                 )}
             </div>
+
+            <p className="text-xs text-muted-foreground">{SAMPLE_CSV_HELP}</p>
 
             {error && (
                 <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>
@@ -155,11 +163,32 @@ export function CsvImportMapper({
                         />
                     </div>
 
+                    {hasPhone && (
+                        <p className="text-sm text-foreground">
+                            We&apos;ll dial the &ldquo;{dialColumn}&rdquo; column.
+                        </p>
+                    )}
+
                     {!hasPhone && (
                         <p className="flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-700 dark:text-red-400">
                             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                             No column maps to a phone number. Nothing in this file can be
                             dialled.
+                        </p>
+                    )}
+
+                    {nameColumns.length > 0 ? (
+                        <p className="text-sm text-foreground">
+                            We&apos;ll use{" "}
+                            {nameColumns.map((h) => `“${h}”`).join(" and ")} as each
+                            person&apos;s name, so the agent can greet them by it.
+                        </p>
+                    ) : (
+                        <p className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                            No column looks like a name, so calls will start without one.
+                            Name a column &ldquo;Name&rdquo; (or &ldquo;First name&rdquo; and
+                            &ldquo;Last name&rdquo;) and choose the file again.
                         </p>
                     )}
 

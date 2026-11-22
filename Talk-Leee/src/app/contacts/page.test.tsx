@@ -134,7 +134,7 @@ test("EP2 mapper Import button sends the file through the SAME upload path and C
     const sent: string[] = [];
     mockHome(async (file) => { sent.push(await file.text()); return okResponse; });
     mock.method(leadDetailsApi, "previewImport", async () => ({
-        headers: { Phone: "phone_number", "First Name": "first_name", "Last Name": "last_name", Email: "email" },
+        headers: { Phone: "phone_number", "First Name": "first_name", "Last Name": "last_name", Email: "email" }, dial_column: "Phone",
         unmapped: [], total_rows: 2, valid_rows: 2, issues: [], duplicates_in_file: [], sample: [],
     }));
     await openUploadPanel();
@@ -325,4 +325,17 @@ test("FX3a3: the upload help names the name and company columns in plain words",
     const help = screen.getByText(/Required column:/).textContent ?? "";
     assert.equal(help.includes("Use either full name or first name, last name; email and company name are optional."), true, help);
     assert.equal(/full_name|first_name|last_name|company_name/.test(help), false);
+});
+
+test("EP1 result card says how many existing contacts were given a name", async () => {
+    mockHome(async () => ({ total_rows: 1, imported: 0, failed: 0, duplicates_skipped: 1, names_added: 3, errors: [] }));
+    await openUploadPanel();
+    fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(FILE_TEXT)] } });
+    await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
+    await chooseUnitedKingdom("contacts-import-country");
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contact$/ })), { timeout: SLOW });
+    fillContactPermission();
+    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
+    const line = await screen.findByTestId("contacts-import-names-added", undefined, { timeout: SLOW });
+    assert.equal(line.textContent, "Names added to 3 contacts that were already in this campaign.");
 });

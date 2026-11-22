@@ -76,6 +76,8 @@ class BulkImportResponse(BaseModel):
     imported: int
     failed: int
     duplicates_skipped: int = 0
+    # Contacts already in the campaign with no name that this file gave one to.
+    names_added: int = 0
     errors: List[ImportError]
     # Cells we could not use on rows that DID import. Separate from ``errors``
     # so ``failed`` keeps meaning "contacts that did not land": a contact whose
@@ -104,6 +106,28 @@ class BulkPasteRequest(BaseModel):
     # The customer's confirmation that they may call these contacts:
     # {basis, source, permission_date, statement_version}. Validated in the route.
     permission: Optional[Any] = None
+
+
+def _names_from_values(values: dict) -> tuple[Optional[str], Optional[str]]:
+    """first/last name of a mapped CSV row. A single name column (Name, Full
+    name, Customer ...) is split by the product's one rule, the same one the
+    manual Add-Contact form uses."""
+    first_name = values.get("first_name")
+    last_name = values.get("last_name")
+    if not first_name and not last_name and values.get("full_name"):
+        from app.api.v1.endpoints.campaigns import _split_contact_full_name
+        return _split_contact_full_name(values["full_name"])
+    return first_name, last_name
+
+
+def _mapped_row(row: dict, header_mapping: dict) -> dict:
+    """A CSV row keyed by canonical field (first non-empty cell wins)."""
+    values: dict = {}
+    for header, value in row.items():
+        key = header_mapping.get(header) if header is not None else None
+        if key and isinstance(value, str) and value.strip():
+            values.setdefault(key, value.strip())
+    return values
 
 
 def _campaign_default_country(campaign) -> str:
@@ -376,10 +400,13 @@ async def upload_campaign_contacts(
         # the preview endpoint and the agent-context builder. A Mobile column
         # can be the dial number when no separate Phone number is supplied.
         from app.domain.services.contact_fields import (
-            BY_KEY, coerce_bool, map_headers, validate_row,
+            BY_KEY, SEMICOLON_FILE_MESSAGE, coerce_bool,
+            looks_semicolon_separated, map_headers, validate_row,
         )
 
         fieldnames = list(csv_reader.fieldnames or [])
+        if looks_semicolon_separated(fieldnames):
+            raise HTTPException(status_code=400, detail=SEMICOLON_FILE_MESSAGE)
         header_mapping = map_headers(fieldnames)
         if not any(
             mapped in {"phone_number", "mobile_number"}
@@ -446,12 +473,7 @@ async def upload_campaign_contacts(
                 field_errors.append(_field_issue(issue, BY_KEY[issue.field].label))
             field_errors.extend(_check_optional_numbers(values, row_num, default_country))
 
-            first_name = values.get("first_name")
-            last_name = values.get("last_name")
-            if not first_name and not last_name and values.get("full_name"):
-                name_parts = values["full_name"].split()
-                first_name = name_parts[0] if name_parts else None
-                last_name = " ".join(name_parts[1:]) or None
+            first_name, last_name = _names_from_values(values)
 
             phone_raw = values.get("phone_number") or values.get("mobile_number")
             company = values.get("company_name")
@@ -540,6 +562,7 @@ async def upload_campaign_contacts(
             imported=result.imported,
             failed=len(result.errors) + len(ragged_rows),
             duplicates_skipped=result.duplicates_skipped,
+            names_added=result.names_added,
             errors=shown,
             errors_total=errors_total,
             errors_truncated=errors_truncated,
@@ -791,9 +814,22 @@ async def bulk_import_contacts(
         
         from app.domain.services.dialer.bulk_ingest import LeadRecord
         csv_rows = list(csv_reader)
+        from app.domain.services.contact_fields import (
+            SEMICOLON_FILE_MESSAGE, looks_semicolon_separated, map_headers,
+        )
+        fieldnames = list(csv_reader.fieldnames or [])
+        if looks_semicolon_separated(fieldnames):
+            raise HTTPException(status_code=400, detail=SEMICOLON_FILE_MESSAGE)
+        # The same heading recognition as the campaign upload, so Name, Phone,
+        # Mobile ... mean the same thing on both paths.
+        header_mapping = map_headers(fieldnames)
+        mapped_rows = [_mapped_row(row, header_mapping) for row in csv_rows]
         _preflight_phones([
-            LeadRecord(phone_raw=(row.get("phone_number") or "").strip(), source_row=i)
-            for i, row in enumerate(csv_rows, start=2)
+            LeadRecord(
+                phone_raw=(v.get("phone_number") or v.get("mobile_number") or "").strip(),
+                source_row=i,
+            )
+            for i, v in enumerate(mapped_rows, start=2)
         ], default_country)
         list_id = None
         if permission is not None:
@@ -814,10 +850,11 @@ async def bulk_import_contacts(
         
         for row_num, row in enumerate(csv_rows, start=2):  # Start at 2 (header is row 1)
             total_rows += 1
+            values = mapped_rows[row_num - 2]
             
             try:
                 # Validate required field
-                phone = row.get('phone_number', '').strip()
+                phone = (values.get("phone_number") or values.get("mobile_number") or "").strip()
                 if not phone:
                     errors.append(ImportError(
                         row=row_num, error=ROW_ERROR_TEXT["phone_missing"],
@@ -844,10 +881,9 @@ async def bulk_import_contacts(
                     continue
                 
                 # Prepare data
-                first_name = row.get('first_name', '').strip() or None
-                last_name = row.get('last_name', '').strip() or None
-                email = row.get('email', '').strip() or None
-                company = row.get('company', '').strip() or None
+                first_name, last_name = _names_from_values(values)
+                email = values.get("email")
+                company = values.get("company_name")
                 
                 if campaign_id:
                     # Add as lead to campaign (with tenant_id)

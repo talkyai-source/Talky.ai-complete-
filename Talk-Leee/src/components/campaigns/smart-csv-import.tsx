@@ -22,7 +22,7 @@ import { DefaultCountrySelect } from "@/components/contacts/default-country-sele
 import { ContactPermissionFields } from "@/components/contacts/contact-permission-fields";
 import { useContactPermissionForm } from "@/components/contacts/use-contact-permission-form";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
-import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
+import { parseContactsCsv, semicolonFileMessage, type ContactRow } from "@/lib/contact-csv";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 
@@ -113,9 +113,9 @@ export function SmartCsvImport({
         setFileName(f.name);
         try {
             const text = await f.text();
-            const { rows: parsed, phoneFound } = parseContactsCsv(text);
+            const { rows: parsed, phoneFound, headers: parsedHeaders } = parseContactsCsv(text);
             if (!phoneFound) {
-                setParseError("Couldn't find a phone column. Make sure the file has a header row with a column like 'Phone', 'Mobile', or 'To Number'.");
+                setParseError(semicolonFileMessage(parsedHeaders) ?? "Couldn't find a phone column. Make sure the file has a header row with a column like 'Phone', 'Mobile', or 'To Number'.");
                 return;
             }
             if (parsed.length === 0) { setParseError("The file has no data rows."); return; }
@@ -226,6 +226,7 @@ export function SmartCsvImport({
                         <CheckCircle2 className="h-5 w-5" /> Imported {result.imported} of {result.total_rows} contacts.
                     </div>
                     {result.duplicates_skipped > 0 && <p className="text-muted-foreground">{result.duplicates_skipped} duplicate(s) skipped by the server.</p>}
+                    {(result.names_added ?? 0) > 0 && <p className="text-foreground">Names added to {result.names_added} {result.names_added === 1 ? "contact" : "contacts"} that were already in this campaign.</p>}
                     {result.failed > 0 && (
                         <div className="text-yellow-700 dark:text-yellow-400">
                             {result.failed} failed:

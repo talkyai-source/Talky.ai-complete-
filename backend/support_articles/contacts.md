@@ -15,7 +15,7 @@ The Contacts area is used to manage people who may be called by campaigns.
 3. Choose **Upload CSV** or **Add more contacts**.
 
    ![The CSV upload panel, with a link to download a template](/docs/contacts-02-csv-upload.webp)
-4. If needed, select **Download template** to obtain the expected format.
+4. If needed, select **Download a sample file** to get a CSV with the right columns and two example rows.
 5. Choose the CSV file.
 6. Review the import preview and any validation errors.
 7. Select **Upload Contacts**.

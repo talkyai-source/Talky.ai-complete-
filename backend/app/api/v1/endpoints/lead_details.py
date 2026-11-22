@@ -35,6 +35,8 @@ from app.domain.services.contact_fields import (
     CONTACT_FIELDS,
     csv_template_headers,
     dedupe_key,
+    SEMICOLON_FILE_MESSAGE,
+    looks_semicolon_separated,
     map_headers,
     validate_row,
 )
@@ -109,6 +111,9 @@ class ImportPreview(BaseModel):
     # import stores them; phone_number is None when the row cannot be dialled.
     default_country: Optional[str] = None
     normalized_rows: list[dict] = Field(default_factory=list)
+    # The column the import will dial: the one mapped to phone_number, else the
+    # one mapped to mobile_number (the importer's own rule). None = no number.
+    dial_column: Optional[str] = None
 
 
 _PHONE_KEYS = ("phone_number", "mobile_number", "business_number")
@@ -154,10 +159,15 @@ async def preview_import(
     if not headers:
         raise HTTPException(status_code=400, detail="That file has no header row.")
 
+    if looks_semicolon_separated(headers):
+        raise HTTPException(status_code=400, detail=SEMICOLON_FILE_MESSAGE)
     mapping = map_headers(headers)
     unmapped = [h for h, k in mapping.items() if k is None]
     # As on import, a Mobile column is the dial number when there is no Phone.
     dial_mapped = any(k in ("phone_number", "mobile_number") for k in mapping.values())
+    dial_column = next(
+        (h for key in ("phone_number", "mobile_number")
+         for h, k in mapping.items() if k == key), None)
 
     issues: list[dict] = []
     normalized_rows: list[dict] = []
@@ -228,6 +238,7 @@ async def preview_import(
         headers=mapping, unmapped=unmapped, total_rows=total, valid_rows=valid,
         issues=issues[:200], duplicates_in_file=dupes[:200], sample=sample,
         default_country=country, normalized_rows=normalized_rows,
+        dial_column=dial_column,
     )
 
 

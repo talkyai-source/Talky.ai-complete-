@@ -30,6 +30,10 @@ export type ContactRow = {
      *  header, preamble and blank lines all count), so every row error can
      *  name the row the user sees in their own file, not the cleaned one. */
     source_row: number;
+    /** Columns this reader does not recognise, kept under the customer's own
+     *  heading so the import can store them as custom fields (the mapper tells
+     *  the customer nothing is discarded). Absent when there are none. */
+    extras?: Record<string, string>;
 };
 
 export type ContactCsvParse = {
@@ -94,6 +98,7 @@ export function mapHeaders(headers: string[]) {
         }
         return -1;
     };
+    const fullByWords = findBy(["fullname", "contactname", "customername", "leadname"]);
     return {
         phone: findBy(
             ["primaryphone", "dialnumber", "e164", "tonumber", "phonenumber",
@@ -110,9 +115,14 @@ export function mapHeaders(headers: string[]) {
              "officephone", "officenumber", "landline"],
             ["valid", "status", "type", "count"],
         ),
-        first: findBy(["firstname", "givenname", "fname"]),
+        first: findBy(["firstname", "givenname", "forename", "fname"]),
         last: findBy(["lastname", "surname", "familyname", "lname"]),
-        full: findBy(["fullname", "contactname", "customername", "leadname"]),
+        // A bare "Name" / "Customer" column is the most common heading of all.
+        // It is matched whole, never as a substring, so "Company Name" and
+        // "File name" are not taken for a person.
+        full: fullByWords >= 0
+            ? fullByWords
+            : norm.findIndex((h) => ["name", "customer", "client", "clientname", "person"].includes(h)),
         email: findBy(["emailaddress", "email"], ["valid", "status", "extra", "secondary"]),
         company: findBy(["companyname", "company", "organization", "organisation", "business", "accountname"]),
         jobTitle: findBy(["jobtitle", "jobrole", "position", "role", "title"]),
@@ -147,9 +157,22 @@ export function parseContactsCsv(text: string): ContactCsvParse {
     const headerRow = findHeaderRow(grid);
     const headers = grid[headerRow] ?? [];
     const m = mapHeaders(headers);
-    if (m.phone < 0 && m.mobile < 0) {
+    // "Name;Phone" is one cell to this reader, and the word "phone" inside it
+    // would pass for a phone column; it is a semicolon file, not a phone column.
+    if (semicolonFileMessage(headers) || (m.phone < 0 && m.mobile < 0)) {
         return { headerRow, headers, rows: [], phoneFound: false };
     }
+    const used = new Set<number>(Object.values(m).filter((i) => i >= 0));
+    const reserved = new Set(["phone_number", "full_name", "first_name", "last_name", "email",
+        "company_name", "mobile_number", "business_number", "job_title", "best_time_to_call",
+        "timezone", "calling_notes", "preferred_contact_method", "do_not_call"]);
+    const extraCols: Array<{ index: number; header: string }> = [];
+    headers.forEach((h, index) => {
+        const header = h.trim();
+        if (used.has(index) || !header || reserved.has(header.toLowerCase())) return;
+        if (extraCols.some((c) => c.header.toLowerCase() === header.toLowerCase())) return;
+        extraCols.push({ index, header });
+    });
     const rows: ContactRow[] = gridWithLines.slice(headerRow + 1).map(({ cells: r, line }) => {
         let first = m.first >= 0 ? (r[m.first] ?? "").trim() : "";
         let last = m.last >= 0 ? (r[m.last] ?? "").trim() : "";
@@ -163,7 +186,13 @@ export function parseContactsCsv(text: string): ContactCsvParse {
             ? (r[m.full] ?? "").trim()
             : [first, last].filter(Boolean).join(" ");
         const mobile = m.mobile >= 0 ? (r[m.mobile] ?? "").trim() : "";
+        const extras: Record<string, string> = {};
+        for (const { index, header } of extraCols) {
+            const v = (r[index] ?? "").trim();
+            if (v) extras[header] = v;
+        }
         return {
+            ...(Object.keys(extras).length ? { extras } : {}),
             phone: (m.phone >= 0 ? (r[m.phone] ?? "") : mobile).trim(),
             mobile_number: mobile,
             business_number: m.businessNumber >= 0 ? (r[m.businessNumber] ?? "").trim() : "",
@@ -182,4 +211,13 @@ export function parseContactsCsv(text: string): ContactCsvParse {
         };
     }).filter((r) => r.phone || r.first_name || r.last_name);
     return { headerRow, headers, rows, phoneFound: true };
+}
+
+/** Said when a file uses ";" between columns (some Excel settings), which this
+ *  reader and the server read as one column. Null when that is not the case. */
+export const SEMICOLON_FILE_MESSAGE =
+    'This file uses semicolons between columns (some Excel settings do this). Please save it again as "CSV (Comma delimited)" and choose it again.';
+
+export function semicolonFileMessage(headers: string[]): string | null {
+    return headers.length === 1 && headers[0].includes(";") ? SEMICOLON_FILE_MESSAGE : null;
 }
