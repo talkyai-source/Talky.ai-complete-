@@ -21,7 +21,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Optional
+from typing import Optional, Sequence
 
 from fastapi import WebSocket
 
@@ -194,9 +194,12 @@ class TtsPlayback:
         *,
         barge_in_event: Optional[asyncio.Event] = None,
         track_latency: bool = True,
+        premade_chunks: Optional[Sequence[bytes]] = None,
     ) -> bool:
         """
         Synthesize TTS audio and stream it to the media gateway.
+        ``premade_chunks`` (caller-first opener only) stands in for the provider
+        stream and nothing else; every other step below is unchanged.
         Return True when the sentence cannot be treated as fully submitted.
 
         Caller interruption and failed delivery both stop the turn. The existing
@@ -344,12 +347,17 @@ class TtsPlayback:
             # by about six seconds. Healthy providers normally answer in well
             # under one second; three seconds per attempt preserves a retry
             # without leaving a caller in ten seconds of unexplained silence.
-            _tts_iter = self._p.tts_provider.stream_synthesize(
-                spoken_text,
-                voice_id=session.voice_id,
-                sample_rate=self._p.tts_sample_rate,
-                call_id=call_id,
-            ).__aiter__()
+            if premade_chunks:
+                from app.domain.services.voice_pipeline.premade_opener import iter_premade
+
+                _tts_iter = iter_premade(premade_chunks).__aiter__()
+            else:
+                _tts_iter = self._p.tts_provider.stream_synthesize(
+                    spoken_text,
+                    voice_id=session.voice_id,
+                    sample_rate=self._p.tts_sample_rate,
+                    call_id=call_id,
+                ).__aiter__()
             provider_exhausted = False
             # NOTE: sample-alignment carry across chunk boundaries used to live
             # here (int16-only, 2-byte). It's now centralized in

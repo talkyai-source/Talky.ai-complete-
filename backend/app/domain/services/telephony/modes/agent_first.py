@@ -374,8 +374,11 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         disclosure_was_in_flight = getattr(session, "_disclosure_in_flight", False)
         session._disclosure_in_flight = True
         try:
+            from app.domain.services.voice_pipeline.premade_opener import premade_kwargs
+
             interrupted = await voice_session.pipeline.synthesize_and_send_audio(
                 session, text, websocket=None, track_latency=False,
+                **premade_kwargs(voice_session, session, text),
             )
         finally:
             session._disclosure_in_flight = disclosure_was_in_flight
@@ -904,6 +907,10 @@ async def prepare_pre_originate_greeting(
     pre_warm_session._opener_with_notice_text = outbound_opener_with_notice(
         pre_warm_session.call_session
     )
+    # Caller-first outbound only: also make the notice opener's audio while it rings.
+    from app.domain.services.voice_pipeline.premade_opener import premake_caller_first_lines
+
+    await premake_caller_first_lines(pre_warm_session, effective_first_speaker, greeting_text, chunks)
     logger.info(
         "pre_originate_greeting_ready first_speaker=%s chunks=%d bytes=%d text=%r",
         effective_first_speaker,
