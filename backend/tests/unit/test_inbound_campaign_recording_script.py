@@ -31,10 +31,13 @@ def script():
 
 
 def campaign(cid=C1, name="Main line", status="paused", recording=False, notice=None, version=7,
-             blockers=()):
-    return {"id": cid, "name": name, "status": status, "recording_enabled": recording,
-            "consent_message": notice, "version": version,
-            "readiness": {"ready": not blockers, "blockers": [{"code": b} for b in blockers]}}
+             blockers=(), assignment=None):
+    c = {"id": cid, "name": name, "status": status, "recording_enabled": recording,
+         "consent_message": notice, "version": version,
+         "readiness": {"ready": not blockers, "blockers": [{"code": b} for b in blockers]}}
+    if assignment is not None:
+        c["assignment_status"] = assignment
+    return c
 
 
 class Service:
@@ -347,3 +350,74 @@ async def test_show_mode_says_a_live_campaign_needs_the_flag(script, capsys):
     service = Service([campaign(status="active")])
     assert await script.run(args(), service=service, db=FakeDb()) == 0
     assert "would need --pause-and-resume because the campaign is live" in capsys.readouterr().out
+
+
+C3 = "c3c3c3c3-3333-4333-8333-000000000003"
+C4 = "c4c4c4c4-4444-4444-8444-000000000004"
+C5 = "c5c5c5c5-5555-4555-8555-000000000005"
+NO_NUMBER = ("has no phone number assigned (its number assignment is archived), so it cannot take calls; "
+             "nothing to switch. Assign a number on the campaign's page first; recording can be switched on then.")
+
+
+async def test_show_mode_prints_the_number_state_in_plain_words(script, capsys):
+    service = Service([
+        campaign(C1, "A", assignment="active"), campaign(C2, "B", assignment="paused"),
+        campaign(C3, "C", assignment="archived"), campaign(C4, "D", assignment="quarantined"),
+    ])
+    assert await script.run(args(), service=service, db=FakeDb()) == 0  # show mode never fails
+    out = capsys.readouterr().out
+    assert out.count("number=assigned") == 2
+    assert "number=none (assignment archived)" in out and "number=held (quarantined)" in out
+
+
+def production_case():
+    return [
+        campaign(C1, "Live line", assignment="paused"),
+        campaign(C2, "Already on", recording=True, notice="x", assignment="paused"),
+        campaign(C3, "Reception (ext 940004)", assignment="archived"),
+        campaign(C4, "Second reception", assignment="archived"),
+    ]
+
+
+async def test_campaigns_with_an_archived_assignment_are_not_a_failure(script, capsys):
+    service = Service(production_case())
+    assert await script.run(args("on", apply=True), service=service, db=FakeDb()) == 0
+    assert [u["config_id"] for u in service.updates] == [C1]  # the archived ones are never sent
+    out = capsys.readouterr().out
+    assert f'campaign c3c3c3c3 "Reception (ext 940004)": {NO_NUMBER}' in out
+    assert f'campaign c4c4c4c4 "Second reception": {NO_NUMBER}' in out
+    assert "switched on: 1; already on: 1; no phone number (cannot take calls): 2" in out
+    assert "assignment_state_conflict" not in out
+
+
+async def test_an_archived_assignment_does_not_hide_a_real_refusal_elsewhere(script, capsys):
+    campaigns = production_case() + [campaign(C5, "Opt-out notice", notice="Recorded. Press 9 to opt out.",
+                                              assignment="paused")]
+    service = Service(campaigns)
+    assert await script.run(args("on", apply=True), service=service, db=FakeDb()) == 1
+    out = capsys.readouterr().out
+    assert 'campaign c5c5c5c5 "Opt-out notice": not changed: ' in out and "cannot offer callers a way to opt out" in out
+    assert out.count(f'": {NO_NUMBER}' + chr(10)) == 2  # the two result lines (preview lines differ)
+    assert "switched on: 1; already on: 1; no phone number (cannot take calls): 2" in out
+
+
+async def test_show_mode_says_what_apply_would_do_for_a_campaign_with_no_number(script, capsys):
+    service = Service(production_case())
+    assert await script.run(args("on"), service=service, db=FakeDb()) == 0
+    assert f"with --state on --apply: {NO_NUMBER}" in capsys.readouterr().out
+
+
+async def test_a_quarantined_number_stays_a_refusal_with_the_plain_reason(script, capsys):
+    service = Service([campaign(assignment="quarantined")])
+    assert await script.run(args("on", apply=True), service=service, db=FakeDb()) == 1
+    assert service.updates == []
+    assert "not changed: its number is held by a platform quarantine (assignment_quarantined)" in capsys.readouterr().out
+
+
+async def test_an_unexpected_assignment_state_conflict_is_explained_and_fails(script, capsys):
+    service = Service([campaign(assignment="paused")])
+    service.error = Refused("assignment_state_conflict")
+    assert await script.run(args("on", apply=True), service=service, db=FakeDb()) == 1
+    out = capsys.readouterr().out
+    assert ("not changed: assignment_state_conflict (the product only allows an edit while the campaign's "
+            "number assignment is paused; it is in another state)") in out
