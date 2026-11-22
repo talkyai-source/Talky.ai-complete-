@@ -4,7 +4,8 @@ import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allo
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, adoptSiblingTabRotation, ApiClientError } from "@/lib/http-client";
+import { isSameSignIn, readTokenIdentity } from "@/lib/auth-token-identity";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
 import { emailAuditStore } from "@/lib/email-audit";
@@ -278,6 +279,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (e.key === "talklee.auth.token") {
                 const next = e.newValue && e.newValue.trim() ? e.newValue : null;
                 if (next === accessTokenRef.current) return;
+                // A sibling tab's routine renewal of THIS sign-in (same user,
+                // tenant and session) is a rotation, not an account change. An
+                // unreadable, different or removed token takes the path below.
+                const previous = accessTokenRef.current;
+                if (next && previous && isSameSignIn(readTokenIdentity(previous), readTokenIdentity(next))) {
+                    adoptSiblingTabRotation(previous, next);
+                    accessTokenRef.current = next;
+                    setAccessTokenState(next);
+                    return;
+                }
                 accessTokenRef.current = next;
                 setAccessTokenState(next);
                 handleIdentityChange(next ? "changed" : "logout");
