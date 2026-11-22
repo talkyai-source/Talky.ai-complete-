@@ -228,7 +228,9 @@ async def save_config(
             await require_elevenlabs_voice_eligible(db_client.pool, tenant_id, config.tts_voice_id, voices=elevenlabs_voices)
         except VoiceEligibilityError as exc:
             raise HTTPException(exc.status_code, str(exc)) from exc
-        valid_voice_ids = {voice.id for voice in elevenlabs_voices}
+        # Eligibility above already passed (tenant-owned clone or public stock);
+        # an owned clone may be missing from this process's cached catalogue.
+        valid_voice_ids = {voice.id for voice in elevenlabs_voices} | {config.tts_voice_id}
 
     if config.tts_model not in valid_tts_models:
         raise HTTPException(

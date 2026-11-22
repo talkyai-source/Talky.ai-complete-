@@ -811,7 +811,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         <Label>AI Voice ({campaignVoices.length} available)</Label>
                         {globalAiConfig && (
                             <p className="text-xs text-muted-foreground">
-                                Campaign voices follow your global AI Options TTS provider:{" "}
+                                This campaign&apos;s calls use the voice chosen here. AI Options only sets the default for new campaigns:{" "}
                                 <span className="font-medium capitalize text-foreground">{globalAiConfig.tts_provider}</span>{" "}
                                 on model{" "}
                                 <span className="font-medium text-foreground">{ttsModelNames[globalAiConfig.tts_model] ?? globalAiConfig.tts_model}</span>.
@@ -956,12 +956,12 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
                                                 Heads up: this voice belongs to{" "}
                                                 <span className="font-semibold">{selectedVoice.provider}</span>, but
-                                                your global TTS provider is{" "}
+                                                your AI Options default is{" "}
                                                 <span className="font-semibold">
                                                     {globalAiConfig.tts_provider}
                                                 </span>
-                                                . Switch the global provider in AI Options before launching this
-                                                campaign, otherwise calls will fail at synthesis time.
+                                                . This campaign&apos;s calls use its own voice; AI Options only sets
+                                                the default for new campaigns.
                                             </div>
                                         )}
 

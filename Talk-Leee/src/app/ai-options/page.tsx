@@ -770,6 +770,8 @@ function AIOptionsEditor({ scope }: { scope: string }) {
                             }
                         />
 
+                        <p className="mb-4 text-xs text-muted-foreground sm:text-sm">This is the default for new campaigns. A campaign that already has its own voice keeps it; change it on the campaign, or use Apply to campaigns after saving.</p>
+
                         <div className={`mb-4 grid gap-3 ${showAccentFilter ? "sm:grid-cols-2" : ""}`}>
                             <div>
                                 <label htmlFor="tts-model" className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
@@ -984,7 +986,12 @@ function AIOptionsEditor({ scope }: { scope: string }) {
             <VoiceCloneModal
                 open={cloneOpen}
                 onClose={() => setCloneOpen(false)}
-                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices(scope) }); }}
+                onCloned={({ voiceId, name }) => {
+                    void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices(scope) });
+                    // Offer the new clone to campaigns right away (existing Apply pop-up).
+                    setCloneOpen(false);
+                    setApplyModal({ provider: "elevenlabs", voiceId, voiceLabel: name });
+                }}
             />
         </DashboardLayout>
     );

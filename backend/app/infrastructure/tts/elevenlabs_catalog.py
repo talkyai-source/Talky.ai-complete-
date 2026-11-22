@@ -313,6 +313,26 @@ def invalidate_elevenlabs_voices_cache() -> None:
     _elevenlabs_voices_retry_after = 0.0
 
 
+# A tenant's own clone (cloned_voices table) can be missing from THIS process's
+# cached catalogue (the clone was made via the other API process). One forced
+# refresh is allowed per this many seconds per process, so a clone deleted at
+# the provider (row kept) cannot cause a refresh on every request or call.
+_MISSING_CLONE_REFRESH_MIN_INTERVAL_SECONDS = 60.0
+_missing_clone_last_refresh_at: float = -_MISSING_CLONE_REFRESH_MIN_INTERVAL_SECONDS
+
+
+async def refresh_voices_for_missing_clones() -> list[VoiceInfo]:
+    """Force one catalogue refresh, at most once per bound. Returns the fresh
+    catalogue, or [] when the bound says a refresh already happened recently."""
+    global _missing_clone_last_refresh_at
+    now = time.monotonic()
+    if now - _missing_clone_last_refresh_at < _MISSING_CLONE_REFRESH_MIN_INTERVAL_SECONDS:
+        return []
+    _missing_clone_last_refresh_at = now
+    invalidate_elevenlabs_voices_cache()
+    return await get_elevenlabs_voices_for_current_key()
+
+
 async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
     """Never raises. On a failed fetch it returns the last good catalog (stale
     while error) or [] and does NOT cache the failure; callers that must tell
