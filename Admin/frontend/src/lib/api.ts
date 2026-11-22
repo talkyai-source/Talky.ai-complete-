@@ -1646,6 +1646,28 @@ class ApiClient {
 
     expectIdentity(identity: SessionIdentity | null) { this.expectedIdentity = identity; }
 
+    /**
+     * A sibling tab renewed the token for the account this tab already shows:
+     * take the new token without a new auth generation, so the page stays. Any
+     * other token (another user or tenant, unreadable, none) returns false and
+     * the caller resets exactly as before.
+     */
+    adoptSiblingToken(token: string | null): boolean {
+        const next = storedIdentity(token);
+        const current = this.expectedIdentity ?? storedIdentity(this.token);
+        if (!token || !next || !current || !this.token) return false;
+        if (next.userId !== current.userId || next.tenantId !== (current.tenantId ?? null)) return false;
+        // A changed role retires privileged views, as this tab's own renewal does: never adopt it quietly.
+        const knownRole = this.expectedIdentity?.role;
+        if (knownRole) {
+            let tokenRole: unknown;
+            try { tokenRole = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role; } catch { tokenRole = undefined; }
+            if (tokenRole !== knownRole) return false;
+        }
+        this.token = token;
+        return true;
+    }
+
     onSessionRefreshed(listener: (role: string, authorityChanged: boolean) => void): () => void {
         this.refreshListeners.add(listener);
         return () => { this.refreshListeners.delete(listener); };
@@ -1976,6 +1998,15 @@ class ApiClient {
             if (sentGeneration !== this.authGeneration) return { error: sessionChangedError };
             if (!response.ok) {
                 const error = { ...normalizeAdminApiError(data), status: response.status };
+                if (response.status === 401) {
+                    const refreshed = await this.renewSession(sentGeneration, sentToken);
+                    // Never re-send the file by ourselves: the caller confirms again.
+                    if (refreshed.data) return { error: { code: 'AUTH_RETRY_REQUIRED', status: 401,
+                        message: 'Your session was renewed. Review the current state, then confirm the action again.' } };
+                    if (refreshed.error?.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                    if (refreshed.error?.status !== 401) return { error: refreshed.error?.status === 403
+                        ? { ...refreshed.error, code: 'SESSION_RENEWAL_UNAVAILABLE' } : refreshed.error ?? error };
+                }
                 if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration, sentToken);
                 if (response.status === 409 && error.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
                 if (response.status === 403) await this.recheckForbiddenAuthority(endpoint, sentGeneration, sentToken);

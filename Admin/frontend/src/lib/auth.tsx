@@ -281,6 +281,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const onStorage = (event: StorageEvent) => {
             if (event.key === TOKEN_KEY) {
                 if (event.newValue === api.getToken()) return;
+                // A sibling tab renewed the token of the account shown here: keep the page.
+                if (api.adoptSiblingToken(event.newValue)) return;
                 authOperation.current += 1; challengeRef.current = null; api.setToken(event.newValue, false);
                 setLogoutPending(!event.newValue);
                 setState({ ...anonymous(), isLoading: Boolean(event.newValue) });
