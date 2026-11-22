@@ -25,7 +25,7 @@ def _sql(monkeypatch, operation):
 
 
 def test_0101_sits_on_top_of_0100_and_under_0102():
-    assert SCRIPTS.get_heads() == ["0104_paypal_review_dismissed"]
+    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
     assert SCRIPTS.get_revision("0102_paypal_subscriptions").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0100_force_legal_acceptance_rls"
     assert len(REVISION) <= 32 and _module().revision == REVISION

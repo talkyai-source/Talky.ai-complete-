@@ -28,7 +28,7 @@ def _sql(monkeypatch, operation):
 
 
 def test_0098_sits_on_top_of_0097_under_one_head():
-    assert SCRIPTS.get_heads() == ["0104_paypal_review_dismissed"]
+    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
     assert SCRIPTS.get_revision("0099_clean_install_tables").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0097_remove_wizard_plan_line"
     assert len(REVISION) <= 32 and _module().revision == REVISION

@@ -1,5 +1,6 @@
-"""0096 on disposable loopback PostgreSQL: the contact list permission confirmation."""
+"""0096 and 0105 on disposable loopback PostgreSQL: the contact list permission confirmation."""
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
 import asyncpg
@@ -27,6 +28,25 @@ def migration():
     return module
 
 
+def migration_0105():
+    module = load("0105_contact_list_consent_complete")
+    assert (module.revision, module.down_revision) == ("0105_list_consent_complete", "0104_paypal_review_dismissed")
+    return module
+
+
+async def run_0105(conn, method="upgrade"):
+    """Run the statements of 0105 on one connection in one transaction; return the server notices."""
+    module = migration_0105()
+    statements, notices = [], []
+    module.op = SimpleNamespace(execute=statements.append)
+    getattr(module, method)()
+    conn.add_log_listener(lambda _c, message: notices.append(message))
+    async with conn.transaction():
+        for statement in statements:
+            await conn.execute(statement)
+    return notices
+
+
 async def insert(conn, **consent):
     columns = ["campaign_id", "name", *consent]
     marks = ", ".join(f"${i + 1}" for i in range(len(columns)))
@@ -37,6 +57,7 @@ async def insert(conn, **consent):
 async def migrated(database):  # noqa: F811
     await database.build(LINEAGE)
     await database.apply(migration())
+    await database.apply(migration_0105())
 
 
 async def test_every_column_null_and_a_complete_confirmation_are_accepted(database):  # noqa: F811
@@ -125,3 +146,56 @@ async def test_downgrade_refuses_while_a_confirmation_exists_and_succeeds_when_n
         assert await conn.fetchval("""SELECT count(*) FROM information_schema.columns
             WHERE table_name = 'contact_lists' AND starts_with(column_name, 'consent_')""") == 0
         assert await conn.fetchval("SELECT count(*) FROM pg_constraint WHERE conname = 'contact_lists_consent_complete'") == 0
+
+
+INCOMPLETE = {**GOOD, "consent_source": None}  # allowed by the 0096 rule, refused by 0105
+OLD_RULE_ONLY = ({"consent_source": None}, {"consent_basis": None}, {"consent_statement_version": None})
+
+
+async def test_a_row_written_before_0105_does_not_fail_it_and_new_ones_are_refused(database):  # noqa: F811
+    await database.build(LINEAGE)
+    await database.apply(migration())
+    async with database.pool.acquire() as conn:
+        bad = await insert(conn, **INCOMPLETE)  # the old constraint accepts it
+        await insert(conn, **GOOD)
+        notices = await run_0105(conn)  # must not raise
+        assert any("1 contact list(s) hold an incomplete permission confirmation" in getattr(n, "message", str(n)) for n in notices)
+        assert await conn.fetchval(
+            "SELECT convalidated FROM pg_constraint WHERE conname = 'contact_lists_consent_complete'") is False
+        assert await conn.fetchval("SELECT consent_confirmed_at FROM contact_lists WHERE id = $1", bad) == CONFIRMED_AT
+        for override in OLD_RULE_ONLY:  # each refused statement runs in its own transaction
+            with pytest.raises(asyncpg.CheckViolationError):
+                await insert(conn, **{**GOOD, **override})
+        await insert(conn, **GOOD)
+
+
+async def test_0105_applied_through_alembic_succeeds_with_a_bad_row_present(database):  # noqa: F811
+    await database.build(LINEAGE)
+    await database.apply(migration())
+    async with database.pool.acquire() as conn:
+        await insert(conn, **INCOMPLETE)
+    await database.apply(migration_0105())
+    async with database.pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT convalidated FROM pg_constraint WHERE conname = 'contact_lists_consent_complete'") is False
+
+
+async def test_without_a_bad_row_the_constraint_ends_validated(database):  # noqa: F811
+    await migrated(database)
+    async with database.pool.acquire() as conn:
+        assert await conn.fetchval(
+            "SELECT convalidated FROM pg_constraint WHERE conname = 'contact_lists_consent_complete'") is True
+        assert await conn.fetchval("""SELECT count(*) FROM pg_constraint
+            WHERE conrelid = 'contact_lists'::regclass AND conname = 'contact_lists_consent_complete'""") == 1
+
+
+async def test_0105_downgrade_puts_the_0096_rule_back(database):  # noqa: F811
+    await migrated(database)
+    await database.apply(migration_0105(), "downgrade")
+    async with database.pool.acquire() as conn:
+        for override in OLD_RULE_ONLY:
+            await insert(conn, **{**GOOD, **override})  # the old rule accepts these again
+        with pytest.raises(asyncpg.CheckViolationError):
+            await insert(conn, **{**GOOD, "consent_source": "abcd"})
+        assert await conn.fetchval(
+            "SELECT convalidated FROM pg_constraint WHERE conname = 'contact_lists_consent_complete'") is True

@@ -26,7 +26,7 @@ def _plans():
 
 
 def test_0097_sits_on_top_of_0096_under_one_head():
-    assert SCRIPTS.get_heads() == ["0104_paypal_review_dismissed"]
+    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
     assert SCRIPTS.get_revision("0098_calls_changed_since_index").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0096_contact_list_permission"
     assert len(REVISION) <= 32 and _module().revision == REVISION
