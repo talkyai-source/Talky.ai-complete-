@@ -49,6 +49,13 @@ export function HealthOverviewCards() {
             color: health.memory_percent > 80 ? 'var(--accent-red)' : 'var(--accent-blue)'
         },
         {
+            icon: <HardDrive size={24} />,
+            label: 'Disk Usage',
+            value: `${health.disk_usage_percent.toFixed(1)}%`,
+            subtext: `${health.disk_free_gb.toFixed(1)} GB free`,
+            color: health.disk_usage_percent > 85 ? 'var(--accent-red)' : 'var(--accent-blue)'
+        },
+        {
             icon: <Cpu size={24} />,
             label: 'CPU Usage',
             value: `${health.cpu_usage_percent.toFixed(1)}%`,
@@ -64,8 +71,28 @@ export function HealthOverviewCards() {
         }
     ];
 
+    const watch = health.health_watch;
+    // The watch runs every `interval_seconds`; older than twice that, or no run on record, it is not reporting.
+    // A server from before 23 November 2026 does not send the field at all (undefined): then nothing is
+    // claimed either way, as before. This panel goes live on merge, the server on its next release.
+    const silent = watch !== undefined && (!watch || watch.overall === 'unknown' || watch.age_seconds == null
+        || watch.age_seconds > 2 * watch.interval_seconds);
+    const silentFor = watch?.age_seconds == null ? 'more than 10 minutes' : `${Math.max(1, Math.floor(watch.age_seconds / 60))} minutes`;
+    const watchAlerts = watch?.overall === 'alert' ? watch.alerting : [];
+
     return (
         <>
+        {watchAlerts.length > 0 && (
+            <div role="alert" className="health-watch-banner" style={{ border: '1px solid var(--accent-red)', color: 'var(--accent-red)', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+                <strong>The health watch reports {watchAlerts.length === 1 ? 'a problem' : `${watchAlerts.length} problems`}.</strong>
+                <ul>{watchAlerts.map((check) => <li key={check.name}>{check.sentence}</li>)}</ul>
+            </div>
+        )}
+        {silent && (
+            <div role="status" className="health-watch-banner" style={{ border: '1px solid var(--accent-orange)', borderRadius: 8, padding: '12px 16px', marginBottom: 12 }}>
+                The health watch has not reported for {silentFor}. This page cannot say the server is healthy.
+            </div>
+        )}
         <p className="text-muted">{health.metrics_scope}. Observed {observedAt(health.checked_at)}.</p>
         <div className="health-overview-cards">
             {cards.map((card, index) => (

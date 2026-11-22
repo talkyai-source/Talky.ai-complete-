@@ -6,6 +6,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 from .._serialization import AdminResponseModel
+from ._healthwatch import HealthWatchState
 
 
 # =============================================================================
@@ -41,6 +42,8 @@ class DetailedHealthResponse(BaseModel):
     last_updated: str
     checked_at: str
     metrics_scope: str
+    # The server health watch's last result (talky-healthwatch); None only if it could not be read at all.
+    health_watch: Optional[HealthWatchState] = None
 
 
 class WorkerStatus(BaseModel):

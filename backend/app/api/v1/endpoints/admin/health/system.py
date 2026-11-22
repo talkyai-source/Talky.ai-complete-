@@ -10,6 +10,7 @@ from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform
 from app.core.postgres_adapter import Client
 from ._shared import _format_uptime, _internal_dependency_health, _utc_now
 from .schemas import DetailedHealthResponse
+from ._healthwatch import read_healthwatch_state
 
 router = APIRouter()
 
@@ -30,9 +31,12 @@ async def get_detailed_health(admin_user: CurrentUser = Depends(require_platform
             _internal_dependency_health(db_client.pool),
         )
         observed = _utc_now()
+        from app.core.container import get_container
+        container = get_container()
+        watch = await read_healthwatch_state(getattr(container, "redis", None) if container.is_initialized else None)
         return DetailedHealthResponse(**metrics, python_version=platform.python_version(),
             os_info=f"{platform.system()} {platform.release()}", environment=os.getenv("ENVIRONMENT", "unknown"),
-            version=os.getenv("APP_VERSION", "unknown"), providers=providers, last_updated=observed, checked_at=observed,
+            version=os.getenv("APP_VERSION", "unknown"), providers=providers, health_watch=watch, last_updated=observed, checked_at=observed,
             metrics_scope="Host as reported by this API process; uptime is this API process only, not platform availability.")
     except Exception:
         raise HTTPException(status_code=503, detail="API host metrics could not be measured.")
