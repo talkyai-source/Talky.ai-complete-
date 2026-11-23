@@ -699,9 +699,17 @@ async def _send_outbound_greeting(voice_session) -> None:
                     from app.domain.services.telephony.config import (
                         _resolve_greeting_context,
                     )
-                    agent_name, company = _resolve_greeting_context(session)
-                    greeting = (
-                        f"Hello, this is {agent_name} calling from {company}."
+                    from app.domain.services.voice_pipeline.first_line_identity import (
+                        identity_line,
+                    )
+                    _placeholder_name, company = _resolve_greeting_context(session)
+                    _agent_config = getattr(session, "agent_config", None)
+                    # Even this line says it is an AI, and it is true in both
+                    # call directions (it used to say "calling from" on an
+                    # incoming call too, and never said AI).
+                    greeting = "Hello. " + identity_line(
+                        getattr(_agent_config, "agent_name", None) if _agent_config else None,
+                        company, recorded_line=False,
                     )
                     logger.warning(
                         "outbound_greeting_realtime_rejected call_id=%s "

@@ -396,3 +396,23 @@ async def test_through_the_real_turn_ender_the_identity_line_precedes_the_model_
     s.conversation_history.append(Message(role=MessageRole.USER, content="Hello?"))
     assert await speak_disclosure_before_first_reply(s, "Do you do boilers?") is False
     assert vs.pipeline.spoken == [IDENT]
+
+
+# --- 23 Nov 2026: the last-resort greeting says it is an AI ---
+# When the greeting builder yields nothing speakable (a broken template), the
+# slow path builds a minimal line from the names on the session. It used to be
+# "Hello, this is <agent> calling from <company>.": no "AI", and "calling from"
+# even on an incoming call.
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+@pytest.mark.parametrize("agent,expected", [
+    ("Sarah", "Hello. This is Sarah, an AI assistant from Smith Plumbing."),
+    (None, "Hello. This is an AI assistant from Smith Plumbing."),
+])
+def test_last_resort_greeting_says_it_is_an_ai(monkeypatch, direction, agent, expected):
+    monkeypatch.setattr(agent_first, "_build_call_greeting", lambda *a, **k: "...")
+    import app.domain.services.voice_pipeline.inbound_answer_greeting as iag
+
+    monkeypatch.setattr(iag, "ensure_ai_disclosure", lambda greeting, session: greeting)
+    spoken = _speak(_voice_session(direction=direction, agent=agent))
+    assert spoken == [expected]
+    assert says_it_is_ai(spoken[0]) and "calling from" not in spoken[0]
