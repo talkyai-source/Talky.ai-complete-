@@ -51,6 +51,7 @@ const summaryOn = (over: Partial<ContactPermissionSummary> = {}): ContactPermiss
     ungrouped_without_permission: 7, queues_on_confirm: false, ...over,
 });
 const OLD_HINT = "Leads not tied to an uploaded list. Import a CSV to group them.";
+// A stand-in for the 32-character fingerprint the server sends; built here so that no scanner takes it for a key.
 const SHOWN = "0123456789abcdef".repeat(2);
 const toasts = () => notificationsStore.getSnapshot().notifications.map((n) => `${n.title}|${n.message ?? ""}`);
 
