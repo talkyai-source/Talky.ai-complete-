@@ -123,7 +123,8 @@ def ungrouped_token(rows) -> str:
         (str(r["id"]).lower(), r["phone_number"] or "") for r in rows
     )
     text = ",".join(f"{i}:{p}" for i, p in pairs)
-    return hashlib.md5(text.encode("utf-8")).hexdigest()  # noqa: S324 — a fingerprint, not security
+    # A change fingerprint that has to equal Postgres md5(); it protects nothing.
+    return hashlib.md5(text.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 _CAMPAIGN_STATUS_SQL = (
     "SELECT status FROM campaigns "
