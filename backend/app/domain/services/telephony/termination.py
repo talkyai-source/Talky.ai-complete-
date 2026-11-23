@@ -398,8 +398,33 @@ async def mark_termination_pending_and_load_context(
         str(tenant_id) if tenant_id is not None else None,
         timeout=bounded_timeout,
     ) as conn:
-        row = await conn.fetchrow(
-            """
+        if tenant_id is not None:
+            row = await conn.fetchrow(
+                """
+                SELECT id::text AS call_id,
+                       tenant_id::text AS tenant_id,
+                       COALESCE(provider_call_id, external_call_uuid)
+                           AS provider_call_id,
+                       status, provider, direction, campaign_id::text AS campaign_id,
+                       answered_at, route_snapshot
+                FROM calls
+                WHERE tenant_id = $2::uuid
+                  AND (
+                       id::text=$1
+                    OR talklee_call_id=$1
+                    OR provider_call_id=$1
+                    OR external_call_uuid=$1
+                )
+                ORDER BY created_at DESC
+                LIMIT 1
+                FOR UPDATE
+                """,
+                normalized_reference,
+                str(tenant_id),
+            )
+        else:
+            row = await conn.fetchrow(
+                """
             SELECT id::text AS call_id,
                    tenant_id::text AS tenant_id,
                    COALESCE(provider_call_id, external_call_uuid)
@@ -417,8 +442,8 @@ async def mark_termination_pending_and_load_context(
             LIMIT 1
             FOR UPDATE
             """,
-            normalized_reference,
-        )
+                normalized_reference,
+            )
         if not row:
             raise LookupError("call not found")
 
@@ -432,9 +457,11 @@ async def mark_termination_pending_and_load_context(
                    SET status='termination_pending', updated_at=NOW()
                  WHERE id=$1::uuid
                    AND status <> ALL($2::text[])
+                   AND tenant_id = $3::uuid
                 """,
                 str(row["call_id"]),
                 list(TERMINAL_CALL_STATUSES),
+                str(row["tenant_id"]),
             )
 
         leg_rows = list(
