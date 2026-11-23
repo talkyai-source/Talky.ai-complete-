@@ -113,6 +113,8 @@ export function ContactLists({
     const [permissionTarget, setPermissionTarget] = useState<ContactList | null>(null);
     const [savingPermission, setSavingPermission] = useState(false);
     const [permissionNotice, setPermissionNotice] = useState("");
+    // Set after the server refused the Ungrouped confirmation as changed (409): this open dialog holds an old count, so it cannot save again.
+    const [permissionStale, setPermissionStale] = useState(false);
     // null = the server has no summary (older server): the page then looks as it did before.
     const [summary, setSummary] = useState<ContactPermissionSummary | null>(null);
     const permissionForm = useContactPermissionForm();
@@ -188,12 +190,14 @@ export function ContactLists({
     function openPermissionDialog(list: ContactList) {
         permissionForm.reset();
         setPermissionNotice("");
+        setPermissionStale(false);
         setPermissionTarget(list);
     }
 
     function closePermissionDialog() {
         permissionForm.reset();
         setPermissionNotice("");
+        setPermissionStale(false);
         setPermissionTarget(null);
     }
 
@@ -229,6 +233,7 @@ export function ContactLists({
         } catch (err) {
             if (isApiClientError(err) && err.status === 409) {
                 setPermissionNotice(refusalMessage(err, "The contacts changed. Check them and confirm again."));
+                setPermissionStale(true);
                 await refreshQuietly();
             } else if (!permissionForm.showServerError(err)) {
                 setPermissionNotice(refusalMessage(err, "Could not save the confirmation."));
@@ -239,7 +244,7 @@ export function ContactLists({
     }
 
     async function handleSavePermission() {
-        if (!permissionTarget || savingPermission) return;
+        if (!permissionTarget || savingPermission || permissionStale) return;
         const confirmation = permissionForm.require();
         if (!confirmation) return;
         const list = permissionTarget;
@@ -454,7 +459,7 @@ export function ContactLists({
                 footer={(
                     <div className="flex justify-end gap-2">
                         <Button variant="ghost" onClick={closePermissionDialog} disabled={savingPermission}>Cancel</Button>
-                        <Button onClick={() => void handleSavePermission()} disabled={savingPermission}>
+                        <Button onClick={() => void handleSavePermission()} disabled={savingPermission || permissionStale}>
                             {savingPermission ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                             Save confirmation
                         </Button>
@@ -468,6 +473,7 @@ export function ContactLists({
                 ) : null}
                 <ContactPermissionFields idPrefix="list-permission" disabled={savingPermission} {...permissionForm.fieldProps} />
                 {permissionNotice ? <p role="alert" className="mt-3 text-sm text-destructive">{permissionNotice}</p> : null}
+                {permissionStale ? <p className="mt-2 text-sm text-muted-foreground">Close this and open it again to confirm the contacts as they are now.</p> : null}
             </Modal>
             {/* handleCall reports its own result as a toast and never rejects,
                 so the dialog closes once the request has answered. */}

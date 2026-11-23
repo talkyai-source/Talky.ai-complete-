@@ -4,6 +4,11 @@ import { notificationsStore } from "@/lib/notifications";
 import { captureException } from "@/lib/monitoring";
 import { captureMutationNotificationOrigin, mutationNotificationOrigin } from "@/lib/notification-mutations";
 
+// 403 for a signed-in user who has not accepted the current terms: the re-acceptance dialog handles it.
+function isLegalAcceptanceRequired(error: unknown) {
+    return isApiClientError(error) && error.code === "legal_acceptance_required";
+}
+
 function isHealthQuery(query: { queryKey?: unknown } | undefined) {
     const key = query?.queryKey;
     return Array.isArray(key) && key[0] === "health";
@@ -12,6 +17,7 @@ function isHealthQuery(query: { queryKey?: unknown } | undefined) {
 export function createAppQueryClient(onUnauthorized: () => void) {
     const onError = (error: Error, origin: ReturnType<typeof notificationsStore.capture> | undefined, query?: { queryKey?: unknown }) => {
         if (isHealthQuery(query) || !origin?.isCurrent()) return;
+        if (isLegalAcceptanceRequired(error)) return;
         if (isApiClientError(error)) {
             if (error.code === "unauthorized") {
                 // The redirect itself is now driven by the http-client's
@@ -81,7 +87,7 @@ export function createAppQueryClient(onUnauthorized: () => void) {
                 gcTime: 5 * 60_000,
                 retry: (failureCount, err) => {
                     if (isApiClientError(err)) {
-                        if (err.code === "unauthorized" || err.code === "forbidden" || err.code === "rate_limited") return false;
+                        if (err.code === "unauthorized" || err.code === "forbidden" || err.code === "legal_acceptance_required" || err.code === "rate_limited") return false;
                     }
                     return failureCount < 2;
                 },

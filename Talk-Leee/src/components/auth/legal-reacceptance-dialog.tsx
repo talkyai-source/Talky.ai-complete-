@@ -26,7 +26,11 @@ function nonEmpty(value: unknown): string | null {
 
 const noop = () => undefined;
 
-export function LegalReacceptanceDialog() {
+// Reads made before the acceptance were refused with `legal_acceptance_required`; most of them do not use
+// the query library and would stay in error, so the page is loaded again once the acceptance is saved.
+const reloadPage = () => window.location.reload();
+
+export function LegalReacceptanceDialog({ onAccepted = reloadPage }: { onAccepted?: () => void } = {}) {
     const pathname = usePathname() ?? "";
     const { user, refreshUser } = useAuth();
     const checkboxId = useId();
@@ -68,6 +72,7 @@ export function LegalReacceptanceDialog() {
         setConfirmed(`${termsVersion}|${privacyVersion}`);
         setSaving(false);
         void refreshUser({ silent: true });
+        onAccepted();
     }
 
     return (

@@ -220,3 +220,40 @@ test("the contacts changed although their number did not (409): the server's mes
     await within(dialog).findByText(message);
     await waitFor(() => assert.equal(reads, 2));
 });
+
+test("after a 409 the dialog cannot save again; reopening carries the fresh count and the fresh fingerprint", async () => {
+    const FRESH = "f".repeat(32);
+    let reads = 0;
+    dashboardApi.listContactLists = async () => { reads++; return [reads === 1 ? ungrouped : { ...ungrouped, contact_count: 9 }]; };
+    dashboardApi.getContactPermissionSummary = async () => summaryOn({ ungrouped_token: reads === 1 ? SHOWN : FRESH });
+    const message = "The number of contacts without a list changed from 7 to 9. Check them and confirm again.";
+    const posted: unknown[][] = [];
+    dashboardApi.confirmUngroupedPermission = async (_id, permission, expected, token) => {
+        posted.push([permission, expected, token]);
+        if (posted.length === 1) {
+            throw new ApiClientError({ status: 409, code: "contact_count_changed", message, details: { detail: { code: "contact_count_changed", message } }, url: "u", method: "POST" });
+        }
+        return { list: { ...ungrouped, id: "new" }, contacts_confirmed: 9, queued_for_calling: null, message: "Permission recorded for 9 contacts." };
+    };
+    mountLists();
+    const dialog = await openDialog();
+    fillContactPermission();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
+    await within(dialog).findByText(message);
+    await within(dialog).findByText("Close this and open it again to confirm the contacts as they are now.");
+    await waitFor(() => assert.equal(reads, 2));
+    const save = within(dialog).getByRole("button", { name: "Save confirmation" }) as HTMLButtonElement;
+    assert.equal(save.disabled, true);
+    fireEvent.click(save);
+    assert.equal(posted.length, 1, "no second request from the same dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
+    const again = await openDialog();
+    assert.ok(within(again).getByText("“Ungrouped”: 9 contacts"));
+    assert.equal(within(again).queryByText("Close this and open it again to confirm the contacts as they are now.") === null, true);
+    fillContactPermission();
+    fireEvent.click(within(again).getByRole("button", { name: "Save confirmation" }));
+    await waitFor(() => assert.equal(posted.length, 2));
+    assert.equal(posted[1][1], 9);
+    assert.equal(posted[1][2], FRESH);
+});
