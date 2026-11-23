@@ -1,9 +1,16 @@
 """Release confirmed due callbacks into the existing dialer; no new worker."""
 import json
+import logging
 from uuid import UUID, uuid5
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.models.dialer_job import DialerJob
+from app.domain.services.dialer.permission_gate import (
+    contact_permission_dial_gate_mode,
+    permission_missing_for_lead,
+)
+
+logger = logging.getLogger(__name__)
 
 
 def _object(value):
@@ -45,12 +52,18 @@ async def drain_voice_callbacks(pool, queue, limit=20):
                 and not row["do_not_call"] and row["lead_status"] != "deleted"
                 and row["phone_number"] == payload["phone"]
                 and "schedule_callback" in (brief.get("approved_next_actions") or []))
-            if not permitted or row["expired"]:
+            reason = "callback_policy_changed_or_time_expired" if (not permitted or row["expired"]) else None
+            if reason is None and contact_permission_dial_gate_mode() == "on" and await permission_missing_for_lead(conn, tenant, str(row["lead_id"])):
+                # The dial gate would drop this job at dial time; say so now.
+                reason = "contact_permission_missing"
+                logger.info("voice_callback_blocked action=%s tenant=%s reason=%s",
+                            action_id[:8], tenant[:8], reason)
+            if reason:
                 await conn.execute("""
-                    UPDATE assistant_actions SET status='failed', error='callback_policy_changed_or_time_expired',
+                    UPDATE assistant_actions SET status='failed', error=$3,
                         output_data=output_data || '{"success":false,"status":"failed","confirmation_allowed":false}'::jsonb
                     WHERE id=$1::uuid AND tenant_id=$2::uuid
-                """, action_id, tenant)
+                """, action_id, tenant, reason)
                 continue
             job_id = callback_job_id(action_id)
             active = await conn.fetchval("""
