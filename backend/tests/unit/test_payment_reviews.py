@@ -388,6 +388,35 @@ async def test_a_changed_body_for_a_dismissed_event_reopens_it(world):  # noqa: 
     assert webhook_row(world)["state"] == "needs_review" and webhook_row(world)["detail"] == "payload_changed"
 
 
+async def test_a_changed_body_counts_as_a_delivery_attempt(world):  # noqa: F811
+    raw = body()
+    await run_webhook(world, raw)
+    webhook_row(world)["state"] = "needs_review"
+    assert webhook_row(world)["attempt_count"] == 1
+    changed = body(resource={"id": "OTHER"})
+    assert await run_webhook(world, changed) == {"status": "needs_review"}
+    assert webhook_row(world)["attempt_count"] == 2 and webhook_row(world)["detail"] == "payload_changed"
+    assert len(world.svc.settled) == 1  # only the first delivery was dispatched
+
+
+async def test_a_changed_body_after_the_list_was_read_is_not_closed_unseen(world):  # noqa: F811
+    await run_webhook(world, body())
+    stored = webhook_row(world)
+    stored.update(state="needs_review", attempt_count=2, detail="amount_mismatch", past_redelivery=False)
+    db = PG()
+    db.pp["WH-EVT-1"] = stored  # the same row the webhook handler writes
+    db.paypal = [pp_row(event_id="WH-EVT-1", attempt_count=stored["attempt_count"])]
+    db.tenants = [{"id": T1, "business_name": "Acme Dental", "stripe_customer_id": None}]
+    (item,) = (await pr().list_payment_reviews(db))["items"]
+    seen = item["attempt_count"]
+    assert seen == 2
+    assert await run_webhook(world, body(resource={"id": "OTHER"})) == {"status": "needs_review"}
+    assert stored["detail"] == "payload_changed"
+    with pytest.raises(ValueError, match="changed after the list was read"):
+        await close(db, event_id="WH-EVT-1", seen=seen)
+    assert db.pp_log == [] and stored["state"] == "needs_review"
+
+
 def _local_review_sql(path):
     tree = ast.parse((BACKEND / path).read_text(encoding="utf-8"))
     sql = [n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)

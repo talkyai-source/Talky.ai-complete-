@@ -372,18 +372,21 @@ async def handle_paypal_webhook(
     if inserted is None:
         if existing is None:
             raise PayPalWebhookRetry("receipt could not be read")
-        if existing["payload_hash"] != payload_hash:
-            await _update(event_id, "needs_review", "payload_changed", None, pool)
-            logger.error("paypal_webhook_payload_changed event=%s type=%s", _log(event_id), _log(event_type))
-            return {"status": "needs_review"}
-        if existing["state"] in _FINISHED:
+        changed = existing["payload_hash"] != payload_hash
+        if not changed and existing["state"] in _FINISHED:
             return {"status": "duplicate"}
+        # A changed body is a delivery too: count it, so an admin who read the review
+        # before it changed cannot close the new reason unseen (one call site).
         async with acquire_with_tenant(pool, None) as conn:
             await conn.execute(
                 "UPDATE paypal_webhook_events SET attempt_count = attempt_count + 1 "
                 "WHERE event_id = $1",
                 event_id,
             )
+        if changed:
+            await _update(event_id, "needs_review", "payload_changed", None, pool)
+            logger.error("paypal_webhook_payload_changed event=%s type=%s", _log(event_id), _log(event_type))
+            return {"status": "needs_review"}
 
     if service is None:
         service = PayPalTopupService(pool)
