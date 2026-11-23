@@ -34,7 +34,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 import asyncpg
@@ -56,6 +56,7 @@ from app.domain.services.paypal_client import (
     get_paypal_client,
     minor_units,
 )
+from app.domain.services.payment_reviews import _RECURRING_RULES
 from app.domain.services.paypal_mode import PAYPAL_UNAVAILABLE, paypal_env, paypal_provider_mode
 from app.domain.services.payg import PAYG_PLAN_ID
 from app.domain.services.plan_end import end_plan
@@ -335,6 +336,22 @@ def _parse_time(value) -> datetime | None:
     except ValueError:
         return None
     return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
+
+
+def _period_day(value) -> str | None:
+    """The billing period's end as YYYY-MM-DD (UTC), or None when it is missing or unreadable."""
+    if isinstance(value, str):
+        value = _parse_time(value) or _parse_day(value)
+    if isinstance(value, datetime):
+        value = (value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)).date()
+    return value.isoformat() if isinstance(value, date) else None
+
+
+def _parse_day(value: str) -> date | None:
+    try:
+        return date.fromisoformat(value.strip()[:10])
+    except ValueError:
+        return None
 
 
 def _count(value) -> int:
@@ -931,6 +948,12 @@ class PayPalSubscriptionService:
         event_id = f"local:review:plan:{row['id']}:{rule}"[:255]
         try:
             async with acquire_with_tenant(self._pool, None) as conn:
+                period = _period_day(row.get("current_period_end")) if rule in _RECURRING_RULES else None
+                if period is not None:
+                    # A recurring review closed by staff stays closed within one billing period;
+                    # a new period is a new episode with its own id. (A review that was open
+                    # under the id without a period when this shipped gets one companion row.)
+                    event_id = f"{event_id}:{period}"[:255]
                 await conn.execute(
                     _Q_REVIEW, event_id, str(row["paypal_subscription_id"] or "")[:255],
                     row["provider_mode"], rule[:255], hashlib.sha256(event_id.encode()).hexdigest())

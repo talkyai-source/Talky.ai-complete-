@@ -54,6 +54,9 @@ ENABLED_ENV = "RECORDING_RETENTION_PURGE_ENABLED"
 ACTOR_ENV = "RECORDING_RETENTION_PURGE_ACTOR_ID"
 BATCH_ENV = "RECORDING_RETENTION_PURGE_BATCH"
 DEFAULT_BATCH = 200
+# Dry-run only: the cap used to count ALL expired recordings (same statement as
+# the batch read, a larger LIMIT). A count that reaches it is reported "at least".
+DRY_RUN_TOTAL_CAP = 100000
 
 # The reason is part of the idempotency binding (a replay must carry the same
 # text), so it is a constant. Per-recording detail goes to the log.
@@ -204,12 +207,18 @@ async def purge_expired_recordings(
         return summary
 
     if not enabled:
-        per_tenant = Counter(str(r["tenant_id"])[:8] for r in rows)
+        all_rows = await select_expired_recordings(pool, DRY_RUN_TOTAL_CAP)
+        total = len(all_rows)
+        capped = total >= DRY_RUN_TOTAL_CAP
+        per_tenant = Counter(str(r["tenant_id"])[:8] for r in all_rows)
         summary["would_delete"] = len(rows)
+        summary["would_delete_total"] = total
+        summary["would_delete_total_capped"] = capped
+        total_text = f"at_least_{DRY_RUN_TOTAL_CAP}" if capped else str(total)
         logger.info(
-            "recording_retention_purge DRY-RUN would_delete=%d per_tenant=%s "
-            "(set %s=true and %s to enable)",
-            len(rows), dict(per_tenant), ENABLED_ENV, ACTOR_ENV,
+            "recording_retention_purge DRY-RUN would_delete=%d would_delete_total=%s "
+            "per_tenant=%s (set %s=true and %s to enable)",
+            len(rows), total_text, dict(per_tenant), ENABLED_ENV, ACTOR_ENV,
         )
         return summary
 

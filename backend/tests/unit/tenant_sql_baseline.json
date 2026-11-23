@@ -10319,10 +10319,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "7bbf2b6dbee272abd0d7db541954cbca9a214fa1ca2ddbf6fe4eaf21c45f68c2",
+      "id": "39925aadcfa55fc1f17e3314e582d7720c9054b1ddc9b66e263ea6100bd0ca2a",
       "file": "app/workers/recording_retention_purge.py",
       "function": "select_expired_recordings",
-      "line": 106,
+      "line": 109,
       "method": "fetch",
       "tables": [
         "recordings_s3",
@@ -10333,7 +10333,7 @@
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Retention worker discovery joins recording/policy on tenant_id, filters the per-tenant age and active hold condition, and returns bounded candidates across tenants. Each later deletion carries expected_tenant_id; missing policy/hold schema causes a skip rather than implied permission. Exact reviewed operation: fetch; app/workers/recording_retention_purge.py:106.",
+      "reason": "Retention worker discovery joins recording/policy on tenant_id, filters the per-tenant age and active hold condition, and returns bounded candidates across tenants. Each later deletion carries expected_tenant_id; missing policy/hold schema causes a skip rather than implied permission. Exact reviewed operation: fetch; app/workers/recording_retention_purge.py:109.",
       "category": "system_retention_discovery"
     },
     {
@@ -12820,7 +12820,7 @@
       "id": "24b315bdd7dca75b6658aed78f539b365d826ec3bba12da867063424b3ceaad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sync",
-      "line": 710,
+      "line": 727,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12830,14 +12830,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:710.",
+      "reason": "PayPal webhook path for plans: no tenant is signed in, so the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, or from the service's own sweep. The value is PayPal's own id for an object this product created; a tenant never supplies it. The row only tells which of OUR records the notice is about: every change that follows re-reads PayPal, checks the answer against the row (subscription id, PayPal plan id, our id in custom_id) and then locks and writes with id AND tenant_id. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:727.",
       "category": "individually_reviewed"
     },
     {
       "id": "7dbfc5af78dc6c9ff445f5734ad8280814cfba54b7967ce7d3b1ff0eda592704",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_for_reversal",
-      "line": 1064,
+      "line": 1087,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments"
@@ -12847,14 +12847,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1064.",
+      "reason": "PayPal webhook path (a reversal or a dispute on a plan payment): the payment row is found by PayPal's transaction id (unique index), which this product recorded from PayPal's own payment list. It returns ids only; the plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Reached only after PayPal verified the notice. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1087.",
       "category": "individually_reviewed"
     },
     {
       "id": "d517413e429d2f424f1200b7bce68e0eb8eb293f5324d5ec373276437f2df6d1",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._plan_option",
-      "line": 534,
+      "line": 551,
       "method": "fetchrow",
       "tables": [
         "paypal_plan_options"
@@ -12864,14 +12864,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:534.",
+      "reason": "paypal_plan_options is platform catalog data (migration 0102, no tenant_id column, platform-only policy): the PayPal billing plan created for one approved price option. Read by the price option id the checkout already resolved through billing_catalog; it returns the PayPal plan id and the frozen terms, which are compared with the price option before any purchase starts. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:551.",
       "category": "platform_catalog"
     },
     {
       "id": "cfb3316ca1f11660de2cf3957dd3304975210763c9c122281113bf1e18da9335",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService._record_review",
-      "line": 934,
+      "line": 957,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12881,14 +12881,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:934. 23 Nov 2026: when the same local review happens again, the row's state is set back to 'needs_review' (it may have been closed by a platform admin as 'dismissed'), so a repeated problem, such as a second charge after a cancel, is shown again instead of staying silent. Nothing else in the statement changed; it still writes only this product's own review row. The two plan rules that the sweep records again on every tick while their condition lasts ('binding' and 'not_confirmed_with_paypal') are the exception: once closed they stay 'dismissed', otherwise a closed review would reopen within minutes and could never be closed.",
+      "reason": "Review marker for a plan bought with PayPal that needs a person (binding mismatch, superseded purchase, reversal, dispute, still running at PayPal, charged after cancel). One row in the platform-only paypal_webhook_events table (migration 0101, no tenant_id column on purpose) so the health watch counts it. It carries our row id, the PayPal subscription id, the rule name and a hash of its own key: no payer data and nothing chosen by a caller. Exact reviewed operation: execute; app/domain/services/paypal_subscriptions.py:957. 23 Nov 2026: when the same local review happens again, the row's state is set back to 'needs_review' (it may have been closed by a platform admin as 'dismissed'), so a repeated problem, such as a second charge after a cancel, is shown again instead of staying silent. Nothing else in the statement changed; it still writes only this product's own review row. The two plan rules that the sweep records again on every tick while their condition lasts ('binding' and 'not_confirmed_with_paypal') are the exception: once closed they stay 'dismissed', otherwise a closed review would reopen within minutes and could never be closed.",
       "category": "system_provider_receipt"
     },
     {
       "id": "92b36a0f21b827a1e8ffb9ab4ea259295286cbd1e29e66da76421d506dc7da33",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1116,
+      "line": 1139,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12898,14 +12898,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1116.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans the customer cancelled whose paid period is over, across tenants. It returns id and tenant_id only; each plan is then ended in its own transaction under the tenant lock and the row lock, re-checking the condition on the locked row, with id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1139.",
       "category": "system_discovery"
     },
     {
       "id": "a58656db090728cb8108aed77ea9e8fa7dc90ae259b5bd24621a57f8101a0100",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1117,
+      "line": 1140,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12915,7 +12915,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1117.",
+      "reason": "Worker discovery (reminder worker, every five minutes): live PayPal plan rows not re-read from PayPal for six hours, and unfinished purchases not re-read for ten minutes, across tenants. Each row is then re-read from PayPal by the subscription id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a lost notice cannot leave a plan running that is not paid for. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1140.",
       "category": "system_discovery"
     },
     {
@@ -12958,7 +12958,7 @@
       "id": "461751b083aef4dbdf6d94e1f20aa3961efe41546152fc58ee16af7b98b33206",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.end_subscription_for_reversal",
-      "line": 1088,
+      "line": 1111,
       "method": "fetchrow",
       "tables": [
         "paypal_subscriptions"
@@ -12968,14 +12968,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1088.",
+      "reason": "PayPal webhook path (a reversal of a plan payment whose payment row was not recorded yet): the subscription row is found by the PayPal subscription id this product stored on it (unique index). It is reached only from handle_paypal_webhook, after PayPal itself verified the notice, and only after the lookup by PayPal's transaction id found nothing. The plan is then ended under the tenant lock and the row lock with id AND tenant_id, and a review row is written for a person. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1111.",
       "category": "individually_reviewed"
     },
     {
       "id": "f27b597611809426dc307f3c9163b3511ce2531e64d917830d77ec5d4e301bb6",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1118,
+      "line": 1141,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -12985,14 +12985,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1118.",
+      "reason": "Worker discovery (reminder worker, every five minutes): purchases this product closed as failed or expired in the last three days that carry a PayPal subscription id, across tenants, re-read hourly. A customer can still approve such a purchase at PayPal; each row is re-read from PayPal by the id stored on it and applied in its own transaction under the tenant lock and the row lock with id AND tenant_id, so a late approval is followed, or superseded and raised for a refund, even when PayPal's notice is lost. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1141.",
       "category": "system_discovery"
     },
     {
       "id": "ec8dfe3b69ee2b9d30b17497f962cfce5bd026f0369ba1942b0354a48e83fe68",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1119,
+      "line": 1142,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13002,14 +13002,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1119.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans this product ended while PayPal last reported the subscription approved, active or suspended, across tenants, re-read hourly. PayPal may keep charging such a subscription; each row is re-read from PayPal by the id stored on it, cancelled there again and raised for a person, with every write bound to id AND tenant_id. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1142.",
       "category": "system_discovery"
     },
     {
       "id": "6a7283106e60f9ebd4c935eb5f737feffb595555472efbc398b853fe51932ad9",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.sweep",
-      "line": 1142,
+      "line": 1165,
       "method": "fetch",
       "tables": [
         "paypal_subscriptions"
@@ -13019,7 +13019,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1142.",
+      "reason": "Worker discovery (reminder worker, every five minutes): plans whose paid period ended more than three days ago and which could not be confirmed with PayPal for three days, across tenants. Nothing is changed: one review row per plan is written so a person is told that PayPal could not be read. Exact reviewed operation: fetch; app/domain/services/paypal_subscriptions.py:1165.",
       "category": "system_discovery"
     },
     {
@@ -13075,7 +13075,7 @@
       "id": "615ab944ed391d9a05795b79b0fb967dc417847919897d8f27a723b16a316c4c",
       "file": "app/domain/services/paypal_subscriptions.py",
       "function": "PayPalSubscriptionService.owns_transaction",
-      "line": 1078,
+      "line": 1101,
       "method": "fetchrow",
       "tables": [
         "paypal_subscription_payments"
@@ -13085,7 +13085,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "PayPal webhook path (a dispute at the inquiry stage): no tenant is signed in, so a plan payment is recognised by the PayPal transaction id this product stored when it recorded the payment; it is the same lookup end_for_reversal uses. It is reached only from handle_paypal_webhook, after PayPal verified the event. The method is read-only and only a boolean leaves it (ours / not ours): the dispute is flagged for a person's review, no plan is ended and nothing is written. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1078.",
+      "reason": "PayPal webhook path (a dispute at the inquiry stage): no tenant is signed in, so a plan payment is recognised by the PayPal transaction id this product stored when it recorded the payment; it is the same lookup end_for_reversal uses. It is reached only from handle_paypal_webhook, after PayPal verified the event. The method is read-only and only a boolean leaves it (ours / not ours): the dispute is flagged for a person's review, no plan is ended and nothing is written. Exact reviewed operation: fetchrow; app/domain/services/paypal_subscriptions.py:1101.",
       "category": "individually_reviewed"
     },
     {
