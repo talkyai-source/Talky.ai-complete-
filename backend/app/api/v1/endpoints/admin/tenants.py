@@ -590,14 +590,20 @@ async def _mutate_tenant(
         async with acquire_with_tenant(db_client.pool, None) as conn:
             await _lock_operator_write(conn, audit_logger, admin_user)
             current = await conn.fetchrow(
-                "SELECT id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at "
+                "SELECT id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at,staff_suspended_at "
                 "FROM tenants WHERE id=$1 FOR UPDATE", tenant_id,
             )
             if not current:
                 raise HTTPException(status_code=404, detail="Tenant not found")
             rules = _calling_rules(current["calling_rules"])
+            # An account suspended by a payment dispute has no staff mark: a staff Suspend over it
+            # still writes (the mark is what keeps a later won dispute from lifting it).
             same = (
-                current["subscription_status"] == target if target is not None else
+                current["subscription_status"] == target
+                # ... and the staff mark already says the same: set for Suspend, empty for
+                # Resume and Archive (so a mark left behind can always be cleared by staff).
+                and (current["staff_suspended_at"] is not None) == (target == "suspended")
+                if target is not None else
                 (quota.minutes_allocated is None or current["minutes_allocated"] == quota.minutes_allocated)
                 and (quota.max_concurrent_calls is None or _max_concurrent(rules) == quota.max_concurrent_calls)
             )
@@ -608,10 +614,12 @@ async def _mutate_tenant(
             _check_version(current, body.expected_updated_at)
             if target is not None:
                 saved = await conn.fetchrow(
-                    "UPDATE tenants SET subscription_status=$2, "
+                    "UPDATE tenants SET subscription_status=$2, staff_suspended_by=$3::uuid, "
+                    "staff_suspended_at=CASE WHEN $3::uuid IS NULL THEN NULL ELSE clock_timestamp() END, "
                     "updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') "
-                    "WHERE id=$1 RETURNING id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at",
-                    tenant_id, target,
+                    "WHERE id=$1 RETURNING id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at,"
+                    "staff_suspended_at,staff_suspended_by",
+                    tenant_id, target, admin_user.id if target == "suspended" else None,
                 )
             else:
                 saved = await conn.fetchrow(

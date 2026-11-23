@@ -23,7 +23,7 @@ def _sql(monkeypatch, operation):
 
 
 def test_alembic_finds_0096_on_top_of_0095_and_one_head_above_it():
-    assert SCRIPTS.get_heads() == ["0106_outbound_notice_placement"]
+    assert SCRIPTS.get_heads() == ["0107_staff_suspension"]
     assert SCRIPTS.get_revision("0097_remove_wizard_plan_line").down_revision == REVISION
     revision = SCRIPTS.get_revision(REVISION)
     assert revision.down_revision == "0095_webhook_receipt_dismissed"

@@ -41,7 +41,8 @@ PAYPAL_PLANS = "0102_paypal_subscriptions"
 RECORDING_NOTICE = "0103_recording_notice_state"
 PAYPAL_REVIEW_DISMISSED = "0104_paypal_review_dismissed"
 LIST_CONSENT_COMPLETE = "0105_list_consent_complete"
-HEAD = "0106_outbound_notice_placement"
+OUTBOUND_NOTICE = "0106_outbound_notice_placement"
+HEAD = "0107_staff_suspension"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -54,7 +55,8 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
     # (pay as you go), on 0082 (support system), which sits on the payment
     # merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == LIST_CONSENT_COMPLETE
+    assert SCRIPTS.get_revision(HEAD).down_revision == OUTBOUND_NOTICE
+    assert SCRIPTS.get_revision(OUTBOUND_NOTICE).down_revision == LIST_CONSENT_COMPLETE
     assert SCRIPTS.get_revision(LIST_CONSENT_COMPLETE).down_revision == PAYPAL_REVIEW_DISMISSED
     assert SCRIPTS.get_revision(PAYPAL_REVIEW_DISMISSED).down_revision == RECORDING_NOTICE
     assert SCRIPTS.get_revision(RECORDING_NOTICE).down_revision == PAYPAL_PLANS
@@ -218,4 +220,4 @@ def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_th
                          PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, ABUSE, HARDEN,
                          RECEIPT_DISMISSED, CONTACT_LIST_PERMISSION, WIZARD_PLAN_LINE, CALLS_CHANGED_SINCE,
                          CLEAN_INSTALL_TABLES, FORCE_LEGAL_ACCEPTANCE, PAYPAL_RECEIPTS, PAYPAL_PLANS, RECORDING_NOTICE,
-                         PAYPAL_REVIEW_DISMISSED, LIST_CONSENT_COMPLETE, HEAD]
+                         PAYPAL_REVIEW_DISMISSED, LIST_CONSENT_COMPLETE, OUTBOUND_NOTICE, HEAD]
