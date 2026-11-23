@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -45,7 +46,7 @@ from app.domain.interfaces.media_gateway import MediaGateway
 from app.infrastructure.telephony.asterisk_adapter import TtsDeliveryError
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 from app.domain.services.telephony.config import AUDIO_CALLBACK_INTERVAL_MS
-from app.utils import event_loop_lag
+from app.utils import event_loop_lag, gc_pause_monitor
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,26 @@ logger = logging.getLogger(__name__)
 # not tighter: at a 40ms cadence a 2x threshold would fire on ordinary
 # scheduler jitter and drown the real stalls.
 _AUDIO_GAP_WARN_MS = max(120, AUDIO_CALLBACK_INTERVAL_MS * 3)
+
+
+def _gap_source(previous_at: float, now: float, gap_ms: float) -> str:
+    """Log text only: what the evidence says held the batch up. Decides nothing."""
+    explains = gap_ms - 2 * AUDIO_CALLBACK_INTERVAL_MS
+    # The upper bound is the real clock, not only the loop's ``now``: an event
+    # loop may hand out a coarser time than ``time.monotonic()`` (uvloop's is in
+    # whole milliseconds), so a collection that has just ended can carry an end
+    # time slightly after it. Any pause already recorded has ended by now.
+    gc_ms = gc_pause_monitor.full_pause_between(previous_at, max(now, time.monotonic()))
+    # A full collection is named only when it is long enough to account for the
+    # gap (the same measure as for the loop lag below). With the start-up heap
+    # frozen, short full collections are frequent: one of 2 ms inside a 500 ms
+    # gap did not cause it.
+    if gc_ms is not None and gc_ms >= explains:
+        return f"gc_pause gc_ms={gc_ms:.1f}"
+    lag_ms = event_loop_lag.current_ms()
+    if lag_ms is not None and lag_ms >= explains:
+        return "process_stall"
+    return "undetermined"
 
 
 @dataclass
@@ -400,7 +421,8 @@ class TelephonyMediaGateway(MediaGateway):
         # Gap detection — fire-and-forget C++ gateway callbacks can be silently dropped
         loop = asyncio.get_running_loop()
         now = loop.time()
-        gap_ms = (now - session.last_audio_received_at) * 1000
+        previous_audio_at = session.last_audio_received_at
+        gap_ms = (now - previous_audio_at) * 1000
         session.last_audio_received_at = now
         if not session.first_audio_received_at:
             session.first_audio_received_at = now
@@ -454,7 +476,10 @@ class TelephonyMediaGateway(MediaGateway):
                 gap_ms / AUDIO_CALLBACK_INTERVAL_MS if AUDIO_CALLBACK_INTERVAL_MS else 0.0,
                 session.audio_gap_count,
                 arrived_ratio,
-                event_loop_lag.describe(),
+                event_loop_lag.describe(
+                    since=session.first_audio_received_at,
+                    source=_gap_source(previous_audio_at, now, gap_ms),
+                ),
                 extra={
                     "call_id": call_id,
                     "gap_ms": round(gap_ms),

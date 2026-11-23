@@ -274,7 +274,7 @@ def _cf(direction="inbound", agent="Sarah", company="Smith Plumbing", interrupts
 @pytest.fixture
 def notice(monkeypatch):
     """A recording notice that really speaks and records, like the real one."""
-    async def speak(voice_session, *, opener_with_notice=None):
+    async def speak(voice_session, *, opener_with_notice=None, carrier="opening"):
         if voice_session._recording_disclosure_attempted:
             return
         voice_session._recording_disclosure_attempted = True
@@ -344,14 +344,15 @@ async def test_no_name_no_company_through_the_real_function_speaks_the_bare_line
 
 
 @pytest.mark.asyncio
-async def test_outbound_caller_first_is_unchanged(notice):
+async def test_outbound_caller_first_greeting_unchanged_and_non_greeting_gets_notice_then_plain_identity(notice):
     s, vs = _cf(direction="outbound", notice_owed=True)
     assert await speak_disclosure_before_first_reply(s, "Hello?") is True
     assert vs.pipeline.spoken == ["This call is recorded.", _build_call_greeting(s, first_speaker="user")]
     assert vs.pipeline.spoken[1].startswith("Hi, this is Sarah, an AI assistant from Smith Plumbing")
     s2, vs2 = _cf(direction="outbound", notice_owed=True)
     assert await speak_disclosure_before_first_reply(s2, "I'm busy right now.") is False
-    assert vs2.pipeline.spoken == ["This call is recorded."]
+    # 23 Nov 2026: not a greeting -> the notice, then the plain identity sentence, then the model.
+    assert vs2.pipeline.spoken == ["This call is recorded.", "This is Sarah, an AI assistant from Smith Plumbing."]
 
 
 @pytest.mark.asyncio
@@ -395,3 +396,23 @@ async def test_through_the_real_turn_ender_the_identity_line_precedes_the_model_
     s.conversation_history.append(Message(role=MessageRole.USER, content="Hello?"))
     assert await speak_disclosure_before_first_reply(s, "Do you do boilers?") is False
     assert vs.pipeline.spoken == [IDENT]
+
+
+# --- 23 Nov 2026: the last-resort greeting says it is an AI ---
+# When the greeting builder yields nothing speakable (a broken template), the
+# slow path builds a minimal line from the names on the session. It used to be
+# "Hello, this is <agent> calling from <company>.": no "AI", and "calling from"
+# even on an incoming call.
+@pytest.mark.parametrize("direction", ["inbound", "outbound"])
+@pytest.mark.parametrize("agent,expected", [
+    ("Sarah", "Hello. This is Sarah, an AI assistant from Smith Plumbing."),
+    (None, "Hello. This is an AI assistant from Smith Plumbing."),
+])
+def test_last_resort_greeting_says_it_is_an_ai(monkeypatch, direction, agent, expected):
+    monkeypatch.setattr(agent_first, "_build_call_greeting", lambda *a, **k: "...")
+    import app.domain.services.voice_pipeline.inbound_answer_greeting as iag
+
+    monkeypatch.setattr(iag, "ensure_ai_disclosure", lambda greeting, session: greeting)
+    spoken = _speak(_voice_session(direction=direction, agent=agent))
+    assert spoken == [expected]
+    assert says_it_is_ai(spoken[0]) and "calling from" not in spoken[0]

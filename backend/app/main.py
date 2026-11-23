@@ -49,6 +49,7 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
         observe_event_loop_lag_seconds,
     )
     from app.utils import event_loop_lag as _lag_view
+    from app.utils import gc_pause_monitor as _gc_pauses
 
     loop = asyncio.get_running_loop()
     period = 0.010
@@ -65,6 +66,10 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
             # late", which needs a value in hand at the moment of the log
             # call. telephony_audio_gap reads it — see event_loop_lag.
             _lag_view.record(lag)
+            # Collector pauses are recorded inside the collector and written
+            # to the log here, on the loop, never from inside a collection
+            # (gc_pause_monitor). Returns at once when there is nothing.
+            _gc_pauses.log_pending()
             deadline += period
             if now > deadline:
                 # Still behind after advancing by one period means the stall
@@ -598,6 +603,11 @@ async def lifespan(app: FastAPI):
             asyncio.create_task(_event_loop_lag_heartbeat(app.state.redis_listener_stop))
         )
         logger.info("event_loop_lag_heartbeat_started period_ms=10")
+        # Evidence for the ~200 ms stalls: record every full GC pause; the
+        # heartbeat above writes the lines (gc_pause_monitor).
+        from app.utils import gc_pause_monitor as _gc_pause_monitor
+        _gc_pause_monitor.install()
+        logger.info("gc_pause_monitor_installed")
 
     # Single-owner telephony lock. Exactly ONE process may hold the ARI
     # event connection to Asterisk and serve calls — all per-call live
@@ -934,6 +944,11 @@ async def lifespan(app: FastAPI):
     app.state.suspension_expiry_watchdog = start_suspension_expiry_watchdog(
         getattr(container, "db_pool", None), redis_client=getattr(container, "redis", None),
     )
+    # Last start-up step: build the web framework's per-route objects now (it
+    # otherwise builds them on the first request), then move what start-up built
+    # out of the full collector's reach (GC_FREEZE_STARTUP_HEAP=0 switches both off).
+    from app.utils import gc_pause_monitor as _gc_pause_monitor
+    _gc_pause_monitor.freeze_startup_heap(app)
     try:
         yield
     finally:

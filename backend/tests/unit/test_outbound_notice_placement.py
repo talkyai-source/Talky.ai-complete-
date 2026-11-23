@@ -17,8 +17,10 @@ from app.domain.services import recording_policy_service as rps
 from app.domain.services.notice_placement import (
     IN_OPENING,
     OWN_SENTENCE_FIRST,
+    NoticePlacement,
     decide_notice_placement,
     normalize_placement,
+    placement_for,
 )
 from app.domain.services.recording_policy_service import (
     RecordingDecision,
@@ -41,6 +43,7 @@ from tests.unit.test_recording_disclosure import (
 )
 
 OWN = "Acme records calls to train its team."
+IDENTITY_PLAIN = "This is Sarah, an AI assistant from All State Estimation."
 PLACEMENT_LOGGER = "app.domain.services.notice_placement"
 
 
@@ -163,18 +166,70 @@ async def test_caller_first_account_choice_uses_the_premade_notice_opener(monkey
 
 
 # 6
-async def test_non_pickup_first_words_still_say_the_account_sentence_alone(monkeypatch, caplog):
+async def test_non_pickup_first_words_still_say_the_accounts_own_sentence_then_the_plain_identity(
+        monkeypatch, caplog):
+    # The Settings page promise: with "in the opening", the account's own sentence is
+    # still said on a call where the opening is not said, e.g. when the person's first
+    # words are not a greeting. The identity sentence follows it, in its plain form.
     caplog.set_level(logging.INFO)
-    voice, s, gw, provider, _ = premade_t.make_voice(monkeypatch)
+    voice, s, gw, provider, pipe = premade_t.make_voice(monkeypatch)
     await premade_t._ring(voice)
-    n = len(provider.texts)
     await premade_t._answer(
         _decision(text=OWN),
         lambda: speak_disclosure_before_first_reply(s, "Who is this? Stop calling me.", opener=False))
-    assert provider.texts[n:] == [OWN]
-    assert premade_t.NOTICE_OPENER not in provider.texts[n:]
+    assert [c[0] for c in pipe.calls] == [OWN, IDENTITY_PLAIN]
+    assert [m.content for m in s.conversation_history] == [OWN, IDENTITY_PLAIN]
+    assert rps.get_disclosure_state(premade_t.CALL) == "transmitted"
     lines = _lines(caplog)
-    assert len(lines) == 1 and "why=opener_not_spoken" in lines[0] and "said=notice_alone" in lines[0]
+    assert len(lines) == 1 and "said=notice_then_identity_line" in lines[0]
+    assert "why=account_choice_is_for_the_opening" in lines[0] and "stored=in_opening" in lines[0]
+
+
+async def test_non_pickup_first_words_platform_wording_is_one_sentence_with_the_recorded_line(
+        monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    voice, s, gw, provider, pipe = premade_t.make_voice(monkeypatch)
+    await premade_t._ring(voice)
+    await premade_t._answer(
+        premade_t.PLATFORM,
+        lambda: speak_disclosure_before_first_reply(s, "Who is this? Stop calling me.", opener=False))
+    assert [c[0] for c in pipe.calls] == [premade_t.IDENTITY_NOTICE]
+    lines = _lines(caplog)
+    assert len(lines) == 1 and "said=identity_line_with_recorded_line" in lines[0]
+    assert "why=platform_wording" in lines[0]
+
+
+@pytest.mark.parametrize("decision, text, opener, pinned", list(itertools.product(
+    _DECISIONS + [_decision(placement=IN_OPENING), _decision(text=rps.MINIMUM_DISCLOSURE_TEXT)],
+    _TEXTS, [None, "", "Hi, this is Sarah."], [False, True])))
+def test_carrier_opening_is_exactly_the_default(decision, text, opener, pinned):
+    kw = dict(opener_available=bool(opener), pinned=pinned)
+    assert placement_for(decision, text, carrier="opening", **kw) == placement_for(decision, text, **kw)
+    got = decide_notice_placement(decision, text, call_id="c1", path="cascaded", carrier="opening", **kw)
+    assert got == decide_notice_placement(decision, text, call_id="c1", path="cascaded", **kw)
+    today = bool(opener and text and is_platform_notice_text(text))
+    account_choice = (
+        normalize_placement(getattr(decision, "outbound_notice_placement", None)) == IN_OPENING
+        and bool(opener and text) and not pinned and not is_platform_notice_text(text)
+    )
+    assert got.in_opening is (today or account_choice)
+    assert got.said in {"none", "notice_alone", "opening_with_recorded_line", "notice_then_opening"}
+
+
+@pytest.mark.parametrize("stored", [None, OWN_SENTENCE_FIRST, IN_OPENING])
+@pytest.mark.parametrize("switch", [True, False])
+def test_identity_line_carrier_only_carries_the_platform_wording(monkeypatch, stored, switch):
+    if not switch:
+        monkeypatch.delenv(rt_t.on.ENV_SWITCH, raising=False)
+        monkeypatch.setenv("OUTBOUND_NOTICE_PLACEMENT_CHOICE_ENABLED", "")
+    decision = types.SimpleNamespace(outbound_notice_placement=stored)
+    kw = dict(opener_available=True, pinned=False, carrier="identity_line")
+    assert placement_for(decision, None, **kw) == NoticePlacement(False, "no_notice", "none")
+    assert placement_for(decision, rps.MINIMUM_DISCLOSURE_TEXT, **kw) == NoticePlacement(
+        True, "platform_wording", "identity_line_with_recorded_line")
+    own = placement_for(decision, OWN, **kw)
+    assert own.in_opening is False and own.said == "notice_then_identity_line"
+    assert own.why == ("account_choice_is_for_the_opening" if stored == IN_OPENING else "account_sentence_first")
 
 
 # 7

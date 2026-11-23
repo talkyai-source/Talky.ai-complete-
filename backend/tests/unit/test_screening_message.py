@@ -76,20 +76,20 @@ def test_live_receptionist_no_prior_screener_no_message_no_hangup():
     assert pipe.calls == [] and gw.hangups == []
 
 
-def test_missing_names_fall_back_to_generic_line():
+def test_missing_names_still_say_it_is_an_ai_assistant():
     s, pipe, gw = _session(agent="", company=None), FakePipeline(), FakeGateway()
     _run(s, SCREEN, pipe, gw)
     assert _run(s, UNAVAILABLE, pipe, gw) is True
     msg = pipe.calls[0][1]
-    assert msg == "We'll try again another time. Thank you, goodbye."
+    assert msg == "Thanks, this is an AI assistant. We'll try again another time. Goodbye."
 
 
-def test_no_agent_config_falls_back_to_generic_line():
+def test_no_agent_config_still_says_it_is_an_ai_assistant():
     s = SimpleNamespace(call_id="c1", turn_id=2, direction="outbound")
     pipe, gw = FakePipeline(), FakeGateway()
     _run(s, SCREEN, pipe, gw)
     _run(s, UNAVAILABLE, pipe, gw)
-    assert pipe.calls[0][1] == "We'll try again another time. Thank you, goodbye."
+    assert pipe.calls[0][1] == "Thanks, this is an AI assistant. We'll try again another time. Goodbye."
 
 
 def test_message_spoken_at_most_once():

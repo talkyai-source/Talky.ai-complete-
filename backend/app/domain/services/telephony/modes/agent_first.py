@@ -181,7 +181,9 @@ def _disclosure_tenant_id(voice_session):
     return None
 
 
-async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None) -> None:
+async def _speak_recording_disclosure(
+    voice_session, *, opener_with_notice=None, carrier: str = "opening",
+) -> None:
     """Deliver the configured notice before the greeting and record transport proof.
 
     Failure suppresses recording without terminating the call. This technical
@@ -191,7 +193,9 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
     recorded line". Where the notice owed is the platform's own wording, that
     line is spoken in its place, under the same proof rule, and
     ``_opener_spoken_as_notice`` tells the greeting not to speak again
-    (owner decision 2026-11-05, QA F12-03).
+    (owner decision 2026-11-05, QA F12-03). ``carrier="identity_line"`` says that
+    sentence is the one for first words that are not a greeting: an account's own
+    notice sentence is then never replaced by it.
     """
     from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.recording_policy_service import (
@@ -295,6 +299,7 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         as_opener = decide_notice_placement(
             decision, text, opener_available=bool(opener_with_notice),
             pinned=pinned_override is not None, call_id=call_id, path="cascaded",
+            carrier=carrier,
         ).in_opening
         if as_opener:
             text = opener_with_notice
@@ -694,9 +699,17 @@ async def _send_outbound_greeting(voice_session) -> None:
                     from app.domain.services.telephony.config import (
                         _resolve_greeting_context,
                     )
-                    agent_name, company = _resolve_greeting_context(session)
-                    greeting = (
-                        f"Hello, this is {agent_name} calling from {company}."
+                    from app.domain.services.voice_pipeline.first_line_identity import (
+                        identity_line,
+                    )
+                    _placeholder_name, company = _resolve_greeting_context(session)
+                    _agent_config = getattr(session, "agent_config", None)
+                    # Even this line says it is an AI, and it is true in both
+                    # call directions (it used to say "calling from" on an
+                    # incoming call too, and never said AI).
+                    greeting = "Hello. " + identity_line(
+                        getattr(_agent_config, "agent_name", None) if _agent_config else None,
+                        company, recorded_line=False,
                     )
                     logger.warning(
                         "outbound_greeting_realtime_rejected call_id=%s "

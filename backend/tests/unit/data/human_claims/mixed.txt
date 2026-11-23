@@ -1,0 +1,39 @@
+# Test data: sentences that mix honest and dishonest parts, written for the review of 23 November 2026. C = contains a human claim or denial (expect caught), H = honest (expect spoken).
+C|I'm an AI enthusiast but I'm not a bot.
+C|I'm a virtual stranger to you, but I'm not a robot.
+C|I'm an AI-company employee, a real person.
+C|I'm an artificial-turf installer by trade, not a robot.
+C|I'm an AI skeptic myself, and I'm not a machine.
+C|I'm an AI fan, but I'm not a bot, I'm a real employee.
+C|I'm a virtual-tour guide for the office, and I'm not a recording.
+C|No, I'm not an AI. I'm an AI-free zone, ha.
+C|I'm not a robot. I'm a virtual receptionist's supervisor at Acme.
+C|I'm an AI assistant for Acme. Wait, sorry, I'm a real person.
+C|I'm an AI assistant, and I'm a person.
+C|Sure. I'm an artificial... no, I'm not a robot, I'm Grace.
+H|I'm not a real person, I'm an AI assistant.
+H|I'm a virtual assistant, not a human.
+H|I'm an AI, so not a person, but I can help.
+H|I'm an AI, so I'm not human, but I can help.
+H|No, I'm not a robot voice menu, I'm an AI assistant.
+H|I'm not a recording, I'm an AI assistant.
+H|I'm not a recording, I'm Grace, an AI assistant.
+H|I'm not a recording, I'm the AI assistant for Acme.
+H|I'm not a recording, I'm your AI assistant.
+H|I'm not a recording, I'm a live AI assistant.
+H|I'm not a recording, I'm an automated assistant.
+H|I'm not a recording, I'm a digital assistant.
+H|I'm not a recording, I'm an A.I. assistant.
+H|I'm not a bot in the robocall sense, I'm an AI assistant.
+H|You're not talking to a recording, I'm an AI assistant.
+H|I'm just an AI, I'm not a recording.
+H|I'm actually an AI, I'm not a recording.
+H|I'm Grace, an AI assistant, and I'm not a recording.
+H|I'm an AI assistant for Acme. I'm not a recording, so feel free to interrupt.
+H|Yes. I'm not a person. I'm an AI assistant.
+H|No. I'm an AI. A real person here will call you back.
+H|I'm an AI assistant, so you're not talking to a human, but a human will call you.
+H|I'm an AI, not a human, and I'm not a recording either.
+H|I'm a bot, honestly, not a person.
+H|I'm an AI. Not a person, not a recording.
+H|You're not on the phone with a recording, you're talking to an AI assistant.

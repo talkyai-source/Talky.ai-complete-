@@ -401,6 +401,18 @@ class AsteriskAdapter(CallControlAdapter):
         # mislabelled and never got its no-answer +24h reschedule. Bounded: an
         # entry is popped when consumed, and stale ones are cleaned on hangup.
         self._hangup_causes: Dict[str, str] = {}
+        # The numeric cause and the "soft" flag of the FIRST terminal ARI event
+        # that carried either, keyed by channel id, exactly as that one event
+        # gave them (never mixed across events). DIAGNOSTIC ONLY (printed in
+        # the inbound_setup_terminal / inbound_handoff_fenced lines); no
+        # decision reads it. How to read the pair: soft=True is a LOCAL
+        # soft-hangup request (ours over ARI, or Asterisk's own) and its number
+        # is Asterisk's soft-hangup reason, not Q.850 (32 = explicit request,
+        # e.g. an ARI DELETE); without soft the number is the Q.850 cause the
+        # far side gave (16 = normal clearing). Bounded (oldest evicted). An
+        # entry is removed with the channel's inbound state; a trailing
+        # ChannelDestroyed can write it once more, which the bound absorbs.
+        self._hangup_cause_codes: Dict[str, tuple] = {}
         # Same-channel ChannelDestroyed is authoritative absence proof. Keep a
         # bounded handoff set so a preceding StasisEnd cleanup task can consume
         # the later proof instead of polling or timing out after already
@@ -708,6 +720,34 @@ class AsteriskAdapter(CallControlAdapter):
         if cause is not None:
             first_read.setdefault(channel_id, now)
         return cause
+
+    def _record_hangup_cause_code(
+        self, channel_id: str, event: Dict[str, Any], channel: Dict[str, Any]
+    ) -> None:
+        """Keep the numeric cause and soft flag of the FIRST terminal event that
+        carries either (log only). Later events never change the pair: our own
+        hang-up of a channel is followed by events that would otherwise be read
+        as the far side's."""
+        if not channel_id:
+            return
+        code = event.get("cause")
+        soft = event.get("soft")
+        if code is None and soft is None:
+            return
+        codes = self.__dict__.setdefault("_hangup_cause_codes", {})
+        if channel_id in codes:
+            return
+        if len(codes) >= 500:
+            for _old in list(codes)[:250]:
+                codes.pop(_old, None)
+        codes[channel_id] = (code, soft)
+
+    def _forget_hangup_cause_code(self, channel_id: str) -> None:
+        self.__dict__.get("_hangup_cause_codes", {}).pop(channel_id, None)
+
+    def _hangup_cause_code_fields(self, channel_id: str) -> tuple:
+        code, soft = self.__dict__.get("_hangup_cause_codes", {}).get(channel_id, (None, None))
+        return ("-" if code is None else code, "-" if soft is None else soft)
 
     async def _emit_outbound_channel_alias(
         self,
@@ -2031,13 +2071,14 @@ class AsteriskAdapter(CallControlAdapter):
         # cause. This line is the diagnosis the fence log could not give.
         logger.warning(
             "inbound_setup_terminal channel=%s event=%s cause=%s setup_inflight=%s "
-            "handoff_pending=%s active_session=%s",
+            "handoff_pending=%s active_session=%s cause_code=%s soft=%s",
             channel_id[:12],
             reason,
             self._hangup_causes.get(channel_id),
             bool(setup_task is not None and not setup_task.done()),
             bool(pending_handoff is not None and not pending_handoff.done()),
             channel_id in self._active_sessions,
+            *self._hangup_cause_code_fields(channel_id),
         )
         if setup_task is not None and not setup_task.done():
             setup_task.cancel()
@@ -3079,6 +3120,7 @@ class AsteriskAdapter(CallControlAdapter):
             # instead of defaulting to an agent-side hangup. ChannelDestroyed
             # carries `cause` (int) + `cause_txt` (e.g. "No Answer", "User
             # busy"); the channel's `hangupsource`/`cause` may also be present.
+            self._record_hangup_cause_code(channel_id, event, channel)
             _cause_txt = event.get("cause_txt") or channel.get("cause_txt")
             if not _cause_txt:
                 _cause_int = event.get("cause")
@@ -4419,6 +4461,7 @@ class AsteriskAdapter(CallControlAdapter):
                             )
                             if released:
                                 self._inbound_call_meta.pop(channel_id, None)
+                                self._forget_hangup_cause_code(channel_id)
                                 self._inbound_cleanup_pending.discard(channel_id)
                                 return
                     except asyncio.CancelledError:
@@ -4484,6 +4527,7 @@ class AsteriskAdapter(CallControlAdapter):
                 )
                 if released:
                     self._inbound_call_meta.pop(channel_id, None)
+                    self._forget_hangup_cause_code(channel_id)
                     self._inbound_cleanup_pending.discard(channel_id)
                     return
         self._schedule_failed_inbound_setup_cleanup(
@@ -4542,10 +4586,11 @@ class AsteriskAdapter(CallControlAdapter):
             listen_port=listen_port,
         )
         logger.critical(
-            "inbound_handoff_fenced channel=%s reason=%s cause=%s",
+            "inbound_handoff_fenced channel=%s reason=%s cause=%s cause_code=%s soft=%s",
             channel_id[:12],
             reason,
             self._hangup_causes.get(channel_id),
+            *self._hangup_cause_code_fields(channel_id),
         )
         return True
 
@@ -4765,6 +4810,7 @@ class AsteriskAdapter(CallControlAdapter):
                             await asyncio.sleep(self._inbound_cleanup_retry_s)
                             continue
                         self._inbound_call_meta.pop(channel_id, None)
+                        self._forget_hangup_cause_code(channel_id)
                         self._inbound_cleanup_pending.discard(channel_id)
                         return
                     logger.critical(
@@ -4832,6 +4878,7 @@ class AsteriskAdapter(CallControlAdapter):
                         )
                         if released:
                             self._inbound_call_meta.pop(channel_id, None)
+                            self._forget_hangup_cause_code(channel_id)
                             self._inbound_cleanup_pending.discard(channel_id)
                             return
                     logger.critical(
@@ -5424,6 +5471,7 @@ class AsteriskAdapter(CallControlAdapter):
         self._emit_interrupt_audio_audit(channel_id)
         self._tts_utterances.pop(channel_id, None)
         self._inbound_call_meta.pop(channel_id, None)
+        self._forget_hangup_cause_code(channel_id)
 
         if session_id:
             try:

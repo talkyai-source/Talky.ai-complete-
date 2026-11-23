@@ -48,19 +48,23 @@ RECORDED = ("Hi, this is Sarah, an AI assistant from All State Estimation, on a 
             "Who am I speaking with?")
 
 
+ALONE_RECORDED = "This is Sarah, an AI assistant from All State Estimation, on a recorded line."
+ALONE_PLAIN = "This is Sarah, an AI assistant from All State Estimation."
+
+
 async def test_own_text_default_placement_is_sentence_first():
     d = _decision(text=OWN + " Press 9 to opt out of recording.")
     out = await _preview(d)
     assert out == {"notice_first": spoken_disclosure_text(d), "opening": PLAIN,
                    "notice_in_opening": False, "waits_for_person": False,
-                   "notice_alone": spoken_disclosure_text(d), "notice_depends_on_place": False}
+                   "notice_alone": f"{spoken_disclosure_text(d)} {ALONE_PLAIN}", "notice_depends_on_place": False}
     assert "Press 9" not in out["notice_first"]
 
 
 async def test_platform_wording_is_inside_the_opening():
     out = await _preview(_decision(text=PLATFORM))
     assert out == {"notice_first": None, "opening": RECORDED, "notice_in_opening": True,
-                   "waits_for_person": False, "notice_alone": "This call may be recorded for quality and training purposes.",
+                   "waits_for_person": False, "notice_alone": ALONE_RECORDED,
                    "notice_depends_on_place": False}
 
 
@@ -69,15 +73,17 @@ async def test_stored_in_opening_follows_the_platform_switch(monkeypatch):
     monkeypatch.setenv(SWITCH, "1")
     on = await _preview(d)
     assert (on["notice_first"], on["opening"], on["notice_in_opening"]) == (None, RECORDED, True)
-    assert on["notice_alone"] == OWN
+    # The account's own sentence is still said on first words that are not a greeting.
+    assert on["notice_alone"] == f"{OWN} {ALONE_PLAIN}"
     monkeypatch.delenv(SWITCH)
     off = await _preview(d)
     assert (off["notice_first"], off["opening"], off["notice_in_opening"]) == (OWN, PLAIN, False)
+    assert off["notice_alone"] == f"{OWN} {ALONE_PLAIN}"
 
 
 async def test_no_notice_owed_is_the_plain_opening():
     want = {"notice_first": None, "opening": PLAIN, "notice_in_opening": False,
-            "waits_for_person": False, "notice_alone": None, "notice_depends_on_place": False}
+            "waits_for_person": False, "notice_alone": ALONE_PLAIN, "notice_depends_on_place": False}
     assert await _preview(_decision(required=False, text=None)) == want
     assert await _preview(_decision(required=False, text=None, record=False)) == want
 
@@ -231,11 +237,11 @@ async def test_waits_for_person_follows_the_opening_mode():
 
 async def test_notice_alone_is_the_sentence_said_without_an_opening():
     own = await _preview(_decision())
-    assert own["notice_alone"] == OWN
+    assert own["notice_alone"] == f"{OWN} {ALONE_PLAIN}"
     plat = await _preview(_decision(text=PLATFORM))
-    assert plat["notice_alone"] == spoken_disclosure_text(_decision(text=PLATFORM))
-    assert plat["notice_alone"].startswith("This call may be recorded for quality")
-    assert (await _preview(_decision(required=False, text=None)))["notice_alone"] is None
+    assert plat["notice_alone"] == ALONE_RECORDED
+    assert "AI assistant" in plat["notice_alone"] and "Hi," not in plat["notice_alone"]
+    assert (await _preview(_decision(required=False, text=None)))["notice_alone"] == ALONE_PLAIN
 
 
 async def test_notice_depends_on_place_through_the_real_decide():
@@ -248,7 +254,8 @@ async def test_notice_depends_on_place_through_the_real_decide():
     assert out["notice_depends_on_place"] is True and out["notice_first"] == OWN
     assert (await _real(_FakePool(two)))["notice_depends_on_place"] is False
     off_out = await _real(_FakePool(off))
-    assert off_out["notice_depends_on_place"] is False and off_out["notice_alone"] is None
+    assert off_out["notice_depends_on_place"] is False and off_out["notice_alone"] == (
+        "This is Sarah, an AI assistant from All State Estimation.")
 
 
 async def test_one_info_line_per_run_without_notice_text(caplog):
@@ -294,6 +301,32 @@ async def test_non_greeting_first_words_say_the_notice_alone_and_no_opening(deci
             session, "I am busy, what is this about")
     out = await _preview(decision)
     assert said_opener is False
-    assert [e for e in log.events if e[0] == "tts"] == (
-        [("tts", out["notice_alone"])] if out["notice_alone"] else [])
+    # 23 Nov 2026: what the preview shows is what the call says, sentence for sentence.
+    assert " ".join(e[1] for e in log.events if e[0] == "tts") == out["notice_alone"]
     assert all(m.content != out["opening"] for m in session.conversation_history)
+
+
+@pytest.mark.parametrize("switch", [None, "1"])
+@pytest.mark.parametrize("decision", [
+    _decision(text=PLATFORM),
+    _decision(),
+    _decision(placement="in_opening"),
+    _decision(required=False, text=None),
+    _decision(required=False, text=None, record=False),
+], ids=["platform", "own_default", "own_in_opening", "no_notice_owed", "recording_off"])
+async def test_notice_alone_is_what_the_call_really_speaks_on_a_non_greeting_turn(
+        monkeypatch, decision, switch):
+    from tests.unit import test_premade_caller_first_opener as pm
+    from app.domain.services.voice_pipeline.caller_first_disclosure import (
+        speak_disclosure_before_first_reply,
+    )
+
+    if switch:
+        monkeypatch.setenv(SWITCH, switch)
+    voice, session, _gw, _provider, pipe = pm.make_voice(monkeypatch)
+    await pm._ring(voice)
+    said_opener = await pm._answer(
+        decision, lambda: speak_disclosure_before_first_reply(session, "I am busy, what is this about"))
+    out = await _preview(decision)
+    assert said_opener is False
+    assert " ".join(c[0] for c in pipe.calls) == out["notice_alone"]

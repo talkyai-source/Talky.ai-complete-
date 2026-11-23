@@ -104,28 +104,23 @@ _ALWAYS_MACHINE_PHRASES = (
 )
 
 
-_GENERIC_SCREENING_MESSAGE = "We'll try again another time. Thank you, goodbye."
-
-
 def build_screening_message(session) -> str:
     """One short callback line built only from data the call already has.
 
     Agent first name + company (+ the campaign's call_reason when short).
-    Missing identity falls back to a generic line; nothing is invented.
+    It always says it is an AI assistant; a missing name or company is left out,
+    nothing is invented.
     """
     cfg = getattr(session, "agent_config", None)
     agent = " ".join(str(getattr(cfg, "agent_name", "") or "").split())
     company = " ".join(str(getattr(cfg, "company_name", "") or "").split())
     reason = " ".join(str(getattr(cfg, "call_reason", "") or "").split()).rstrip(" .")
     agent = agent.split(" ")[0] if agent else ""
-    if not agent and not company:
-        return _GENERIC_SCREENING_MESSAGE
-    if agent and company:
-        who = f"this is {agent} from {company}"
-    elif agent:
-        who = f"this is {agent}"
-    else:
-        who = f"this is {company}"
+    # The same identity words as the first line of the call (first_line_identity):
+    # the message always says it is an AI assistant, with or without names.
+    from app.domain.services.voice_pipeline.first_line_identity import identity_clause
+
+    who = identity_clause(agent, company, company_fallback=False)
     why = ""
     if reason and len(reason) <= 60:
         why = f", calling {reason}" if reason.lower().startswith("to ") else f", calling about {reason}"

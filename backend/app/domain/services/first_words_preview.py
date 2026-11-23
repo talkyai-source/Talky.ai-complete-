@@ -30,9 +30,9 @@ async def outbound_first_words(
     """The first words of an outgoing call of this account, or None.
 
     Keys: notice_first, opening, notice_in_opening, waits_for_person (the
-    campaign waits for the person's first words), notice_alone (the sentence
-    said on its own when the person's first words are not a greeting, so no
-    opening is said), notice_depends_on_place (a notice is owed only because
+    campaign waits for the person's first words), notice_alone (the sentence(s)
+    said when the person's first words are not a greeting, so no opening is said:
+    always tells them it is an AI), notice_depends_on_place (a notice is owed only because
     the callee's place is unknown).
 
     Never raises: any failure to read the policy logs one warning (exception type
@@ -48,6 +48,7 @@ async def outbound_first_words(
             spoken_disclosure_text,
         )
         from app.domain.services.telephony_session_config import build_identity_opener
+        from app.domain.services.voice_pipeline.first_line_identity import identity_line
 
         # The callee's country is unknown in a preview: same as a call whose
         # callee cannot be placed (callee_country_code=None).
@@ -65,6 +66,20 @@ async def outbound_first_words(
             agent_name, company_name, None, recorded_line=placement.in_opening,
         )
         notice_first = text if (text and not placement.in_opening) else None
+        # What really follows first words that are not a greeting (the same
+        # function the call uses): the one sentence with the notice words in it
+        # (the platform's own wording), or the account's own notice sentence and
+        # then the plain sentence, or the plain sentence alone when no notice is owed.
+        in_line = placement_for(
+            decision, text, opener_available=True, pinned=False, carrier="identity_line",
+        ).in_opening
+        plain = identity_line(agent_name, company_name, recorded_line=False)
+        if in_line:
+            alone = identity_line(agent_name, company_name, recorded_line=True)
+        elif text:
+            alone = f"{text} {plain}"
+        else:
+            alone = plain
         waits = opening_mode == "callee_first"
         logger.info(
             "first_words_preview tenant=%s notice=%s waits_for_person=%s",
@@ -77,7 +92,7 @@ async def outbound_first_words(
             "opening": opening,
             "notice_in_opening": bool(placement.in_opening),
             "waits_for_person": waits,
-            "notice_alone": text or None,
+            "notice_alone": alone,
             "notice_depends_on_place": bool(text) and decision.reason == _ONE_PARTY_PLACE_REASON,
         }
     except _PolicyLookupFailed:

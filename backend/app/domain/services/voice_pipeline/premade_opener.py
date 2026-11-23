@@ -40,11 +40,12 @@ OPENER_PREMADE_BACKGROUND_TIMEOUT_S = 8.0
 _STORE_ATTR = "_premade_opener_lines"
 _PENDING_ATTR = "_premade_opener_pending"
 _CONSUMED_ATTR = "_premade_opener_consumed"
+_KINDS_ATTR = "_premade_opener_kinds"  # text -> kind of every line started in the background
 
 
 @dataclass(frozen=True)
 class PremadeLine:
-    kind: str  # "opener" | "notice_opener"
+    kind: str  # "opener" | "notice_opener" | "identity_notice"
     text: str
     spoken_form: str  # exactly what was sent to the provider
     chunks: Tuple[bytes, ...]
@@ -93,8 +94,11 @@ async def _collect(provider, spoken: str, voice_id, sample_rate, call_id) -> lis
 
 
 async def _make_notice_line(pre_warm_session, store, consumed, notice_text, spoken,
-                            provider, voice_id, sample_rate, call_id) -> None:
-    """Background task: make the notice opener's audio and store it. Never raises.
+                            provider, voice_id, sample_rate, call_id, kind="notice_opener") -> bool:
+    """Background task: make one line's audio (the notice opener, or the identity
+    sentence) and store it. Never raises.
+    Returns False when the provider failed (timeout, error, no audio), so the
+    caller does not ask a failing provider for the next line.
 
     A result that arrives after the opener was already spoken live (its text is in
     ``consumed``) is dropped, never stored. A provider closed under the task by a
@@ -111,34 +115,56 @@ async def _make_notice_line(pre_warm_session, store, consumed, notice_text, spok
         logger.debug("opener_premade_cancelled call_id=%s", call_id)
         raise
     except asyncio.TimeoutError:
-        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=timeout", call_id)
-        return
+        logger.info("opener_premade_failed call_id=%s kind=%s reason=timeout", call_id, kind)
+        return False
     except Exception as exc:  # noqa: BLE001 - a background task never raises
-        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=error:%s",
-                    call_id, type(exc).__name__)
-        return
+        logger.info("opener_premade_failed call_id=%s kind=%s reason=error:%s",
+                    call_id, kind, type(exc).__name__)
+        return False
     finally:
         getattr(pre_warm_session, _PENDING_ATTR, {}).pop(notice_text, None)
     if not chunks:
-        logger.info("opener_premade_failed call_id=%s kind=notice_opener reason=empty", call_id)
-        return
+        logger.info("opener_premade_failed call_id=%s kind=%s reason=empty", call_id, kind)
+        return False
     if notice_text in consumed:
-        logger.info("opener_premade_dropped call_id=%s kind=notice_opener reason=late_after_live", call_id)
-        return
+        logger.info("opener_premade_dropped call_id=%s kind=%s reason=late_after_live", call_id, kind)
+        return True
     store[notice_text] = PremadeLine(
-        "notice_opener", notice_text, spoken, tuple(chunks), voice_id, sample_rate, provider,
+        kind, notice_text, spoken, tuple(chunks), voice_id, sample_rate, provider,
     )
     logger.info(
-        "opener_premade_ready call_id=%s kind=notice_opener chunks=%d bytes=%d synth_ms=%d text=%r",
-        call_id, len(chunks), sum(len(c) for c in chunks),
+        "opener_premade_ready call_id=%s kind=%s chunks=%d bytes=%d synth_ms=%d text=%r",
+        call_id, kind, len(chunks), sum(len(c) for c in chunks),
         int((time.monotonic() - started) * 1000), _log_text(notice_text),
     )
+    return True
+
+
+async def _make_lines_in_sequence(pre_warm_session, store, consumed, jobs) -> None:
+    """Background task: make each line in turn (the provider is never asked for two
+    at once). ``jobs`` = [(text, spoken, kind, provider, voice_id, sample_rate, call_id)].
+    Every line here is the first sentence the code speaks for the person's first
+    words (a reprompt for unclear words may come before it), so once any first
+    sentence has been spoken (``consumed`` is not empty) no further line is started:
+    it could never be used, and its synthesis would run beside the call's speech."""
+    for index, (text, spoken, kind, provider, voice_id, sample_rate, call_id) in enumerate(jobs):
+        if index and consumed:
+            getattr(pre_warm_session, _PENDING_ATTR, {}).pop(text, None)
+            logger.info("opener_premade_not_started call_id=%s kind=%s reason=first_sentence_already_spoken",
+                        call_id, kind)
+            continue
+        if not await _make_notice_line(pre_warm_session, store, consumed, text, spoken,
+                                       provider, voice_id, sample_rate, call_id, kind):
+            for later in jobs[index + 1:]:  # a failing provider is not asked again
+                getattr(pre_warm_session, _PENDING_ATTR, {}).pop(later[0], None)
+            return
 
 
 async def premake_caller_first_lines(
     pre_warm_session, effective_first_speaker, greeting_text, greeting_chunks,
 ) -> None:
-    """Register the plain opener's audio and START the notice opener's synthesis.
+    """Register the plain opener's audio and START the synthesis of the notice
+    opener and of the identity sentence, in the background.
 
     Returns at once: the phone rings no later than without this feature. Never fatal.
     """
@@ -169,14 +195,24 @@ async def premake_caller_first_lines(
             "opener", greeting_text, greeting_text, tuple(greeting_chunks),
             voice_id, sample_rate, provider,
         )
-        if notice_text == greeting_text:
+        # The with-notice identity sentence (first words that are not a greeting) is
+        # made AFTER the notice opener, in the same task. Never awaited on the dial path.
+        from app.domain.services.voice_pipeline.first_line_identity import outbound_identity_line
+
+        identity_text = outbound_identity_line(call_session, recorded_line=True)
+        pronunciations = getattr(call_session, "tts_pronunciations", None)
+        jobs = []
+        for text, kind in ((notice_text, "notice_opener"), (identity_text, "identity_notice")):
+            if text and text != greeting_text and all(text != j[0] for j in jobs):
+                jobs.append((text, apply_pronunciations(text, pronunciations), kind,
+                             provider, voice_id, sample_rate, call_id))
+        if not jobs:
             return
-        spoken = apply_pronunciations(notice_text, getattr(call_session, "tts_pronunciations", None))
-        task = asyncio.ensure_future(_make_notice_line(
-            pre_warm_session, store, consumed, notice_text, spoken,
-            provider, voice_id, sample_rate, call_id))
+        task = asyncio.ensure_future(_make_lines_in_sequence(pre_warm_session, store, consumed, jobs))
         task.add_done_callback(lambda t: t.cancelled() or t.exception())  # never "not retrieved"
-        pending[notice_text] = task
+        for job in jobs:
+            pending[job[0]] = task
+        setattr(pre_warm_session, _KINDS_ATTR, {job[0]: job[2] for job in jobs})  # for the skip log
         setattr(pre_warm_session, "_premade_opener_task", task)  # keeps it alive mid-flight
     except Exception as exc:  # noqa: BLE001 - the call must ring whatever happens here
         logger.warning("opener_premade_failed call_id=%s kind=any reason=error:%s",
@@ -204,8 +240,10 @@ def premade_kwargs(voice_session, session, text) -> dict:
         if line is None:
             pending = getattr(voice_session, _PENDING_ATTR, None)
             reason = "not_ready_yet" if isinstance(pending, dict) and text in pending else "no_matching_text"
+            kinds = getattr(voice_session, _KINDS_ATTR, None)
+            kind = (kinds.get(text) if isinstance(kinds, dict) else None) or "notice_opener"
             logger.info("opener_premade_skipped call_id=%s kind=%s reason=%s stored=%s",
-                        call_id, "notice_opener" if reason == "not_ready_yet" else "other", reason, left)
+                        call_id, kind if reason == "not_ready_yet" else "other", reason, left)
             return {}
         pipeline = getattr(voice_session, "pipeline", None)
         reason = None

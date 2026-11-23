@@ -1990,3 +1990,153 @@ async def test_terminal_race_after_real_lifecycle_provisional_registration_unwin
             await asyncio.sleep(0)
         lifecycle._inbound_admissions_finalized.discard(dedupe_key)
         lifecycle._inbound_admissions_in_flight.pop(call_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Why an incoming call ended during set-up: raw cause code + soft flag are
+# kept per channel and printed (log only) in the two diagnostic lines.
+# ---------------------------------------------------------------------------
+_ADAPTER_LOGGER = "app.infrastructure.telephony.asterisk_adapter"
+_REAL_CHANNEL = "1763897844.123"  # Asterisk epoch.seq shape; survives log redaction
+
+
+async def _hangup_during_setup(request_fields: dict) -> AsteriskAdapter:
+    adapter = AsteriskAdapter()
+    adapter._inbound_cleanup_retry_s = 0
+    adapter.set_inbound_admission_callback(AsyncMock(return_value=_allowed(_REAL_CHANNEL)))
+    finalizer = AsyncMock()
+    adapter.set_inbound_admission_finalizer(finalizer)
+    _enable_answer_persistence(adapter)
+    adapter.set_call_end_callback(AsyncMock())
+    entered = asyncio.Event()
+    never = asyncio.Event()
+
+    async def ari(method, path, **kwargs):
+        if method == "POST" and path == "/bridges":
+            return {"id": "bridge-1"}
+        if method == "POST" and path == "/channels/externalMedia":
+            return {"id": "external-1"}
+        if method == "DELETE" and path == f"/channels/{_REAL_CHANNEL}" and kwargs.get("return_status"):
+            return 404, {}
+        return {}
+
+    async def gateway(method, path, **kwargs):
+        if path == "/v1/sessions/start":
+            entered.set()
+            await never.wait()
+        return {}
+
+    adapter._ari = ari
+    adapter._gateway = gateway
+    adapter._alloc_rtp_port = AsyncMock(return_value=32000)
+    adapter._resolve_unicastrtp_local = AsyncMock(return_value=("127.0.0.1", 41000))
+    adapter._release_rtp_port = AsyncMock()
+
+    adapter._schedule_inbound_start(_REAL_CHANNEL, _event(_REAL_CHANNEL))
+    await entered.wait()
+    await adapter._handle_ari_event(
+        {"type": "ChannelHangupRequest", "channel": {"id": _REAL_CHANNEL}, **request_fields}
+    )
+    for _ in range(50):
+        if finalizer.await_count and not adapter._terminal_cleanup_tasks and not adapter._preanswer_hangup_tasks:
+            break
+        await asyncio.sleep(0)
+    return adapter
+
+
+def _adapter_lines(caplog, prefix: str) -> list:
+    return [
+        r.getMessage() for r in caplog.records
+        if r.name == _ADAPTER_LOGGER and r.getMessage().startswith(prefix)
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields, tail",
+    [
+        # The shapes Asterisk really sends: the far side's request carries a
+        # Q.850 cause and no "soft"; a local soft hang-up (an ARI DELETE, or
+        # Asterisk's own) carries soft=true and its soft-hangup reason (32).
+        ({"cause": 16}, "cause_code=16 soft=-"),
+        ({"cause": 32, "soft": True}, "cause_code=32 soft=True"),
+        ({}, "cause_code=- soft=-"),
+    ],
+)
+async def test_setup_terminal_line_carries_raw_cause_code_and_soft_flag(caplog, fields, tail):
+    caplog.set_level("DEBUG", logger=_ADAPTER_LOGGER)
+    adapter = await _hangup_during_setup(fields)
+    lines = _adapter_lines(caplog, "inbound_setup_terminal")
+    assert len(lines) == 1, lines
+    line = lines[0]
+    assert line.endswith(tail), line
+    # The pre-existing fields print exactly what they printed before.
+    from app.infrastructure.telephony.asterisk_adapter import _Q850_CAUSE_TEXT
+    expected = _Q850_CAUSE_TEXT.get(fields.get("cause"))
+    assert f"event=ChannelHangupRequest cause={expected} setup_inflight=" in line
+    # The entry is gone once the channel's set-up has been cleaned up.
+    assert _REAL_CHANNEL not in adapter._hangup_cause_codes
+
+
+@pytest.mark.asyncio
+async def test_fenced_line_carries_raw_cause_code_and_soft_flag(caplog):
+    caplog.set_level("DEBUG", logger=_ADAPTER_LOGGER)
+    adapter = AsteriskAdapter()
+    adapter._inbound_admissions[_REAL_CHANNEL] = _allowed(_REAL_CHANNEL)
+    adapter._active_sessions[_REAL_CHANNEL] = {
+        "session_id": "gateway-1",
+        "listen_port": 32000,
+        "bridge_id": "bridge-1",
+        "direction": "inbound",
+    }
+    adapter._schedule_failed_inbound_setup_cleanup = lambda *a, **k: None
+    await adapter._handle_ari_event(
+        {"type": "ChannelHangupRequest", "channel": {"id": _REAL_CHANNEL}, "cause": 32, "soft": True}
+    )
+    assert adapter.reject_pending_inbound_handoff(_REAL_CHANNEL, reason="lifecycle_handoff_cancelled")
+    lines = _adapter_lines(caplog, "inbound_handoff_fenced")
+    assert len(lines) == 1, lines
+    assert lines[0].endswith(
+        "reason=lifecycle_handoff_cancelled cause=None cause_code=32 soft=True"
+    ), lines[0]
+
+
+@pytest.mark.asyncio
+async def test_cause_code_map_is_bounded_and_the_first_event_wins_whole():
+    adapter = AsteriskAdapter()
+    for i in range(1200):
+        await adapter._handle_ari_event(
+            {"type": "ChannelDestroyed", "channel": {"id": f"1763897844.{i}"}, "cause": 16}
+        )
+    assert len(adapter._hangup_cause_codes) <= 500
+    assert "1763897844.1199" in adapter._hangup_cause_codes
+    assert "1763897844.0" not in adapter._hangup_cause_codes
+    # The first event that carries anything wins WHOLE: the pair printed is one
+    # that a single event gave, never a mix of two.
+    # (a) the far side asks to hang up, then our own DELETE produces a soft request:
+    await adapter._handle_ari_event(
+        {"type": "ChannelHangupRequest", "channel": {"id": "x.1"}, "cause": 16}
+    )
+    await adapter._handle_ari_event(
+        {"type": "ChannelHangupRequest", "channel": {"id": "x.1"}, "cause": 32, "soft": True}
+    )
+    await adapter._handle_ari_event(
+        {"type": "ChannelDestroyed", "channel": {"id": "x.1"}, "cause": 16, "cause_txt": "Normal Clearing"}
+    )
+    assert adapter._hangup_cause_codes["x.1"] == (16, None)
+    # (b) our own soft hang-up first, then the destroy it causes (which looks
+    # exactly like a normal far-side clear): still ours.
+    await adapter._handle_ari_event(
+        {"type": "ChannelHangupRequest", "channel": {"id": "x.2"}, "cause": 32, "soft": True}
+    )
+    await adapter._handle_ari_event(
+        {"type": "ChannelDestroyed", "channel": {"id": "x.2"}, "cause": 16, "cause_txt": "Normal Clearing"}
+    )
+    assert adapter._hangup_cause_codes["x.2"] == (32, True)
+    # (c) an event with neither value (StasisEnd) records nothing and blocks nothing.
+    await adapter._handle_ari_event({"type": "StasisEnd", "channel": {"id": "x.3"}})
+    assert "x.3" not in adapter._hangup_cause_codes
+    await adapter._handle_ari_event(
+        {"type": "ChannelDestroyed", "channel": {"id": "x.3"}, "cause": 17, "cause_txt": "User busy"}
+    )
+    assert adapter._hangup_cause_codes["x.3"] == (17, None)
