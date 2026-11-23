@@ -477,6 +477,27 @@ export interface ContactList {
     created_at: string | null;
     /** Permission to call this list. Absent until the backend sends it: treat as unknown. */
     permission?: ContactListPermission;
+    /** Set on the answer to a permission save when the server queued the contacts (absent on an older server). */
+    queued_for_calling?: number | null;
+    /** The server's own sentence about a permission save (absent on an older server). */
+    message?: string | null;
+}
+
+/** GET /campaigns/{id}/contact-permission. Absent (404) on an older server. */
+export interface ContactPermissionSummary {
+    dial_gate: "off" | "warn" | "on";
+    statement_version: string;
+    waiting_without_permission: number;
+    ungrouped_without_permission: number;
+    queues_on_confirm: boolean;
+}
+
+/** Answer to POST /campaigns/{id}/contact-lists/ungrouped/permission. */
+export interface UngroupedPermissionResult {
+    list: ContactList;
+    contacts_confirmed: number;
+    queued_for_calling: number | null;
+    message: string;
 }
 
 /** Result of POST /contact-lists/{id}/call — placing REAL outbound calls now. */
@@ -657,7 +678,7 @@ class DashboardApi {
     async startCampaign(
         id: string,
         opts: CampaignStartOptions,
-    ): Promise<{ message: string; jobs_enqueued: number }> {
+    ): Promise<{ message: string; jobs_enqueued: number; jobs_withheld?: number }> {
         const body: Record<string, unknown> = {
             first_speaker: opts.first_speaker,
         };
@@ -775,6 +796,32 @@ class DashboardApi {
             path: `/contact-lists/${listId}/permission`,
             method: "POST",
             body: permission,
+        });
+    }
+
+    /** How many contacts have no permission on record. Any error (an older server answers 404) is "no summary": null, never zero. */
+    async getContactPermissionSummary(campaignId: string): Promise<ContactPermissionSummary | null> {
+        try {
+            const data = await this.client.request<ContactPermissionSummary>({
+                path: `/campaigns/${campaignId}/contact-permission`,
+                method: "GET",
+            });
+            return data && typeof data.waiting_without_permission === "number" ? data : null;
+        } catch {
+            return null;
+        }
+    }
+
+    /** Records the permission statement for exactly the contacts that belong to no list. */
+    async confirmUngroupedPermission(
+        campaignId: string,
+        permission: ContactPermission,
+        expectedCount: number,
+    ): Promise<UngroupedPermissionResult> {
+        return this.client.request({
+            path: `/campaigns/${campaignId}/contact-lists/ungrouped/permission`,
+            method: "POST",
+            body: { ...permission, expected_count: expectedCount },
         });
     }
 
