@@ -940,9 +940,10 @@ class RealtimeBridge:
             if evidence is not None:
                 utterance["status"] = "completed"
                 self._remember_contact_turn("assistant", event.text)
-                # A bare "yes" may authorise an action only after real playout.
-                # A merely transmitted reply must not, and must not leave an older
-                # played reply standing as the text a "yes" is matched against.
+                # A bare "yes" may authorise an action only after real playout, so
+                # a merely transmitted reply never sets this text. (It was already
+                # emptied when this playback began; writing "" here keeps that
+                # true even if that earlier step changes.)
                 self._action_session._voice_action_delivered_text = (
                     event.text if evidence == "transport_played" else "")
                 if self._identity_opening_pending:
@@ -950,7 +951,10 @@ class RealtimeBridge:
                     self._identity_opening_pending = False
                     await self._publish_live_state()
             else:
-                utterance["status"] = receipt.get("status", "unknown")
+                # Not proven. A receipt that says "completed" without proof (no
+                # evidence, or another utterance's id) must not read as completed.
+                unproven = receipt.get("status", "unknown")
+                utterance["status"] = "unknown" if unproven == "completed" else unproven
             if self._utterance is not utterance or utterance.get("status") == "interrupted":
                 return
             if (self._closing_after_generation is not None

@@ -181,3 +181,18 @@ async def test_a_transmitted_reply_after_a_played_one_cannot_be_authorised_by_a_
     await feed(h.bridge, "Is there anything else I can help with?")
     assert h.bridge._utterance["status"] == "completed"
     assert h.bridge._action_session._voice_action_delivered_text == ""
+
+
+# Added after the independent review.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("receipt", [
+    lambda cid, uid: {"utterance_id": uid, "status": "completed", "evidence": "unknown", "played_ms": 0},
+    lambda cid, uid: {"utterance_id": "rt-other", "status": "completed", "evidence": "transport_played", "played_ms": 900},
+])
+async def test_a_receipt_that_says_completed_without_proof_is_not_completed(receipt):
+    """A status word alone is not proof: no evidence, or another reply's id."""
+    h = build(receipt=receipt)
+    await feed(h.bridge, REPLY)
+    assert h.bridge._utterance["status"] == "unknown"
+    assert _last_agent_line(h.bridge) == ""
+    assert h.bridge._identity_opening_pending is True
