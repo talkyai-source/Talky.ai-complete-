@@ -79,8 +79,11 @@ async def regenerate_recovery_codes(
 
         if matched_step is None:
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid TOTP code.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": "mfa_code_invalid",
+                    "message": "That code is not correct. Check your authenticator app and try again.",
+                },
             )
 
         # Update last_used_at after verification

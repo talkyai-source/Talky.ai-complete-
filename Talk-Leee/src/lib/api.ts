@@ -671,6 +671,7 @@ class ApiClient {
         const data = await this.client().request({
             path,
             method,
+            suppressAuthRedirect: true,
             body: { code },
             timeoutMs: 10_000,
         });

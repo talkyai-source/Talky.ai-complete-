@@ -69,3 +69,59 @@ async def test_wrong_current_password_is_validation_and_session_still_works(monk
     assert "set-cookie" not in response.headers
     conn.execute.assert_not_awaited()
     assert sessions.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_wrong_recovery_regeneration_code_is_validation_and_session_still_works(monkeypatch):
+    recovery = importlib.import_module("app.api.v1.endpoints.mfa.recovery")
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"totp_secret_enc": "synthetic", "enabled": True, "last_used_at": None}),
+        execute=AsyncMock(side_effect=AssertionError("wrong code must not write")))
+
+    @asynccontextmanager
+    async def connection(*args):
+        yield conn
+
+    client = SimpleNamespace(pool=object())
+    sessions = AsyncMock(return_value={"id": "session-a", "user_id": "user-a"})
+    row = {"id": "user-a", "email": "synthetic@example.invalid", "tenant_id": None,
+           "role": "user", "name": "Synthetic", "business_name": None}
+    invalidate = AsyncMock(side_effect=AssertionError("wrong code must not replace codes"))
+    store = AsyncMock(side_effect=AssertionError("wrong code must not store codes"))
+    monkeypatch.setattr(dep, "get_db_client", lambda: client)
+    monkeypatch.setattr(dep, "acquire_with_tenant", connection)
+    monkeypatch.setattr(dep, "get_session_by_id", sessions)
+    monkeypatch.setattr(dep, "decode_and_validate_token", lambda token: {"sub": "user-a", "sid": "session-a"})
+    monkeypatch.setattr(principal, "load_current_principal", AsyncMock(return_value=row))
+    monkeypatch.setattr("app.services.scripts.tenant_minutes.compute_tenant_minutes_status",
+                        AsyncMock(return_value=SimpleNamespace(allowance=lambda: {})))
+    monkeypatch.setattr(recovery, "acquire_with_tenant", connection)
+    monkeypatch.setattr(recovery, "lock_authenticated_credential_change", AsyncMock())
+    monkeypatch.setattr(recovery, "decrypt_totp_secret", lambda value: "synthetic-secret")
+    monkeypatch.setattr(recovery, "verify_totp_step", lambda *args, **kwargs: None)
+    monkeypatch.setattr(recovery, "invalidate_all_codes", invalidate)
+    monkeypatch.setattr(recovery, "store_recovery_codes", store)
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(recovery.router, prefix="/auth/mfa")
+    app.dependency_overrides[recovery.get_db_client] = lambda: client
+
+    @app.get("/private")
+    async def private(user=Depends(dep.get_current_user)):
+        return {"id": user.id}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://synthetic",
+                                headers={"Authorization": "Bearer synthetic-session-token"}) as http:
+        assert (await http.get("/private")).status_code == 200
+        response = await http.post("/auth/mfa/recovery-codes/regenerate", json={"code": "000000"})
+        after = await http.get("/private")
+    assert after.status_code == 200
+    assert after.json() == {"id": "user-a"}
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "mfa_code_invalid"
+    assert response.json()["error"]["message"] == (
+        "That code is not correct. Check your authenticator app and try again.")
+    assert "set-cookie" not in response.headers
+    conn.execute.assert_not_awaited()
+    invalidate.assert_not_awaited()
+    store.assert_not_awaited()
