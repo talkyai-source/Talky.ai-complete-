@@ -933,18 +933,28 @@ class RealtimeBridge:
                 await settle_opening(self, utterance, event.text)
             # Retain delivery evidence for action authorization and history.
             # Contact interpretation is handled by record_contact, not prose parsing.
-            if (receipt.get("utterance_id") == utterance["id"]
-                    and receipt.get("status") == "completed"
-                    and receipt.get("evidence") == "transport_played"):
+            # Same rule as the opening sentence and the normal voice path: a phone
+            # gateway can only prove "transmitted", which counts as delivered.
+            from app.realtime.opening_notice import receipt_evidence
+            evidence = receipt_evidence(receipt, utterance["id"])
+            if evidence is not None:
                 utterance["status"] = "completed"
                 self._remember_contact_turn("assistant", event.text)
-                self._action_session._voice_action_delivered_text = event.text
+                # A bare "yes" may authorise an action only after real playout, so
+                # a merely transmitted reply never sets this text. (It was already
+                # emptied when this playback began; writing "" here keeps that
+                # true even if that earlier step changes.)
+                self._action_session._voice_action_delivered_text = (
+                    event.text if evidence == "transport_played" else "")
                 if self._identity_opening_pending:
                     self._live_state = reduce_live_state(self._live_state, IdentityEvidence(introduced=True))
                     self._identity_opening_pending = False
                     await self._publish_live_state()
             else:
-                utterance["status"] = receipt.get("status", "unknown")
+                # Not proven. A receipt that says "completed" without proof (no
+                # evidence, or another utterance's id) must not read as completed.
+                unproven = receipt.get("status", "unknown")
+                utterance["status"] = "unknown" if unproven == "completed" else unproven
             if self._utterance is not utterance or utterance.get("status") == "interrupted":
                 return
             if (self._closing_after_generation is not None
