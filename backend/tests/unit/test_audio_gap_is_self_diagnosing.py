@@ -17,13 +17,15 @@ remove.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from app.infrastructure.telephony.telephony_media_gateway import TelephonyMediaGateway
-from app.utils import event_loop_lag
+from app.utils import event_loop_lag, gc_pause_monitor
 
 
 @pytest.fixture(autouse=True)
@@ -136,13 +138,24 @@ async def test_gap_warning_does_not_exonerate_gateway_when_loop_sample_is_health
     assert "loop_recent=healthy source=undetermined" in msg
 
 
-def test_recent_healthy_sample_does_not_assign_audio_gap_fault_to_carrier():
-    event_loop_lag.record(0.3)
+def test_recent_healthy_sample_does_not_assign_audio_gap_fault_to_carrier(monkeypatch):
+    """The process-lifetime peak is never reset and is named for what it is; the
+    per-call peak only sees stalls from the call's first audio batch on."""
+    clock = [50.0]
+    monkeypatch.setattr(event_loop_lag, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    event_loop_lag.record(0.9)             # a stall BEFORE the call (e.g. start-up)
+    clock[0] = 150.0
+    event_loop_lag.record(0.3)             # a stall DURING the call
     event_loop_lag.record(0)
-    description = event_loop_lag.describe()
+    description = event_loop_lag.describe(since=100.0)
     assert "stall=not-ours" not in description
     assert "source=undetermined" in description
-    assert "loop_lag_peak_ms=300.0" in description
+    assert "loop_lag_process_peak_ms=900.0" in description
+    assert "loop_lag_call_peak_ms=300.0" in description
+    assert "loop_lag_peak_ms=" not in description
+    # a call that began after every stall sees none of them
+    assert "loop_lag_call_peak_ms=0.0" in event_loop_lag.describe(since=200.0)
+    assert event_loop_lag.peak_since(100.0) == pytest.approx(300.0)
 
 
 @pytest.mark.asyncio
@@ -175,3 +188,146 @@ async def test_warning_survives_an_unmeasured_loop(caplog):
 
     msg = [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1].getMessage()
     assert "loop_lag=unmeasured" in msg
+
+
+# ── source= and the per-call peak in the real warning ────────────────────────
+
+async def _late_batch(gateway, call_id, caplog):
+    session = gateway._sessions[call_id]
+    frame = b"\xff" * 320
+    with caplog.at_level(logging.WARNING):
+        await gateway.on_audio_received(call_id, frame)
+        session.last_audio_received_at -= 0.500
+        await gateway.on_audio_received(call_id, frame)
+    return session, [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1]
+
+
+@pytest.fixture
+def _no_gc_pause():
+    gc_pause_monitor.uninstall()
+    yield
+    gc_pause_monitor.uninstall()
+
+
+@pytest.mark.asyncio
+async def test_gap_line_call_peak_ignores_a_stall_from_before_the_call(caplog, monkeypatch, _no_gc_pause):
+    call_id = "gap-callpeak"
+    gateway = await _gateway_with_session(call_id)
+    session = gateway._sessions[call_id]
+    clock = [50.0]
+    monkeypatch.setattr(event_loop_lag, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    event_loop_lag.record(1.257)            # before the call
+    frame = b"\xff" * 320
+    await gateway.on_audio_received(call_id, frame)   # first audio batch
+    session.first_audio_received_at = 100.0
+    clock[0] = 150.0
+    event_loop_lag.record(0.196)            # during the call
+    with caplog.at_level(logging.WARNING):
+        session.last_audio_received_at -= 0.500
+        await gateway.on_audio_received(call_id, frame)
+    msg = [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1].getMessage()
+    assert "loop_lag_call_peak_ms=196.0" in msg
+    assert "loop_lag_process_peak_ms=1257.0" in msg
+    assert "loop_lag_peak_ms=" not in msg
+
+
+@pytest.mark.asyncio
+async def test_gap_source_is_gc_pause_when_a_full_collection_ended_inside_the_gap(caplog, _no_gc_pause):
+    call_id = "gap-src-gc"
+    gateway = await _gateway_with_session(call_id)
+    session = gateway._sessions[call_id]
+    event_loop_lag.record(0.480)
+    frame = b"\xff" * 320
+    await gateway.on_audio_received(call_id, frame)
+    # A 470 ms full collection inside a ~500 ms gap accounts for it.
+    gc_pause_monitor._last_full = (asyncio.get_running_loop().time() - 0.2, 470.0)
+    with caplog.at_level(logging.WARNING):
+        session.last_audio_received_at -= 0.500
+        await gateway.on_audio_received(call_id, frame)
+    msg = [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1].getMessage()
+    assert "source=gc_pause gc_ms=470.0" in msg
+
+
+@pytest.mark.asyncio
+async def test_a_short_collection_inside_a_long_gap_is_not_named_as_its_cause(caplog, _no_gc_pause):
+    # With the start-up heap frozen, short full collections are frequent. One of
+    # 2 ms inside a 500 ms gap did not cause it, and the line must not say so.
+    call_id = "gap-src-short-gc"
+    gateway = await _gateway_with_session(call_id)
+    session = gateway._sessions[call_id]
+    event_loop_lag.record(0.001)             # the loop looks healthy
+    frame = b"\xff" * 320
+    await gateway.on_audio_received(call_id, frame)
+    gc_pause_monitor._last_full = (asyncio.get_running_loop().time() - 0.2, 2.0)
+    with caplog.at_level(logging.WARNING):
+        session.last_audio_received_at -= 0.500
+        await gateway.on_audio_received(call_id, frame)
+    msg = [r for r in caplog.records if "telephony_audio_gap" in r.getMessage()][-1].getMessage()
+    assert "source=undetermined" in msg and "gc_ms=" not in msg
+
+
+@pytest.mark.asyncio
+async def test_gap_source_is_process_stall_when_only_the_loop_lag_explains_it(caplog, _no_gc_pause):
+    call_id = "gap-src-stall"
+    gateway = await _gateway_with_session(call_id)
+    event_loop_lag.record(0.480)             # gap is ~500 ms, expected 40 ms
+    gc_pause_monitor._last_full = (asyncio.get_running_loop().time() - 60.0, 150.0)  # outside the gap
+    _, rec = await _late_batch(gateway, call_id, caplog)
+    msg = rec.getMessage()
+    assert "source=process_stall" in msg
+    assert "gc_ms=" not in msg
+
+
+@pytest.mark.asyncio
+async def test_gap_source_is_undetermined_otherwise_and_counters_are_unchanged(caplog, _no_gc_pause):
+    call_id = "gap-src-none"
+    gateway = await _gateway_with_session(call_id)
+    event_loop_lag.record(0.0004)
+    session, rec = await _late_batch(gateway, call_id, caplog)
+    msg = rec.getMessage()
+    assert "source=undetermined" in msg
+    assert "expected_ms=40" in msg and "total_gaps=1" in msg
+    assert session.audio_gap_count == 1
+    assert rec.gap_ms >= 500 and rec.audio_gap_count == 1 and rec.expected_ms == 40
+
+
+def test_a_pause_that_ended_just_after_the_loops_time_is_still_attributed(monkeypatch):
+    # Some event loops give a "now" read at the start of the loop turn from a
+    # coarser clock, so a collection that has just ended can carry an end time a
+    # few ms AFTER it. It has ended all the same, and it is what held the batch up.
+    from app.infrastructure.telephony import telephony_media_gateway as tmg
+
+    gc_pause_monitor.uninstall()
+    try:
+        gc_pause_monitor._last_full = (100.243, 212.0)          # ended 3 ms after the loop's now
+        monkeypatch.setattr(tmg.time, "monotonic", lambda: 100.250)
+        assert tmg._gap_source(100.0, 100.240, 240.0) == "gc_pause gc_ms=212.0"
+        gc_pause_monitor._last_full = (99.9, 212.0)             # ended before the previous batch
+        assert tmg._gap_source(100.0, 100.240, 240.0) != "gc_pause gc_ms=212.0"
+    finally:
+        gc_pause_monitor.uninstall()
+
+
+def test_the_call_peak_is_exact_however_many_samples_follow():
+    # A 200 ms stall early in a call must still be the call's peak after
+    # hundreds of later small samples (a fixed window of recent samples lost it).
+    event_loop_lag.reset()
+    try:
+        clock = [1000.0]
+        import time as _time
+
+        real = event_loop_lag.time
+        event_loop_lag.time = SimpleNamespace(monotonic=lambda: clock[0])
+        try:
+            event_loop_lag.record(0.200)
+            for _ in range(600):
+                clock[0] += 0.5
+                event_loop_lag.record(0.003)
+            assert event_loop_lag.peak_since(999.0) == 200.0
+            assert event_loop_lag.peak_since(1000.1) == 3.0     # after the stall: only the small ones
+            assert len(event_loop_lag._recent) <= 2             # and the record stays short
+        finally:
+            event_loop_lag.time = real
+            del _time
+    finally:
+        event_loop_lag.reset()
