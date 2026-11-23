@@ -655,6 +655,8 @@ class DashboardApi {
         /** Saving will be refused; the preview shows what a live call would run. */
         over_budget: boolean;
         layers: Array<{ key: string; label: string; content: string }>;
+        /** Optional; read with parseOutboundFirstWords (absent, null or malformed all mean none). */
+        outbound_first_words?: unknown;
     }> {
         return this.client.request({
             path: "/campaigns/preview-prompt",

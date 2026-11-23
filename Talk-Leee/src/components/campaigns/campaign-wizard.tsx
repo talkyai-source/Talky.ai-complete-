@@ -29,6 +29,7 @@ import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-e
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
+import { OpeningBoxText, OpeningNotes } from "@/components/campaigns/opening-first-words";
 import {
     buildCampaignBrief,
     campaignBriefGuidanceText,
@@ -219,6 +220,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         greeting: string;
         prompt_chars: number;
         layers: Array<{ key: string; label: string; content: string }>;
+        outbound_first_words?: unknown;
     } | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -394,6 +396,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                 greeting: res.greeting,
                 prompt_chars: res.prompt_chars,
                 layers: res.layers,
+                outbound_first_words: res.outbound_first_words,
             });
         } catch (err) {
             if (isCurrent()) setError(err instanceof Error ? err.message : "Couldn't build a preview");
@@ -721,8 +724,9 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             ) : null}
                             <div className="mt-1 rounded-lg border border-gray-200 dark:border-white/10 bg-gray-50 dark:bg-white/5 px-3 py-2 text-sm italic text-gray-700 dark:text-zinc-300 min-h-[2.5rem]">
                                 {previewLoading ? <span className="inline-flex items-center gap-2 text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin" /> building preview…</span>
-                                    : preview?.greeting || "—"}
+                                    : <OpeningBoxText greeting={preview?.greeting || "—"} firstWords={preview?.outbound_first_words} outbound={!inbound} />}
                             </div>
+                            {previewLoading ? null : <OpeningNotes firstWords={preview?.outbound_first_words} outbound={!inbound} />}
                         </div>
 
                         {preview?.layers.length ? (

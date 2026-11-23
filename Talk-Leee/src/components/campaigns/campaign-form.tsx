@@ -54,6 +54,7 @@ import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-e
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
 import { callingHoursInverted, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
+import { OpeningBoxText, OpeningNotes } from "@/components/campaigns/opening-first-words";
 import {
     CampaignLeadFieldsPicker,
     useCampaignLeadFieldDraft,
@@ -376,6 +377,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         campaign_guidance_budget_chars: number;
         over_budget: boolean;
         layers: Array<{ key: string; label: string; content: string }>;
+        outbound_first_words?: unknown;
     } | null>(null);
     // Live counter for the guidance field. The server's budget wins once a
     // preview has reported it; the local default matches the backend default.
@@ -1266,8 +1268,9 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                                 First spoken line ({previewData.direction})
                                             </Label>
                                             <pre className="whitespace-pre-wrap rounded border border-border bg-background p-2 text-xs">
-                                                {previewData.greeting}
+                                                <OpeningBoxText greeting={previewData.greeting} firstWords={previewData.outbound_first_words} outbound={previewData.direction === "outbound"} />
                                             </pre>
+                                            <OpeningNotes firstWords={previewData.outbound_first_words} outbound={previewData.direction === "outbound"} />
                                         </div>
                                         <PromptLayerPreview
                                             layers={previewData.layers}
