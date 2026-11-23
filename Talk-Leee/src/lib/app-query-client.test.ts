@@ -108,3 +108,25 @@ test("an unauthorized query or mutation error writes no sign-in-ended marker", a
         sessionStorage.clear();
     }
 });
+
+test("legal_acceptance_required: no retry and no toast; forbidden and a 500 behave as before", async () => {
+    const qc = createAppQueryClient(() => {});
+    const toasts = () => notificationsStore.getSnapshot().toasts.map((t) => t.title);
+    const legal = new ApiClientError({ code: "legal_acceptance_required", message: "Accept the terms", status: 403, url: "/campaigns", method: "GET" });
+    const forbidden = new ApiClientError({ code: "forbidden", message: "no", status: 403, url: "/campaigns", method: "GET" });
+    try {
+        const retry = qc.getDefaultOptions().queries?.retry as (count: number, err: Error) => boolean;
+        assert.equal(retry(0, legal), false);
+        assert.equal(retry(0, forbidden), false);
+        assert.equal(retry(0, serverError()), true);
+        for (const [error, expected] of [[legal, []], [forbidden, ["Permission denied"]], [serverError(), ["Server error"]]] as const) {
+            const mutation = qc.getMutationCache().build(qc, { mutationFn: async () => { throw error; } });
+            try {
+                await assert.rejects(() => mutation.execute(undefined));
+                assert.deepEqual(toasts(), expected);
+            } finally { mutation.destroy(); notificationsStore.clearAll(); }
+        }
+    } finally {
+        qc.clear();
+    }
+});
