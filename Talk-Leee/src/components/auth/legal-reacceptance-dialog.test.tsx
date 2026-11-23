@@ -20,7 +20,7 @@ loader._load = function (id, ...args) {
     if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user, refreshUser, logout }) };
     return originalLoad.call(this, id, ...args);
 };
-let Dialog: React.ComponentType;
+let Dialog: React.ComponentType<{ onAccepted?: () => void }>;
 try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- synchronous scoped boundary stubs above
     Dialog = require("./legal-reacceptance-dialog").LegalReacceptanceDialog;
