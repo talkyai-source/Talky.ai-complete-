@@ -1434,7 +1434,7 @@
       "id": "280608689f03440186690f28eff74f9d1f339c4e966f5df456e135df63007be4",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_resolve_user_tenant",
-      "line": 286,
+      "line": 287,
       "method": "fetchrow",
       "tables": [
         "user_profiles"
@@ -3805,7 +3805,7 @@
       "id": "77393a88aba0c8522e53c1778868574ed5170377054b8ddfac4164ec008bc6e0",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_record_test_call",
-      "line": 391,
+      "line": 392,
       "method": "execute",
       "tables": [
         "calls"
@@ -4793,10 +4793,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e36ef6e1139fbc434300f4d72d73a6a7053ad35354cf4ffdce64bd734792133d",
+      "id": "054c12e3b4947f2cf7c47fac3f92a431124ba00a07b1f4c3a665783678f7b801",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 926,
+      "line": 944,
       "method": "fetchval",
       "tables": [
         "assistant_actions"
@@ -6166,7 +6166,7 @@
       "id": "c835591fadd71e3465dd35e86a316457e4140bb8abe4304e22c8475939f0bb7a",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_has_test_membership",
-      "line": 228,
+      "line": 229,
       "method": "fetchval",
       "tables": [
         "tenant_users"
@@ -6324,10 +6324,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5f11c254817903808e79162db5c480212a099d2a7fa05a1aa4f89452db854c66",
+      "id": "977309ab267a992c2b09f45ababcdffbe42ddf1bf93be732994ca268f0b297e3",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 927,
+      "line": 945,
       "method": "fetch",
       "tables": [
         "assistant_actions"
@@ -7210,7 +7210,7 @@
       "id": "ef25cea65bfa178265845ddafaf76685520aefd99b267f7eadd819369aabe02b",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_finalise_test_call",
-      "line": 458,
+      "line": 459,
       "method": "execute",
       "tables": [
         "calls"
