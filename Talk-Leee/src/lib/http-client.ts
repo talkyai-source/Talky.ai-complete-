@@ -1,5 +1,6 @@
 import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
 import { SessionCoordinationError, withBrowserSessionLock } from "@/lib/browser-session";
+import { noteSignInEnded } from "@/lib/sign-in-ended";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -387,6 +388,7 @@ function fireSessionExpired() {
         }
         return;
     }
+    noteSignInEnded();
     if (_sessionExpiredFired) return;
     _sessionExpiredFired = true;
     if (!_sessionExpiredHandler) return;

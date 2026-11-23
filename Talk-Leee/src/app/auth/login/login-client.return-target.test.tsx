@@ -97,3 +97,71 @@ test("white-label login keeps its own dashboard even with Ask AI and a return UR
 test("ordinary login without a return target retains the dashboard", async () => {
     assert.equal(await completeLogin(undefined), "/dashboard");
 });
+
+// ─── "Your sign-in has ended" line ──────────────────────────────────────────
+const ENDED_LINE = "Your sign-in has ended. Please sign in again to continue.";
+const TAB_KEY = "talky.signin.tab";
+async function openLoginPage(search = "") {
+    originalWindow.history.replaceState({}, "", `/auth/login${search}`);
+    api.getMe = async () => { throw new ApiClientError({ status: 401, code: "unauthorized", message: "anonymous", url: "/auth/me", method: "GET" }); };
+    globalThis.fetch = async () => { throw new Error("No network request allowed in sign-in-ended test"); };
+    const query = new URLSearchParams(search.replace(/^\?/, ""));
+    const router = { bfcacheId: "ended-line", push() {}, replace() {}, refresh() {}, back() {}, forward() {}, async prefetch() {} } satisfies NonNullable<React.ContextType<typeof AppRouterContext>>;
+    client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+    render(<AppRouterContext.Provider value={router}><PathnameContext.Provider value="/auth/login">
+        <SearchParamsContext.Provider value={query}><QueryClientProvider client={client}>
+            <AuthProvider><Identity /><LoginClientPage /></AuthProvider>
+        </QueryClientProvider></SearchParamsContext.Provider>
+    </PathnameContext.Provider></AppRouterContext.Provider>);
+    await waitFor(() => assert.equal(auth.loading, false));
+    return screen.findByLabelText("Email");
+}
+
+test("an ended sign-in shows one plain line, once, as the email field's description", async () => {
+    sessionStorage.clear();
+    sessionStorage.setItem(TAB_KEY, `ended:${Date.now()}`);
+    const email = await openLoginPage();
+    const line = await screen.findByText(ENDED_LINE);
+    assert.equal(line.getAttribute("role"), null);
+    assert.ok(line.id);
+    assert.ok((email.getAttribute("aria-describedby") ?? "").split(" ").includes(line.id));
+    assert.equal(screen.getAllByText(ENDED_LINE).length, 1);
+    assert.equal(sessionStorage.getItem(TAB_KEY), null, "the marker is consumed");
+    assert.notEqual(document.activeElement, line);
+});
+
+test("an unconfirmed sign-out shows only its own line and still consumes the marker", async () => {
+    sessionStorage.clear();
+    sessionStorage.setItem(TAB_KEY, `ended:${Date.now()}`);
+    await openLoginPage("?logout=unconfirmed");
+    await screen.findByText(/could not confirm that the server session ended/);
+    assert.equal(screen.queryByText(ENDED_LINE), null);
+    assert.equal(sessionStorage.getItem(TAB_KEY), null);
+});
+
+test("a first visit shows no ended-sign-in line", async () => {
+    sessionStorage.clear();
+    await openLoginPage();
+    assert.equal(screen.queryByText(ENDED_LINE), null);
+});
+
+test("a signed-in value that has not ended shows no line", async () => {
+    sessionStorage.clear();
+    sessionStorage.setItem(TAB_KEY, "signed-in");
+    await openLoginPage();
+    assert.equal(screen.queryByText(ENDED_LINE), null);
+});
+
+test("a 31-second-old marker shows no line and is removed", async () => {
+    sessionStorage.clear();
+    sessionStorage.setItem(TAB_KEY, `ended:${Date.now() - 31_000}`);
+    await openLoginPage();
+    assert.equal(screen.queryByText(ENDED_LINE), null);
+    assert.equal(sessionStorage.getItem(TAB_KEY), null);
+});
+
+test("a query parameter alone cannot make the line appear", async () => {
+    sessionStorage.clear();
+    await openLoginPage("?reason=ended&ended=1&expired=true");
+    assert.equal(screen.queryByText(ENDED_LINE), null);
+});

@@ -1,10 +1,11 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { useEffect } from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { api } from "@/lib/api";
 import { ApiClientError, clearFreshLoginGrace, createHttpClient } from "@/lib/http-client";
+import { rememberSignedIn, takeSignInEnded } from "@/lib/sign-in-ended";
 
 const originalGetMe = api.getMe;
 const originalFetch = globalThis.fetch;
@@ -21,6 +22,7 @@ afterEach(() => {
     api.getMe = originalGetMe;
     globalThis.fetch = originalFetch;
     window.localStorage.clear();
+    window.sessionStorage.clear();
     clearFreshLoginGrace();
     if (originalFallback === undefined) delete process.env.NEXT_PUBLIC_BEARER_FALLBACK;
     else process.env.NEXT_PUBLIC_BEARER_FALLBACK = originalFallback;
@@ -55,4 +57,32 @@ test("a page refresh keeps data requested before the sign-in check confirms the 
     campaigns.resolve(Response.json({ campaigns: ["spring"] }));
     await waitFor(() => assert.notEqual(result, null));
     assert.equal(result, "spring");
+});
+
+async function loadPageWith(failure: ApiClientError, signedInBefore: boolean) {
+    process.env.NEXT_PUBLIC_BEARER_FALLBACK = "false";
+    window.sessionStorage.clear();
+    if (signedInBefore) rememberSignedIn();
+    globalThis.fetch = (() => { throw new Error("No network request allowed"); }) as typeof fetch;
+    let reads = 0;
+    api.getMe = async () => { reads++; throw failure; };
+    render(<AuthProvider><SignedInAs /></AuthProvider>);
+    await waitFor(() => assert.equal(reads, 1));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+}
+const refused = () => new ApiClientError({ status: 401, code: "unauthorized", message: "gone", url: "/auth/me", method: "GET" });
+
+test("a page reload after the sign-in ended marks a tab that was signed in", async () => {
+    await loadPageWith(refused(), true);
+    assert.equal(takeSignInEnded(), true);
+});
+
+test("a first visit that gets a 401 leaves no mark", async () => {
+    await loadPageWith(refused(), false);
+    assert.equal(takeSignInEnded(), false);
+});
+
+test("a network failure on page load leaves no mark", async () => {
+    await loadPageWith(new ApiClientError({ code: "network_error", message: "offline", url: "/auth/me", method: "GET" }), true);
+    assert.equal(takeSignInEnded(), false);
 });

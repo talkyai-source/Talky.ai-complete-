@@ -3,13 +3,18 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { useLayoutEffect } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { AuthProvider, useAuth } from './auth-context';
-import { clearFreshLoginGrace, setSessionExpiredHandler } from './http-client';
+import { api } from './api';
+import { ApiClientError, clearFreshLoginGrace, setSessionExpiredHandler } from './http-client';
+import { takeSignInEnded } from './sign-in-ended';
 import { notificationsStore } from './notifications';
 
 const OWN = 'talklee.auth.identity.v1', FOREIGN = 'talky.admin.identity.v1';
 const A = { id: 'marker-A', email: 'a@example.invalid', name: 'A', role: 'tenant_admin', tenant_id: 'tenant-A', minutes_remaining: 1, minutes_state: 'known' };
 const B = { ...A, id: 'marker-B', email: 'b@example.invalid', tenant_id: 'tenant-B' };
 const originalFetch = globalThis.fetch;
+const originalGetMe = api.getMe;
+const TAB = 'talky.signin.tab';
+const refusedMe = () => new ApiClientError({ status: 401, code: 'unauthorized', message: 'gone', url: '/auth/me', method: 'GET' });
 const originalFallback = process.env.NEXT_PUBLIC_BEARER_FALLBACK;
 const originalChannel = Object.getOwnPropertyDescriptor(window, 'BroadcastChannel');
 const originalStorage = Object.getOwnPropertyDescriptor(window, 'localStorage')!;
@@ -48,7 +53,7 @@ afterEach(() => {
     cleanup(); notificationsStore.setIdentity(null); globalThis.fetch = originalFetch;
     Object.defineProperty(window, 'localStorage', originalStorage);
     if (originalChannel) Object.defineProperty(window, 'BroadcastChannel', originalChannel); else Reflect.deleteProperty(window, 'BroadcastChannel');
-    window.localStorage.clear(); clearFreshLoginGrace();
+    window.localStorage.clear(); window.sessionStorage.clear(); clearFreshLoginGrace(); api.getMe = originalGetMe;
     if (originalFallback === undefined) delete process.env.NEXT_PUBLIC_BEARER_FALLBACK; else process.env.NEXT_PUBLIC_BEARER_FALLBACK = originalFallback;
 });
 
@@ -327,3 +332,56 @@ test('cookie bootstrap retains the explicit logout fence without probing a valid
     assert.equal(auth.user, null); assert.equal(auth.status, 'anonymous'); assert.equal(reads.length, 0);
     assert.equal(window.localStorage.getItem('talky.logout.pending'), 'synthetic-unconfirmed-logout');
 });
+
+test('a signed-in visitor is remembered for this tab', async () => {
+    window.sessionStorage.clear(); await boot();
+    assert.equal(window.sessionStorage.getItem(TAB), 'signed-in');
+});
+
+test('a background check that finds the sign-in ended marks the tab', async () => {
+    window.sessionStorage.clear(); await boot();
+    api.getMe = async () => { throw refusedMe(); };
+    await act(async () => { await auth.refreshUser({ silent: true }); });
+    assert.equal(auth.user, null);
+    assert.equal(takeSignInEnded(), true);
+});
+
+test('a background check that fails without a refusal leaves no mark', async () => {
+    window.sessionStorage.clear(); await boot();
+    api.getMe = async () => { throw new ApiClientError({ code: 'network_error', message: 'offline', url: '/auth/me', method: 'GET' }); };
+    await act(async () => { await auth.refreshUser({ silent: true }); });
+    assert.equal(takeSignInEnded(), false);
+});
+
+test('a refused re-check after another tab changed the sign-in marks the tab', async () => {
+    window.sessionStorage.clear(); await boot();
+    api.getMe = async () => { throw refusedMe(); };
+    await act(async () => storage(OWN, marker('changed')));
+    await waitFor(() => assert.equal(auth.loading, false));
+    assert.equal(takeSignInEnded(), true);
+});
+
+test('a stored token removed by another tab with no sign-out marker marks the tab', async () => {
+    window.sessionStorage.clear(); await boot();
+    await act(async () => { window.dispatchEvent(new window.StorageEvent('storage', { key: 'talklee.auth.token', newValue: null })); });
+    await waitFor(() => assert.equal(auth.user, null));
+    assert.equal(takeSignInEnded(), true);
+});
+
+test('a token removed while a sign-out receipt is pending does not mark the tab', async () => {
+    window.sessionStorage.clear(); await boot();
+    window.localStorage.setItem('talky.logout.pending', 'synthetic-receipt');
+    await act(async () => { window.dispatchEvent(new window.StorageEvent('storage', { key: 'talklee.auth.token', newValue: null })); });
+    await waitFor(() => assert.equal(auth.user, null));
+    assert.equal(takeSignInEnded(), false);
+});
+
+for (const [name, key] of [['another tab', OWN], ['the admin panel', FOREIGN]] as const) {
+    test(`a sign-out marker from ${name} forgets the tab`, async () => {
+        window.sessionStorage.clear(); await boot();
+        assert.equal(window.sessionStorage.getItem(TAB), 'signed-in');
+        await act(async () => storage(key, marker('logout')));
+        await waitFor(() => assert.equal(auth.user, null));
+        assert.equal(window.sessionStorage.getItem(TAB), null);
+    });
+}
