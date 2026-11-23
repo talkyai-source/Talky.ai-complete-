@@ -629,6 +629,7 @@ async def get_calling_rules(
 async def preview_prompt(
     body: CampaignPromptPreviewRequest,
     current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_read_client),
 ):
     """Render the system prompt + TTS opener for a campaign draft (T4-B4).
 
@@ -726,9 +727,19 @@ async def preview_prompt(
         direction=body.direction,
     )
 
+    first_words = None
+    if body.direction == "outbound":
+        from app.domain.services.first_words_preview import outbound_first_words
+        first_words = await outbound_first_words(
+            getattr(db_client, "pool", None), getattr(current_user, "tenant_id", None),
+            agent_name=body.agent_name, company_name=body.company_name,
+            opening_mode=opening_mode,
+        )
+
     return CampaignPromptPreviewResponse(
         system_prompt=document.system_prompt,
         greeting=greeting,
+        outbound_first_words=first_words,
         direction=body.direction,
         has_inbound_directive=(
             document.system_prompt.startswith(TRUE_INBOUND_DIRECTIVE)
