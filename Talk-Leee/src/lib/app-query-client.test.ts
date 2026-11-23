@@ -3,6 +3,7 @@ import { afterEach, beforeEach, mock, test } from "node:test";
 import { createAppQueryClient } from "@/lib/app-query-client";
 import { ApiClientError } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
+import { rememberSignedIn } from "@/lib/sign-in-ended";
 
 beforeEach(() => {
     window.localStorage.clear();
@@ -88,5 +89,22 @@ test("queries keep their bounded retry", () => {
         assert.equal(fn(2, serverError()), false);
     } finally {
         qc.clear();
+    }
+});
+
+test("an unauthorized query or mutation error writes no sign-in-ended marker", async () => {
+    sessionStorage.clear();
+    rememberSignedIn();
+    const qc = createAppQueryClient(() => {});
+    const unauthorized = new ApiClientError({ code: "unauthorized", message: "gone", status: 401, url: "/x", method: "GET" });
+    try {
+        const mutation = qc.getMutationCache().build(qc, { mutationFn: async () => { throw unauthorized; } });
+        try {
+            await assert.rejects(() => mutation.execute(undefined));
+        } finally { mutation.destroy(); notificationsStore.clearAll(); }
+        assert.equal(sessionStorage.getItem("talky.signin.tab"), "signed-in");
+    } finally {
+        qc.clear();
+        sessionStorage.clear();
     }
 });

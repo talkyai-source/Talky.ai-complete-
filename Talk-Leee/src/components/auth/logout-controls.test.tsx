@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { clearFreshLoginGrace } from "@/lib/http-client";
+import { noteSignInEnded, takeSignInEnded } from "@/lib/sign-in-ended";
 import LogoutButton from "./logout-button";
 import { Sidebar } from "@/components/layout/sidebar";
 
@@ -55,7 +56,7 @@ function clickLogout(kind: "button" | "sidebar") {
 afterEach(() => {
   Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });
   cleanup(); client?.clear(); api.getMe = originalGetMe; api.logout = originalLogout;
-  localStorage.clear(); clearFreshLoginGrace();
+  localStorage.clear(); sessionStorage.clear(); clearFreshLoginGrace();
 });
 
 for (const kind of ["button", "sidebar"] as const) {
@@ -98,3 +99,15 @@ for (const kind of ["button", "sidebar"] as const) {
     assert.equal(completed, 0);
   });
 }
+
+test("the visitor's own sign-out forgets the tab even when a refused request lands right after", async () => {
+  api.logout = async () => {};
+  await mount("button");
+  assert.equal(sessionStorage.getItem("talky.signin.tab"), "signed-in");
+  await act(async () => { clickLogout("button"); });
+  await waitFor(() => assert.equal(destinations.length, 1));
+  // The dashboard guard or a late refused request fires after the sign-out.
+  noteSignInEnded();
+  assert.equal(takeSignInEnded(), false);
+  assert.equal(sessionStorage.getItem("talky.signin.tab"), null);
+});

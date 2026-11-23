@@ -1,11 +1,13 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { api } from "./api";
+import { rememberSignedIn, takeSignInEnded } from "./sign-in-ended";
 import { ApiClientError, clearFreshLoginGrace, resetSessionExpiredLatch,
     setRequestIdentity, setSessionExpiredHandler, setTokenProvider } from "./http-client";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
+    sessionStorage.clear();
     globalThis.fetch = originalFetch;
     setSessionExpiredHandler(null);
     setTokenProvider(null);
@@ -88,4 +90,17 @@ test("regenerate-recovery-codes 400 mfa_code_invalid stays inline", async () => 
     assert.equal(state.paths.filter(p => p.endsWith("/auth/refresh")).length, 0);
     assert.equal(state.expired(), 0);
     assert.equal(state.token(), "synthetic-session");
+});
+
+test("a wrong recovery code leaves no sign-in-ended marker", async () => {
+    sessionStorage.clear();
+    rememberSignedIn();
+    const state = setupRecoveryRegeneration(path => path.endsWith("/auth/refresh")
+        ? Response.json({ access_token: "renewed-token", user_id: "user-a", tenant_id: "tenant-a" })
+        : Response.json({ error: { code: "unauthorized", message: "Invalid TOTP code.",
+            request_id: "synthetic-request" } }, { status: 401 }));
+    await assert.rejects(() => api.regenerateRecoveryCodes("000000"));
+    assert.equal(state.expired(), 0);
+    assert.equal(takeSignInEnded(), false);
+    sessionStorage.clear();
 });

@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+    clearFreshLoginGrace,
     createHttpClient,
+    markFreshLogin,
     resetSessionExpiredLatch,
     setSessionExpiredHandler,
 } from "@/lib/http-client";
+import { rememberSignedIn, takeSignInEnded } from "@/lib/sign-in-ended";
 
 /**
  * The single-source-of-truth 401 redirect.
@@ -191,4 +194,64 @@ test("a thrown handler does not derail the request rejection", async () => {
         (globalThis as unknown as { fetch?: unknown }).fetch = prev;
         setSessionExpiredHandler(null);
     }
+});
+
+async function refusedRequest(opts: { suppressAuthRedirect?: boolean } = {}) {
+    setSessionExpiredHandler(() => {});
+    resetSessionExpiredLatch();
+    const prev = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () =>
+        new Response(JSON.stringify({ detail: "expired" }), {
+            status: 401,
+            headers: { "content-type": "application/json" },
+        })) as unknown as typeof fetch;
+    try {
+        const client = createHttpClient({ baseUrl: "http://example.test", getToken: () => "x", setToken: () => {} });
+        await client.request({ path: "/x", ...opts }).catch(() => null);
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prev;
+        setSessionExpiredHandler(null);
+        clearFreshLoginGrace();
+    }
+}
+
+test("a refused request while signed in marks the tab as ended", async () => {
+    sessionStorage.clear();
+    rememberSignedIn();
+    await refusedRequest();
+    assert.equal(takeSignInEnded(), true);
+});
+
+test("a refused request in a tab that never signed in leaves no mark", async () => {
+    sessionStorage.clear();
+    await refusedRequest();
+    assert.equal(takeSignInEnded(), false);
+});
+
+test("a refusal the caller suppressed leaves no mark", async () => {
+    sessionStorage.clear();
+    rememberSignedIn();
+    await refusedRequest({ suppressAuthRedirect: true });
+    assert.equal(takeSignInEnded(), false);
+});
+
+test("a refusal inside the fresh-login grace window leaves no mark", async () => {
+    sessionStorage.clear();
+    rememberSignedIn();
+    markFreshLogin();
+    setSessionExpiredHandler(() => {});
+    resetSessionExpiredLatch();
+    const prev = (globalThis as unknown as { fetch?: unknown }).fetch;
+    (globalThis as unknown as { fetch: unknown }).fetch = (async () =>
+        new Response("nope", { status: 401 })) as unknown as typeof fetch;
+    try {
+        const client = createHttpClient({ baseUrl: "http://example.test", getToken: () => "x", setToken: () => {} });
+        await client.request({ path: "/x" }).catch(() => null);
+    } finally {
+        (globalThis as unknown as { fetch?: unknown }).fetch = prev;
+        setSessionExpiredHandler(null);
+        clearFreshLoginGrace();
+    }
+    assert.equal(takeSignInEnded(), false);
+    sessionStorage.clear();
 });

@@ -10,6 +10,7 @@ import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, 
 import { notificationsStore } from "@/lib/notifications";
 import { emailAuditStore } from "@/lib/email-audit";
 import { isPublicRoute } from "@/lib/public-routes";
+import { forgetSignIn, noteSignInEnded, rememberSignedIn } from "@/lib/sign-in-ended";
 
 // Contains no token or account data. Cookie-only sessions also need an explicit
 // cross-tab boundary because removing an absent bearer key emits no event.
@@ -106,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
             emailAuditStore.suspendIdentity();
         }
+        if (next) rememberSignedIn();
         setUserState(next);
     }, []);
     const [loading, setLoading] = useState(true);
@@ -252,8 +254,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const current = () => identityEpoch.current === epoch && profileRead.current === read;
             void api.getMe().then(me => {
                 if (current()) { setUser(me); setLoading(false); }
-            }).catch(() => {
-                if (current()) { notificationsStore.setIdentity(null); setUser(null); setLoading(false); }
+            }).catch(err => {
+                if (current()) {
+                    if (isApiClientError(err) && err.code === "unauthorized") noteSignInEnded();
+                    notificationsStore.setIdentity(null); setUser(null); setLoading(false);
+                }
             });
         }
         function receiveMarker(value: unknown, foreign = false) {
@@ -262,6 +267,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if ((message.kind !== "changed" && message.kind !== "logout") || typeof message.nonce !== "string" || !message.nonce || message.nonce.length > 200) return;
             if (seen.has(message.nonce)) return;
             seen.add(message.nonce);
+            if (message.kind === "logout") forgetSignIn();
             if (seen.size > 100) seen.delete(seen.values().next().value!);
             if (foreign) {
                 // Foreign cookie changes invalidate this app's old bearer; it
@@ -291,6 +297,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 accessTokenRef.current = next;
                 setAccessTokenState(next);
+                // A token removed with no sign-out receipt means the sign-in
+                // ended elsewhere; a sign-out marker (or the receipt) forgets it.
+                if (!next) {
+                    let ownSignOut = false;
+                    try { ownSignOut = !!window.localStorage.getItem("talky.logout.pending"); } catch { /* Storage may be unavailable. */ }
+                    if (!ownSignOut) noteSignInEnded();
+                }
                 handleIdentityChange(next ? "changed" : "logout");
             } else if (e.key === AUTH_IDENTITY_EVENT_KEY || e.key === FOREIGN_IDENTITY_EVENT_KEY) {
                 try { receiveMarker(JSON.parse(e.newValue ?? "null"), e.key === FOREIGN_IDENTITY_EVENT_KEY); } catch { /* Ignore malformed markers. */ }
@@ -391,6 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 // The canonical check failed; leave this provider anonymous.
                 setProfileReadError(err);
+                if (isApiClientError(err) && err.code === "unauthorized") noteSignInEnded();
                 setUser(null);
             } finally {
                 if (current()) setLoading(false);
@@ -447,6 +461,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser]);
 
     const logout = useCallback(async () => {
+        forgetSignIn();
         const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
         emailAuditStore.clearForLogout();
         logoutIntent.current = true;
@@ -579,6 +594,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 return;
             }
+            noteSignInEnded();
             setAccessToken(null);
             invalidateIdentity();
             setUser(null);

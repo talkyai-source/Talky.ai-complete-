@@ -32,6 +32,7 @@ import { failedReadMessage } from "@/components/states/page-states";
 import { useAuth } from "@/lib/auth-context";
 import { getRequestIdentityGeneration, markFreshLogin, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
+import { takeSignInEnded } from "@/lib/sign-in-ended";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
@@ -159,6 +160,13 @@ export default function LoginClientPage() {
         // The persisted logout receipt is available only after hydration.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setLogoutUnconfirmed(pending);
+    }, []);
+    // The marker is consumed on every visit. It only ever sets true: a second
+    // (StrictMode) run finds nothing and must not hide the line.
+    const [signInEnded, setSignInEnded] = useState(false);
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the marker lives in sessionStorage, readable only after hydration.
+        if (takeSignInEnded()) setSignInEnded(true);
     }, []);
     const emailInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
@@ -416,6 +424,9 @@ export default function LoginClientPage() {
                             You signed out on this device, but we could not confirm that the server session ended.
                             Sign in again to review and revoke other sessions in Security settings.
                         </p>}
+                        {!logoutUnconfirmed && signInEnded && <p id="sign-in-ended-line" className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                            Your sign-in has ended. Please sign in again to continue.
+                        </p>}
                     </CardHeader>
 
                     <AnimatePresence mode="wait" custom={direction}>
@@ -468,6 +479,7 @@ export default function LoginClientPage() {
                                                         [
                                                             emailError ? "email-error" : null,
                                                             error ? errorId : null,
+                                                            !logoutUnconfirmed && signInEnded ? "sign-in-ended-line" : null,
                                                         ]
                                                             .filter(Boolean)
                                                             .join(" ") || undefined
