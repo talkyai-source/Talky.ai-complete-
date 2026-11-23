@@ -96,6 +96,59 @@ test("a malformed field is treated as absent", () => {
     assert.equal(notes(), "");
 });
 
+const BASE = { notice_first: NOTICE, opening: "Hi, this is Grace from Acme.", notice_in_opening: false };
+const PLACE = "Your recording policy asks for the notice only on calls to certain places. On other calls the agent says the opening without it. You set this in Settings, under Recording policy.";
+const ALONE = "This call may be recorded for quality and training purposes.";
+const WAITS_ALONE = `This campaign waits for the person to speak first. If their first words are not a greeting, the agent says "${ALONE}" and then answers them, without this opening.`;
+const WAITS_PLAIN = "This campaign waits for the person to speak first. If their first words are not a greeting, the agent answers them without this opening.";
+
+test("waits for the person with its own sentence: the quoted line sits between the policy line and the first-name line", () => {
+    render(<Box words={{ ...BASE, waits_for_person: true, notice_alone: ALONE }} />);
+    assert.equal(notes(), `${POLICY}${WAITS_ALONE}${NAME_LINE}`);
+});
+
+test("waits for the person with no notice owed: the second form of the line", () => {
+    render(<Box words={{ ...BASE, waits_for_person: true, notice_alone: null }} />);
+    assert.equal(notes(), `${POLICY}${WAITS_PLAIN}${NAME_LINE}`);
+});
+
+test("waits_for_person false or absent: neither waiting line", () => {
+    const { unmount } = render(<Box words={{ ...BASE, waits_for_person: false, notice_alone: ALONE }} />);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+    unmount();
+    render(<Box words={{ ...BASE, notice_alone: ALONE }} />);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+});
+
+test("depends on place: the 'certain places' sentence replaces the 'requires one' sentence; false or absent is the reverse", () => {
+    const { unmount } = render(<Box words={{ ...BASE, notice_depends_on_place: true }} />);
+    assert.equal(notes(), `${PLACE}${NAME_LINE}`);
+    unmount();
+    cleanup();
+    render(<Box words={{ ...BASE, notice_depends_on_place: false }} />);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+    cleanup();
+    render(<Box words={BASE} />);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+});
+
+test("depends on place with the notice inside the opening: the recorded-line sentence stays in front", () => {
+    render(<Box words={{ notice_first: null, opening: "Hi, on a recorded line.", notice_in_opening: true, notice_depends_on_place: true }} />);
+    assert.equal(notes(), `${IN_OPENING} ${PLACE}${NAME_LINE}`);
+});
+
+test("the old three-field object renders as before", () => {
+    render(<Box words={BASE} />);
+    assert.equal(box(), `First, your recording notice, on its own: "${NOTICE}"Then the opening: "Hi, this is Grace from Acme."`);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+});
+
+test("a non-boolean waits_for_person is read as false and does not hide the rest", () => {
+    render(<Box words={{ ...BASE, waits_for_person: "yes", notice_alone: 7, notice_depends_on_place: "true" }} />);
+    assert.equal(box(), `First, your recording notice, on its own: "${NOTICE}"Then the opening: "Hi, this is Grace from Acme."`);
+    assert.equal(notes(), `${POLICY}${NAME_LINE}`);
+});
+
 // ---- the wizard's review step ----
 const REALTIME = { pipeline_mode: "realtime" as const, realtime_model: "gpt-realtime", realtime_voice: "alloy" };
 const KEY = "opening-first-words";

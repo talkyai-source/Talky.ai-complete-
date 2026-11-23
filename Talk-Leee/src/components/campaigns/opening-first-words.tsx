@@ -10,6 +10,12 @@ export type OutboundFirstWords = {
     notice_first: string | null;
     opening: string;
     notice_in_opening: boolean;
+    /** The campaign waits for the person to speak first. */
+    waits_for_person: boolean;
+    /** The notice as said on its own when their first words are not a greeting. */
+    notice_alone: string | null;
+    /** The policy asks for the notice only on calls to certain places. */
+    notice_depends_on_place: boolean;
 };
 
 export function parseOutboundFirstWords(raw: unknown): OutboundFirstWords | null {
@@ -23,6 +29,9 @@ export function parseOutboundFirstWords(raw: unknown): OutboundFirstWords | null
         notice_first: typeof notice === "string" && notice.trim() ? notice : null,
         opening: value.opening,
         notice_in_opening: value.notice_in_opening,
+        waits_for_person: value.waits_for_person === true,
+        notice_alone: typeof value.notice_alone === "string" && value.notice_alone.trim() ? value.notice_alone : null,
+        notice_depends_on_place: value.notice_depends_on_place === true,
     };
 }
 
@@ -55,7 +64,16 @@ export function OpeningNotes({ firstWords, outbound }: { firstWords: unknown; ou
             {noticeSaid ? (
                 <p>
                     {words.notice_in_opening ? `"on a recorded line" is this account's recording notice. ` : ""}
-                    The recording notice is said on calls where your recording policy requires one. You set it in Settings, under Recording policy.
+                    {words.notice_depends_on_place
+                        ? "Your recording policy asks for the notice only on calls to certain places. On other calls the agent says the opening without it. You set this in Settings, under Recording policy."
+                        : "The recording notice is said on calls where your recording policy requires one. You set it in Settings, under Recording policy."}
+                </p>
+            ) : null}
+            {words.waits_for_person ? (
+                <p>
+                    {words.notice_alone
+                        ? `This campaign waits for the person to speak first. If their first words are not a greeting, the agent says "${words.notice_alone}" and then answers them, without this opening.`
+                        : "This campaign waits for the person to speak first. If their first words are not a greeting, the agent answers them without this opening."}
                 </p>
             ) : null}
             <p>When the contact has a first name on file, the question is &quot;Am I speaking with [first name]?&quot;.</p>
