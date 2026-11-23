@@ -129,6 +129,11 @@ async def refresh(
                 session_id, session_alive = await bind_refresh_to_session(conn, claims)
                 if not session_alive:
                     await revoke_family_by_token(conn, presented_token=new_raw, reason="logout")
+                    logger.info(
+                        "refresh.session_ended family=%s user=%s — family revoked",
+                        claims["family_id"],
+                        claims["user_id"],
+                    )
                     rejection = "Your login session has ended. Please sign in again."
                 else:
                     access_jwt = encode_access_token(
