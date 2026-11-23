@@ -6,17 +6,23 @@ contacts that have no list.
 
 The POST records the customer's statement on a NEW confirmed list and moves
 exactly the campaign's listless contacts into it, in ONE transaction. The
-caller sends ``expected_count`` (the number it showed the person); if the number
-moved differs, everything rolls back and the answer is 409, so the statement
-only ever covers the contacts the person saw.
+caller sends ``expected_count`` (the number it showed the person) and
+``expected_token`` (the fingerprint of those contacts that the GET gave it with
+the page: their ids and numbers). If the contacts moved are not that number
+AND that set, everything rolls back and the answer is 409, so the statement
+only ever covers the contacts the person saw. The count alone was not enough:
+one contact removed and another added leaves the same number.
 
 ``queue_confirmed_contacts_if_running`` is also used by the list-confirm route
 (contact_lists.py): when the switch is ``on`` and the campaign is ``running``,
-the newly confirmed pending contacts are queued at once. It never restarts a
-stopped or paused campaign (``only_lead_ids`` makes the start refuse anything
-that is not running).
+the newly confirmed pending contacts are queued at once, except a contact that
+is on a live call right now (it waits for the next Start, as on the
+add-a-contact path). It never restarts a stopped or paused campaign
+(``only_lead_ids`` makes the start refuse anything that is not running).
 """
+import hashlib
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
@@ -61,6 +67,7 @@ class ContactPermissionSummary(BaseModel):
     waiting_without_permission: int
     ungrouped_without_permission: int
     queues_on_confirm: bool
+    ungrouped_token: str
 
 
 class UngroupedPermissionOut(BaseModel):
@@ -84,8 +91,39 @@ _INSERT_LIST_SQL = (
 _MOVE_SQL = (
     "UPDATE leads SET list_id = $3::uuid, updated_at = NOW() "
     "WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid "
-    "AND list_id IS NULL AND status <> 'deleted' RETURNING id"
+    "AND list_id IS NULL AND status <> 'deleted' RETURNING id, phone_number"
 )
+
+# The same set as _MOVE_SQL, as a token. It must equal ungrouped_token() for the same
+# rows: ids sort as uuid here and as lowercase text there (the same order), a NULL
+# phone number counts as '', and the whole string is hashed as UTF-8.
+_UNGROUPED_TOKEN_SQL = (
+    "SELECT md5(COALESCE(string_agg(l.id::text || ':' || COALESCE(l.phone_number, ''), "
+    "',' ORDER BY l.id), '')) AS token FROM leads AS l "
+    "WHERE l.tenant_id = $1::uuid AND l.campaign_id = $2::uuid "
+    "AND l.list_id IS NULL AND l.status <> 'deleted'"
+)
+
+# Contacts of this tenant that are on a real (non-test) live call right now.
+_LIVE_CALL_LEAD_IDS_SQL = (
+    "SELECT c.lead_id FROM calls AS c WHERE c.tenant_id = $1::uuid "
+    "AND c.lead_id = ANY($2::uuid[]) AND c.status = ANY($3::text[]) "
+    "AND c.is_test IS NOT TRUE"
+)
+
+_TOKEN_RE = re.compile(r"[0-9a-f]{32}")
+
+
+def ungrouped_token(rows) -> str:
+    """md5 of the 'id:phone' pairs of the listless contacts, sorted by id, comma-joined.
+
+    ``rows`` are mappings with ``id`` and ``phone_number`` (None counts as '').
+    """
+    pairs = sorted(
+        (str(r["id"]).lower(), r["phone_number"] or "") for r in rows
+    )
+    text = ",".join(f"{i}:{p}" for i, p in pairs)
+    return hashlib.md5(text.encode("utf-8")).hexdigest()  # noqa: S324 — a fingerprint, not security
 
 _CAMPAIGN_STATUS_SQL = (
     "SELECT status FROM campaigns "
@@ -123,7 +161,23 @@ async def queue_confirmed_contacts_if_running(
             rows = await conn.fetch(
                 _PENDING_IDS_SQL, str(tenant_id), str(campaign_id), str(list_id),
             )
-        ids = [str(r["id"]) for r in rows]
+            ids = [str(r["id"]) for r in rows]
+            if ids:
+                # Same statuses as the add-a-contact path (campaigns._contact_has_live_call):
+                # a contact on a live call right now is not queued; it waits for the next Start.
+                from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+
+                live_rows = await conn.fetch(
+                    _LIVE_CALL_LEAD_IDS_SQL, str(tenant_id), ids,
+                    list(CAMPAIGN_LIVE_CALL_STATUSES),
+                )
+                live = {str(r["lead_id"]) for r in live_rows}
+                if live:
+                    ids = [i for i in ids if i not in live]
+                    logger.info(
+                        "contact_queue_skipped_live_call campaign=%s count=%d",
+                        str(campaign_id)[:8], len(live),
+                    )
         if not ids:
             return "queued", 0
         from app.api.v1.endpoints.campaigns import _get_campaign_service
@@ -169,8 +223,12 @@ async def get_contact_permission_summary(
         waiting, ungrouped = await count_waiting_without_permission(
             conn, tenant, campaign_id,
         )
+        token = await conn.fetchval(
+            _UNGROUPED_TOKEN_SQL, tenant, str(campaign_id),
+        )
     mode = contact_permission_dial_gate_mode()
     return {
+        "ungrouped_token": token,
         "dial_gate": mode,
         "statement_version": CONTACT_PERMISSION_STATEMENT_VERSION,
         "waiting_without_permission": waiting,
@@ -197,6 +255,21 @@ def _expected_count(body: Any) -> int:
     return value
 
 
+def _expected_token(body: Any) -> str:
+    value = body.get("expected_token") if isinstance(body, dict) else None
+    if not isinstance(value, str) or _TOKEN_RE.fullmatch(value) is None:
+        # An older page sends no token: it is told to reload, before any write.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": CODE_INVALID,
+                "field": "expected_token",
+                "message": "Reload the page and confirm again.",
+            },
+        )
+    return value
+
+
 @router.post(
     "/campaigns/{campaign_id}/contact-lists/ungrouped/permission",
     response_model=UngroupedPermissionOut,
@@ -211,6 +284,7 @@ async def confirm_ungrouped_permission(
     """Record the customer's statement for the contacts that have no list."""
     permission = validate_for_route(body)
     expected = _expected_count(body)
+    token = _expected_token(body)
     tenant = str(current_user.tenant_id)
     require_owned_outbound_campaign(db_client, campaign_id, tenant_id=tenant)
 
@@ -234,15 +308,17 @@ async def confirm_ungrouped_permission(
                 permission.permission_date, permission.statement_version, now,
             )
             moved = await conn.fetch(_MOVE_SQL, tenant, str(campaign_id), list_id)
-            if len(moved) != expected:
+            if len(moved) != expected or ungrouped_token(moved) != token:
                 # Raised INSIDE the block: the list insert and the move roll back.
+                # The count alone is not enough: one contact removed and another
+                # added leaves the same number but not the same contacts.
                 raise HTTPException(
                     status_code=409,
                     detail={
-                        "code": "contact_count_changed",
+                        "code": "contacts_changed",
                         "message": (
-                            f"The number of contacts without a list changed from "
-                            f"{expected} to {len(moved)}. Check them and confirm again."
+                            "The contacts without a list changed since you loaded "
+                            "this page. Reload the page, check them and confirm again."
                         ),
                     },
                 )
