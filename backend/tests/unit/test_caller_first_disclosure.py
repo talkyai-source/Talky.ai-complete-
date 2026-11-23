@@ -36,7 +36,8 @@ from tests.unit.test_first_line_guard import _session
 def _speaker(monkeypatch, *, platform_notice_owed=True):
     calls = []
 
-    async def fake_speak(voice_session, *, opener_with_notice=None):
+    async def fake_speak(voice_session, *, opener_with_notice=None, carrier="opening"):
+        voice_session._carrier_seen = carrier
         calls.append((opener_with_notice, voice_session.call_session._disclosure_in_flight))
         voice_session._opener_spoken_as_notice = bool(platform_notice_owed and opener_with_notice)
 
@@ -137,7 +138,10 @@ async def test_other_first_words_get_the_notice_and_the_model(monkeypatch, words
     s = _session(tts_active=False, started_ago=None)
     vs = _with_voice_session(s)
     assert await speak_disclosure_before_first_reply(s, words) is False
-    assert calls == [(None, True)] and vs.pipeline.spoken == []
+    [(line, guard_armed)] = calls                    # 23 Nov 2026: the notice carries the identity
+    assert line.startswith("This is ") and "an AI assistant from" in line and line.endswith(", on a recorded line.")
+    assert guard_armed and vs.pipeline.spoken == []
+    assert vs._carrier_seen == "identity_line"        # the notice step knows what carries the words
     assert s.conversation_history == []
 
 
@@ -283,7 +287,8 @@ async def test_an_opt_out_or_goodbye_first_is_not_answered_with_the_opener(monke
     await TranscriptHandler(p).handle(s, _Chunk(text=words, is_final=True, confidence=0.97))
     s._last_transcript_confidence = 0.97
     await deliver_end_of_turn(p, s)
-    assert calls == [(None, True)]                 # the notice only, no opener
+    [(line, _armed)] = calls                       # the identity sentence as the notice, no opener
+    assert line.startswith("This is ") and "an AI assistant from" in line and "Hi," not in line
     assert vs.pipeline.spoken == []
     assert p._run_turn.await_count == 1             # the model answers them
     if "call me" in words:

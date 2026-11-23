@@ -135,4 +135,5 @@ async def test_a_bare_greeting_still_falls_through_to_the_llm_turn(monkeypatch):
         "first words that are not pickup words must still reach the LLM turn"
     )
     roles = [m.role for m in session.conversation_history]
-    assert roles[:2] == [MessageRole.USER, MessageRole.ASSISTANT]
+    # 23 Nov 2026: the identity sentence now comes before their words.
+    assert roles[:3] == [MessageRole.ASSISTANT, MessageRole.USER, MessageRole.ASSISTANT]

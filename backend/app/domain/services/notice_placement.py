@@ -6,7 +6,10 @@ sentence ("..., on a recorded line. ..."). An account's own text is, by default
 `in_opening`: then the opening carries the recording words in place of the
 account's own sentence. On a turn where no opening is said (the person's first
 words were not a greeting, or the opening could not be prepared) the account's
-own sentence is still spoken, alone. The proof rules do not depend on the
+own sentence is still spoken, alone, whatever it chose; on an outgoing call whose
+first words were not a greeting the plain sentence "This is <agent>, an AI
+assistant from <company>." follows it (``carrier="identity_line"``: only the
+platform's own wording is said inside that sentence, never an account's own). The proof rules do not depend on the
 placement: a notice is "confirmed" only when the phone system confirms the whole
 spoken sentence was played, and any doubt is recorded as NOT confirmed.
 
@@ -66,8 +69,14 @@ def placement_for(
     *,
     opener_available: bool,
     pinned: bool,
+    carrier: str = "opening",
 ) -> NoticePlacement:
     """Choose where the notice `text` is said. Pure: writes no log line.
+
+    `carrier` is the sentence offered to carry the recording words: "opening"
+    (the greeting) or "identity_line" (the one sentence said for first words that
+    are not a greeting). On the identity line only the platform's own wording is
+    said inside it; an account's own sentence is always said first, whatever it chose.
 
     `decide_notice_placement` is this plus the one per-call log line; the
     campaign preview calls this alone so it never writes evidence about a call.
@@ -78,6 +87,11 @@ def placement_for(
         return NoticePlacement(False, "no_notice", "none")
     if not opener_available:
         return NoticePlacement(False, "opener_not_spoken", "notice_alone")
+    if carrier == "identity_line":
+        if is_platform_notice_text(text):
+            return NoticePlacement(True, "platform_wording", "identity_line_with_recorded_line")
+        why = "account_choice_is_for_the_opening" if stored == IN_OPENING else "account_sentence_first"
+        return NoticePlacement(False, why, "notice_then_identity_line")
     if is_platform_notice_text(text):
         return NoticePlacement(True, "platform_wording", "opening_with_recorded_line")
     if pinned:
@@ -98,11 +112,14 @@ def decide_notice_placement(
     pinned: bool,
     call_id: Any,
     path: str,
+    carrier: str = "opening",
 ) -> NoticePlacement:
     """Choose where the notice `text` is said on this turn, and log it once."""
     stored = normalize_placement(getattr(decision, "outbound_notice_placement", None))
     choice_on = placement_choice_enabled()
-    result = placement_for(decision, text, opener_available=opener_available, pinned=pinned)
+    result = placement_for(
+        decision, text, opener_available=opener_available, pinned=pinned, carrier=carrier,
+    )
     logger.info(
         "recording_notice_placement call_id=%s path=%s stored=%s choice_switch=%s said=%s why=%s policy_reason=%s",
         str(call_id)[:12], path, stored, "on" if choice_on else "off",

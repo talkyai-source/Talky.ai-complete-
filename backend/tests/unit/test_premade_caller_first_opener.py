@@ -42,6 +42,7 @@ NOTICE_OPENER = (
     "Am I speaking with John?"
 )
 TENANT_TEXT = "Acme records calls to train its team."
+IDENTITY_NOTICE = "This is Sarah, an AI assistant from All State Estimation, on a recorded line."
 LOGGER = "app.domain.services.voice_pipeline.premade_opener"
 
 
@@ -185,7 +186,7 @@ async def test_ringing_premakes_both_openers_on_caller_first_calls(monkeypatch, 
     caplog.set_level(logging.INFO)
     voice, session, _, provider, _ = make_voice(monkeypatch)
     await _ring(voice)
-    assert provider.texts == [PLAIN, NOTICE_OPENER]
+    assert provider.texts == [PLAIN, NOTICE_OPENER, IDENTITY_NOTICE]
     store = voice._premade_opener_lines
     assert store[PLAIN].kind == "opener"
     assert store[PLAIN].chunks == tuple(voice._presynth_greeting_audio)
@@ -252,6 +253,11 @@ async def test_not_ready_yet_speaks_live_and_the_late_result_is_never_played(mon
     await voice._premade_opener_task                           # the late result arrives ...
     assert NOTICE_OPENER not in voice._premade_opener_lines    # ... and is dropped
     assert "opener_premade_dropped" in caplog.text and "opener_premade_ready" not in caplog.text
+    # 23 Nov 2026: the opening has been spoken, so the identity sentence (which can
+    # only ever be a call's first sentence) is not started beside the call's speech.
+    assert provider.texts == [PLAIN, NOTICE_OPENER, NOTICE_OPENER]
+    assert "opener_premade_not_started call_id=11111111-111 kind=identity_notice" in caplog.text
+    assert IDENTITY_NOTICE not in voice._premade_opener_pending
     assert premade_kwargs(voice, s, NOTICE_OPENER) == {}       # no later sentence with that text can use it
 
 

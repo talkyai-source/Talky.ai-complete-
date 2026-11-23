@@ -434,6 +434,31 @@ class TurnEnder:
                 # — the single highest-abandon moment of a cold call. Speak a
                 # short reprompt so rejection is never the silent path. Fail-soft:
                 # a reprompt-TTS failure must not mask the drop.
+                #
+                # An OUTGOING call that waits for the person to speak: whatever
+                # they hear first must say it is an AI, so the identity sentence
+                # (with the recording words when owed) comes before the reprompt.
+                # One try per call (_caller_first_disclosure_done), so a second
+                # rejected utterance gets only the reprompt; an incoming call
+                # never takes this path (its identity line is said on the next
+                # accepted turn).
+                try:
+                    from app.domain.services.telephony.config import _call_direction
+
+                    if (
+                        _first_speaker_label(session) == "user"
+                        and _call_direction(session) != "inbound"
+                        and not getattr(session, "_caller_first_disclosure_done", False)
+                    ):
+                        from app.domain.services.voice_pipeline.caller_first_disclosure import (
+                            speak_disclosure_before_first_reply,
+                        )
+
+                        await speak_disclosure_before_first_reply(session, None, opener=False)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "turn_0_reject_identity_failed call=%s err=%s", call_id[:12], exc,
+                    )
                 try:
                     reprompt = "Sorry, I didn't catch that — could you say that again?"
                     interrupted = await self._p.synthesize_and_send_audio(

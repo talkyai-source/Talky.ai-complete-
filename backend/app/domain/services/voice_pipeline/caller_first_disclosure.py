@@ -58,8 +58,11 @@ async def speak_disclosure_before_first_reply(
     """True when the identity opener was the reply to the caller's first words.
 
     Only pickup words get the opener. Anything else, or ``opener=False``
-    (first words that opt out or say goodbye), gets only the notice, so the
-    normal turn records an opt-out before the farewell.
+    (first words that opt out or say goodbye), gets the notice and, on an
+    outgoing call, the one sentence that says it is an AI (the platform's notice
+    words are inside it; an account's own notice sentence is said first and the
+    plain sentence follows), so the normal turn records an opt-out before the
+    farewell.
     """
     if getattr(session, "_caller_first_disclosure_done", False):
         return False
@@ -90,14 +93,35 @@ async def speak_disclosure_before_first_reply(
         # Their words come before the opener, so the turn-0 floor treats their
         # answer to "Am I speaking with ...?" as an ordinary later turn.
         session.conversation_history.append(Message(role=MessageRole.USER, content=caller_text))
+    # An OUTGOING call whose first words are not a greeting: one identity sentence
+    # stands in for the bare notice ("This is Sarah, an AI assistant from Acme, on a
+    # recorded line."). None on an incoming call, and when the silent-pickup greeting
+    # already ran (notice and opening: the same three signs as for pickup words
+    # above), because the opening is never said a second time in another form.
+    identity_with_notice = None
+    if opener_with_notice is None and not (
+        getattr(voice_session, "_recording_disclosure_attempted", False)
+        or getattr(session, "_has_introduced", False)
+        or getattr(voice_session, "_opener_spoken_as_notice", False)
+    ):
+        from app.domain.services.voice_pipeline.first_line_identity import outbound_identity_line
+
+        identity_with_notice = outbound_identity_line(session, recorded_line=True)
     if not getattr(voice_session, "_recording_disclosure_attempted", False):
         session._disclosure_in_flight = True
         try:
-            await _speak_recording_disclosure(voice_session, opener_with_notice=opener_with_notice)
+            await _speak_recording_disclosure(
+                voice_session, opener_with_notice=opener_with_notice or identity_with_notice,
+                **({"carrier": "identity_line"} if identity_with_notice is not None else {}),
+            )
         finally:
             session._disclosure_in_flight = False
     if opener_with_notice is None:
-        if opener and _is_inbound_call(session):
+        if identity_with_notice is not None:
+            from app.domain.services.voice_pipeline.first_line_identity import say_outbound_identity_line
+
+            await say_outbound_identity_line(session, voice_session)
+        elif opener and _is_inbound_call(session):
             await _speak_inbound_identity_line(session, voice_session)
         return False
     if getattr(voice_session, "_opener_spoken_as_notice", False):

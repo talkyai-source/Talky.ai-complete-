@@ -181,7 +181,9 @@ def _disclosure_tenant_id(voice_session):
     return None
 
 
-async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None) -> None:
+async def _speak_recording_disclosure(
+    voice_session, *, opener_with_notice=None, carrier: str = "opening",
+) -> None:
     """Deliver the configured notice before the greeting and record transport proof.
 
     Failure suppresses recording without terminating the call. This technical
@@ -191,7 +193,9 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
     recorded line". Where the notice owed is the platform's own wording, that
     line is spoken in its place, under the same proof rule, and
     ``_opener_spoken_as_notice`` tells the greeting not to speak again
-    (owner decision 2026-11-05, QA F12-03).
+    (owner decision 2026-11-05, QA F12-03). ``carrier="identity_line"`` says that
+    sentence is the one for first words that are not a greeting: an account's own
+    notice sentence is then never replaced by it.
     """
     from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.recording_policy_service import (
@@ -295,6 +299,7 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         as_opener = decide_notice_placement(
             decision, text, opener_available=bool(opener_with_notice),
             pinned=pinned_override is not None, call_id=call_id, path="cascaded",
+            carrier=carrier,
         ).in_opening
         if as_opener:
             text = opener_with_notice
