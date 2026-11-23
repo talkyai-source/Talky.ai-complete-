@@ -332,7 +332,7 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
     events: list[str] = []
 
     class Conn:
-        async def fetchrow(self, query, call_reference):
+        async def fetchrow(self, query, call_reference, *_extra):
             assert "FOR UPDATE" in query
             assert call_reference == "durable-call"
             events.append("lock")
@@ -385,6 +385,108 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
     assert context.provider_call_id == "parent-provider"
     assert context.previous_status == "in_call"
     assert context.provider_leg_ids == ("talky-xfer-one", "talky-xfer-two")
+
+
+# Lookup statement as shipped at HEAD (git show HEAD:...termination.py); the
+# platform (tenant_id=None) path must keep this text character for character.
+_PLATFORM_LOOKUP_SQL = """
+            SELECT id::text AS call_id,
+                   tenant_id::text AS tenant_id,
+                   COALESCE(provider_call_id, external_call_uuid)
+                       AS provider_call_id,
+                   status, provider, direction, campaign_id::text AS campaign_id,
+                   answered_at, route_snapshot
+            FROM calls
+            WHERE (
+                   id::text=$1
+                OR talklee_call_id=$1
+                OR provider_call_id=$1
+                OR external_call_uuid=$1
+            )
+            ORDER BY created_at DESC
+            LIMIT 1
+            FOR UPDATE
+            """
+
+_TENANT_A = "00000000-0000-0000-0000-000000000001"
+_ROW_TENANT = "00000000-0000-0000-0000-000000000077"
+
+
+def _recording_conn(monkeypatch, *, lookup_row="default"):
+    rec: dict = {"lookups": [], "updates": []}
+    row = {
+        "call_id": "00000000-0000-0000-0000-000000000010",
+        "tenant_id": _ROW_TENANT,
+        "provider_call_id": "p",
+        "status": "in_call",
+        "provider": "asterisk",
+        "direction": "outbound",
+        "campaign_id": None,
+        "answered_at": None,
+    }
+
+    class Conn:
+        async def fetchrow(self, query, *args):
+            rec["lookups"].append((query, args))
+            return row if lookup_row == "default" else lookup_row
+
+        async def execute(self, query, *args):
+            rec["updates"].append((query, args))
+
+        async def fetch(self, query, *_args):
+            return []
+
+    @asynccontextmanager
+    async def acquire(pool, tenant_id, *, timeout=None):
+        yield Conn()
+
+    monkeypatch.setattr(termination, "acquire_with_tenant", acquire)
+    return rec
+
+
+@pytest.mark.asyncio
+async def test_tenant_caller_lookup_binds_the_tenant(monkeypatch):
+    rec = _recording_conn(monkeypatch)
+    await mark_termination_pending_and_load_context(
+        object(), call_reference="ref-1", tenant_id=_TENANT_A
+    )
+    query, args = rec["lookups"][0]
+    assert "tenant_id = $2::uuid" in query
+    assert "FOR UPDATE" in query
+    assert args == ("ref-1", _TENANT_A)
+
+
+@pytest.mark.asyncio
+async def test_platform_lookup_text_unchanged(monkeypatch):
+    rec = _recording_conn(monkeypatch)
+    await mark_termination_pending_and_load_context(object(), call_reference="ref-1")
+    query, args = rec["lookups"][0]
+    assert query == _PLATFORM_LOOKUP_SQL
+    assert args == ("ref-1",)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("caller_tenant", [_TENANT_A, None])
+async def test_fence_binds_the_rows_tenant(monkeypatch, caller_tenant):
+    rec = _recording_conn(monkeypatch)
+    await mark_termination_pending_and_load_context(
+        object(), call_reference="ref-1", tenant_id=caller_tenant
+    )
+    assert len(rec["updates"]) == 1
+    query, args = rec["updates"][0]
+    assert "tenant_id = $3::uuid" in query
+    assert args[0] == "00000000-0000-0000-0000-000000000010"
+    assert args[2] == _ROW_TENANT
+
+
+@pytest.mark.asyncio
+async def test_wrong_tenant_finds_nothing(monkeypatch):
+    rec = _recording_conn(monkeypatch, lookup_row=None)
+    with pytest.raises(LookupError, match="call not found"):
+        await mark_termination_pending_and_load_context(
+            object(), call_reference="ref-1", tenant_id=_TENANT_A
+        )
+    assert rec["updates"] == []
 
 
 @pytest.mark.asyncio

@@ -201,3 +201,34 @@ async def test_locked_database_bounds_save_and_cancellation_preserves_caller(pro
     # Lock release/retry saves actual evidence; canceled transactions did not poison the pool.
     monkeypatch.setattr(receipts, "_RECEIPT_WRITE_TIMEOUT_SECONDS", 5.0)
     assert (await receipts.persist_termination_receipt(value.db.pool, value.context, requested=False)).saved
+
+
+async def test_other_tenants_newer_call_with_same_reference_not_fenced(bound_call):
+    value = bound_call
+    db = value.db
+    other_tenant, other_call = uuid4(), uuid4()
+    shared_ref = "shared-provider-" + uuid4().hex[:12]
+    await db.admin.execute("UPDATE calls SET provider_call_id=$2 WHERE id=$1", value.call_id, shared_ref)
+    await db.admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic other')", other_tenant)
+    try:
+        # The other tenant's call is NEWER and carries the same provider id.
+        await db.admin.execute(
+            """INSERT INTO calls(id,tenant_id,talklee_call_id,phone_number,status,direction,
+               provider_call_id,created_at)
+               VALUES($1,$2,$3,'+15550001002','in_call','outbound',$4, NOW() + interval '1 minute')""",
+            other_call, other_tenant, "AD10" + uuid4().hex[:16], shared_ref,
+        )
+        context = await mark_termination_pending_and_load_context(
+            db.pool, call_reference=shared_ref, tenant_id=str(db.tenant),
+        )
+        assert context.call_id == str(value.call_id)
+        assert context.tenant_id == str(db.tenant)
+        assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", other_call) == "in_call"
+        assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", value.call_id) == "termination_pending"
+        with pytest.raises(LookupError):
+            await mark_termination_pending_and_load_context(
+                db.pool, call_reference=shared_ref, tenant_id=str(uuid4()),
+            )
+    finally:
+        await db.admin.execute("DELETE FROM calls WHERE id=$1", other_call)
+        await db.admin.execute("DELETE FROM tenants WHERE id=$1", other_tenant)
