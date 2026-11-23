@@ -6916,7 +6916,7 @@
       "id": "df6c2f89e03b828f0409798baea9080d49e886b2ea57b7b773a0cba12cb68cd0",
       "file": "app/domain/services/voice_orchestrator.py",
       "function": "VoiceOrchestrator._persist_prompt_identity",
-      "line": 526,
+      "line": 546,
       "method": "execute",
       "tables": [
         "calls"

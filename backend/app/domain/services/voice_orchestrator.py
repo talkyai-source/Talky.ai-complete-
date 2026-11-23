@@ -41,6 +41,9 @@ from app.domain.repositories.call_event_repository import CallEventRepository
 
 logger = logging.getLogger(__name__)
 
+# Detached provider-closing tasks (cancelled set-up); held here until they end.
+_BACKGROUND_CLEANUPS: set = set()
+
 # 2026-07-08: post-greeting-TTS STT unmute tail for telephony (non-browser)
 # calls. SOTA guidance (Coval, Gladia, Deepgram, Retell) recommends 200-500ms
 # here to absorb network jitter + echo-tail decay on PSTN before STT goes
@@ -417,13 +420,30 @@ class VoiceOrchestrator:
         VoiceEligibilityError still maps to 403. Only objects created here are
         cleaned; the shared ask_ai singletons never pass through this path.
         """
-        results = await asyncio.gather(
-            self._create_stt_provider(config),
-            self._create_llm_provider(config),
-            self._create_tts_provider(config),
-            self._create_media_gateway(config),
-            return_exceptions=True,
-        )
+        # Explicit tasks (same order, same concurrency as the former bare
+        # gather) so that, when set-up itself is cancelled, the providers that
+        # had already finished can still be found and cleaned up.
+        tasks = [
+            asyncio.ensure_future(self._create_stt_provider(config)),
+            asyncio.ensure_future(self._create_llm_provider(config)),
+            asyncio.ensure_future(self._create_tts_provider(config)),
+            asyncio.ensure_future(self._create_media_gateway(config)),
+        ]
+        try:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            # A cancelled gather has already cancelled the children and waited
+            # for them to settle before this is raised. Whatever finished
+            # before the cancel is closed in a DETACHED task: set-up is
+            # cancelled because the call is ending, and the caller's own
+            # teardown (fence, hang-up, lease release) must not wait behind a
+            # provider's socket close (up to 10 s), nor can a second cancel
+            # abandon the closing half-way. Cancellation still wins.
+            self._cleanup_in_background([
+                task.result() for task in tasks
+                if task.done() and not task.cancelled() and task.exception() is None
+            ])
+            raise
         failures = [r for r in results if isinstance(r, BaseException)]
         if not failures:
             return tuple(results)
@@ -1547,6 +1567,44 @@ class VoiceOrchestrator:
             )
             return None
 
+    def _cleanup_in_background(self, providers) -> None:
+        """Close providers that were created for a set-up that was cancelled,
+        without making the cancellation wait. One detached task, kept alive by
+        a strong reference until it ends; each close is guarded and they run
+        side by side, so one slow close does not hold the others open."""
+        targets = [p for p in providers if p is not None and getattr(p, "cleanup", None) is not None]
+        if not targets:
+            return
+
+        async def _close(target) -> None:
+            try:
+                await target.cleanup()
+            except Exception:
+                logger.debug("Provider cleanup after cancelled session init failed", exc_info=True)
+
+        async def _close_all() -> None:
+            await asyncio.gather(*(_close(target) for target in targets))
+
+        task = asyncio.ensure_future(_close_all())
+        _BACKGROUND_CLEANUPS.add(task)
+        task.add_done_callback(_BACKGROUND_CLEANUPS.discard)
+
+    async def _initialize_tts_or_cleanup(self, provider, config: dict) -> None:
+        """provider.initialize(config); if it fails or is cancelled, close what
+        it opened (HTTP session / socket) and re-raise the original. After a
+        cancellation the close runs detached, so the cancel is not delayed."""
+        try:
+            await provider.initialize(config)
+        except asyncio.CancelledError:
+            self._cleanup_in_background([provider])
+            raise
+        except Exception:
+            try:
+                await provider.cleanup()
+            except Exception:
+                logger.debug("TTS cleanup after failed initialize failed", exc_info=True)
+            raise
+
     async def _create_tts_provider(self, config: VoiceSessionConfig):
         """Initialise and return the TTS provider.
 
@@ -1564,7 +1622,8 @@ class VoiceOrchestrator:
 
             credential = await resolver.resolve_with_metadata("cartesia", tenant_id=config.tenant_id)
             provider = CartesiaTTSProvider()
-            await provider.initialize(
+            await self._initialize_tts_or_cleanup(
+                provider,
                 {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
@@ -1578,7 +1637,8 @@ class VoiceOrchestrator:
 
             credential = await resolver.resolve_with_metadata("deepgram", tenant_id=config.tenant_id)
             provider = DeepgramTTSProvider()
-            await provider.initialize(
+            await self._initialize_tts_or_cleanup(
+                provider,
                 {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
@@ -1607,7 +1667,8 @@ class VoiceOrchestrator:
                 raise
             credential = await resolver.resolve_with_metadata("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
-            await provider.initialize(
+            await self._initialize_tts_or_cleanup(
+                provider,
                 {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
@@ -1623,7 +1684,8 @@ class VoiceOrchestrator:
             )
 
             provider = GoogleTTSStreamingProvider()
-            await provider.initialize(
+            await self._initialize_tts_or_cleanup(
+                provider,
                 {
                     "voice_id": config.voice_id,
                     "sample_rate": config.tts_sample_rate,
@@ -1636,7 +1698,19 @@ class VoiceOrchestrator:
         # leaves us with the primary alone (still degrades better than
         # nothing).
         if _failover_enabled("TTS_FAILOVER_ENABLED"):
-            secondary = await self._create_tts_secondary(config)
+            try:
+                secondary = await self._create_tts_secondary(config)
+            except asyncio.CancelledError:
+                # Cancelled while the secondary builds: the primary is already
+                # initialised and would otherwise be dropped open.
+                self._cleanup_in_background([provider])
+                raise
+            except Exception:
+                try:
+                    await provider.cleanup()
+                except Exception:
+                    logger.debug("TTS cleanup after failed secondary init failed", exc_info=True)
+                raise
             if secondary is not None:
                 from app.domain.services.resilient_tts import (
                     ResilientTTSProvider,
@@ -1693,7 +1767,7 @@ class VoiceOrchestrator:
             if secondary_provider_name == "cartesia":
                 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
                 provider = CartesiaTTSProvider()
-                await provider.initialize({
+                await self._initialize_tts_or_cleanup(provider, {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
@@ -1707,7 +1781,7 @@ class VoiceOrchestrator:
                 from app.domain.services.voice_eligibility import require_elevenlabs_voice_eligible
                 await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, secondary_voice)
                 provider = ElevenLabsTTSProvider()
-                await provider.initialize({
+                await self._initialize_tts_or_cleanup(provider, {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
@@ -1717,7 +1791,7 @@ class VoiceOrchestrator:
             elif secondary_provider_name == "deepgram":
                 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
                 provider = DeepgramTTSProvider()
-                await provider.initialize({
+                await self._initialize_tts_or_cleanup(provider, {
                     "api_key": credential.secret if credential is not None else None,
                     "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": secondary_voice,
