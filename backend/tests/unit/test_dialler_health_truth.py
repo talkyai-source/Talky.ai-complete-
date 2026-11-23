@@ -167,3 +167,67 @@ async def test_healthy_loop_writes_same_key_and_expiry(monkeypatch):
     assert key == "dialer:heartbeat_ts"
     assert ttl == 180
     assert float(value) > 0
+
+
+async def test_a_good_read_with_no_running_campaign_resets_the_count(monkeypatch):
+    """No campaign running is a GOOD read. It must not look like a failure, or the
+    health check would go red on every quiet day."""
+    redis = _FakeRedis()
+    w = _worker(redis, fail_db=True)
+    for _ in range(5):
+        await w._get_active_tenant_ids()
+    assert w._active_tenants_failures == 5
+
+    class _NoRows:
+        async def fetch(self, *_a, **_k):
+            return []
+
+    @contextlib.asynccontextmanager
+    async def _acq():
+        yield _NoRows()
+
+    w._acquire_db = _acq
+    assert await w._get_active_tenant_ids() == []
+    assert w._active_tenants_failures == 0
+    await _tick(w, monkeypatch)
+    assert [c[0] for c in redis.calls] == ["dialer:heartbeat_ts"]
+
+
+async def test_a_reaper_that_cannot_get_a_connection_does_not_stop_the_others(monkeypatch, caplog):
+    from app.domain.services.dialer import stuck_job_reaper as sjr
+
+    ran = []
+
+    async def jobs(_c):
+        ran.append("jobs")
+
+    async def calls(_c):
+        ran.append("calls")
+
+    async def sched(_c):
+        ran.append("sched")
+
+    monkeypatch.setattr(sjr, "reap_stuck_jobs", jobs)
+    monkeypatch.setattr(sjr, "reap_stuck_calls", calls)
+    monkeypatch.setattr(sjr, "reap_orphaned_scheduled_jobs", sched)
+    w = _worker()
+    acquisitions = []
+
+    @contextlib.asynccontextmanager
+    async def _acq():
+        acquisitions.append(1)
+        if len(acquisitions) == 1:
+            raise TimeoutError("pool exhausted")
+        yield _Conn()
+
+    w._acquire_db = _acq
+
+    class _Q:
+        async def reap_stale_processing(self):
+            ran.append("zset")
+
+    w.queue_service = _Q()
+    with caplog.at_level(logging.DEBUG, logger=LOGGER):
+        await w._reap_stuck_jobs_tick()
+    assert ran == ["calls", "sched", "zset"] and len(acquisitions) == 3
+    assert "reaper_failed name=reap_stuck_jobs error=TimeoutError" in _msgs(caplog)
