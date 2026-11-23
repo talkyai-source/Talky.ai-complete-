@@ -600,7 +600,9 @@ async def _mutate_tenant(
             # still writes (the mark is what keeps a later won dispute from lifting it).
             same = (
                 current["subscription_status"] == target
-                and (target != "suspended" or current["staff_suspended_at"] is not None)
+                # ... and the staff mark already says the same: set for Suspend, empty for
+                # Resume and Archive (so a mark left behind can always be cleared by staff).
+                and (current["staff_suspended_at"] is not None) == (target == "suspended")
                 if target is not None else
                 (quota.minutes_allocated is None or current["minutes_allocated"] == quota.minutes_allocated)
                 and (quota.max_concurrent_calls is None or _max_concurrent(rules) == quota.max_concurrent_calls)

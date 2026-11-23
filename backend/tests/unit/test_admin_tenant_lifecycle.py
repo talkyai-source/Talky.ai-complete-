@@ -723,3 +723,25 @@ def test_suspend_over_a_staff_suspension_is_a_no_op():
     assert r.status_code == 200, r.text
     assert r.json()["changed"] is False
     assert not conn.statements_matching("UPDATE tenants") and not audit.events
+
+
+@pytest.mark.parametrize("verb,status", [("resume", "active"), ("archive", "cancelled")])
+def test_a_mark_left_behind_can_be_cleared_by_resume_or_archive(verb, status):
+    """A marked account that is no longer suspended (an older release, or a cancel that
+    raced a Suspend) must not answer "already saved": staff clear the mark this way."""
+    respond, seen = mark_responder(status=status, marked=True)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/{verb}", json=BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] is True
+    assert len(conn.statements_matching("UPDATE tenants")) == 1 and seen["args"][2] is None
+
+
+@pytest.mark.parametrize("verb,status", [("resume", "active"), ("archive", "cancelled")])
+def test_resume_or_archive_with_nothing_to_change_is_still_a_no_op(verb, status):
+    respond, seen = mark_responder(status=status, marked=False)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/{verb}", json=BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] is False
+    assert not conn.statements_matching("UPDATE tenants") and not audit.events
