@@ -248,6 +248,7 @@ async def run_voice_action(
         call_args = dict(arguments or {})
         opted_out = call_args.get("do_not_call") is True and verified_opt_out(call_args, user_text)
         opt_out_recorded = False
+        flagged_dnc = call_args.get("do_not_call") is True
         if opted_out:
             # Do it before the goodbye can say it was done (same rule as the
             # end-session path). Teardown retries an unconfirmed write.
@@ -338,13 +339,22 @@ async def run_voice_action(
         )
 
     _record_result(session, result)
-    logger.info(
-        "voice_action_result call=%s action=%s success=%s status=%s",
+    log_line = "voice_action_result call=%s action=%s success=%s status=%s"
+    log_args: tuple[Any, ...] = (
         str(getattr(session, "call_id", "?"))[:12],
         result["action"],
         result["success"],
         result["status"],
     )
+    if action == ACTION_END_CALL:
+        # What happened to the ending and to a do-not-call flag; never words.
+        opt_out_log = (
+            ("recorded" if opt_out_recorded else "write_unconfirmed") if opted_out
+            else "quote_not_verified" if flagged_dnc else "none"
+        )
+        log_line += " do_not_call=%s opt_out=%s"
+        log_args += (flagged_dnc, opt_out_log)
+    logger.info(log_line, *log_args)
     return result
 
 

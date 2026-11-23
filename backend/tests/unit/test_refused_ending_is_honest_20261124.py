@@ -178,3 +178,40 @@ def _opt_session():
 
 def _result_lines(caplog):
     return [r.getMessage() for r in caplog.records if r.getMessage().startswith("voice_action_result")]
+
+
+async def test_refused_flag_with_an_unverified_quote_is_logged_without_any_words(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    purge = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", purge)
+    said, quote = "What does the sleeper seat cost?", "remove me from your list"
+    result = await run_voice_action(
+        _opt_session(), ACTION_END_CALL,
+        {"reason": "x", "do_not_call": True, "opt_out_quote": quote}, user_text=said)
+    assert result["status"] == "caller_intent_unconfirmed"
+    (line,) = _result_lines(caplog)
+    assert line.endswith("status=caller_intent_unconfirmed do_not_call=True opt_out=quote_not_verified")
+    assert said not in caplog.text and quote not in caplog.text
+
+
+@pytest.mark.parametrize("write_ok,expected", [(True, "recorded"), (False, "write_unconfirmed")])
+async def test_a_verified_opt_out_is_logged_by_what_the_write_did(monkeypatch, caplog, write_ok, expected):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=write_ok))
+    await run_voice_action(
+        _opt_session(), ACTION_END_CALL,
+        {"reason": "x", "do_not_call": True, "opt_out_quote": "never bother this number again"},
+        user_text=PARAPHRASE)
+    (line,) = _result_lines(caplog)
+    assert line.endswith(f"status=accepted do_not_call=True opt_out={expected}")
+    assert PARAPHRASE not in caplog.text and "never bother this number again" not in caplog.text
+
+
+async def test_no_flag_is_logged_as_none_and_other_actions_keep_their_line(caplog):
+    caplog.set_level(logging.INFO)
+    await run_voice_action(_opt_session(), ACTION_END_CALL, {"reason": "bye"}, user_text="Okay, goodbye.")
+    await run_voice_action(_opt_session(), "not_an_action", {}, user_text="Goodbye.")
+    ending, other = _result_lines(caplog)
+    assert ending.endswith("status=accepted do_not_call=False opt_out=none")
+    assert other == "voice_action_result call=call-optout- action=not_an_action success=False status=unknown_action"
