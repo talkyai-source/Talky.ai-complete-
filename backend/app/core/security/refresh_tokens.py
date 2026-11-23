@@ -139,7 +139,9 @@ async def rotate_refresh_token(
             row["user_id"],
         )
     elif row["used_at"] is not None:
-        await conn.execute(
+        # The protective step is unchanged: whatever is still valid in this
+        # family is revoked, whenever a used token comes back.
+        revoked = await conn.execute(
             """
             UPDATE refresh_tokens
             SET revoked_at = $2, revoked_reason = 'reuse_detected'
@@ -148,11 +150,22 @@ async def rotate_refresh_token(
             row["family_id"],
             now,
         )
-        logger.error(
-            "refresh.reuse_detected family=%s user=%s — family revoked",
-            row["family_id"],
-            row["user_id"],
-        )
+        if revoked == "UPDATE 0":
+            # Nothing was left to revoke: every token of this family had been
+            # revoked before (typically the sign-in ended and the browser still
+            # holds its old cookie). The token is refused as always, but nothing
+            # new happened, so it is not reported as a theft.
+            logger.warning(
+                "refresh.revoked_token_presented family=%s user=%s",
+                row["family_id"],
+                row["user_id"],
+            )
+        else:
+            logger.error(
+                "refresh.reuse_detected family=%s user=%s — family revoked",
+                row["family_id"],
+                row["user_id"],
+            )
         return None
 
     if row["revoked_at"] is not None:
