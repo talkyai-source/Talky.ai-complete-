@@ -713,6 +713,9 @@ class MakeCallRequest(BaseModel):
     # and it keeps the dialer from having to know which fields the agent is
     # allowed to see. See contact_fields.agent_usable.
     lead_id: Optional[str] = None
+    # The contact's own IANA time zone (leads.timezone), sent by the trusted
+    # dialer worker only. Used for the time-of-day greeting; never for routing.
+    lead_timezone: Optional[str] = None
     # Required internal-dialer durability contract. The trusted worker commits
     # and owns the referenced row before it asks this endpoint to originate.
     durable_call_id: Optional[str] = None
@@ -2597,6 +2600,9 @@ async def make_call(request: Request, body: MakeCallRequest):
             pre_warm_session._dialer_campaign_id = internal_dialer_intent.campaign_id
             pre_warm_session._dialer_lead_id = internal_dialer_intent.lead_id
             pre_warm_session._dialer_phone = internal_dialer_intent.destination
+            if body.lead_timezone:
+                # time_of_day.person_zone normalises it; invalid -> ignored.
+                pre_warm_session._dialer_lead_timezone = body.lead_timezone
             pre_warm_session._dialer_talklee_call_id = (
                 internal_dialer_intent.talklee_call_id
             )

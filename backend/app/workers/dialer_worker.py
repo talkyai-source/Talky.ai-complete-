@@ -1827,6 +1827,15 @@ class DialerWorker:
         # contact_fields.agent_usable, and cannot drift out of step here.
         if getattr(job, "lead_id", None):
             payload["lead_id"] = str(job.lead_id)
+            # The contact's own zone, for the agent's time-of-day greeting only.
+            # Best-effort: a failed read must never change whether the call goes.
+            try:
+                _lead_tz = await self._get_lead_timezone(job.lead_id)
+            except Exception:  # noqa: BLE001
+                _lead_tz = None
+            # A real zone name is short; anything longer is not one and is not sent.
+            if isinstance(_lead_tz, str) and 0 < len(_lead_tz.strip()) <= 64:
+                payload["lead_timezone"] = _lead_tz.strip()
         if call_intent is not None:
             # These fields are not caller-selected identities. They name the
             # row this worker already committed for this exact attempt; the
