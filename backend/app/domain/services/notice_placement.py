@@ -3,8 +3,10 @@
 Two ways exist. The platform's own wording is always said inside the opening
 sentence ("..., on a recorded line. ..."). An account's own text is, by default
 (`own_sentence_first`), said first as a separate sentence. An account may choose
-`in_opening`: then the opening carries the recording words and the account's own
-sentence is not spoken on outgoing calls. The proof rules do not depend on the
+`in_opening`: then the opening carries the recording words in place of the
+account's own sentence. On a turn where no opening is said (the person's first
+words were not a greeting, or the opening could not be prepared) the account's
+own sentence is still spoken, alone. The proof rules do not depend on the
 placement: a notice is "confirmed" only when the phone system confirms the whole
 spoken sentence was played, and any doubt is recorded as NOT confirmed.
 

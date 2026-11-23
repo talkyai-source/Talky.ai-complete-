@@ -109,3 +109,84 @@ async def test_switched_off_the_endpoint_refuses_and_reads_and_writes_nothing(mo
     assert refused.value.status_code == 503
     assert refused.value.detail == {"code": "notice_placement_unavailable"}
     assert entered == [] and audit.events == []
+
+
+# --- Added after the independent review of 23 November -------------------------------
+
+from app.domain.services import recording_policy_service as rps  # noqa: E402
+from tests.unit import test_outbound_ai_disclosure_opener as opener_t  # noqa: E402
+from tests.unit import test_realtime_opening_notice as rt_t  # noqa: E402
+
+
+@pytest.fixture
+def _clean_calls(monkeypatch):
+    rps._DISCLOSURE_LEDGER.clear()
+    monkeypatch.delenv("OPENER_PREMADE_ENABLED", raising=False)
+    monkeypatch.delenv(rt_t.on.ENV_SWITCH, raising=False)
+    yield
+    rps._DISCLOSURE_LEDGER.clear()
+
+
+def test_switched_on_an_incoming_lines_own_text_is_never_moved_into_the_opening(monkeypatch):
+    """The choice is about the account's sentence, not the text pinned on a line."""
+    monkeypatch.setenv(SWITCH, "true")
+    result = np.decide_notice_placement(
+        _decision("in_opening"), "This incoming line is recorded.", opener_available=True,
+        pinned=True, call_id="call-pinned-1", path="cascaded")
+    assert result.in_opening is False
+    assert result.why == "incoming_line_text" and result.said == "notice_then_opening"
+
+
+async def test_switched_off_a_whole_cascaded_call_is_the_same_whatever_is_stored(monkeypatch, _clean_calls):
+    """End to end through the greeting: the account sentence first, then the opening."""
+    monkeypatch.delenv(SWITCH, raising=False)
+    outcomes = []
+    for placement in ("own_sentence_first", "in_opening"):
+        rps._DISCLOSURE_LEDGER.clear()
+        spoken, session = await opener_t._answer(_decision(placement))
+        outcomes.append((spoken, [m.content for m in session.conversation_history],
+                         rps.get_disclosure_state(opener_t.CALL_UUID), session._has_introduced))
+    assert outcomes[0] == outcomes[1]
+    spoken, history, _state, _introduced = outcomes[1]
+    assert spoken[0] == ("tts", OWN)
+    assert spoken[1:] and all(kind == "presynth_audio" for kind, _ in spoken[1:])
+    assert history == [OWN, opener_t.OPENER]
+
+
+async def test_switched_off_a_realtime_call_still_requires_the_account_sentence_first(monkeypatch, _clean_calls):
+    monkeypatch.delenv(SWITCH, raising=False)
+    gates = []
+    for placement in ("own_sentence_first", "in_opening"):
+        rps._DISCLOSURE_LEDGER.clear()
+        gate = await rt_t.start(rt_t.build(), _decision(placement))
+        gates.append((gate.notice, gate.required_text, gate.notice_owed))
+    assert gates[0] == gates[1]
+    assert gates[1] == ("tenant_text_first", f"{OWN} {rt_t.PLAIN_OPENER}", True)
+
+
+async def test_a_fault_in_the_audit_record_is_not_reported_as_the_choice_being_unavailable(monkeypatch):
+    """Only the missing column of the UPDATE means "unavailable"; anything else is raised."""
+    import asyncpg
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(SWITCH, "true")
+    _tenant, user = _user()
+
+    async def fetchrow(_query, *_args):
+        return {"default_consent_mode": "two_party", "announcement_text": OWN, "opt_out_dtmf_digit": None,
+                "two_party_country_codes": [], "retention_days": 90,
+                "outbound_notice_placement": "in_opening", "updated_at": None}
+
+    @asynccontextmanager
+    async def acquire(_pool, _t):
+        yield SimpleNamespace(fetchrow=fetchrow)
+
+    class _BrokenAudit(_Audit):
+        async def log_in_transaction(self, conn, **kwargs):
+            raise asyncpg.UndefinedColumnError("a column of the audit table is missing")
+
+    monkeypatch.setattr(ep, "acquire_with_tenant", acquire)
+    with pytest.raises(asyncpg.UndefinedColumnError):
+        await ep.put_outbound_notice_placement(
+            body=ep.NoticePlacementBody(outbound_notice_placement="in_opening"),
+            user=user, db_pool=object(), audit_logger=_BrokenAudit())
