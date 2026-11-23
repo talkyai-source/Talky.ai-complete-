@@ -214,7 +214,11 @@ export function ContactLists({
         setSavingPermission(true);
         setPermissionNotice("");
         try {
-            const result = await dashboardApi.confirmUngroupedPermission(campaignId, confirmation, list.contact_count);
+            // The fingerprint loaded WITH the list on screen, never read again at the click:
+            // it must stand for the contacts the person saw.
+            const result = await dashboardApi.confirmUngroupedPermission(
+                campaignId, confirmation, list.contact_count, summary?.ungrouped_token,
+            );
             closePermissionDialog();
             await refreshQuietly();
             createNotification({
