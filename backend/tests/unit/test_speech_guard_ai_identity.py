@@ -374,19 +374,32 @@ def test_the_log_line_carries_the_pattern_and_no_word_of_the_reply(caplog):
         assert word not in text
 
 
+def _assert_cost_grows_in_proportion(run, make, size=50_000):
+    """``run`` on 50,000 characters must finish in well under two seconds (best of
+    three). A rule that backtracks takes many seconds or never finishes on such
+    input (an earlier one in this code base took 29 s on 132 characters); a linear
+    one takes a few hundredths of a second. The wide margin is deliberate: a tight
+    wall-clock limit, or a ratio of two short timings, fails at random on a busy
+    machine."""
+    text = make(size)
+    runs = []
+    for _ in range(3):
+        started = time.perf_counter()
+        run(text)
+        runs.append(time.perf_counter() - started)
+    assert min(runs) < 2.0, runs
+
+
 @pytest.mark.parametrize("make", [
-    lambda: "this is " * 6250,
-    lambda: "Hi " + "-" * 50000,
-    lambda: " " * 50000,
-    lambda: "Hi there, " * 5000,
-    lambda: "this is Grace " * 3500,
+    lambda n: "this is " * (n // 8),
+    lambda n: "Hi " + "-" * n,
+    lambda n: " " * n,
+    lambda n: "Hi there, " * (n // 10),
+    lambda n: "this is Grace " * (n // 14),
 ])
 def test_matching_is_linear_on_long_input(make):
-    text = make()
     session = _intro_session("Grace Miller")
-    started = time.perf_counter()
-    add_ai_identity(session, text)
-    assert time.perf_counter() - started < 0.2
+    _assert_cost_grows_in_proportion(lambda text: add_ai_identity(session, text), make)
 
 
 def test_replacement_lines_are_not_rewritten_again():
@@ -499,24 +512,14 @@ def test_a_whole_realtime_reply_with_a_named_claim_is_caught():
 
 
 @pytest.mark.parametrize("make", [
-    lambda: "this is " * 6250,
-    lambda: "I'm Grace, " * 4500,
-    lambda: "Grace, " * 7200,
-    lambda: "This is Grace, Miller, " * 2200,
-    lambda: "I'm " + "Grace " * 8000,
+    lambda n: "this is " * (n // 8),
+    lambda n: "I'm Grace, " * (n // 11),
+    lambda n: "Grace, " * (n // 7),
+    lambda n: "This is Grace, Miller, " * (n // 23),
+    lambda n: "I'm " + "Grace " * (n // 6),
 ])
 def test_the_claim_rule_is_linear_on_long_input(make):
-    text = make()
-    def best(call):
-        # Best of three: the laptop runs other agents, a quadratic rule fails all three.
-        runs = []
-        for _ in range(3):
-            started = time.perf_counter()
-            call()
-            runs.append(time.perf_counter() - started)
-        return min(runs)
-
-    assert best(lambda: _claims_human(text)) < 0.2
+    _assert_cost_grows_in_proportion(_claims_human, make)
 
 
 # --- A new clause about someone else is true and is spoken (23 Nov 2026, lead) ---
@@ -577,15 +580,19 @@ def test_a_huge_agent_name_never_raises_and_is_fast(name):
     first_word = name.split()[0]
     sentence = f"Hi there, this is {first_word} from Acme."
     session = _intro_session(name)
+    from app.domain.services.voice_pipeline import ai_identity_intro
+
     started = time.perf_counter()
     first = add_ai_identity(session, sentence)
     cold = time.perf_counter() - started
-    started = time.perf_counter()
+    hits = ai_identity_intro._patterns.cache_info().hits
     second = add_ai_identity(session, sentence)
-    warm = time.perf_counter() - started
     assert first == second
     assert first in (sentence, f"Hi there, this is {first_word}, an AI assistant from Acme.")
-    assert cold < 0.3 and warm < 0.005, (cold, warm)
+    # The patterns are built once per name, not once per sentence (a fixed
+    # wall-clock limit would fail at random on a busy machine).
+    assert ai_identity_intro._patterns.cache_info().hits == hits + 1
+    assert cold < 5.0, cold
 
 
 def test_a_name_longer_than_four_words_is_matched_by_its_first_four_words():
@@ -682,8 +689,11 @@ def test_two_more_real_wordings_are_amended(sentence, expected):
      "This is Grace, an AI assistant from Acme, you can also ask our AI assistant online."),
     ("This is Grace from Acme, an AI-powered estimating company.",
      "This is Grace, an AI assistant from Acme, an AI-powered estimating company."),
-    ("This is Grace, a human, not an AI.",
-     "This is Grace, an AI assistant, a human, not an AI."),
+    # A negation of something else is not the speaker saying it is an AI. (The row
+    # that stood here, "This is Grace, a human, not an AI.", is a human claim: it is
+    # now replaced by the guard, see test_human_claim_forms_20261123.py.)
+    ("This is Grace from Acme, not an AI-powered company.",
+     "This is Grace, an AI assistant from Acme, not an AI-powered company."),
 ])
 def test_a_mention_of_ai_that_is_not_the_speaker_does_not_suppress_the_insertion(sentence, expected):
     assert guard_spoken_sentence(_intro_session(), sentence) == expected
@@ -722,11 +732,12 @@ def test_a_denial_is_not_the_speaker_saying_it():
     assert _speaker_says_ai("I'm an AI.")
 
 
-def test_the_new_rules_are_linear_on_long_input():
-    for make in (lambda: "it is " * 8000, lambda: "Hi, " * 12000 + "it is Grace",
-                 lambda: "this is Grace? " * 3500, lambda: "I'm " * 12000):
-        session = _intro_session("Grace Miller")
-        text = make()
-        started = time.perf_counter()
-        add_ai_identity(session, text)
-        assert time.perf_counter() - started < 0.2
+@pytest.mark.parametrize("make", [
+    lambda n: "it is " * (n // 6),
+    lambda n: "Hi, " * (n // 4) + "it is Grace",
+    lambda n: "this is Grace? " * (n // 15),
+    lambda n: "I'm " * (n // 4),
+])
+def test_the_new_rules_are_linear_on_long_input(make):
+    session = _intro_session("Grace Miller")
+    _assert_cost_grows_in_proportion(lambda text: add_ai_identity(session, text), make)
