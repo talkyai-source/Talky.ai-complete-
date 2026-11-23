@@ -394,3 +394,172 @@ def test_replacement_lines_are_not_rewritten_again():
         == "I'm an AI assistant for All State Estimation."
     assert guard_spoken_sentence(_intro_session(), "I have sent the email. This is Grace from Acme.") \
         == "I'm not able to do that from this call."
+
+
+# --- A name between "this is" / "I'm" and the claim or denial (23 Nov 2026) ----
+from app.domain.services.voice_pipeline import speech_guard as _sg
+from app.domain.services.voice_pipeline.speech_guard import _claims_human
+
+_AI_LINE = "I'm an AI assistant for All State Estimation."
+
+# Gap 1: a real/live/actual person, human, agent or representative after a name.
+# Gap 2: a denial of being an AI, bot, robot, ... after a name.
+# "My name is Grace and I'm a real person." and the two "I'm not" forms were
+# already caught on the base commit (436748eb); the rest were spoken.
+NAMED_MUST_CATCH = [
+    "This is Grace, a real person.",
+    "I'm Grace, a real human being.",
+    "It's Grace here, a live agent.",
+    "This is Grace Miller, an actual person from Acme.",
+    "My name is Grace and I'm a real person.",
+    "This is Grace, a real person from Acme.",
+    "Hi there, this is Grace, a genuine representative of Acme.",
+    "THIS IS GRACE, A REAL PERSON.",
+    "I’m Grace, a real person.",
+    "This is Grace, not an AI.",
+    "I'm Grace, not a robot.",
+    "It's Grace, I'm not a bot.",
+    "This is Grace and no, I am not an AI.",
+    "My name is Grace, not a machine.",
+    "This is Grace here, not automated.",
+    "I'm Grace, not a recording.",
+]
+
+NAMED_MUST_NOT_CATCH = [
+    "I can put you through to a real person.",
+    "Would you like to speak with a live agent?",
+    "A real person will call you back.",
+    "This is Grace, an AI assistant.",
+    "You're a real person, I understand.",
+    "Is this a real person I'm speaking with?",
+    "I'm an AI assistant, not a person.",
+    "I'm not a person, I'm an AI assistant.",
+    "No, I'm an AI.",
+    "I'm not able to do that.",
+    "That's not an AI feature.",
+    "It's not automated on our side.",
+    "This is Grace, I'm an AI, not a real person.",
+    "This is Grace, not an AI, I'm an AI assistant.",
+]
+
+
+@pytest.mark.parametrize("name", ["grace", None])
+@pytest.mark.parametrize("sentence", NAMED_MUST_CATCH)
+def test_a_claim_or_denial_after_a_name_is_replaced(sentence, name):
+    out = guard_spoken_sentence(_intro_session(name), sentence)
+    print(f"{name!r} {sentence!r} -> {out!r}")
+    assert out == _AI_LINE
+    assert _claims_human(sentence)
+
+
+@pytest.mark.parametrize("name", ["grace", None])
+@pytest.mark.parametrize("sentence", NAMED_MUST_NOT_CATCH)
+def test_true_or_third_party_sentences_are_spoken_as_before(sentence, name):
+    out = guard_spoken_sentence(_intro_session(name), sentence)
+    print(f"{name!r} {sentence!r} -> {out!r}")
+    assert out == sentence
+    assert not _claims_human(sentence)
+
+
+_REALTIME_CAUGHT = [
+    "I'm a real person, not a robot.", "I am a real person, yes.", "No, I'm not a robot.",
+    "I'm not an AI.", "This is a real person speaking.",
+]
+
+
+@pytest.mark.parametrize("sentence", CAUGHT + _REALTIME_CAUGHT)
+def test_nothing_caught_before_is_missed_now(sentence):
+    assert _claims_human(sentence)
+
+
+@pytest.mark.parametrize("sentence", [s for s in PASSES if s])
+def test_nothing_that_passed_before_is_caught_now(sentence):
+    assert not _claims_human(sentence)
+
+
+@pytest.mark.parametrize("sentence", [
+    "This is Grace, a real person.",
+    "This is Grace, not an AI.",
+    "I'm Grace, not a robot.",
+    "This is Grace Miller, an actual person from Acme.",
+])
+def test_a_named_claim_never_reaches_the_ai_identity_step(sentence, monkeypatch):
+    def boom(*_a, **_k):
+        raise AssertionError("add_ai_identity must not run for a human claim")
+    monkeypatch.setattr(_sg, "add_ai_identity", boom)
+    assert guard_spoken_sentence(_intro_session(), sentence) == _AI_LINE
+
+
+def test_a_whole_realtime_reply_with_a_named_claim_is_caught():
+    # app/realtime/bridge.py calls _claims_human on the whole reply.
+    assert _claims_human("Hello there! This is Grace, a real person. How can I help you today?")
+    assert _claims_human("Thanks for picking up. I'm Grace, not a robot. I'm calling about your estimate.")
+    assert not _claims_human("Hello there! This is Grace, an AI assistant. I can put you through to a real person.")
+
+
+@pytest.mark.parametrize("make", [
+    lambda: "this is " * 6250,
+    lambda: "I'm Grace, " * 4500,
+    lambda: "Grace, " * 7200,
+    lambda: "This is Grace, Miller, " * 2200,
+    lambda: "I'm " + "Grace " * 8000,
+])
+def test_the_claim_rule_is_linear_on_long_input(make):
+    text = make()
+    def best(call):
+        # Best of three: the laptop runs other agents, a quadratic rule fails all three.
+        runs = []
+        for _ in range(3):
+            started = time.perf_counter()
+            call()
+            runs.append(time.perf_counter() - started)
+        return min(runs)
+
+    assert best(lambda: _claims_human(text)) < 0.2
+
+
+# --- A new clause about someone else is true and is spoken (23 Nov 2026, lead) ---
+# The first version of the named forms replaced these with the AI line, losing a
+# true and useful promise ("a real person will follow up"). A claim about the
+# SPEAKER ends the clause or goes on describing the same person; these start a
+# new clause with its own verb.
+NAMED_TRUE_NEW_CLAUSE = [
+    "I'm Grace, and a real person will follow up with you tomorrow.",
+    "I'm Grace, and a real person from the team will follow up with you.",
+    "It's Monday, a real person will call you back tomorrow.",
+    "This is Acme, a real person will be with you shortly.",
+    "This is Acme, a real person can call you back.",
+    "This is Grace, a real person is available if you prefer.",
+    "It's Grace, and a live agent can take over at any time.",
+    "This is Grace, an AI assistant, and a real person can call you back.",
+    "This is Mark's line, a real person will answer shortly.",
+    "It's Friday, not a robot day.",
+]
+
+NAMED_CLAIM_ABOUT_THE_SPEAKER = [
+    "This is Grace, a real person who can help you today.",
+    "This is Grace, a real person here to help.",
+    "This is Grace, a real person, and I can help you with that.",
+    "This is Grace and not a robot.",
+    "I'm Grace, not a robot, I promise.",
+]
+
+
+@pytest.mark.parametrize("name", ["grace", None])
+@pytest.mark.parametrize("sentence", NAMED_TRUE_NEW_CLAUSE)
+def test_a_new_clause_about_someone_else_is_not_a_claim(sentence, name):
+    assert not _claims_human(sentence)
+    out = guard_spoken_sentence(_intro_session(name), sentence)
+    assert out != _AI_LINE
+    # Everything after the first comma (the promise itself) is spoken as written.
+    tail = sentence.split(",", 1)[1]
+    assert out.endswith(tail), out
+    if name is None:
+        assert out == sentence
+
+
+@pytest.mark.parametrize("name", ["grace", None])
+@pytest.mark.parametrize("sentence", NAMED_CLAIM_ABOUT_THE_SPEAKER)
+def test_a_named_claim_that_goes_on_describing_the_speaker_is_replaced(sentence, name):
+    assert _claims_human(sentence)
+    assert guard_spoken_sentence(_intro_session(name), sentence) == _AI_LINE

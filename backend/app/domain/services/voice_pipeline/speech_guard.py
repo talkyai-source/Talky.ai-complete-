@@ -202,11 +202,28 @@ _SECTION_ID = re.compile(r"\s*\bk[0-9a-f]{8}_\d+\b")
 _HUMAN_ADJ = r"(?:(?:real|live|actual|genuine|living|breathing)[,\s]+(?:and\s+)?)+"
 _HUMAN_NOUN = r"(?:person|human(?:\s+being)?|agent|representative|rep)(?![\w-])"
 _I_AM = r"\b(?:i'?m|i\s+am)\s+(?:just\s+|definitely\s+|really\s+|actually\s+)?"
+# "This is Grace, ..." / "I'm Grace Miller here, ...": the agent introduces itself by
+# a name of one or two capitalised words, then makes the claim or the denial.
+_INTRO_NAME = (
+    r"\b(?:this\s+is|i'?m|i\s+am|it'?s|it\s+is|my\s+name\s+is)\s+"
+    r"(?-i:[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?)(?:\s+(?:here|speaking|calling))?"
+    r"(?:\s*,\s*|\s+)"
+)
+# After a named claim the clause must END there or go on describing the same
+# speaker ("from Acme", "who can help"). "I'm Grace, and a real person will call
+# you back" and "It's Monday, a real person is in tomorrow" start a new clause
+# about someone else: they are true and must be spoken.
+_CLAUSE_ENDS = r"(?=\s*(?:[.,;:!?\u2014\u2013]|$))"
+_STILL_THE_SPEAKER = (
+    r"(?=\s*(?:[.,;:!?\u2014\u2013]|$)"
+    r"|\s+(?:from|of|at|with|here|on|in|for|calling|speaking|who|that)\b)"
+)
 _HUMAN_CLAIM = re.compile(
     rf"{_I_AM}(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
     rf"|{_I_AM}(?:an?\s+)?human(?:\s+being)?(?![\w-])"
     rf"|{_I_AM}(?:a\s+)?flesh\s+and\s+blood\b"
     rf"|\bthis\s+is\s+(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
+    rf"|{_INTRO_NAME}(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}{_STILL_THE_SPEAKER}"
     rf"|\byou(?:'re|\s+are)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?"
     rf"{_HUMAN_ADJ}{_HUMAN_NOUN}"
     rf"|^\W*(?:(?:yes|yeah|yep|yup|nope|no)\W+)?(?:an?\s+)?{_HUMAN_ADJ}"
@@ -225,6 +242,7 @@ _A_RECORDING = r"a\s+record(?:ing|ed\s+(?:message|voice|call))(?!\w)"
 _AI_DENIAL = re.compile(
     rf"{_I_AM}not\s+(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING})"
     rf"|\bthis\s+(?:is\s+not|isn'?t)\s+(?:(?:an?\s+)?{_NOT_THIS_THING}|{_A_RECORDING})"
+    rf"|{_INTRO_NAME}(?:and\s+)?not\s+(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING}){_CLAUSE_ENDS}"
     rf"|\byou(?:'re|\s+are)\s+not\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+"
     rf"(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING})",
     re.IGNORECASE,
