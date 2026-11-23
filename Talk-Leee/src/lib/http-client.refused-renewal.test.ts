@@ -1,8 +1,8 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { createHttpClient, __resetRefreshStateForTests, __setRefreshTimeoutMsForTests,
-    adoptSiblingTabRotation, clearFreshLoginGrace, markFreshLogin, setSessionExpiredHandler,
-    setRequestIdentity, setTokenProvider } from "./http-client";
+    adoptSiblingTabRotation, clearFreshLoginGrace, markFreshLogin, resetSessionExpiredLatch,
+    setSessionExpiredHandler, setRequestIdentity, setTokenProvider } from "./http-client";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -83,5 +83,29 @@ test("B4: adopting a sibling tab's renewed token clears the memory", async () =>
     adoptSiblingTabRotation("old-a", "sibling-a");
     t.setTok("sibling-a");
     await t.ask();
+    assert.equal(t.calls.refresh, 2);
+});
+
+// Added after the independent review: each way the memory is cleared, on its own. (B3 above
+// calls two of them together, so it cannot show that either one alone is enough.)
+for (const [name, clear] of [
+    ["storing a new token, as every sign-in does", () => resetSessionExpiredLatch()],
+    ["marking a fresh sign-in", () => markFreshLogin()],
+    ["ending the fresh sign-in window, as a sign-out does", () => clearFreshLoginGrace()],
+] as const) {
+    test(`B5: ${name} alone clears the memory of a refused renewal`, async () => {
+        const t = setup(() => new Response(null, { status: 401 }));
+        await t.ask(); await t.ask();
+        assert.equal(t.calls.refresh, 1);
+        clear();
+        t.setTok("new-a");
+        await t.ask();
+        assert.equal(t.calls.refresh, 2);
+    });
+}
+
+test("B6: a 409 (the renewal belongs to another account) is not remembered as a refusal", async () => {
+    const t = setup(() => new Response(null, { status: 409 }));
+    await t.ask(); await t.ask();
     assert.equal(t.calls.refresh, 2);
 });
