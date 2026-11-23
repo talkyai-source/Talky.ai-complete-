@@ -55,6 +55,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.domain.services.call_summary.store import generate_and_store
+from app.services.scripts.call_summary_retry import start_retries, summary_unavailable
 
 # Module-level task set keeps fire-and-forget tasks alive until they
 # complete — without this the GC can destroy a pending task and log
@@ -454,10 +455,25 @@ def _schedule_call_summary(pool, tenant_id, call_id) -> None:
 
 
 async def _safe_generate(pool, tenant_id, call_id) -> None:
+    summary = None
     try:
-        await generate_and_store(pool, tenant_id, call_id)
+        summary = await generate_and_store(pool, tenant_id, call_id)
     except Exception as exc:
         logger.warning("call summary generation failed for %s: %s", call_id[:12], exc)
+    if summary_unavailable(summary):
+        # The model failed (rate limit / outage). Ask again in the background;
+        # the CRM sync then runs once, after the last attempt. If no retry slot
+        # is free the sync runs now, as it always did.
+        if start_retries(
+            call_id,
+            lambda: generate_and_store(pool, tenant_id, call_id),
+            lambda: _crm_sync_after_summary(tenant_id, call_id),
+        ):
+            return
+    await _crm_sync_after_summary(tenant_id, call_id)
+
+
+async def _crm_sync_after_summary(tenant_id, call_id) -> None:
     # Summary (or its absence) is now final for this pass: hand the call to
     # the CRM sync. For outbound calls the settlement hook already logged the
     # call and this amends it with the summary; for inbound calls (settled
