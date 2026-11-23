@@ -313,7 +313,10 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
 
   if (!subscription) {
     return (
-      <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card">
+      // The Card lifts on hover and carries the strip that keeps the pointer on it (see components/ui/card.tsx).
+      // Its content is clipped by the wrapper inside it, at the Card's inner edge, so the strip is not clipped too.
+      <Card className="relative border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card">
+        <div className="relative overflow-hidden rounded-[calc(var(--radius)+3px)]">
         <div className="pointer-events-none absolute -right-16 -top-20 h-52 w-52 rounded-full bg-primary/10 blur-3xl" />
         <CardHeader className="relative">
           <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-2xl border border-primary/20 bg-primary/10 text-primary">
@@ -327,6 +330,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
             <Link href="/billing/plans">Choose a plan <ArrowRight className="ml-1 h-4 w-4" aria-hidden /></Link>
           </Button>
         </CardContent>
+        </div>
       </Card>
     );
   }
@@ -348,7 +352,9 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   ];
 
   return (
-    <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card shadow-sm">
+    // As above: the Card carries the strip, the wrapper inside it clips the content at the Card's inner edge.
+    <Card className="relative border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card shadow-sm">
+      <div className="relative overflow-hidden rounded-[calc(var(--radius)+3px)]">
       <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
       <CardHeader className="relative pb-5">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -401,6 +407,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
         </div>
         {subscription.billing_provider === "paypal" && hasManagedSubscription(subscription) && billingAdmin !== "loading" && <div className="mt-4">{billingAdmin === "yes" ? <PaypalPlanManage subscription={subscription} /> : <p className="text-sm">{BILLING_ADMIN_ONLY_TEXT}</p>}</div>}
       </CardContent>
+      </div>
     </Card>
   );
 }

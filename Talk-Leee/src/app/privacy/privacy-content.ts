@@ -116,7 +116,7 @@ export const privacyBlocks: LegalBlock[] = [
   {
     type: "ul",
     items: [
-      `We do not collect Social Security numbers or national identity documents`,
+      `We do not collect Social Security numbers. If you buy a phone number in Telephony, we ask for the documents that destination regulations require: for business use, your business registration and a photo ID matching it; for personal use, a utility bill as proof of address and a photo ID matching it.`,
       `We do not collect biometric data — passkey public keys are cryptographic, not biometric`,
       `We do not collect precise geolocation data. To show prices and amounts in your local currency, the website uses only the country your connection appears to come from, and does not store it`,
       `We do not read your email or your Google Drive files unless you connect that account. Section 5 says what Talk-Lee can read once you do`,

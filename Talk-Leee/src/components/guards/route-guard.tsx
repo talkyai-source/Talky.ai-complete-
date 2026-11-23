@@ -179,7 +179,7 @@ export function RouteGuard({
 
                         <div className="mt-4 space-y-4">
                             {statusesQ.isLoading ? (
-                                <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background hover:shadow-md">
                                     <div className="space-y-3">
                                         <div className="h-4 w-2/3 animate-pulse rounded bg-foreground/10" />
                                         <div className="h-4 w-1/2 animate-pulse rounded bg-foreground/10" />
@@ -187,7 +187,7 @@ export function RouteGuard({
                                     </div>
                                 </div>
                             ) : statusesQ.isError ? (
-                                <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md">
+                                <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background hover:shadow-md">
                                     <div className="text-sm font-medium text-foreground">Failed to load connector status.</div>
                                     <div className="mt-3 flex flex-wrap gap-2">
                                         <Button
@@ -215,7 +215,7 @@ export function RouteGuard({
                                         {connectorIssues.map((x) => (
                                             <div
                                                 key={x.type}
-                                                className="group rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100 shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:shadow-md"
+                                                className="group rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-100 shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md"
                                             >
                                                 <div className="font-semibold">{connectorLabel(x.type)}</div>
                                                 <div className="mt-1 text-amber-100/80">{x.message}</div>
@@ -260,7 +260,7 @@ export function RouteGuard({
                                 <div className="h-4 w-3/5 animate-pulse rounded bg-foreground/10" />
                             </div>
                         ) : statusesQ.isError ? (
-                            <div className="rounded-xl border border-border bg-background p-4 text-sm text-foreground shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:scale-[1.01] hover:shadow-md">
+                            <div className="rounded-xl border border-border bg-background p-4 text-sm text-foreground shadow-sm transition-[transform,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-0.5%)/1.01)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:scale-[1.01] hover:shadow-md">
                                 <div className="font-semibold text-destructive">Failed to load connector status.</div>
                                 <div className="mt-3 flex flex-wrap gap-2">
                                     <Button

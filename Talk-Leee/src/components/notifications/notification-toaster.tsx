@@ -101,7 +101,7 @@ function Toast({ n, onClose }: { n: AppNotification; onClose: () => void }) {
                 <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                            <div className="text-sm font-semibold text-foreground truncate">{n.title}</div>
+                            <div className="text-sm font-semibold text-foreground break-words">{n.title}</div>
                             {n.message ? <div className="mt-0.5 text-sm text-muted-foreground">{n.message}</div> : null}
                         </div>
                         <button

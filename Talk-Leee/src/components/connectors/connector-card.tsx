@@ -226,7 +226,7 @@ export function ConnectorCard({
     return (
         <div
             className={cn(
-                "rounded-2xl border p-4 backdrop-blur-sm shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background/40 hover:shadow-md",
+                "rounded-2xl border p-4 backdrop-blur-sm shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background/40 hover:shadow-md",
                 accentClassName,
                 className
             )}

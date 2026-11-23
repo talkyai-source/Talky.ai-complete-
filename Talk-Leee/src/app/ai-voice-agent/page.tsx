@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function AIVoiceAgentPage() {
   const accentCardClassName =
-    "group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:border-border hover:shadow-md";
+    "group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:brightness-[1.02] hover:border-border hover:shadow-md";
   const accentCardStyle = {
     backgroundImage: "var(--home-card-gradient)",
     backgroundSize: "cover",
@@ -33,8 +33,11 @@ export default function AIVoiceAgentPage() {
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
   const centeredCtaClassName = "mt-10 flex justify-center";
+  // The frame lifts on hover and carries the strip that keeps the pointer on it (see components/ui/card.tsx).
+  // Its picture is clipped by the wrapper inside it, at the frame's inner edge, so the strip is not clipped too.
   const imageFrameClassName =
-    "group w-full overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]";
+    "group w-full rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:brightness-[1.02]";
+  const imageClipClassName = "overflow-hidden rounded-[calc(1.5rem-1px)]";
   const imageClassName = "object-cover transition-transform duration-300 ease-out group-hover:scale-[1.02]";
   const pillClassName =
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
@@ -608,6 +611,7 @@ export default function AIVoiceAgentPage() {
           </div>
           <div className="mt-10 flex justify-center">
             <div className={imageFrameClassName}>
+              <div className={imageClipClassName}>
               <div className="relative aspect-[1536/1024] w-full">
                 <Image
                   src="/images/ai-voice-agent/see-it-in-action.png"
@@ -617,6 +621,7 @@ export default function AIVoiceAgentPage() {
                   quality={100}
                   className={imageClassName}
                 />
+              </div>
               </div>
             </div>
           </div>
@@ -705,7 +710,7 @@ export default function AIVoiceAgentPage() {
         </section>
 
         <section className="mt-14">
-          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
+          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>Ready to Put AI on the Phone?</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Your customers are already calling. Your prospects are already asking questions. It&rsquo;s time to give those

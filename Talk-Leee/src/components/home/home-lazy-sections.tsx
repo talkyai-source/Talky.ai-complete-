@@ -89,7 +89,7 @@ function FAQSection() {
           {items.map((item) => (
             <details
               key={item.question}
-              className="group rounded-2xl border border-gray-200 bg-transparent backdrop-blur-sm p-5 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:scale-[1.01] hover:brightness-[1.02] hover:border-gray-200 hover:shadow-md dark:border-border/70"
+              className="group rounded-2xl border border-gray-200 bg-transparent backdrop-blur-sm p-5 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-0.5%)/1.01)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:scale-[1.01] hover:brightness-[1.02] hover:border-gray-200 hover:shadow-md dark:border-border/70"
               style={{
                 backgroundImage: "var(--home-card-gradient)",
                 backgroundSize: "cover",
