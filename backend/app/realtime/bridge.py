@@ -933,12 +933,18 @@ class RealtimeBridge:
                 await settle_opening(self, utterance, event.text)
             # Retain delivery evidence for action authorization and history.
             # Contact interpretation is handled by record_contact, not prose parsing.
-            if (receipt.get("utterance_id") == utterance["id"]
-                    and receipt.get("status") == "completed"
-                    and receipt.get("evidence") == "transport_played"):
+            # Same rule as the opening sentence and the normal voice path: a phone
+            # gateway can only prove "transmitted", which counts as delivered.
+            from app.realtime.opening_notice import receipt_evidence
+            evidence = receipt_evidence(receipt, utterance["id"])
+            if evidence is not None:
                 utterance["status"] = "completed"
                 self._remember_contact_turn("assistant", event.text)
-                self._action_session._voice_action_delivered_text = event.text
+                # A bare "yes" may authorise an action only after real playout.
+                # A merely transmitted reply must not, and must not leave an older
+                # played reply standing as the text a "yes" is matched against.
+                self._action_session._voice_action_delivered_text = (
+                    event.text if evidence == "transport_played" else "")
                 if self._identity_opening_pending:
                     self._live_state = reduce_live_state(self._live_state, IdentityEvidence(introduced=True))
                     self._identity_opening_pending = False
