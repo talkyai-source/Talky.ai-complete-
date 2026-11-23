@@ -25,7 +25,7 @@ def _sql(monkeypatch, operation):
 
 
 def test_0104_sits_on_top_of_0103_and_under_0105():
-    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
+    assert SCRIPTS.get_heads() == ["0106_outbound_notice_placement"]
     assert SCRIPTS.get_revision("0105_list_consent_complete").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0103_recording_notice_state"
     assert len(REVISION) <= 32 and _module().revision == REVISION

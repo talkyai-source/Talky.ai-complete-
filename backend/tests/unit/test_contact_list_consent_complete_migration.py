@@ -28,8 +28,9 @@ def _norm(text):
     return " ".join(text.split())
 
 
-def test_0105_is_the_single_head_on_top_of_0104():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0105_sits_on_0104_and_0106_sits_on_it():
+    assert SCRIPTS.get_heads() == ["0106_outbound_notice_placement"]
+    assert SCRIPTS.get_revision("0106_outbound_notice_placement").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0104_paypal_review_dismissed"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 

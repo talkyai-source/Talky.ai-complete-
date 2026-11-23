@@ -35,7 +35,7 @@ def _create(statements, table):
 
 
 def test_0102_sits_on_top_of_0101_under_0103():
-    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
+    assert SCRIPTS.get_heads() == ["0106_outbound_notice_placement"]
     assert SCRIPTS.get_revision("0103_recording_notice_state").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0101_paypal_webhook_events"
     assert len(REVISION) <= 32 and _module().revision == REVISION

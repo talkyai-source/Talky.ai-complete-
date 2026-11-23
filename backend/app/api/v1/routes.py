@@ -63,6 +63,7 @@ from app.api.v1.endpoints.rbac import router as rbac_router
 from app.api.v1.endpoints.sessions import router as sessions_router
 from app.api.v1.endpoints.plans import router as plans_router
 from app.api.v1.endpoints.recordings import router as recordings_router
+from app.api.v1.endpoints.recording_notice_placement import router as recording_notice_placement_router
 from app.api.v1.endpoints.telephony_bridge import router as telephony_bridge_router
 from app.api.v1.endpoints.telephony_drain import router as telephony_drain_router
 from app.api.v1.endpoints.telephony_concurrency import (
@@ -115,6 +116,7 @@ api_router.include_router(conversation_reviews_router)
 # the registration order turns out to be.
 api_router.include_router(conversation_reviews_admin_router)
 api_router.include_router(recordings_router)
+api_router.include_router(recording_notice_placement_router)
 api_router.include_router(health_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)

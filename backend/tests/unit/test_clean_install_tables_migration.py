@@ -36,7 +36,7 @@ def _branches(block):
 
 
 def test_0099_sits_on_top_of_0098_under_one_head():
-    assert SCRIPTS.get_heads() == ["0105_list_consent_complete"]
+    assert SCRIPTS.get_heads() == ["0106_outbound_notice_placement"]
     assert SCRIPTS.get_revision("0100_force_legal_acceptance_rls").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0098_calls_changed_since_index"
     assert len(REVISION) <= 32 and _module().revision == REVISION

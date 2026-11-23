@@ -2560,10 +2560,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "169e79c3676bfd8cdb3cf43a08f11e9a9d88dea1ee75f5ecac1f05767e35eddd",
+      "id": "43c51deb7fb6470bf189368839100f5e335b0c50f9ca07498867be09d3eb52aa",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 353,
+      "line": 365,
       "method": "fetch",
       "tables": [
         "calls",
@@ -2644,7 +2644,7 @@
       "id": "502d10c93e2571d0a6e0f1df533526a8f035419fed97ffed2258c65f4d642c2f",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "put_recording_policy",
-      "line": 281,
+      "line": 293,
       "method": "fetchrow",
       "tables": [
         "tenant_recording_policy"
@@ -3069,7 +3069,7 @@
       "id": "632784ea0987d64439a4b2a3b5dde3626e9b48e7fb4bbace1fe17dea1e0ae3fa",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "_recording_storage_row",
-      "line": 551,
+      "line": 563,
       "method": "fetchrow",
       "tables": [
         "recordings_s3",
@@ -7465,10 +7465,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b4c5b6bfa2c98ac667cddc9517a12f5b29c3c2119fd3368cf9de0a6af85f8e02",
+      "id": "605bc9a5f8e4c23f935d3b7711b386593c1706a82f46520977e7765570e3cbd2",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 387,
+      "line": 399,
       "method": "fetchval",
       "tables": [
         "recordings_s3"
