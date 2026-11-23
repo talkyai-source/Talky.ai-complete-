@@ -16,6 +16,7 @@ import type { NotificationPriority, NotificationRouting, NotificationType } from
 import { Lock } from "lucide-react";
 import DeviceList from "@/components/auth/device-list";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TelephonyBuyCard } from "@/components/settings/telephony-buy-card";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
 import { RecordingPolicySection } from "@/components/settings/recording-policy-section";
 import { ProviderKeysSection } from "@/components/settings/provider-keys-section";
@@ -213,7 +214,7 @@ export default function SettingsPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label>Notification sounds</Label>
-                                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
+                                <div className="flex items-center justify-between rounded-xl border border-gray-200 bg-white px-4 py-3 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                                     <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Enable sounds</div>
                                     <Switch
                                         checked={settings.soundsEnabled}
@@ -237,14 +238,14 @@ export default function SettingsPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {notificationTypes.map((type) => (
-                            <div key={type} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
+                            <div key={type} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                                 <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                     <div className="min-w-0">
                                         <div className="text-sm font-semibold capitalize text-gray-900 dark:text-zinc-100">{type}</div>
                                     <div className="mt-1 text-sm text-muted-foreground">Choose whether to show a popup and adjust its priority.</div>
                                     </div>
                                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)] sm:w-[220px]">
+                                        <div className="flex items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-2 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)] sm:w-[220px]">
                                             <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Enabled</div>
                                             <Switch
                                                 checked={settings.category[type].enabled}
@@ -305,7 +306,7 @@ export default function SettingsPage() {
 
                             {/* Profile Tab */}
                             <TabsContent value="profile" className="space-y-4">
-                                <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
+                                <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                                     <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Profile Information</div>
                                     {!user && profileLoading ? (
                                         <LoadingState title="Loading profile…" />
@@ -456,12 +457,19 @@ export default function SettingsPage() {
                                 {!user ? (
                                     profileLoading ? <LoadingState title="Loading telephony settings…" /> : null
                                 ) : canEditBusinessName ? (
-                                    <TelephonyProvidersSection />
+                                    // space-y-6: the same gap the Telephony cards keep between themselves.
+                                    <div className="space-y-6">
+                                        <TelephonyProvidersSection />
+                                        <TelephonyBuyCard />
+                                    </div>
                                 ) : (
-                                    <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
-                                        <p className="text-sm text-muted-foreground">
-                                            Phone lines are managed by your account admin. Ask an admin if a line needs to be added or changed.
-                                        </p>
+                                    <div className="space-y-6">
+                                        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-white/10 dark:bg-white/5">
+                                            <p className="text-sm text-muted-foreground">
+                                                Phone lines are managed by your account admin. Ask an admin if a line needs to be added or changed.
+                                            </p>
+                                        </div>
+                                        <TelephonyBuyCard />
                                     </div>
                                 )}
                             </TabsContent>

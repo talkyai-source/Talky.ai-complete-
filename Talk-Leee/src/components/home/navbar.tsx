@@ -606,7 +606,7 @@ export function Navbar() {
                                   className={[
                                     "group/card block h-full rounded-2xl border border-black/[0.05] dark:border-white/[0.07] bg-transparent px-3 py-2.5",
                                     "transition-[transform,background-color,box-shadow,border-color,filter] duration-200 ease-out",
-                                    "hover:-translate-y-0.5 hover:scale-[1.01] hover:brightness-[1.02] hover:bg-foreground/5",
+                                    "hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-0.5%)/1.01)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:scale-[1.01] hover:brightness-[1.02] hover:bg-foreground/5",
                                     "hover:border-black/[0.1] dark:hover:border-white/[0.12]",
                                     "hover:shadow-[0_4px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.03)] dark:hover:shadow-[0_4px_12px_rgba(0,0,0,0.2),0_1px_3px_rgba(0,0,0,0.1)]",
                                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",

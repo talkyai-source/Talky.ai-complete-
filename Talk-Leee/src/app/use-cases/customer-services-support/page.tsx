@@ -13,7 +13,7 @@ export const metadata: Metadata = {
 
 export default function CustomerServicesSupportUseCasePage() {
   const accentCardClassName =
-    "group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:brightness-[1.02] hover:border-border hover:shadow-md";
+    "group rounded-2xl border border-border/70 bg-transparent backdrop-blur-sm p-6 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:brightness-[1.02] hover:border-border hover:shadow-md";
   const accentCardStyle = {
     backgroundImage: "var(--home-card-gradient)",
     backgroundSize: "cover",
@@ -342,7 +342,10 @@ export default function CustomerServicesSupportUseCasePage() {
             </ul>
           </div>
           <div className="mt-10 flex justify-center">
-            <div className="group w-full max-w-4xl overflow-hidden rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:brightness-[1.02]">
+            {/* The frame lifts on hover and carries the strip that keeps the pointer on it (see components/ui/card.tsx).
+                Its picture is clipped by the wrapper inside it, at the frame's inner edge, so the strip is not clipped too. */}
+            <div className="group w-full max-w-4xl rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:brightness-[1.02]">
+              <div className="overflow-hidden rounded-[calc(1.5rem-1px)]">
               <Image
                 src="/images/use-cases/customer-services-support/1.png"
                 alt="Talk-Lee AI customer support automation resolving repetitive requests, with manual ticket triage replaced by AI resolution"
@@ -352,6 +355,7 @@ export default function CustomerServicesSupportUseCasePage() {
                 className="h-auto w-full transition-transform duration-300 ease-out group-hover:scale-[1.02]"
                 sizes="(min-width: 1024px) 896px, (min-width: 768px) 672px, 100vw"
               />
+              </div>
             </div>
           </div>
           <div className={centeredCtaClassName}>
@@ -505,7 +509,7 @@ export default function CustomerServicesSupportUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:border-border">
+          <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>See your AI customer support agent in action.</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Give your customers instant, intelligent support across every channel &mdash; without expanding your support team.
