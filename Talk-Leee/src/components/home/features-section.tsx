@@ -58,10 +58,15 @@ export function FeaturesSection() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
           {services.map((service) => (
+            // The card lifts on hover and carries the strip that keeps the pointer on it (see components/ui/card.tsx).
+            // "home-services-card" clips its content (globals.css), and would clip that strip too, so it now sits on the
+            // wrapper inside: the card keeps the border, the shadow and the card background; the wrapper keeps the padding,
+            // the clipping at the card's inner edge and the colour that sweeps in on hover (shown whenever the card is hovered).
             <div
               key={service.title}
-              className="home-services-card group h-full rounded-2xl border border-gray-200 bg-transparent p-8 shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:scale-[1.01] hover:brightness-[1.02] hover:border-gray-200 hover:shadow-md dark:border-border/70"
+              className="group h-full rounded-2xl border border-gray-200 bg-transparent bg-(image:--home-card-gradient) bg-cover bg-no-repeat shadow-sm transition-[transform,filter,border-color,box-shadow] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-0.5%)/1.01)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:scale-[1.01] hover:brightness-[1.02] hover:border-gray-200 hover:shadow-md dark:border-border/70"
             >
+              <div className="home-services-card bg-none! h-full rounded-[calc(1rem-1px)] p-8 before:rounded-2xl! group-hover:before:opacity-100! group-hover:before:[transform:translate3d(0,0,0)]!">
               <div className="mb-6 flex items-center justify-start">
                 <div className="flex h-12 w-12 items-center justify-center rounded-full border border-gray-200 bg-white shadow-sm transition-[background-color,border-color] duration-200 ease-out group-hover:bg-gray-100 dark:border-border/70 dark:bg-white dark:group-hover:bg-gray-100">
                   <service.icon className="h-6 w-6 text-black" aria-hidden />
@@ -73,6 +78,7 @@ export function FeaturesSection() {
               <p className="mt-2 text-sm sm:text-base font-light leading-relaxed text-gray-700 dark:text-muted-foreground">
                 {service.description}
               </p>
+              </div>
             </div>
           ))}
         </div>

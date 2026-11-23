@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Sidebar } from "./sidebar";
+import { PrivacyPolicyNotice } from "@/components/legal/privacy-policy-notice";
 import { usePathname, useRouter } from "next/navigation";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { useSidebarActions, useSidebarState } from "@/lib/sidebar-client";
@@ -195,6 +196,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-32">
                         <SuspensionBanner />
                         <OfflineBanner />
+                        <PrivacyPolicyNotice />
                         <div className="relative">
                             {suspensionState.suspended ? (
                                 <div className="absolute inset-0 z-20 rounded-2xl border border-red-500/20 bg-background/55 backdrop-blur-[1px]" aria-hidden />

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/legal-document";
+import { PRIVACY_POLICY_DATES, formatPolicyDate } from "@/lib/privacy-policy-dates";
 import { privacyBlocks, privacyIntro } from "./privacy-content";
 
 export const metadata: Metadata = {
@@ -12,8 +13,8 @@ export default function PrivacyPage() {
   return (
     <LegalDocument
       title="Privacy Policy"
-      effectiveDate="17 May 2026"
-      lastUpdated="14 November 2026"
+      effectiveDate={formatPolicyDate(PRIVACY_POLICY_DATES.effectiveDate)}
+      lastUpdated={formatPolicyDate(PRIVACY_POLICY_DATES.lastUpdated)}
       summary={{
         title: "Summary",
         text: "Talk-Lee is an AI voice agent platform. We collect the minimum data necessary to operate the service. We do not sell your personal data to any third party under any circumstances. You have full rights over your data including access, correction, portability, and deletion.",

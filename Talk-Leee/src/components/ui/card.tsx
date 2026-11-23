@@ -11,6 +11,14 @@ const Card = React.forwardRef<
         ref={ref}
         className={cn(
             "rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 dark:hover:bg-slate-800 hover:shadow-md dark:hover:shadow-lg",
+            // The hover lift moves the card 2px up, which used to take its bottom 2px out from under a
+            // pointer resting there: the card dropped, was hovered again, lifted again, on every frame.
+            // While hovered, an invisible strip hangs below the lifted card, exactly over the space it
+            // left, so the pointer stays on the card. It starts at the inside of the card's bottom border
+            // (where an absolutely placed box is measured from), so it is the 2px of the lift plus the
+            // border's own width, which it inherits. It exists only while the card is hovered, and only
+            // inside the card's own at-rest box.
+            "hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-['']",
             className
         )}
         {...props}

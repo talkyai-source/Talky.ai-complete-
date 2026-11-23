@@ -42,7 +42,7 @@ function GlassStatCard({
             transition={{ delay, duration: 0.4 }}
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.99 }}
-            className="group rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:bg-background hover:shadow-md"
+            className="group rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-1%)/1.02)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background hover:shadow-md"
         >
             <div className="flex items-center gap-3">
                 <div

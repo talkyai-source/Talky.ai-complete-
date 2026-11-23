@@ -85,3 +85,43 @@ test("telephony tab: while the person is loading there is no note and no telepho
     assert.equal(screen.queryByText(NOTE) === null, true);
     assert.deepEqual(telephonyPaths(paths), []);
 });
+
+// The Buy Now card (components/settings/telephony-buy-card.tsx) is for every signed-in person.
+const buyCard = () => document.querySelector<HTMLElement>("[data-telephony-buy-card]");
+const isLastInTheTab = (card: HTMLElement) => card.nextElementSibling === null && card.parentElement?.nextElementSibling === null && card.parentElement?.parentElement?.getAttribute("role") === "tabpanel";
+
+for (const role of ["readonly", "user", "agent", "billing_user", "campaign_manager"]) {
+    test(`telephony tab: ${role} sees the Buy Now card directly after the note`, async () => {
+        mount(role);
+        const note = (await screen.findByText(NOTE)).parentElement as HTMLElement;
+        const card = buyCard();
+        assert.equal(card !== null, true);
+        assert.equal(note.nextElementSibling === card, true);
+        assert.equal(isLastInTheTab(card as HTMLElement), true);
+        assert.equal(screen.getAllByRole("button", { name: "Buy Now" }).length, 1);
+        // The rest of the section stays closed to this role.
+        assert.equal(screen.queryByRole("heading", { name: "Your PBX" }) === null, true);
+    });
+}
+
+for (const role of ["tenant_admin", "partner_admin", "platform_admin"]) {
+    test(`telephony tab: ${role} sees the Buy Now card last, after the whole section`, async () => {
+        mount(role);
+        const pbx = await screen.findByRole("heading", { name: "Your PBX" });
+        const card = buyCard();
+        assert.equal(card !== null, true);
+        assert.equal(isLastInTheTab(card as HTMLElement), true);
+        const section = (card as HTMLElement).previousElementSibling as HTMLElement;
+        assert.equal(section.contains(pbx), true);
+        assert.equal(section.contains(screen.getByRole("heading", { name: "Twilio" })), true);
+        assert.equal(section.contains(card), false);
+        assert.equal(screen.getAllByRole("button", { name: "Buy Now" }).length, 1);
+        assert.equal(screen.queryByText(NOTE) === null, true);
+    });
+}
+
+test("telephony tab: while the person is loading there is no Buy Now card", async () => {
+    mount(null, true);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(buyCard() === null, true);
+});
