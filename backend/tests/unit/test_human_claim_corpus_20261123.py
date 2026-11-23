@@ -18,7 +18,9 @@ meant to fix.
 
 from pathlib import Path
 
-from app.domain.services.voice_pipeline.speech_guard import _claims_human
+import pytest
+
+from app.domain.services.voice_pipeline.speech_guard import _claims_human, guard_spoken_sentence
 
 DATA = Path(__file__).resolve().parent / "data" / "human_claims"
 
@@ -178,3 +180,121 @@ def test_mixed_sentences():
     assert sorted(c_actual) == sorted(MIXED_C_STILL_SPOKEN), _diff(MIXED_C_STILL_SPOKEN, c_actual)
     h_actual = [s for s in MIXED_H if _claims_human(s)]
     assert sorted(h_actual) == sorted(MIXED_H_STILL_CAUGHT), _diff(MIXED_H_STILL_CAUGHT, h_actual)
+
+
+# --- 23 Nov 2026, after an automated security review of this check ---
+# Point 1: the exemption for "the speaker says it is an AI" must be about the
+# SPEAKER. A phrase about something else may never excuse a denial.
+_DENIAL_NEXT_TO_SOMETHING_ELSE = [
+    "I'm not a robot, it's the AI system that is down today.",
+    "I'm not a bot, it's the automated system that sends those texts.",
+    "I'm not a recording, this is the digital system we use for bookings.",
+    "I'm not an AI, it's Acme's AI assistant that made the mistake.",
+    "No, I'm not a robot, you're talking to the virtual receptionist's supervisor.",
+    "I'm not a bot, it's an AI agent that our other team uses.",
+]
+_DENIAL_NEXT_TO_A_REAL_SELF_DESCRIPTION = [
+    "I'm not a recording, I'm an AI assistant.",
+    "This isn't a recording, it's an AI assistant, so you can talk to me normally.",
+    "You're not dealing with a recording, you're talking to an AI assistant.",
+    "I'm Grace, an AI assistant, and I'm not a recording.",
+    "I'm not a recording, I'm the AI assistant for Acme.",
+    "I'm not a recording, I'm Acme's AI assistant.",
+    "I'm not a robot voice menu, this is an automated assistant.",
+]
+# Point 2: forms an earlier version caught and the reviewed patterns had dropped.
+_FORMS_RESTORED = [
+    "It is a real person.",
+    "It is a real person here.",
+    "It is me, a real person.",
+    "It is not a robot.",
+    "You've reached a real person at Acme.",
+    "Hello, you've reached a real person from the Acme office.",
+    "You've got a real person here.",
+    "It's Grace here, a live agent.",
+]
+_HONEST_LINES_THAT_STAY_SPOKEN = [
+    "With the premium plan, you've got a live agent on call around the clock.",
+    "I'm an AI assistant, but you've got a real person on standby if you need one.",
+    "If you call our main line, you've reached a live agent from nine to five.",
+    "It's Mark, a real person from our estimating team.",
+    "It's Bluebeam, not AI.",
+    "It's Excel, not a robot.",
+    "It is a real person who reviews every estimate.",
+    "After the transfer, you're speaking with a person from our billing team.",
+]
+# "It's <Name>, ..." is a claim only with the agent's OWN stored name.
+_ITS_AGENT_NAME = [
+    "Hi, it's Grace from Acme, a real person.",
+    "It's Grace, a real person.",
+    "It's Grace, not a robot.",
+    "It is Grace, a human.",
+]
+
+
+def _session(agent_name, company="Acme"):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        agent_config=SimpleNamespace(agent_name=agent_name, company_name=company),
+        conversation_history=[], call_id="11111111-1111-4111-8111-111111111111",
+        _spoken_sentences=[],
+    )
+
+
+@pytest.mark.parametrize("sentence", _DENIAL_NEXT_TO_SOMETHING_ELSE)
+def test_a_phrase_about_something_else_never_excuses_a_denial(sentence):
+    assert _claims_human(sentence)
+    assert guard_spoken_sentence(_session("grace"), sentence) == "I'm an AI assistant for Acme."
+
+
+@pytest.mark.parametrize("sentence", _DENIAL_NEXT_TO_A_REAL_SELF_DESCRIPTION)
+def test_the_speaker_saying_what_it_is_still_excuses_a_denial(sentence):
+    assert not _claims_human(sentence)
+    assert guard_spoken_sentence(_session("grace"), sentence) == sentence
+
+
+@pytest.mark.parametrize("sentence", _FORMS_RESTORED)
+def test_the_it_is_and_you_have_reached_forms_are_caught(sentence):
+    assert _claims_human(sentence)
+
+
+@pytest.mark.parametrize("sentence", _HONEST_LINES_THAT_STAY_SPOKEN)
+def test_the_honest_lines_next_to_those_forms_stay_spoken(sentence):
+    assert not _claims_human(sentence)
+    assert guard_spoken_sentence(_session("grace"), sentence) == sentence
+
+
+@pytest.mark.parametrize("sentence", _ITS_AGENT_NAME)
+def test_its_name_is_a_claim_only_with_the_agents_own_name(sentence):
+    stock = "I'm an AI assistant for Acme."
+    assert guard_spoken_sentence(_session("grace"), sentence) == stock            # stored lowercase
+    assert guard_spoken_sentence(_session("Grace Miller"), sentence) == stock     # first name of two
+    other = guard_spoken_sentence(_session("Sarah"), sentence)                    # someone else's name
+    assert other == sentence
+    assert guard_spoken_sentence(_session(None), sentence) == sentence            # no stored name
+
+
+def test_its_someone_else_is_spoken_even_when_the_agent_has_a_name():
+    sentence = "It's Mark, a real person from our estimating team."
+    assert guard_spoken_sentence(_session("grace"), sentence) == sentence
+    # ... and it is a claim when Mark IS the agent.
+    assert guard_spoken_sentence(_session("Mark"), sentence) == "I'm an AI assistant for Acme."
+
+
+def test_its_name_with_a_real_self_description_is_honest():
+    sentence = "It's Grace, not a recording, I'm an AI assistant."
+    assert guard_spoken_sentence(_session("grace"), sentence) == sentence
+
+
+def test_the_agent_name_check_never_raises():
+    from types import SimpleNamespace
+
+    from app.domain.services.voice_pipeline.speech_guard import _its_agent_claims_human
+
+    sentence = "It's Grace, a real person."
+    assert _its_agent_claims_human(SimpleNamespace(), sentence) is False
+    assert _its_agent_claims_human(None, sentence) is False
+    assert _its_agent_claims_human(_session("G.*(race+"), sentence) is False
+    assert _its_agent_claims_human(_session("x" * 5000), sentence) is False
+    assert _its_agent_claims_human(_session(12345), sentence) is False
