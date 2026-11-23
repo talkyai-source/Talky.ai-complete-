@@ -146,6 +146,9 @@ export function FloatingAssistant() {
     }, []);
     const reconnectAttemptsRef = useRef(0);
     const reconnectTimerRef = useRef<number | null>(null);
+    // Set when the server refuses the user until they accept the current
+    // terms; stops the reconnect loop. Cleared when the panel is (re)opened.
+    const legalRefusedRef = useRef(false);
     const messagesEndRef = useRef<HTMLDivElement | null>(null);
     // Keepalive: ping every ~25s so an idle WS isn't closed by proxies/LBs
     // (the "reconnecting" churn). Cleared on every teardown.
@@ -397,6 +400,7 @@ export function FloatingAssistant() {
                 duplicate?: ProposalData["duplicate"];
                 applied?: boolean;
                 error?: string;
+                code?: string;
             };
             try {
                 payload = JSON.parse(event.data);
@@ -507,6 +511,9 @@ export function FloatingAssistant() {
                     break;
                 }
                 case "error":
+                    if (payload.code === "legal_acceptance_required") {
+                        legalRefusedRef.current = true;
+                    }
                     setTyping(false);
                     setMessages((prev) => [
                         ...prev,
@@ -530,7 +537,10 @@ export function FloatingAssistant() {
             setStatus("error");
         };
 
-        ws.onclose = () => {
+        ws.onclose = (closeEvent) => {
+            if (closeEvent?.code === 1008 && closeEvent.reason === "legal_acceptance_required") {
+                legalRefusedRef.current = true;
+            }
             // Only act if this is still the active socket (a planned teardown or
             // a newer connect supersedes this one).
             if (wsRef.current !== ws) return;
@@ -545,7 +555,11 @@ export function FloatingAssistant() {
             // "session expired" on a close code: a genuine auth loss is detected
             // in connect() when the ticket can't be minted (→ sign-in CTA). This
             // is what stops a momentary WS hiccup from logging the user out.
-            if (open && reconnectAttemptsRef.current < 8) {
+            // Terms not accepted: reconnecting cannot succeed and only costs the
+            // server work; stay closed until the panel is opened again.
+            if (legalRefusedRef.current) {
+                setStatus("closed");
+            } else if (open && reconnectAttemptsRef.current < 8) {
                 const attempt = reconnectAttemptsRef.current + 1;
                 reconnectAttemptsRef.current = attempt;
                 setStatus("connecting");
@@ -573,6 +587,7 @@ export function FloatingAssistant() {
             // Fresh open → reset the backoff so a prior exhausted reconnect
             // sequence doesn't prevent this open from connecting.
             reconnectAttemptsRef.current = 0;
+            legalRefusedRef.current = false;
             connect();
         } else {
             closeSocket();
