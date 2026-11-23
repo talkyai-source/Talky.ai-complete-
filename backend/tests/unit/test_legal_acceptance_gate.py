@@ -221,3 +221,132 @@ def test_every_open_route_exists_in_the_real_application():
     assert not missing, f"open-list entries that no longer exist: {missing}"
     assert PREFIX_ROUTES, "no route is mounted under the open prefixes"
     assert all(reason for _, _, reason in legal_gate.OPEN_ROUTES)
+
+
+# --- the REAL application nesting (api_router included at /api/v1) -----------
+
+def _real_application():
+    application = FastAPI()
+    application.include_router(api_router, prefix="/api/v1")
+    return application
+
+
+async def _real_call(application, method, url):
+    async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=application, raise_app_exceptions=False),
+            base_url="https://synthetic.example") as client:
+        return await client.request(method, url, headers={"Authorization": "Bearer valid"})
+
+
+def _is_gate_refusal(response) -> bool:
+    try:
+        detail = response.json().get("detail")
+    except Exception:  # noqa: BLE001 - a non-JSON body is not the gate's answer
+        return False
+    return response.status_code == 403 and isinstance(detail, dict) and detail.get("code") == "legal_acceptance_required"
+
+
+SAMPLE_ID = "0b0b0b0b-1111-4222-8333-444444444444"
+REAL_OPEN_URLS = [
+    ("POST", "/api/v1/auth/legal-acceptance"),
+    ("GET", "/api/v1/auth/me"),
+    ("POST", f"/api/v1/campaigns/{SAMPLE_ID}/stop"),
+    ("GET", "/api/v1/rbac/users/me/permissions"),
+]
+
+
+@pytest.mark.parametrize("method,url", REAL_OPEN_URLS, ids=[f"{m} {u}" for m, u in REAL_OPEN_URLS])
+async def test_real_nesting_open_routes_are_not_refused_by_the_gate(gate, method, url):
+    response = await _real_call(_real_application(), method, url)
+    assert not _is_gate_refusal(response), f"{method} {url} refused by the gate: {response.text}"
+    assert gate.reads == 0
+
+
+async def test_real_nesting_campaign_start_is_refused_by_the_gate(gate):
+    response = await _real_call(_real_application(), "POST", f"/api/v1/campaigns/{SAMPLE_ID}/start")
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "legal_acceptance_required"
+
+
+def _fill(template: str) -> str:
+    import re
+    return re.sub(r"\{[^}]+\}", SAMPLE_ID, template)
+
+
+def _fake_request(method: str, path: str, root_path: str = ""):
+    from starlette.requests import Request
+    return Request({"type": "http", "method": method, "path": root_path + path,
+                    "root_path": root_path, "headers": [], "query_string": b""})
+
+
+def test_matcher_opens_exactly_the_open_list_across_every_real_route():
+    open_templates = {(m, p) for m, p, _ in legal_gate.OPEN_ROUTES}
+    wrongly_closed, wrongly_open = [], []
+    for method, template in sorted(REAL_ROUTES):
+        expected = (method, template) in open_templates or template.startswith(legal_gate.OPEN_PREFIXES)
+        actual = legal_gate._is_open(_fake_request(method, _fill(template)))
+        if expected and not actual:
+            wrongly_closed.append((method, template))
+        if actual and not expected:
+            wrongly_open.append((method, template))
+    assert not wrongly_closed, f"open routes the matcher closes: {wrongly_closed}"
+    assert not wrongly_open, f"routes the matcher wrongly opens: {wrongly_open}"
+
+
+def test_matcher_unknown_or_missing_path_stays_gated():
+    from starlette.requests import Request
+    assert legal_gate._is_open(Request({"type": "http", "method": "GET", "headers": [], "query_string": b""})) is False
+    assert legal_gate._is_open(_fake_request("GET", "/nope")) is False
+
+
+def test_matcher_removes_root_path_and_is_method_specific():
+    assert legal_gate._is_open(_fake_request("GET", "/api/v1/billing/plans", root_path="/edge")) is True
+    assert legal_gate._is_open(_fake_request("POST", "/api/v1/billing/plans")) is False
+    assert legal_gate._is_open(_fake_request("GET", "/api/v1/billing/plans/extra")) is False
+
+
+# --- the helper for WebSocket handshakes ------------------------------------
+
+def _ws_user(**kw):
+    values = {"id": USER, "tenant_id": TENANT, "role": "tenant_admin"}
+    values.update(kw)
+    return SimpleNamespace(**values)
+
+
+async def test_acceptance_missing_switch_off_reads_nothing(gate):
+    gate.required = False
+    assert await legal_gate.acceptance_missing(_ws_user(), object()) is False
+    assert gate.reads == 0 and gate.db_opens == 0
+
+
+async def test_acceptance_missing_true_false_and_cached(gate):
+    assert await legal_gate.acceptance_missing(_ws_user(), object()) is True
+    gate.owed = False
+    assert await legal_gate.acceptance_missing(_ws_user(), object()) is False
+    assert await legal_gate.acceptance_missing(_ws_user(), object()) is False
+    assert gate.reads == 2
+
+
+async def test_acceptance_missing_exempts_platform_admin_no_tenant_unset_versions(gate):
+    assert await legal_gate.acceptance_missing(_ws_user(role="platform_admin"), object()) is False
+    assert await legal_gate.acceptance_missing(_ws_user(tenant_id=None), object()) is False
+    gate.terms = None
+    assert await legal_gate.acceptance_missing(_ws_user(), object()) is False
+    assert gate.reads == 0
+
+
+async def test_acceptance_missing_failed_read_raises_never_accepted(gate):
+    gate.fail = True
+    with pytest.raises(ConnectionError):
+        await legal_gate.acceptance_missing(_ws_user(), object())
+    assert not legal_gate._accepted
+
+
+async def test_refused_request_publishes_no_user(gate, monkeypatch):
+    published = []
+    monkeypatch.setattr(dep, "_publish_current_user_scope", lambda *a, **k: published.append(a))
+    assert (await start(gate)).status_code == 403
+    assert published == []
+    gate.owed = False
+    assert (await start(gate)).status_code == 200
+    assert len(published) == 1
