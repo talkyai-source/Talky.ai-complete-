@@ -348,6 +348,8 @@ async def get_current_user(
     request.state.session_mfa_verified = (
         session["mfa_verified"] is True if "mfa_verified" in session else None
     )
+    from app.core.security.legal_gate import enforce_legal_acceptance
+    await enforce_legal_acceptance(request, user, client.pool)
     return user
 
 
