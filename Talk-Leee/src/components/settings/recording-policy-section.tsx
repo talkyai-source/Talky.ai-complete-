@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { OutboundNoticePlacement } from "@/components/settings/recording-notice-placement";
 import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
@@ -24,6 +25,9 @@ export type RecordingPolicy = {
     two_party_country_codes?: string[];
     retention_days?: number | null;
     updated_at?: string | null;
+    /** Absent on a server that cannot choose where the outgoing notice is said. */
+    outbound_notice_placement?: "own_sentence_first" | "in_opening" | null;
+    outbound_notice_own_sentence?: string | null;
     effect: string;
 };
 
@@ -73,6 +77,7 @@ export function RecordingPolicyView({
     onSave,
     onRetry,
     saving,
+    onPlacementSaved,
 }: {
     policy: RecordingPolicy | undefined;
     isLoading?: boolean;
@@ -84,6 +89,7 @@ export function RecordingPolicyView({
     canEdit: boolean;
     onSave: (input: RecordingPolicyInput) => Promise<unknown>;
     saving?: boolean;
+    onPlacementSaved?: (p: RecordingPolicy) => void;
 }) {
     const [draft, setDraft] = useState<Partial<RecordingPolicyInput>>({});
     const [saveError, setSaveError] = useState<string | null>(null);
@@ -193,6 +199,8 @@ export function RecordingPolicyView({
                             disabled={!canEdit || effective.default_consent_mode !== "two_party"}
                         />
                     </div>
+
+                    {policy ? <OutboundNoticePlacement policy={policy} canEdit={canEdit} formDirty={dirty} onSaved={onPlacementSaved} /> : null}
 
                     <div className="space-y-1">
                         <Label className="text-xs" htmlFor="rp-countries">Countries needing the notice</Label>
@@ -304,6 +312,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
             onSave={onSave}
             onRetry={() => load()}
             saving={saving}
+            onPlacementSaved={setPolicy}
         />
     );
 }
