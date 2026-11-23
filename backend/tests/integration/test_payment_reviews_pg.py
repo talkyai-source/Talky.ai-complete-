@@ -9,6 +9,7 @@ non-BYPASSRLS role the PayPal plan tests use, with only the rights this feature 
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import asyncpg
@@ -212,6 +213,29 @@ async def test_a_closed_recurring_plan_review_stays_closed_and_the_alert_stays_d
     row = await _state(fixture, event_id)
     assert row["state"] == "dismissed" and row["attempt_count"] == 3
     assert after_tick == after_close
+
+
+async def test_a_closed_recurring_review_stays_closed_in_its_period_and_a_new_period_opens_a_new_one(rv):
+    fixture = rv
+    plan = uuid4()
+    rule = "not_confirmed_with_paypal"
+    base = f"local:review:plan:{plan}:{rule}"
+    may, june = f"{base}:2026-12-05", f"{base}:2027-01-05"
+    fixture.extra_events.extend([base, may, june])
+    row = {"id": plan, "paypal_subscription_id": "I-pgperiod", "provider_mode": "test",
+           "current_period_end": datetime(2026, 12, 5, 12, 0, tzinfo=UTC)}
+    await fixture.svc._record_review(row, rule)
+    first = await _state(fixture, may)
+    assert first["state"] == "needs_review" and await _state(fixture, base) is None
+    await _close(fixture, "paypal", may, first["attempt_count"])
+    await fixture.svc._record_review(row, rule)  # the next sweep, same period
+    again = await _state(fixture, may)
+    assert again["state"] == "dismissed" and await _state(fixture, june) is None
+    row["current_period_end"] = datetime(2027, 1, 5, 12, 0, tzinfo=UTC)  # the plan's period moved on
+    await fixture.svc._record_review(row, rule)
+    assert (await _state(fixture, june))["state"] == "needs_review"
+    assert (await _state(fixture, may))["state"] == "dismissed"
+    assert await _state(fixture, base) is None
 
 
 async def test_a_closed_review_of_another_plan_rule_reopens_when_recorded_again(rv):

@@ -1811,7 +1811,8 @@ async def test_unconfirmed_plan_is_reported_and_left_alone(env):
     before = copy.deepcopy(stored(env, row))
     out = await env.svc.sweep()
     assert out == {"ended": 0, "checked": 0, "failed": 1, "unconfirmed": 1}
-    assert f"local:review:plan:{row['id']}:not_confirmed_with_paypal" in env.store["reviews"]
+    period = row["current_period_end"].astimezone(UTC).date().isoformat()
+    assert f"local:review:plan:{row['id']}:not_confirmed_with_paypal:{period}" in env.store["reviews"]
     assert stored(env, row) == before and tenant(env)["subscription_status"] == ACTIVE
 
 
