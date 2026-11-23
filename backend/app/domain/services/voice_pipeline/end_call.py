@@ -32,7 +32,10 @@ from __future__ import annotations
 
 from app.services.scripts.prompts.policies import load_policy
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 END_CALL_TOKEN = "[[END_CALL]]"
 
@@ -82,6 +85,17 @@ def strip_and_flag(session, text: str) -> str:
             session._end_call_requested = True
         except Exception:
             pass
+    elif requested and getattr(session, "_end_call_marker_refused", False) is not True:
+        # A refused marker is visible to this turn (turn_streamer reads it) and
+        # logged once, though this runs on several slices of one turn.
+        try:
+            session._end_call_marker_refused = True
+        except Exception:
+            try:
+                object.__setattr__(session, "_end_call_marker_refused", True)
+            except Exception:
+                pass
+        logger.info("end_call_marker_refused call=%s", str(getattr(session, "call_id", "?"))[:12])
     return clean
 
 
