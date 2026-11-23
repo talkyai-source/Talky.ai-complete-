@@ -294,6 +294,8 @@ ASK_AGAIN_LINE = "Sorry, could you say that once more?"
 # Spoken instead of REFUSED_ENDING_LINE when that was the agent's previous turn
 # (no question, so the same line is never heard twice running).
 REFUSED_ENDING_AGAIN_LINE = "Okay, no problem."
+# Spoken instead of ASK_AGAIN_LINE when that was the agent's previous turn.
+ASK_ANOTHER_WAY_LINE = "Could you put that another way?"
 NOT_CAUGHT_LINE = "Sorry, I didn't quite catch that — could you say it again?"
 
 # A closing line already spoken before the cut: no second farewell.
@@ -1200,7 +1202,11 @@ class TurnStreamer:
             if caller_finished or end_call_accepted:
                 recovery, recovery_kind = "Goodbye.", "goodbye"
             elif end_call_refused_dnc:
-                recovery, recovery_kind = ASK_AGAIN_LINE, "ask_again"
+                from app.domain.services.voice_pipeline.turn_runner import _same_utterance
+                if _same_utterance(previous_assistant_turn(messages), ASK_AGAIN_LINE):
+                    recovery, recovery_kind = ASK_ANOTHER_WAY_LINE, "ask_another_way"
+                else:
+                    recovery, recovery_kind = ASK_AGAIN_LINE, "ask_again"
             elif end_call_refused or marker_refused:
                 from app.domain.services.voice_pipeline.turn_runner import _same_utterance
                 if _same_utterance(previous_assistant_turn(messages), REFUSED_ENDING_LINE):
@@ -1216,10 +1222,11 @@ class TurnStreamer:
                 "zero_token_turn call=%s — LLM produced no speech; spoke recovery line"
                 " cause=%s line=%s raw_chars=%d",
                 call_id,
-                "end_call_accepted" if end_call_accepted and not caller_finished
+                "end_call_accepted" if end_call_accepted
                 else "end_call_refused_do_not_call" if end_call_refused_dnc
                 else "end_call_refused" if end_call_refused
-                else "end_call_marker_refused" if marker_refused else "no_action",
+                else "end_call_marker_refused" if marker_refused
+                else "caller_signaled_end" if caller_finished else "no_action",
                 recovery_kind,
                 len(raw_response_text),
             )

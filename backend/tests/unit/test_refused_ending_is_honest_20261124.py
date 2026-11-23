@@ -130,7 +130,7 @@ async def test_caller_signalled_end_and_nothing_still_says_goodbye(caplog):
     assert spoken == ["Goodbye."]
     assert session._end_call_requested is True
     (line,) = _zero_token_lines(caplog)
-    assert "cause=no_action line=goodbye" in line
+    assert "cause=caller_signaled_end line=goodbye" in line
 
 
 async def test_refused_text_marker_alone_is_visible_and_logged_once(caplog):
@@ -353,6 +353,62 @@ async def test_the_log_says_set_earlier_when_the_phrase_check_already_recorded_t
     session._caller_opted_out = True
     result = await run_voice_action(session, ACTION_END_CALL, {"reason": "x"},
                                     user_text="Stop calling me. Why do you keep ringing?")
-    assert result["status"] == "caller_intent_unconfirmed"
+    # An opt-out recorded earlier in the call lets the ending through (20261124 F2).
+    assert result["status"] == "accepted"
     line = [r.getMessage() for r in caplog.records if r.getMessage().startswith("voice_action_result")][-1]
-    assert line.endswith("status=caller_intent_unconfirmed do_not_call=False opt_out=set_earlier")
+    assert line.endswith("status=accepted do_not_call=False opt_out=set_earlier")
+
+
+# --- leftover inspection items (24 Nov 2026) ------------------------------------
+
+_TPS = {"reason": "opt out", "do_not_call": True, "opt_out_quote": "I'm registered with the TPS"}
+
+
+async def test_f1_ask_again_is_not_spoken_twice_running():
+    ask_another = getattr(turn_streamer, "ASK_ANOTHER_WAY_LINE", ASK_AGAIN_LINE)
+    llm, _ = _silent_end_caller(_TPS)
+    session = _action_session()
+    said = await _run_turns(llm, session, *["I'm registered with the TPS."] * 3)
+    assert said[0] == ASK_AGAIN_LINE
+    assert said[1] == ask_another == "Could you put that another way?"
+    assert all(x != y for x, y in zip(said, said[1:]))
+
+
+async def test_f2_an_opt_out_set_earlier_lets_the_flagged_request_through():
+    said = "Just get rid of me."
+    earlier = _action_session()
+    earlier._caller_opted_out = True
+    accepted = await run_voice_action(earlier, ACTION_END_CALL, dict(_TPS), user_text=said)
+    assert accepted["status"] == "accepted"
+    # The model is not told something untrue: the caller WAS marked, earlier in the call.
+    assert "No opt-out was recorded" not in accepted["message"]
+    assert "already noted earlier" in accepted["message"]
+    assert accepted["opt_out"] == "set_earlier"
+    never = _action_session()
+    refused = await run_voice_action(never, ACTION_END_CALL, dict(_TPS), user_text=said)
+    assert refused["status"] == "caller_intent_unconfirmed"
+    odd = _action_session()
+    odd._caller_opted_out = "yes"  # strict `is True`
+    assert (await run_voice_action(odd, ACTION_END_CALL, dict(_TPS), user_text=said))["status"] == "caller_intent_unconfirmed"
+
+
+async def test_f2_through_the_streamer_the_person_hears_goodbye(caplog):
+    caplog.set_level(logging.INFO)
+    llm, _ = _silent_end_caller(_TPS)
+    session = _action_session()
+    session._caller_opted_out = True
+    (text,) = await _run_turns(llm, session, "Just get rid of me.")
+    assert text == "Goodbye." and session._end_call_requested is True
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_accepted line=goodbye" in line
+
+
+async def test_f3_cause_is_end_call_accepted_when_both_apply(caplog):
+    caplog.set_level(logging.INFO)
+    llm, _ = _silent_end_caller()
+    session = _action_session()
+    (text,) = await _run_turns(llm, session, "Okay, thank you. Goodbye.")
+    assert text == "Goodbye."
+    assert session._voice_action_results["end_call"]["status"] == "accepted"
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_accepted line=goodbye" in line

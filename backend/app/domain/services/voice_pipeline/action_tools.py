@@ -270,7 +270,10 @@ async def run_voice_action(
              or getattr(session, "_machine_screening", False) is True)
             and not continuation_after(user_text)
         )
-        if not opted_out and not machine and not end_call_intent_present(
+        # An opt-out the phrase check recorded earlier in the call lets the ending
+        # through, as on the text-marker path (end_call.model_end_call_allowed).
+        opted_out_earlier = getattr(session, "_caller_opted_out", False) is True
+        if not opted_out and not machine and not opted_out_earlier and not end_call_intent_present(
             user_text, previous_assistant_text=previous_assistant_text
         ):
             result = _result(
@@ -321,12 +324,18 @@ async def run_voice_action(
                         if opted_out and opt_out_recorded else
                         " Opt-out not yet confirmed; do not say they were removed."
                         if opted_out else
+                        # The phrase check marked the caller earlier in this call:
+                        # saying "no opt-out was recorded" would be untrue.
+                        " The caller's opt-out was already noted earlier in this call."
+                        if opted_out_earlier and call_args.get("do_not_call") is True else
                         " No opt-out was recorded; do not say they were removed."
                         if call_args.get("do_not_call") is True else ""
                     ),
                 )
                 if opted_out:
                     result["opt_out"] = "recorded" if opt_out_recorded else "unconfirmed"
+                elif opted_out_earlier and call_args.get("do_not_call") is True:
+                    result["opt_out"] = "set_earlier"
                 elif call_args.get("do_not_call") is True:
                     result["opt_out"] = "not_recorded"
                 # A goodbye spoken with the request is not said twice (test
