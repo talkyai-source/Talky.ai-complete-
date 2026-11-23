@@ -276,6 +276,9 @@ export default function ContactsPage() {
     const allowed = campaignActions(useKnownPermissions());
     const canChange = allowed.update;
     const [listsRefreshToken, setListsRefreshToken] = useState(0);
+    // Bumped after a save or an import: the loading effect then reloads with the CURRENT
+    // page, search, list and campaign, not the ones captured when the save began.
+    const [contactsReloadToken, setContactsReloadToken] = useState(0);
 
     // Per-contact add/edit/delete (mirrors the campaign detail page).
     const [showAddContact, setShowAddContact] = useState(false);
@@ -384,6 +387,10 @@ export default function ContactsPage() {
     const page = pageChoice.key === filterKey ? pageChoice.page : 1;
     const setPage = (next: number) => setPageChoice({ key: filterKey, page: next });
     const [contactsTotal, setContactsTotal] = useState(0);
+    // The page/search/list/campaign the stored rows and total answer; a different current key
+    // means the rows on screen belong to an earlier view.
+    const [answerKey, setAnswerKey] = useState("");
+    const answerIsCurrent = answerKey === `${filterKey}|${page}`;
 
     const loadContacts = useCallback(async () => {
         if (!selectedCampaign) return;
@@ -407,6 +414,7 @@ export default function ContactsPage() {
             setContactsError("");
             setContacts(res.items);
             setContactsTotal(res.total);
+            setAnswerKey(`${filterKey}|${page}`);
             // Only an UNFILTERED load is authoritative for "does this campaign
             // have any contacts at all".
             if (unfiltered) setCampaignHasContacts(res.total > 0);
@@ -427,7 +435,7 @@ export default function ContactsPage() {
         // loadContacts() owns the loading + error + results state.
         // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on filter change, not derivable during render
         void loadContacts();
-    }, [loadContacts]);
+    }, [loadContacts, contactsReloadToken]);
 
     async function handleSaveContact(e: React.FormEvent) {
         e.preventDefault();
@@ -453,7 +461,7 @@ export default function ContactsPage() {
             setEditingContact(null);
             setCampaignHasContacts(true);
             setListsRefreshToken((t) => t + 1);
-            await loadContacts();
+            setContactsReloadToken((t) => t + 1);
         } catch (err) {
             if (addPermission.showServerError(err)) return;
             setContactFormError(err instanceof Error ? err.message : `Failed to ${editingContact ? "update" : "add"} contact`);
@@ -670,7 +678,7 @@ export default function ContactsPage() {
         if (response.imported > 0) setCampaignHasContacts(true);
         setShowUploadPanel(false);
         setListsRefreshToken((t) => t + 1);
-        void loadContacts();
+        setContactsReloadToken((t) => t + 1);
     }
 
     async function handleUpload() {
@@ -1412,7 +1420,7 @@ export default function ContactsPage() {
 
                         {contactsError ? (
                             <ErrorState message={contactsError} requestId={contactsErrorRequestId} onRetry={loadContacts} />
-                        ) : contactsLoading ? (
+                        ) : contactsLoading || !answerIsCurrent ? (
                             <LoadingState title="Loading contacts…" />
                         ) : contacts.length === 0 ? (
                             <EmptyState kind="search" title="No contacts match your search or filter." />

@@ -70,7 +70,11 @@ test("changing the search goes back to page 1", async () => {
     await waitFor(() => assert.equal(shown("Showing 51 to 100 of 120 contacts"), true), { timeout: SLOW });
 
     fireEvent.change(screen.getByLabelText("Search contacts by phone number"), { target: { value: "7400" } });
-    await waitFor(() => assert.equal(shown("Showing 1 to 50 of 120 contacts"), true), { timeout: SLOW });
+    await waitFor(() => {
+        assert.equal(shown("Showing 1 to 50 of 120 contacts"), true);
+        assert.ok(screen.queryAllByText("+447400100000").length > 0, "page 1's rows are on screen");
+        assert.equal(screen.queryAllByText("+447400100050").length, 0, "page 2's rows are gone");
+    }, { timeout: SLOW });
     const last = read.mock.calls.at(-1)!.arguments;
     assert.equal(last[1], 1, "the search asked for page 1");
     assert.equal((last[3] as { search: string }).search, "7400");
