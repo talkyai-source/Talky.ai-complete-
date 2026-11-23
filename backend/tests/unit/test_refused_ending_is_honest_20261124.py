@@ -1,0 +1,344 @@
+"""A refused ending is never answered with "I didn't catch that" (24 Nov 2026).
+
+Inspection of the 23 Nov calls: the model asked to end the call, the code
+refused (the caller's own words did not end it), the model then returned
+nothing, and the agent said "Sorry, I didn't quite catch that" although the
+caller had just been understood. Three fixes, all asserted here:
+
+D1 the stand-in line after a refused ending (tool or text marker);
+D2 the refused result tells the model what to do next;
+D3 the log shows what happened to an ending and to a do-not-call flag.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from app.infrastructure.llm.groq import GroqLLMProvider
+
+from app.domain.models.conversation import Message, MessageRole
+from app.domain.models.session import CallSession
+from app.domain.services.end_session_action import caller_signaled_end
+from app.domain.services.voice_pipeline.action_tools import (
+    ACTION_END_CALL, result_json, run_voice_action,
+)
+from app.domain.services.voice_pipeline import turn_streamer
+from app.domain.services.voice_pipeline_service import VoicePipelineService
+from tests.unit.test_end_call_closing_words import END_CALL, _groq, _tools
+from tests.unit.test_model_verified_opt_out import PARAPHRASE
+from tests.unit.test_voice_action_contract import _session as _action_session
+
+OLD_SENTENCE = "Sorry, I didn't quite catch that — could you say it again?"
+# A missing constant falls back to the OLD sentence, so the tests below fail on old code.
+REFUSED_ENDING_LINE = getattr(turn_streamer, "REFUSED_ENDING_LINE", OLD_SENTENCE)
+NOT_CAUGHT_LINE = getattr(turn_streamer, "NOT_CAUGHT_LINE", OLD_SENTENCE)
+ASK_AGAIN_LINE = getattr(turn_streamer, "ASK_AGAIN_LINE", OLD_SENTENCE)
+REFUSED_ENDING_AGAIN_LINE = getattr(turn_streamer, "REFUSED_ENDING_AGAIN_LINE", OLD_SENTENCE)
+NO_END_WORDS = "Tell me more about it."
+
+
+@pytest.fixture(autouse=True)
+def _env(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
+    monkeypatch.setenv("GROQ_API_KEY", "test")
+
+
+class _PlainLLM:
+    def __init__(self, chunks):
+        self._chunks = chunks
+
+    async def stream_chat_with_timeout(self, *args, **kwargs):
+        for chunk in self._chunks:
+            yield chunk
+
+
+class _ToolLLM:
+    """Asks end_call through the real tool runner and yields no words."""
+    name = "groq"
+    supports_tools = True
+
+    def __init__(self):
+        self.seen = None
+
+    async def stream_chat_with_tools(self, *args, **kwargs):
+        self.seen = json.loads(await kwargs["tool_runner"](ACTION_END_CALL, {"reason": "x"}))
+        if False:
+            yield ""
+
+    async def stream_chat_with_timeout(self, *args, **kwargs):
+        if False:
+            yield ""
+
+
+async def _turn(llm, said, session=None):
+    service = VoicePipelineService(
+        stt_provider=AsyncMock(), llm_provider=llm,
+        tts_provider=AsyncMock(), media_gateway=AsyncMock(),
+    )
+    service.latency_tracker = MagicMock()
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    if session is None:
+        session = CallSession(
+            call_id="call-refused-end-1", campaign_id="c", lead_id="l",
+            provider_call_id="p", system_prompt="Plain.", voice_id="v",
+        )
+        session.barge_in_event = asyncio.Event()
+    session.conversation_history.append(Message(role=MessageRole.USER, content=said))
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    await asyncio.wait_for(service._stream_llm_and_tts(session), 5)
+    spoken = [c.args[1] for c in service.synthesize_and_send_audio.await_args_list]
+    return spoken, session
+
+
+def _zero_token_lines(caplog):
+    return [r.getMessage() for r in caplog.records if "zero_token_turn" in r.getMessage()]
+
+
+async def test_refused_end_call_tool_then_nothing_does_not_claim_a_mishearing(caplog):
+    caplog.set_level(logging.INFO)
+    llm, rounds = _silent_end_caller()  # the REAL Groq round loop and the REAL executor
+    session = _action_session()
+    spoken = await _run_turns(llm, session, NO_END_WORDS)
+    assert session._voice_action_results["end_call"]["status"] == "caller_intent_unconfirmed"
+    assert len(rounds) == 2  # round 2 ran with the tool result
+    assert spoken == [REFUSED_ENDING_LINE]
+    assert "catch" not in spoken[0].lower()
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_refused line=refused_ending" in line
+    assert "raw_chars=0" in line
+    assert NO_END_WORDS not in caplog.text
+
+
+async def test_nothing_and_no_request_keeps_the_old_sentence_byte_for_byte(caplog):
+    caplog.set_level(logging.INFO)
+    spoken, _ = await _turn(_PlainLLM([]), NO_END_WORDS)
+    assert NOT_CAUGHT_LINE == OLD_SENTENCE
+    assert spoken == [OLD_SENTENCE]
+    (line,) = _zero_token_lines(caplog)
+    assert line.startswith("zero_token_turn call=call-refused-end-1 — LLM produced no speech; spoke recovery line")
+    assert "cause=no_action line=not_caught" in line
+
+
+async def test_caller_signalled_end_and_nothing_still_says_goodbye(caplog):
+    caplog.set_level(logging.INFO)
+    spoken, session = await _turn(_PlainLLM([]), "Okay, thank you. Goodbye.")
+    assert spoken == ["Goodbye."]
+    assert session._end_call_requested is True
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=no_action line=goodbye" in line
+
+
+async def test_refused_text_marker_alone_is_visible_and_logged_once(caplog):
+    caplog.set_level(logging.INFO)
+    spoken, session = await _turn(_PlainLLM(["[[END_CALL]]"]), NO_END_WORDS)
+    assert spoken == [REFUSED_ENDING_LINE]
+    assert getattr(session, "_end_call_requested", False) is False
+    assert sum("end_call_marker_refused" in r.getMessage() for r in caplog.records
+               if "zero_token_turn" not in r.getMessage()) == 1
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_marker_refused line=refused_ending" in line
+
+
+@pytest.mark.parametrize("reply", ["No thanks", "Nothing else", "That's all", "Not interested"])
+def test_the_products_detector_accepts_a_decline_after_the_new_line(reply):
+    assert caller_signaled_end(reply, previous_assistant_text=REFUSED_ENDING_LINE) is True
+
+
+def test_the_products_detector_does_not_end_on_a_question():
+    assert caller_signaled_end("Who is this?", previous_assistant_text=REFUSED_ENDING_LINE) is False
+
+
+async def test_refused_result_carries_the_instruction_and_an_accepted_one_does_not():
+    refused = await run_voice_action(_action_session(), ACTION_END_CALL, {"reason": "x"}, user_text=NO_END_WORDS)
+    accepted = await run_voice_action(_action_session(), ACTION_END_CALL, {"reason": "x"}, user_text="Goodbye.")
+    assert refused["status"] == "caller_intent_unconfirmed"
+    assert "Do not say goodbye" in refused["next_step"] and "stays open" in refused["next_step"]
+    assert refused["message"] == "The caller has not clearly ended the conversation."
+    assert refused["success"] is False and refused["confirmation_allowed"] is False
+    assert refused["ends_turn"] is True
+    assert "next_step" not in accepted
+
+
+async def test_the_tool_message_in_the_next_round_contains_the_instruction():
+    provider, rounds = _groq([(None, END_CALL), ("Sure, go ahead.", None)])
+
+    async def run(name, args):
+        return result_json(await run_voice_action(_action_session(), name, args, user_text=NO_END_WORDS))
+
+    out = [t async for t in provider.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content=NO_END_WORDS)],
+        tools=_tools(), tool_runner=run, max_tool_rounds=3)]
+    assert "".join(out) == "Sure, go ahead."
+    tool_messages = [m for m in rounds[1]["extra_messages"] if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert "Do not say goodbye" in json.loads(tool_messages[0]["content"])["next_step"]
+
+
+def _opt_session():
+    return SimpleNamespace(call_id="call-optout-log-1", conversation_history=[])
+
+
+def _result_lines(caplog):
+    return [r.getMessage() for r in caplog.records if r.getMessage().startswith("voice_action_result")]
+
+
+async def test_refused_flag_with_an_unverified_quote_is_logged_without_any_words(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    purge = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell", purge)
+    said, quote = "What does the sleeper seat cost?", "remove me from your list"
+    result = await run_voice_action(
+        _opt_session(), ACTION_END_CALL,
+        {"reason": "x", "do_not_call": True, "opt_out_quote": quote}, user_text=said)
+    assert result["status"] == "caller_intent_unconfirmed"
+    (line,) = _result_lines(caplog)
+    assert line.endswith("status=caller_intent_unconfirmed do_not_call=True opt_out=quote_not_verified")
+    assert said not in caplog.text and quote not in caplog.text
+
+
+@pytest.mark.parametrize("write_ok,expected", [(True, "recorded"), (False, "write_unconfirmed")])
+async def test_a_verified_opt_out_is_logged_by_what_the_write_did(monkeypatch, caplog, write_ok, expected):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=write_ok))
+    await run_voice_action(
+        _opt_session(), ACTION_END_CALL,
+        {"reason": "x", "do_not_call": True, "opt_out_quote": "never bother this number again"},
+        user_text=PARAPHRASE)
+    (line,) = _result_lines(caplog)
+    assert line.endswith(f"status=accepted do_not_call=True opt_out={expected}")
+    assert PARAPHRASE not in caplog.text and "never bother this number again" not in caplog.text
+
+
+async def test_no_flag_is_logged_as_none_and_other_actions_keep_their_line(caplog):
+    caplog.set_level(logging.INFO)
+    await run_voice_action(_opt_session(), ACTION_END_CALL, {"reason": "bye"}, user_text="Okay, goodbye.")
+    await run_voice_action(_opt_session(), "not_an_action", {}, user_text="Goodbye.")
+    ending, other = _result_lines(caplog)
+    assert ending.endswith("status=accepted do_not_call=False opt_out=none")
+    assert other == "voice_action_result call=call-optout- action=not_an_action success=False status=unknown_action"
+
+
+# --- review findings (24 Nov 2026) ---------------------------------------------
+
+def _end_call_args(args):
+    return {"id": "end-1", "name": ACTION_END_CALL, "arguments": dict(args),
+            "arguments_raw": json.dumps(args), "arguments_valid": True}
+
+
+def _silent_end_caller(args=None):
+    """Real Groq tool loop: round 1 asks end_call with no words, later rounds say nothing."""
+    provider, rounds = GroqLLMProvider(), []
+
+    async def stream(messages, **kwargs):
+        rounds.append(kwargs)
+        if not kwargs.get("extra_messages") and kwargs.get("tool_calls_sink") is not None:
+            kwargs["tool_calls_sink"].append(_end_call_args(args or {"reason": "caller declined"}))
+        if False:
+            yield ""
+
+    provider.stream_chat = stream
+    return provider, rounds
+
+
+def _service(llm):
+    svc = VoicePipelineService(
+        stt_provider=AsyncMock(), llm_provider=llm,
+        tts_provider=AsyncMock(), media_gateway=AsyncMock(), mute_during_tts=False,
+    )
+    svc.latency_tracker = MagicMock()
+    svc.latency_tracker.get_metrics.return_value = None
+    svc.transcript_service = MagicMock()
+    svc.synthesize_and_send_audio = AsyncMock(return_value=False)
+    return svc
+
+
+async def _run_turns(llm, session, *said):
+    svc = _service(llm)
+    svc._barge_in_events[session.call_id] = session.barge_in_event
+    out = []
+    for words in said:
+        text, _, _ = await asyncio.wait_for(svc._run_turn(session, words), 10)
+        out.append(text)
+    return out
+
+
+async def test_the_refused_ending_line_is_not_spoken_twice_running():
+    llm, _ = _silent_end_caller()
+    session = _action_session()
+    said = await _run_turns(llm, session, NO_END_WORDS, "No.", "I said no.")
+    assert said[:2] == [REFUSED_ENDING_LINE, REFUSED_ENDING_AGAIN_LINE]
+    assert all(x != y for x, y in zip(said, said[1:]))  # never the same line twice running
+    assert REFUSED_ENDING_AGAIN_LINE == "Okay, no problem." and "?" not in REFUSED_ENDING_AGAIN_LINE
+
+
+async def test_a_refused_do_not_call_is_answered_with_ask_again_never_no_problem(caplog):
+    caplog.set_level(logging.INFO)
+    llm, rounds = _silent_end_caller({"reason": "opt out", "do_not_call": True,
+                                      "opt_out_quote": "I don't want to hear from you again"})
+    session = _action_session()
+    (text,) = await _run_turns(llm, session, "I don't want to hear from you again.")
+    assert text == ASK_AGAIN_LINE == "Sorry, could you say that once more?"
+    assert not text.startswith("No problem")
+    assert getattr(session, "_caller_opted_out", False) is not True
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_refused_do_not_call line=ask_again" in line
+    tool_msgs = [m for r in rounds for m in (r.get("extra_messages") or []) if m.get("role") == "tool"]
+    assert tool_msgs
+    for m in tool_msgs:
+        step = json.loads(m["content"])["next_step"]
+        assert "No opt-out was recorded; do not say they will not be contacted again." in step
+
+
+async def test_refused_next_step_has_the_not_already_spoken_clause_and_the_caveat_only_when_flagged():
+    plain = await run_voice_action(_action_session(), ACTION_END_CALL, {"reason": "x"}, user_text=NO_END_WORDS)
+    flagged = await run_voice_action(
+        _action_session(), ACTION_END_CALL,
+        {"reason": "x", "do_not_call": True, "opt_out_quote": "stuff"}, user_text=NO_END_WORDS)
+    for r in (plain, flagged):
+        assert "If you have not already spoken in this turn" in r["next_step"]
+        assert "Do not say goodbye" in r["next_step"] and "stays open" in r["next_step"]
+    assert "No opt-out was recorded" not in plain["next_step"]
+    assert flagged["next_step"].endswith(" No opt-out was recorded; do not say they will not be contacted again.")
+
+
+async def test_an_accepted_opt_out_followed_by_silence_says_goodbye(monkeypatch, caplog):
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.purge_opt_out_before_farewell",
+                        AsyncMock(return_value=True))
+    llm, _ = _silent_end_caller({"reason": "opt out", "do_not_call": True,
+                                 "opt_out_quote": "never bother this number again"})
+    session = _action_session()
+    (text,) = await _run_turns(llm, session, PARAPHRASE)
+    assert session._voice_action_results["end_call"]["status"] == "accepted"
+    assert text == "Goodbye." and session._end_call_requested is True
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_accepted line=goodbye" in line
+
+
+async def test_a_mailbox_ending_followed_by_silence_says_goodbye(caplog):
+    caplog.set_level(logging.INFO)
+    llm, _ = _silent_end_caller({"reason": "voicemail"})
+    session = _action_session()
+    session._amd_voicemail = True
+    (text,) = await _run_turns(llm, session, "Please leave your message after the tone.")
+    assert session._voice_action_results["end_call"]["status"] == "accepted"
+    assert text == "Goodbye."
+    (line,) = _zero_token_lines(caplog)
+    assert "cause=end_call_accepted line=goodbye" in line
+
+
+async def test_the_log_says_set_earlier_when_the_phrase_check_already_recorded_the_opt_out(caplog):
+    caplog.set_level(logging.INFO)
+    session = _action_session()
+    session._caller_opted_out = True
+    result = await run_voice_action(session, ACTION_END_CALL, {"reason": "x"},
+                                    user_text="Stop calling me. Why do you keep ringing?")
+    assert result["status"] == "caller_intent_unconfirmed"
+    line = [r.getMessage() for r in caplog.records if r.getMessage().startswith("voice_action_result")][-1]
+    assert line.endswith("status=caller_intent_unconfirmed do_not_call=False opt_out=set_earlier")
