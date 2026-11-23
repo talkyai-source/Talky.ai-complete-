@@ -115,7 +115,7 @@ export function OutboundNoticePlacement({
                         <div>
                             <label htmlFor="rp-placement-opening" className="text-sm text-foreground">Inside the opening sentence</label>
                             <div id="rp-placement-opening-help" className="text-xs text-muted-foreground">
-                                {`The person hears one sentence: "${OPENING_RECORDED}" Your notice above is not spoken on outgoing calls.`}
+                                {`The person hears one sentence: "${OPENING_RECORDED}" Your notice above is then said only on a call where the agent does not say this opening, for example when the person's first words are not a greeting.`}
                             </div>
                         </div>
                     </div>

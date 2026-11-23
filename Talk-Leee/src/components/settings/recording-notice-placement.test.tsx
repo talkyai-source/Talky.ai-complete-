@@ -99,7 +99,9 @@ test("both options show what the person will hear", async () => {
     assert.ok(text.includes("Your notice first, as its own sentence"));
     assert.ok(text.includes("Inside the opening sentence"));
     assert.ok(text.includes(", on a recorded line"));
-    assert.ok(text.includes("not spoken on outgoing calls"));
+    // The account's own sentence is still said when no opening is said; the screen must not promise otherwise.
+    assert.ok(text.includes("Your notice above is then said only on a call where the agent does not say this opening"));
+    assert.ok(!text.includes("not spoken on outgoing calls"));
     assert.ok(text.includes("Outgoing calls only"));
     assert.ok(text.includes("[agent name]") && text.includes("[company]") && text.includes("[first name]"));
     assert.equal((screen.getByLabelText("Your notice first, as its own sentence") as HTMLInputElement).checked, true);
