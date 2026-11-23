@@ -887,8 +887,9 @@ class CampaignService:
         who = "1 contact was" if count == 1 else f"{count} contacts were"
         its = "its" if count == 1 else "their"
         return (
-            f" {who} not queued because {its} list has no confirmed permission to "
-            "call. Open the contact list and confirm it, then start the campaign again."
+            f" {who} not queued because no permission to call is recorded for "
+            f"{its} list. Confirm permission on the contact list; while the "
+            "campaign runs, they are then queued straight away."
         )
 
     @staticmethod
@@ -1385,11 +1386,13 @@ class CampaignService:
         match is on (list id, tenant) so another tenant's list with the same id
         never confirms this tenant's contact.
         """
-        from app.domain.services.dialer.block_reasons import (
-            contact_permission_dial_gate_enabled,
+        from app.domain.services.dialer.permission_gate import (
+            contact_permission_dial_gate_mode,
+            log_start_decision,
         )
 
-        if not contact_permission_dial_gate_enabled():
+        mode = contact_permission_dial_gate_mode()
+        if mode == "off":
             return leads
         list_ids = sorted({str(l["list_id"]) for l in leads if l.get("list_id")})
         confirmed: set = set()
@@ -1408,7 +1411,16 @@ class CampaignService:
                     for r in (getattr(resp, "data", None) or [])
                     if r.get("consent_confirmed_at")
                 }
-            except Exception as exc:  # noqa: BLE001 — fail closed, see docstring
+            except Exception as exc:  # noqa: BLE001 — see docstring
+                log_start_decision(
+                    campaign_id, scoped_tenant, mode, len(leads), len(leads), False,
+                )
+                if mode == "warn":
+                    logger.warning(
+                        "permission-confirmation lookup failed for campaign %s "
+                        "(warn mode: selecting every lead): %s", campaign_id, exc,
+                    )
+                    return leads
                 logger.warning(
                     "permission-confirmation lookup failed for campaign %s "
                     "(selecting no leads as fail-safe): %s",
@@ -1422,13 +1434,18 @@ class CampaignService:
             if l.get("list_id")
             and (str(l["list_id"]), str(l.get("tenant_id") or scoped_tenant)) in confirmed
         ]
+        without = len(leads) - len(kept)
+        log_start_decision(campaign_id, scoped_tenant, mode, len(leads), without, True)
+        if mode == "warn":
+            # Nothing is withheld in warn mode: the count above is all it does.
+            return leads
         if withheld_out is not None:
-            withheld_out.append(len(leads) - len(kept))
-        if len(kept) != len(leads):
+            withheld_out.append(without)
+        if without:
             logger.info(
                 "campaign %s: skipped %d lead(s) whose list has no calling-permission "
                 "confirmation (not enqueued, still pending)",
-                campaign_id, len(leads) - len(kept),
+                campaign_id, without,
             )
         return kept
 

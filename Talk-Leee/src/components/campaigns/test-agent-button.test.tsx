@@ -180,6 +180,21 @@ test("the auth_required retry still opens the second socket after the refresh", 
     assert.ok(streams[0].tracks.every((t) => !t.stopped), "retry session must keep its microphone");
 });
 
+test("the button's own renewal keeps the new access token as the stored one", async () => {
+    window.localStorage.removeItem("talklee.auth.token");
+    mock.method(sharedHttpClient(), "request", async (opts: { path: string }) => (
+        opts.path === "/auth/refresh" ? { access_token: "renewed-by-test-agent", user_id: "u", tenant_id: "t" } : {}
+    ));
+    render(<TestAgentButton campaignId="camp-1" />);
+    startTest();
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 1), { timeout: SLOW });
+    await act(async () => { FakeWebSocket.instances[0].serverSends({ type: "error", code: "auth_required" }); });
+    await waitFor(() => assert.equal(FakeWebSocket.instances.length, 2), { timeout: SLOW });
+    assert.equal(sharedHttpClient().getToken(), "renewed-by-test-agent");
+    assert.equal(window.localStorage.getItem("talklee.auth.token"), "renewed-by-test-agent");
+    window.localStorage.removeItem("talklee.auth.token");
+});
+
 test("the agent holds on tts_pause, continues on tts_resume, and an interruption clears the hold", async () => {
     // Pause-then-decide barge-in (test call 850b885e, 2026-10-13): the server
     // holds the agent the moment the caller starts talking.

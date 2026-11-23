@@ -455,6 +455,15 @@ function rotatedSuccessor(epoch: number, from: string | null): string | null {
     return cur;
 }
 
+/**
+ * A sibling tab renewed this sign-in's token (same user, tenant and session).
+ * Record it the way this client records its own renewal, so requests already in
+ * flight with `from` stay valid instead of failing as an account change.
+ */
+export function adoptSiblingTabRotation(from: string, to: string) {
+    recordRotation(_identityEpoch, from, to);
+}
+
 /** Test-only: shorten (or, with null, restore) the refresh timeout. */
 export function __setRefreshTimeoutMsForTests(ms: number | null) {
     _refreshTimeoutMs = ms ?? REFRESH_TIMEOUT_MS;
@@ -578,7 +587,14 @@ export function createHttpClient(config: HttpClientConfig) {
                 throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
                     url: refreshUrl, method: "POST" });
             }
-            if (scope.identity) recordRotation(scope.epoch, scope.token, result.accessToken);
+            if (scope.identity) {
+                recordRotation(scope.epoch, scope.token, result.accessToken);
+                // A sibling tab's renewal may have been adopted while this one was
+                // queued: requests this tab started with THAT token are the same
+                // sign-in too, and must follow on to the new token.
+                const live = getToken();
+                if (live && live !== scope.token) recordRotation(scope.epoch, live, result.accessToken);
+            }
             setToken(result.accessToken);
             scope.token = result.accessToken;
         }

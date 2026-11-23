@@ -93,6 +93,10 @@ async def initiate_call(
         from app.core.container import get_container
         from app.domain.models.dialer_job import DialerJob
         from app.domain.services.phone_number_normalizer import normalize_phone_for_capture
+        from app.domain.services.dialer.permission_gate import (
+            contact_permission_dial_gate_mode,
+            permission_missing_for_lead,
+        )
         if not campaign_id:
             return {"success": False, "error": "Select an active outbound campaign before placing a call."}
         phone = normalize_phone_for_capture(phone_number, None)
@@ -112,6 +116,12 @@ async def initiate_call(
             """,tenant_id,campaign_id,phone,lead_id)
             if not lead or lead["do_not_call"] or lead["status"] == "deleted":
                 return {"success": False, "error": "No callable contact matches this number in the selected campaign."}
+            # CONTACT_PERMISSION_DIAL_GATE=on: say so now rather than queue a job the
+            # dialler would drop. Other positions never look this up.
+            if contact_permission_dial_gate_mode() == "on" and await permission_missing_for_lead(
+                conn, tenant_id, str(lead["id"])
+            ):
+                return {"success": False, "error": "No permission to call this contact is recorded. Confirm permission on the contact's list in the campaign first."}
             if await conn.fetchval("""
                 SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid
                     AND status IN ('pending','queued','processing','calling','retry_scheduled'))

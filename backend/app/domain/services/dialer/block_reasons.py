@@ -103,11 +103,14 @@ class BlockCode(str, Enum):
 
 
 def contact_permission_dial_gate_enabled() -> bool:
-    """CONTACT_PERMISSION_DIAL_GATE, read at call time. Only 1/true/yes/on (any
-    case) turn it on; unset or anything else is off."""
-    return os.getenv("CONTACT_PERMISSION_DIAL_GATE", "").strip().lower() in (
-        "1", "true", "yes", "on",
+    """CONTACT_PERMISSION_DIAL_GATE, read at call time. True only for the ``on``
+    position (1/true/yes/on, any case); unset, ``warn`` or anything else reads
+    as off here. ``warn`` is handled by ``permission_gate``."""
+    from app.domain.services.dialer.permission_gate import (
+        contact_permission_dial_gate_mode,
     )
+
+    return contact_permission_dial_gate_mode() == "on"
 
 
 #: The codes that mean "this campaign is WAITING for its calling window", not
@@ -687,10 +690,9 @@ def classify(
     if "contact_permission_missing" in low:
         return BlockReason(
             BlockCode.CONTACT_PERMISSION_MISSING,
-            "This contact's list has no confirmation that you have permission to "
-            "call these contacts, so the call was not placed. Open the contact "
-            "list, confirm you have permission to call these contacts, then "
-            "start the campaign again.",
+            "No permission to call is recorded for this contact's list, so the "
+            "call was not placed. Confirm permission on the contact list. While "
+            "the campaign runs, its contacts are then queued straight away.",
             severity="warning", stage="contact", details=extra,
         )
 

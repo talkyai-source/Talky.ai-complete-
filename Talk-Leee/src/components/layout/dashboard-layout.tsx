@@ -25,6 +25,7 @@ import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
 import { FailedCallAlerts } from "@/components/notifications/failed-call-alerts";
 import { SupportLauncher } from "@/components/support/support-launcher";
+import { LegalReacceptanceDialog } from "@/components/auth/legal-reacceptance-dialog";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -227,6 +228,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                 unread notifications. Renders nothing until GET /support/config
                 says support is on for this account. */}
             <SupportLauncher />
+
+            {/* Blocks the app until a customer who owes the current terms accepts them. */}
+            <LegalReacceptanceDialog />
             </div>
         </div>
     );

@@ -17,6 +17,10 @@ from app.core.db_utils import acquire_with_tenant
 from app.domain.models.dialer_job import DialerJob
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
 from app.domain.services.dialer.job_states import ACTIVE_STATUSES
+from app.domain.services.dialer.permission_gate import (
+    contact_permission_dial_gate_mode,
+    permission_missing_for_lead,
+)
 from app.domain.services.dnc_service import DNCService, normalize_e164
 from app.domain.services.telephony.outbound_readiness import evaluate_outbound_readiness
 
@@ -106,6 +110,12 @@ async def preview_redial(pool, *, tenant_id: str, call_id: str) -> dict:
     async with acquire_with_tenant(pool, tenant_id) as conn:
         row = await _context(conn, tenant_id, call_id)
         own, busy = await _job_state(conn, tenant_id, row, job_id)
+        # CONTACT_PERMISSION_DIAL_GATE=on: refuse now instead of queueing a job
+        # the dialler would drop. Other positions never look this up.
+        permission_missing = (
+            contact_permission_dial_gate_mode() == "on"
+            and await permission_missing_for_lead(conn, tenant_id, row["lead_id"])
+        )
     block = _local_block(row)
     if block:
         return _preview(row, job_id, block)
@@ -113,6 +123,8 @@ async def preview_redial(pool, *, tenant_id: str, call_id: str) -> dict:
         return _preview(row, job_id, ("already_requested", "This call has already been redialled. Open the new call to try again."))
     if busy:
         return _preview(row, job_id, ("contact_busy", "A call or queued attempt already exists for this contact."))
+    if permission_missing:
+        return _preview(row, job_id, ("contact_permission_missing", "No permission to call this contact is recorded. Confirm permission on the contact's list in the campaign first."))
     # Uses the shared global + tenant DNC lookup. Failures propagate; never
     # show a ready button when suppression or route evidence is unavailable.
     if await DNCService(pool).is_on_dnc(tenant_id=tenant_id, e164=row["phone_number"]):

@@ -334,6 +334,7 @@ jobs:
             tests/integration/test_dialer_destination_busy_pg.py \
             tests/integration/test_running_campaign_new_contacts_pg.py \
             tests/integration/test_contact_list_permission_pg.py \
+            tests/integration/test_contact_permission_ungrouped_pg.py \
             tests/integration/test_dialer_stuck_and_lost_leads_pg.py \
             tests/integration/test_dnc_schema_migration.py \
             tests/integration/test_op07_native_dnc.py \
