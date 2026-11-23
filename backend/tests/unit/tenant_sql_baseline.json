@@ -336,7 +336,7 @@
       "id": "09271bb5fb58b7115b19faf06b2ffe892c8e258b11c3452685b769fa6fe425ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 3052,
+      "line": 3061,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -1049,7 +1049,7 @@
       "id": "052bc8442a497e091c039770c430407b14bc4c97831fd86afb10c3ec47a4cd9e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_attempts_today",
-      "line": 2732,
+      "line": 2741,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -1098,7 +1098,7 @@
       "id": "1932d77adb490c8554c84be0f3a7d8556dc3795ca145191a722c44b3c9ad77d1",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2973,
+      "line": 2982,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -1660,7 +1660,7 @@
       "id": "30f43b2bcb1d0980e26d85305e0e3a46397ebe3a0be9d478d4f1aaa854e5003b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_campaign_calling_config",
-      "line": 2490,
+      "line": 2499,
       "method": "fetchval",
       "tables": [
         "campaigns"
@@ -1774,7 +1774,7 @@
       "id": "3703ed4d5cef73e13a0043ab6270e6c5415d7574280d93aa94b425943bb3964b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2947,
+      "line": 2956,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -2387,7 +2387,7 @@
       "id": "487e1b5192d85f5114fdefaa5f12a6420d06d9830b69191efe80a9d8f607c62c",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_last_called",
-      "line": 2679,
+      "line": 2688,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2436,7 +2436,7 @@
       "id": "4ade25424bc1a3e0f75739755e72548af3e3c7f946f7b1b6f89e46b1357a8945",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._campaign_inflight_calls",
-      "line": 2544,
+      "line": 2553,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -2738,7 +2738,7 @@
       "id": "55946d61b857a13071f79980232feb2e3293c6bcf1e05fa996c177063185be9d",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_lead_timezone",
-      "line": 2705,
+      "line": 2714,
       "method": "fetchval",
       "tables": [
         "leads"
@@ -2976,7 +2976,7 @@
       "id": "5f9b82e40498a7df8992ba5c19b12602225d936901f5f7b9d10da9ab679dd29e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._load_existing_call_intent",
-      "line": 2848,
+      "line": 2857,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -3196,7 +3196,7 @@
       "id": "66613a7831cf0d84f0ce7b8535c12d393cdf2c2ea8c1ca7e7d1edd0ea59283fb",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_route",
-      "line": 1257,
+      "line": 1260,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -3901,7 +3901,7 @@
       "id": "782bd5a3321c3ab0dfc79d78ab7634c187ba9191f87e698e2cb89360e76987b5",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_active_tenant_ids",
-      "line": 2113,
+      "line": 2122,
       "method": "fetch",
       "tables": [
         "campaigns"
@@ -4013,10 +4013,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "75ee9a70e1bef7267fd7c0e03738923e4c30895c7a769aee6fb38416ef10abb3",
+      "id": "510baba674365c84d57422cb522fc15393322e5ca87479ebe1c99c53ff221372",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._update_lead_status",
-      "line": 4191,
+      "line": 4200,
       "method": "execute",
       "tables": [
         "leads"
@@ -4218,7 +4218,7 @@
       "id": "846b0c6d66c0c9f4ec6d237aca4753fc00004d818c2311d5408e2d69b7b2da23",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._attempt_settled_failed_unanswered",
-      "line": 3636,
+      "line": 3645,
       "method": "fetchrow",
       "tables": [
         "calls",
@@ -4251,7 +4251,7 @@
       "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_from_number",
-      "line": 1218,
+      "line": 1221,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -5034,7 +5034,7 @@
       "id": "a1b9751685d701a3e78c01ee999fca8012c790e4b3a0d8d2f72fab2c3e59f3c4",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 2998,
+      "line": 3007,
       "method": "execute",
       "tables": [
         "call_events"
@@ -5066,7 +5066,7 @@
       "id": "a345e4856e73f82534509aff07e61ed4c8d684aced80686ec43b5d115f870e09",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._bind_call_intent",
-      "line": 3779,
+      "line": 3788,
       "method": "execute",
       "tables": [
         "call_legs"
@@ -5903,7 +5903,7 @@
       "id": "c1fd75a4915b6aabe45433890d55d5804a3573f7dafe9ecf7081e18bc709142e",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._create_call_intent",
-      "line": 3021,
+      "line": 3030,
       "method": "execute",
       "tables": [
         "call_events"
@@ -6656,10 +6656,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4be75aeb99a80712b3e7b523aacffbf5f50e6d1426be6e167335d14c98ee4d6c",
+      "id": "475694d4c8c8f13195b034ff1bab7eaa4bead32408b5cf16a4bdeae8496d2454",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3870,
+      "line": 3879,
       "method": "execute",
       "tables": [
         "calls"
@@ -7374,7 +7374,7 @@
       "id": "f314ccbcf229348fd598ef3b2f111cadc3f9356a02c7dc1fa7c54244013a89ba",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._lead_has_live_or_answered_call",
-      "line": 4266,
+      "line": 4275,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -8345,7 +8345,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3203,
+      "line": 3209,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8355,14 +8355,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3203.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3209.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3550,
+      "line": 3556,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8372,14 +8372,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3550.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3556.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3630,
+      "line": 3636,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8390,7 +8390,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3630.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3636.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -12580,7 +12580,7 @@
       "id": "d7b7b3373a5d2dfdddca782928dc0ede7004ed96cd4b459edbf6be77699c96ec",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._stale_payload_reason",
-      "line": 2369,
+      "line": 2378,
       "method": "fetchrow",
       "tables": [
         "contact_lists",
@@ -12592,7 +12592,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2369.",
+      "reason": "One read of the queued job, its contact and the contact's list before a dial. Each of the three tables is joined with its own tenant predicate on the job's tenant ($2): j.tenant_id, l.tenant_id and cl.tenant_id, on a connection opened with acquire_with_tenant for that tenant. The scanner cannot mark it scoped because the predicates sit in LEFT JOIN conditions (a missing row must read as NULL, not drop the result). A list belonging to another tenant can never satisfy the join. Exact reviewed operation: fetchrow; app/workers/dialer_worker.py:2378.",
       "category": "reviewed_tenant_scoped"
     },
     {
