@@ -22,6 +22,16 @@ class _Conn:
         self.reads: list[str] = []
 
     async def fetchval(self, sql, *args):
+        # Recorded before raising: the caller swallows errors, so the tests read `reads`.
+        self.reads.append(sql)
+        raise AssertionError("recording a review must not read anything")
+
+    async def fetch(self, sql, *args):
+        self.reads.append(sql)
+        raise AssertionError("recording a review must not read anything")
+
+    async def fetchrow(self, sql, *args):
+        self.reads.append(sql)
         raise AssertionError("recording a review must not read anything")
 
     async def execute(self, sql, *args):
