@@ -15,8 +15,9 @@ TENANT, SUB, CUS = "11111111-1111-1111-1111-111111111111", "sub_1", "cus_1"
 
 
 class State:
-    def __init__(self, tenant_status="active", dispute=None):
+    def __init__(self, tenant_status="active", dispute=None, staff=False):
         self.tenant = tenant_status
+        self.staff = staff  # staff_suspended_at is set (a suspension staff placed on purpose)
         self.meta = {"dispute": dispute} if dispute else {}
         self.sub_id = SUB
         self.customer = CUS
@@ -51,6 +52,8 @@ def _predicate_holds(pred, st, a):
         return st.customer == a[2]
     if pred == "subscription_status=$4":
         return st.tenant == a[3]
+    if pred == "staff_suspended_at IS NULL":
+        return not st.staff
     if pred == "(subscription_status IS DISTINCT FROM 'suspended' OR $4='suspended')":
         return st.tenant != "suspended" or a[3] == "suspended"
     raise AssertionError(f"fake does not understand predicate: {pred!r}")
@@ -435,15 +438,16 @@ async def _run_won_ended(st):
 @pytest.mark.parametrize("before", ["inactive", "suspended"], ids=["no_admin", "admin_suspended_first"])
 async def test_won_dispute_never_ends_a_paypal_plan_bought_in_between(before):
     # F2: pay as you go, a PayPal plan is started, a dispute opens on an old invoice, PayPal activates
-    # (plan granted, a suspension stays), the dispute is won.
-    st = State(before)
+    # (plan granted, a suspension stays), the dispute is won. A suspension staff placed first stays.
+    st = State(before, staff=before == "suspended")
     st.sub_id, st.plan = None, "payg"
     await _run("charge.dispute.created", "needs_response", st)
     assert st.tenant == "suspended"
     st.plan, st.paypal_row = "pro", "active"  # PayPal activation: plan and minutes granted, status kept
     r = await _run_won_ended(st)
     assert r["reason"] == "subscription_dispute_won"
-    assert st.plan == "pro" and st.tenant == "active" and ALLOCATIONS == []
+    assert st.plan == "pro" and ALLOCATIONS == []
+    assert st.tenant == ("suspended" if before == "suspended" else "active")
 
 
 @pytest.mark.asyncio
@@ -502,3 +506,32 @@ async def test_a_won_dispute_without_a_held_paypal_row_takes_the_ended_plan_path
     st.sub_id, st.plan = None, "payg"
     await _run_won_ended(st)
     assert (st.tenant, st.plan) == ("inactive", "payg") and ALLOCATIONS == [(TENANT, 0)]
+
+
+# ---- a suspension staff placed is not lifted by a won or closed dispute ----
+
+@pytest.mark.asyncio
+async def test_won_dispute_keeps_a_staff_suspension():
+    st = State("suspended", {"id": "dp_1", "status": "open"}, staff=True)
+    await _run("charge.dispute.closed", "won", st)
+    assert (st.tenant, st.meta["dispute"]["status"]) == ("suspended", "won")
+
+
+@pytest.mark.asyncio
+async def test_warning_closed_keeps_a_staff_suspension():
+    st = State("suspended", {"id": "dp_1", "status": "open"}, staff=True)
+    r = await _run("charge.dispute.closed", "warning_closed", st)
+    assert (st.tenant, st.meta["dispute"]["status"], r["status"]) == ("suspended", "closed", "handled")
+
+
+@pytest.mark.asyncio
+async def test_won_on_an_ended_plan_keeps_a_staff_suspension_then_the_deleted_event_ends_the_plan():
+    st = State("suspended", staff=True)
+    _open(st)
+    r = await _run_won_ended(st)
+    assert r["reason"] == "subscription_dispute_won"
+    # the lift changed no row, so the plan-end step did not run yet
+    assert (st.tenant, st.plan, st.sub_id, ALLOCATIONS) == ("suspended", "pro", SUB, [])
+    await bse._apply_subscription(Conn(st), _billing(), _sub("canceled"), _binding_current())
+    assert (st.tenant, st.plan, st.sub_id) == ("suspended", "payg", None)
+    assert ALLOCATIONS == [(TENANT, 0)]

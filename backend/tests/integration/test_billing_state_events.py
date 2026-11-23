@@ -429,6 +429,32 @@ async def test_a_chargeback_on_a_plan_suspends_calls_until_the_dispute_is_won(st
     assert stored == "won"
 
 
+async def test_a_staff_suspension_outlives_a_won_chargeback(state_db):
+    # Staff suspended the account (the mark) over a dispute suspension; the dispute is then won.
+    fixture = state_db
+    receipt, subscription, session, invoice = await _paid(fixture)
+    await _apply(fixture, "invoice.paid", invoice)
+    charge_id, payment_id, dispute_id = "ch_" + uuid4().hex, "pi_" + uuid4().hex, "dp_" + uuid4().hex
+    fixture.objects[("Charge", charge_id)] = stripe.Charge.construct_from({
+        "id": charge_id, "object": "charge", "livemode": False, "invoice": invoice["id"],
+        "customer": session["customer"], "payment_intent": payment_id, "currency": "usd",
+    }, "sk_test_synthetic")
+    dispute = {"id": dispute_id, "object": "dispute", "livemode": False, "charge": charge_id,
+               "payment_intent": payment_id, "status": "needs_response"}
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dispute, "sk_test_synthetic")
+    assert (await _apply(fixture, "charge.dispute.created", dispute))["reason"] == "subscription_dispute_suspended"
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(
+            "UPDATE tenants SET staff_suspended_at=clock_timestamp(), staff_suspended_by=$2::uuid WHERE id=$1",
+            fixture.tenants[0], uuid4())
+
+    fixture.objects[("Dispute", dispute_id)] = stripe.Dispute.construct_from(dict(dispute, status="won"), "sk_test_synthetic")
+    result = await _apply(fixture, "charge.dispute.closed", dispute)
+    assert result["reason"] == "subscription_dispute_won"
+    assert (await _tenant(fixture))["subscription_status"] == "suspended"
+    assert await _stored_dispute_status(fixture, subscription["id"]) == "won"
+
+
 async def test_a_lost_chargeback_on_a_plan_is_final_and_keeps_calls_suspended(state_db):
     # 20 Nov 2026: a lost dispute is stored as lost. Before, it was left
     # "open", so the account stayed suspended with nothing on record saying why.

@@ -24,8 +24,9 @@ def _sql(monkeypatch, operation):
     return statements
 
 
-def test_0106_is_the_single_head_on_top_of_0105():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0106_sits_on_0105_and_0107_sits_on_it():
+    assert SCRIPTS.get_heads() == ["0107_staff_suspension"]
+    assert SCRIPTS.get_revision("0107_staff_suspension").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0105_list_consent_complete"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 

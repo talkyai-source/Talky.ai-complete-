@@ -182,6 +182,7 @@ def tenant_row(idx: int, *, status: str = "active", tid: str | None = None) -> d
         "updated_at": "2026-08-29T00:00:00+00:00",
         "user_count": 1,
         "campaign_count": 2,
+        "staff_suspended_at": None,
     }
 
 
@@ -651,3 +652,74 @@ def test_int4_minutes_boundaries_for_create_and_quota():
             tenants_module.QuotaUpdateRequest(expected_updated_at=None, minutes_allocated=minutes)
         with pytest.raises(ValidationError):
             tenants_module.TenantCreateRequest(business_name="Synthetic", minutes_allocated=minutes)
+
+
+# ---------------------------------------------------------------------------
+# Staff suspension mark: a suspension staff place is not lifted by a won dispute.
+# ---------------------------------------------------------------------------
+
+STAFF_MARK = "2026-11-23T08:00:00+00:00"
+
+
+def mark_responder(*, status, marked):
+    seen = {}
+
+    def _respond(method, sql, args):
+        low = " ".join(sql.lower().split())
+        if low.startswith("select"):
+            row = tenant_row(1, tid=ARCHIVE_ID, status=status)
+            row["staff_suspended_at"] = STAFF_MARK if marked else None
+            return row
+        if "update tenants" in low:
+            seen["sql"], seen["args"] = low, args
+            row = tenant_row(1, tid=ARCHIVE_ID, status=args[1])
+            row["staff_suspended_at"] = STAFF_MARK if args[2] else None
+            row["staff_suspended_by"] = args[2]
+            return row
+        raise AssertionError(f"unexpected statement: {method} {sql}")
+
+    return _respond, seen
+
+
+BODY = {"expected_updated_at": "2026-08-29T00:00:00+00:00"}
+
+
+def test_suspend_writes_the_staff_mark_in_the_one_update():
+    respond, seen = mark_responder(status="active", marked=False)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/suspend", json=BODY)
+    assert r.status_code == 200, r.text
+    assert len(conn.statements_matching("UPDATE tenants")) == 1
+    assert "staff_suspended_by=$3::uuid" in seen["sql"] and "staff_suspended_at" in seen["sql"]
+    assert seen["args"][1:] == ("suspended", PLATFORM_ADMIN.id) and str(seen["args"][0]) == ARCHIVE_ID
+    assert audit.events[0]["after_state"]["staff_suspended_by"] == PLATFORM_ADMIN.id
+
+
+@pytest.mark.parametrize("verb,status", [("resume", "suspended"), ("archive", "suspended")])
+def test_resume_and_archive_clear_the_staff_mark(verb, status):
+    respond, seen = mark_responder(status=status, marked=True)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/{verb}", json=BODY)
+    assert r.status_code == 200, r.text
+    assert len(conn.statements_matching("UPDATE tenants")) == 1
+    assert seen["args"][2] is None
+    assert audit.events[0]["after_state"]["staff_suspended_at"] is None
+
+
+def test_suspend_over_a_dispute_suspension_writes_the_mark_and_audits():
+    respond, seen = mark_responder(status="suspended", marked=False)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/suspend", json=BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] is True
+    assert seen["args"][2] == PLATFORM_ADMIN.id
+    assert audit.events and audit.events[0]["action"] == "tenant_suspended"
+
+
+def test_suspend_over_a_staff_suspension_is_a_no_op():
+    respond, seen = mark_responder(status="suspended", marked=True)
+    client, conn, audit = make_client(respond)
+    r = client.post(f"/api/v1/admin/tenants/{ARCHIVE_ID}/suspend", json=BODY)
+    assert r.status_code == 200, r.text
+    assert r.json()["changed"] is False
+    assert not conn.statements_matching("UPDATE tenants") and not audit.events

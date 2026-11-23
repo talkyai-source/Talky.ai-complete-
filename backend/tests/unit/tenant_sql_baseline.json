@@ -1596,7 +1596,7 @@
       "id": "2e650443cfab95741485c35856c6716e1b12ad210ee9c7e1ab9c9633f3c39b47",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_dispute",
-      "line": 537,
+      "line": 549,
       "method": "fetchrow",
       "tables": [
         "invoices"
@@ -1693,7 +1693,7 @@
       "id": "346092b23a80d6469a1ab9b43475c1ee73e1225083885e8840c514a2adb190fe",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_invoice_for_adjustment",
-      "line": 477,
+      "line": 480,
       "method": "fetchval",
       "tables": [
         "invoices"
@@ -2028,7 +2028,7 @@
       "id": "3ed0ba96e146cf161d2f5eb7f69cc0d30701f5a994bbf837f452f0745097ea24",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_binding",
-      "line": 117,
+      "line": 121,
       "method": "fetchrow",
       "tables": [
         "billing_checkout_attempts"
@@ -4000,7 +4000,7 @@
       "id": "7d2d73e8ca4a64a60a87b9efb3e5aa8e02cf866e1bedc0ab4d0f3dd66abc29a2",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
-      "line": 306,
+      "line": 309,
       "method": "execute",
       "tables": [
         "invoices"
@@ -4032,7 +4032,7 @@
       "id": "7d57110ee8cf98f1615cd92b7116bf0fc15e16a0ef33b2e55c0dc0c16f94187c",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
-      "line": 279,
+      "line": 282,
       "method": "fetchrow",
       "tables": [
         "invoices"
@@ -4048,7 +4048,7 @@
       "id": "7d606d341b03cdb36053e635fec24df9629a04fc650272a95deabd852e693292",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_checkout",
-      "line": 399,
+      "line": 402,
       "method": "fetchrow",
       "tables": [
         "billing_checkout_attempts"
@@ -5617,7 +5617,7 @@
       "id": "337d0ab9e7a8aa83d7ee6ca1a52f8d0e54a04b0ee2b6964e6593cef109166cf3",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_subscription",
-      "line": 209,
+      "line": 213,
       "method": "execute",
       "tables": [
         "subscriptions"
@@ -6416,7 +6416,7 @@
       "id": "cc1d074d33dd76aca6fa051a800a51219d39483404c014525f49d68a5626f857",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_binding",
-      "line": 109,
+      "line": 113,
       "method": "fetchrow",
       "tables": [
         "subscriptions"
@@ -8484,7 +8484,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "0812e2659adb5eee3299a7d3244e9248d7f2123ef76e88ab3c106b68bc3bccfe",
+      "id": "f1a0279b419981460af8db574c26bad532961e1399138e91df2f979f9c48f57e",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 505,
@@ -9306,7 +9306,7 @@
       "id": "4a38d87d342b89497c27b26f6519ff3cf5a4a38be1475aad52d84bb928f84cd4",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "get_tenant",
-      "line": 549,
+      "line": 551,
       "method": "fetchrow",
       "tables": [
         "campaigns",
@@ -9317,7 +9317,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Platform-admin tenant detail (require_platform_admin line 544) selects the target account explicitly; the administrator is not restricted to a single current tenant. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/tenants.py:549.",
+      "reason": "Platform-admin tenant detail (require_platform_admin line 544) selects the target account explicitly; the administrator is not restricted to a single current tenant. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/tenants.py:551.",
       "category": "platform_admin"
     },
     {
@@ -10021,7 +10021,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "8b1e5f5dc02299f15aac85d73fa707f6ec4b568504e31528fec130162b7b3072",
+      "id": "67070590b1377fa7444e442e7cc37d632b3873c5ecd01a9a2283c83cc50b04d4",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 495,

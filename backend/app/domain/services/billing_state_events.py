@@ -620,7 +620,7 @@ async def _apply_dispute(conn, billing, event_type, data, source_reference):
     lifted = await conn.execute(
         """UPDATE tenants SET subscription_status=$3
            WHERE id=$1::uuid AND (stripe_subscription_id=$2 OR stripe_subscription_id IS NULL)
-             AND subscription_status=$4""",
+             AND subscription_status=$4 AND staff_suspended_at IS NULL""",
         tenant_id, subscription_id, (paypal_status or INACTIVE) if ended else restored, SUSPENDED,
     )
     if ended and paypal_status is None and lifted == "UPDATE 1":
