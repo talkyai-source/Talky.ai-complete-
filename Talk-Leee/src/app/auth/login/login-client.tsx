@@ -36,6 +36,7 @@ import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
+import { takeSignInEnded } from "@/lib/signin-ended-flag";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "email" | "password" | "mfa" | "passkey";
@@ -159,6 +160,17 @@ export default function LoginClientPage() {
         // The persisted logout receipt is available only after hydration.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setLogoutUnconfirmed(pending);
+    }, []);
+    // The server ended the sign-in and the expired handler sent the person here.
+    // The marker is read once and removed; only a true read switches the line on
+    // (a repeated effect run in dev finds it already gone and must not hide it).
+    const [signInEnded, setSignInEnded] = useState(false);
+    useEffect(() => {
+        if (takeSignInEnded()) {
+            // Browser-only marker, available after hydration.
+            // eslint-disable-next-line react-hooks/set-state-in-effect
+            setSignInEnded(true);
+        }
     }, []);
     const emailInputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
@@ -415,6 +427,9 @@ export default function LoginClientPage() {
                         {logoutUnconfirmed && <p role="status" className="mt-3 text-sm text-amber-700 dark:text-amber-300">
                             You signed out on this device, but we could not confirm that the server session ended.
                             Sign in again to review and revoke other sessions in Security settings.
+                        </p>}
+                        {signInEnded && !logoutUnconfirmed && <p role="status" className="mt-3 text-sm text-amber-700 dark:text-amber-300">
+                            Your sign-in ended, so you need to sign in again. This happens after 30 minutes without activity, or when a sign-in reaches its time limit.
                         </p>}
                     </CardHeader>
 

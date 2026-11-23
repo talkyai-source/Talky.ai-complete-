@@ -26,6 +26,7 @@ function isOnAuthFlowPath() {
 }
 
 
+import { markSignInEnded } from "@/lib/signin-ended-flag";
 import { ThemeProvider } from "./theme-provider";
 import { AuthProvider } from "@/lib/auth-context";
 import { PrefetchOnAuth } from "./prefetch-on-auth";
@@ -49,7 +50,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     //   2. React-Query's onError — keeps showing the "Session expired"
     //      toast.  The redirect itself is driven by the http-client now,
     //      but this stays as a defensive belt-and-braces call.
-    const redirectToLogin = () => {
+    const redirectToLogin = (sessionEnded = false) => {
         if (isOnAuthFlowPath()) {
             // Already on login — don't loop.  The login form's own
             // 401 handling (bad credentials) shows its inline error.
@@ -62,6 +63,8 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         // direct login, so don't bother passing next=/dashboard — let
         // the login page use its canonical default.
         let target = "/auth/login";
+        // Only the session-expired handler says why: the sign-in page shows its notice once.
+        if (sessionEnded) markSignInEnded();
         try {
             if (typeof window !== "undefined") {
                 const here = `${window.location.pathname}${window.location.search}`;
@@ -89,7 +92,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     // only runs on the FIRST 401 of the session — re-registering on
     // re-renders won't multiply notifications.
     useEffect(() => {
-        setSessionExpiredHandler(redirectToLogin);
+        setSessionExpiredHandler(() => redirectToLogin(true));
         return () => setSessionExpiredHandler(null);
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
