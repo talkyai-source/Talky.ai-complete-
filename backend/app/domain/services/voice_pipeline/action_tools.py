@@ -286,8 +286,11 @@ async def run_voice_action(
             # The whole result reaches the model as the tool message; this key
             # tells it what to do next (message is never spoken to the caller).
             result["next_step"] = (
-                "The call stays open. Reply to what the caller just said in one "
-                "short sentence. Do not say goodbye."
+                "The call stays open. If you have not already spoken in this turn, "
+                "reply to what the caller just said in one short sentence. "
+                "Do not say goodbye."
+                + (" No opt-out was recorded; do not say they will not be "
+                   "contacted again." if flagged_dnc else "")
             )
         else:
             try:
@@ -350,6 +353,7 @@ async def run_voice_action(
         # What happened to the ending and to a do-not-call flag; never words.
         opt_out_log = (
             ("recorded" if opt_out_recorded else "write_unconfirmed") if opted_out
+            else "set_earlier" if getattr(session, "_caller_opted_out", False) is True
             else "quote_not_verified" if flagged_dnc else "none"
         )
         log_line += " do_not_call=%s opt_out=%s"
