@@ -192,115 +192,176 @@ OPT_OUT_PENDING_LINE = "I've noted your request."
 # lookup rounds mid-navigation.
 _SECTION_ID = re.compile(r"\s*\bk[0-9a-f]{8}_\d+\b")
 
-# The agent, in the first person, claims to be human or denies being an AI
-# ("I'm a real person", "I am not a bot", "This is a real person speaking",
-# "You're talking to a live human"). Words are matched after curly apostrophes
-# are straightened. Only first-person / "this is" / "you're talking to" forms
-# match: "I can connect you to a real person" and "I'm not a real person, I'm an
-# AI assistant" are honest and pass. "human" must not be followed by a word
-# character or hyphen ("human-like" is not a claim).
+# The agent claims to be human or denies being an AI ("I'm a real person", "I am not a
+# bot", "This is Grace, a real person.", "You're talking to a live human", "I'm only
+# human", "It's not a robot."). Words are matched after curly apostrophes are
+# straightened. Several families of forms match: first person ("I'm ..."), "this is
+# ...", "it's ...", "you're talking to / you've got ...", an introduction by name
+# ("This is Grace from Acme, a real person"), and elliptical denials ("Not a robot.").
+# A form only matches while the clause is still about the speaker: "I can connect you
+# to a real person", "I'm not a real person, I'm an AI assistant", "After the
+# transfer, you're speaking with a person from our team" and "This is Grace, a real
+# person from our team will call you back" are honest and pass. "human" must not be
+# followed by a word character or hyphen ("human-like" is not a claim).
 _HUMAN_ADJ = r"(?:(?:real|live|actual|genuine|living|breathing)[,\s]+(?:and\s+)?)+"
 _HUMAN_NOUN = r"(?:person|human(?:\s+being)?|agent|representative|rep)(?![\w-])"
+# Intensifiers between "I'm" and the claim: "I'm only human", "I'm 100% human", "I'm as
+# human as you".
 _I_AM = (
     r"\b(?:i'?m|i\s+am)\s+"
-    r"(?:(?:just|definitely|really|actually|certainly|honestly|truly|totally|absolutely)\s+)?"
+    r"(?:(?:just|definitely|really|actually|certainly|honestly|truly|totally|absolutely"
+    r"|only|also|still|basically|fully|completely|entirely|very\s+much|pretty\s+much"
+    r"|100\s*%|a\s+hundred\s+percent|as)\s+)?"
 )
 # "This is Grace, ..." / "I'm Grace Miller here, ...": the agent introduces itself by
-# a name of one or two capitalised words, then makes the claim or the denial.
+# a name of one or two capitalised words, then makes the claim or the denial. There is
+# no bare "it's" lead-in: "It's Mark, a real person from our team" and "It's Bluebeam,
+# not AI" name someone or something else.
 _INTRO_NAME = (
-    r"\b(?:this\s+is|i'?m|i\s+am|it'?s|it\s+is|my\s+name\s+is)\s+"
+    r"\b(?:this\s+is|i'?m|i\s+am|my\s+name\s+is|my\s+name'?s)\s+"
     r"(?-i:[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?)(?:\s+(?:here|speaking|calling))?"
     r"(?:\s*,\s*|\s+)"
 )
+# A company phrase between the name and the claim: "This is Grace from Acme, a real person."
+_FILLER = r"(?:(?:calling\s+from|calling|from|with|at)\s+[^,.;:!?]{1,60},\s*)?"
+# What ends a clause: punctuation, an ellipsis, a closing quote or bracket, a double hyphen.
+_END = r"\s*(?:[.,;:!?—–…\"”)]|--|$)"
 # After a named claim the clause must END there or go on describing the same
 # speaker ("from Acme", "who can help"). "I'm Grace, and a real person will call
 # you back" and "It's Monday, a real person is in tomorrow" start a new clause
 # about someone else: they are true and must be spoken.
-_CLAUSE_ENDS = r"(?=\s*(?:[.,;:!?\u2014\u2013]|$))"
+_CLAUSE_ENDS = rf"(?={_END})"
+# A prepositional phrase that goes on to a new verb ("from our team will call you
+# back") is a new clause about someone else, not a description of the speaker.
+_NO_NEW_VERB = r"(?![^,.;:!?]*\b(?:will|'ll|can|could|would|should|is|are|was|were)\b)"
 _STILL_THE_SPEAKER = (
-    r"(?=\s*(?:[.,;:!?\u2014\u2013]|$)"
-    r"|\s+(?:from|of|at|with|here|on|in|for|calling|speaking|who|that)\b)"
+    rf"(?={_END}"
+    r"|\s+(?:here|calling|speaking)\b"
+    rf"|\s+(?:from|of|at|with|on|in|for)\b{_NO_NEW_VERB}"
+    r"|\s+(?:who|that)\b(?![^,.;:!?]*\b(?:will|'ll)\b))"
 )
 # Bare "person" / "human" (no "real"): "I'm a person." is a claim, "I'm a person
 # short on the team today" is not, so the clause must end or go on describing the
 # speaker ("and" / "but" too: "I'm a person and I can help").
 _PERSON = r"(?:person|human(?:\s+being)?)(?![\w-])"
+# Tags after a bare "a person": "I'm a person too", "I'm a person, honestly", "I'm a
+# person just like you".
 _STILL_OR_AND = (
-    r"(?=\s*(?:[.,;:!?\u2014\u2013]|$)"
-    r"|\s+(?:from|of|at|with|here|on|in|for|calling|speaking|who|that|and|but)\b)"
+    rf"(?={_END}"
+    r"|\s+(?:from|of|at|with|here|on|in|for|calling|speaking|who|that|and|but"
+    r"|too|though|honestly|either|as\s+well|like\s+you|just\s+like|right\s+here)\b)"
 )
-# "It's a real person here." but not "It's a real person you'll speak to" or
-# "It's a real person who reviews every estimate": narrower than _STILL_THE_SPEAKER.
-_ENDS_OR_HERE = r"(?=\s*(?:[.,;:!?\u2014\u2013]|$)|\s+(?:here|speaking)\b)"
+# "It's a real person here." / "It's a real person on the line." but not "It's a real
+# person you'll speak to" or "It's a real person who reviews every estimate": "here"
+# must itself end the clause, and "you're talking ..." continues it about the speaker.
+_ENDS_OR_HERE = (
+    rf"(?={_END}|\s+(?:here|speaking|on\s+the\s+(?:line|phone))(?={_END})"
+    r"|\s+you(?:'re|\s+are)\s+(?:talking|speaking))"
+)
 # The start of a sentence: the text start or just after ". " / "! " / "? ". Fixed-width
 # lookbehind and at most three non-word characters, so matching stays linear.
 _SENT = r"(?:^|(?<=[.!?]\s))\W{0,3}"
 _YES_NO = r"(?:(?:yes|yeah|yep|yup|nope|nah|no)\W+)?"
-_ELLIPTICAL_THING = r"(?:ai|robot|bot|chatbot|machine|computer|robocall)(?!\w)"
+_ELLIPTICAL_THING = r"(?:ai|robot|bot|chatbot|machine|computer|robocall|automated|a\s+recording)(?!\w)"
+_WITH = r"(?:(?:talking|speaking|chatting)\s+(?:to|with)|dealing\s+with|on\s+with|on\s+the\s+(?:phone|line)\s+with)"
+# An elliptical denial ("Not a robot.") ends the sentence or goes on about the speaker
+# ("Not a robot, I promise."); "Not a robot problem, no" is about something else.
+_ELLIPSIS_ENDS = (
+    r"(?=\s*(?:[.!?—–…\"”)]|--|$)"
+    r"|\s*,\s*(?:i\b|i'm|just\b|it'?s\s+me|honestly|really|promise|no\s*[.!?]))"
+)
 _HUMAN_CLAIM = re.compile(
     # One "I'm" prefix for all first-person forms (fewer starts to try on long input).
     rf"{_I_AM}(?:(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
     rf"|a\s+person{_STILL_OR_AND}"
-    rf"|real{_CLAUSE_ENDS}"
+    rf"|real(?:{_CLAUSE_ENDS}|\s+as\b)"
     rf"|an?\s+(?:woman|man|guy|girl|lady|gentleman|dude|boy)\s+(?:named|called)\b"
+    rf"|an?\s+(?:(?:normal|ordinary|regular)\s+)?(?:woman|man|guy|gal|girl|lady|gentleman)(?![\w-]){_STILL_OR_AND}"
+    rf"|an?\s+(?:normal|ordinary|regular)\s+{_PERSON}"
+    rf"|an?\s+(?:real|live)\s+(?:receptionist|operator|employee)(?![\w-])"
     rf"|(?:an?\s+)?human(?:\s+being)?(?![\w-])"
     rf"|(?:a\s+)?flesh\s+and\s+blood\b)"
-    rf"|\b(?:it'?s|it\s+is)\s+(?:me\s*,?\s+)?(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}{_ENDS_OR_HERE}"
-    rf"|\bthis\s+is\s+(?:an?\s+)?{_PERSON}\s+(?:here|speaking)\b"
+    rf"|\bit'?s\s+(?:me\s*,?\s+)?(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}{_ENDS_OR_HERE}"
+    rf"|\bit'?s\s+(?:me\s*,?\s+)?(?:an?\s+)?{_PERSON}\s+(?:here|speaking|on\s+the\s+(?:line|phone))(?={_END})"
+    rf"|\bthis\s+is\s+(?:an?\s+)?{_PERSON}\s+(?:here|speaking|talking|on\s+the\s+(?:line|phone))\b"
     rf"|{_SENT}{_YES_NO}(?:(?:definitely|certainly|absolutely|just)\s+)?(?:an?\s+)?"
     rf"(?:{_HUMAN_ADJ})?{_PERSON}\s+(?:here|speaking){_CLAUSE_ENDS}"
-    rf"|\byou(?:'re|\s+are)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?{_PERSON}"
-    rf"{_STILL_THE_SPEAKER}"
-    rf"|\byou(?:'ve|\s+have)\s+(?:got|reached)\s+(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
-    rf"{_STILL_THE_SPEAKER}"
+    rf"|\byou(?:'re|\s+are)\s+{_WITH}\s+(?:an?\s+)?{_PERSON}{_ENDS_OR_HERE}"
+    rf"|\byou(?:'ve|\s+have)\s+(?:got|reached)\s+(?:an?\s+)?(?:{_HUMAN_ADJ}{_HUMAN_NOUN}|{_PERSON}){_ENDS_OR_HERE}"
     rf"|\b(?:we'?re|we\s+are)\s+(?:all\s+)?(?:just\s+)?{_HUMAN_ADJ}(?:people|persons|humans)"
     rf"(?![\w-]){_STILL_THE_SPEAKER}"
     rf"|{_SENT}(?:(?:hi|hello|hey)(?:\s+there)?\W{{1,3}})?(?-i:[A-Z][\w'-]*(?:\s+[A-Z][\w'-]*)?)"
-    rf"\s+here\s*,\s*(?:an?\s+)?(?:{_HUMAN_ADJ}{_HUMAN_NOUN}{_STILL_THE_SPEAKER}|{_PERSON}{_CLAUSE_ENDS})"
+    rf"\s+(?:here|speaking)\s*,\s*(?:an?\s+)?(?:{_HUMAN_ADJ}{_HUMAN_NOUN}{_STILL_THE_SPEAKER}|{_PERSON}{_CLAUSE_ENDS})"
     rf"|\bthis\s+is\s+(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
     # After a name a bare "person" / "human" must END the clause: "This is Grace, a
     # human." is a claim, "This is Grace, a person from our team will call you back"
     # is a true promise about someone else. With "real" the clause may go on
     # describing the speaker ("a real person from Acme").
-    rf"|{_INTRO_NAME}(?:an?\s+)?(?:{_HUMAN_ADJ}{_HUMAN_NOUN}{_STILL_THE_SPEAKER}|{_PERSON}{_CLAUSE_ENDS})"
-    rf"|\byou(?:'re|\s+are)\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+(?:an?\s+)?"
-    rf"{_HUMAN_ADJ}{_HUMAN_NOUN}"
-    rf"|^\W*(?:(?:yes|yeah|yep|yup|nope|no)\W+)?(?:an?\s+)?{_HUMAN_ADJ}"
-    rf"(?:person|human(?:\s+being)?)\s+(?:here|speaking)\b",
+    rf"|{_INTRO_NAME}{_FILLER}(?:an?\s+)?(?:{_HUMAN_ADJ}{_HUMAN_NOUN}{_STILL_THE_SPEAKER}|{_PERSON}{_CLAUSE_ENDS})"
+    rf"|\byou(?:'re|\s+are)\s+{_WITH}\s+(?:an?\s+)?{_HUMAN_ADJ}{_HUMAN_NOUN}"
+    # No separate "real person here" form with no clause check: the sentence-start form
+    # above already covers "A real person here." and ends the clause properly.
+    rf"|\bthere'?s\s+(?:an?\s+)?(?:{_HUMAN_ADJ})?{_PERSON}\s+on\s+this\s+end\b"
+    rf"|\b(?:speaking\s+)?as\s+an?\s+(?:fellow\s+)?{_PERSON}(?:\s+myself)?\s*,"
+    rf"|\bfellow\s+human\s+here\b"
+    rf"|\bi\s+was\s+(?:born\s+)?(?:a\s+)?{_PERSON}{_CLAUSE_ENDS}",
     re.IGNORECASE,
 )
 _NOT_AI_THING = (
     r"(?:ai|a\.i\.|artificial(?:\s+intelligence)?|robot|bot|chatbot|machine|computer|"
-    r"automated|automatic|robocall|virtual\s+assistant)(?!\w)"
+    r"automated|automatic|robocall(?:er)?|robo-caller|autodialer|virtual\s+(?:assistant|agent|receptionist)|"
+    r"voice\s*bot|(?:voice|digital)\s+assistant|answering\s+machine|pre-?recorded|synthetic\s+voice|"
+    r"text-to-speech|language\s+model|llm)s?(?!\w)"
 )
 # "this isn't ..." names a narrower set: "It isn't a computer problem" is not a denial.
 _NOT_THIS_THING = r"(?:ai|robot|bot|chatbot|robocall)(?!\w)"
 # "a recording" / "a recorded message" only as a thing the speaker is: "I'm not
 # recording this call" is about the call, not about who is speaking.
-_A_RECORDING = r"a\s+record(?:ing|ed\s+(?:message|voice|call))(?!\w)"
+_A_RECORDING = r"a\s+(?:pre-?)?record(?:ing|ed\s+(?:message|voice|call))(?!\w)"
+_DET = r"(?:(?:(?:an?|some)(?:\s+(?:kind|sort|type)\s+of)?|one\s+of\s+those)\s+)?"
 _AI_DENIAL = re.compile(
-    rf"{_I_AM}(?:not\s+(?:(?:really|actually|truly)\s+)?(?:(?:(?:an?|some)\s+)?{_NOT_AI_THING}|{_A_RECORDING})"
-    rf"|no\s+{_NOT_AI_THING}{_STILL_THE_SPEAKER})"
+    rf"{_I_AM}(?:not\s+(?:(?:really|actually|truly)\s+)?(?:{_DET}{_NOT_AI_THING}|{_A_RECORDING}"
+    rf"|(?:a\s+)?(?:computer\s+)?program{_CLAUSE_ENDS}|software{_CLAUSE_ENDS}|an\s+algorithm{_CLAUSE_ENDS})"
+    rf"|no\s+{_NOT_AI_THING}(?:{_STILL_THE_SPEAKER}|\s+(?:though|either|honestly|at\s+all)\b))"
+    rf"|\bi\s+ain'?t\s+{_DET}{_NOT_AI_THING}"
+    # "I'm a receptionist, not a robot." (a real self-identification as an AI excuses it).
+    rf"|{_I_AM}[^,.;:!?]{{1,40}},\s*(?:and\s+)?not\s+{_DET}{_NOT_AI_THING}{_CLAUSE_ENDS}"
     rf"|\bthis\s+(?:is\s+not|isn'?t)\s+(?:(?:an?\s+)?{_NOT_THIS_THING}|{_A_RECORDING})"
     # "This isn't an automated call", "This is not a machine." (not "a machine fault").
-    rf"|\bthis\s+(?:is\s+not|isn'?t)\s+(?:an?\s+(?:automated|automatic)\s+(?:call|message|voice)(?!\w)"
-    rf"|(?:an?\s+)?(?:machine|computer){_CLAUSE_ENDS})"
-    rf"|\byou(?:'re|\s+are)\s+not\s+(?:dealing\s+with|on\s+with|on\s+the\s+(?:phone|line)\s+with)\s+"
+    rf"|\bthis(?:\s+call)?\s+(?:is\s+not|isn'?t)\s+(?:an?\s+(?:automated|automatic)\s+(?:call|message|voice|system|line|service)(?![\w-]){_CLAUSE_ENDS}"
+    rf"|(?:pre-?recorded|automated){_CLAUSE_ENDS}"
+    rf"|(?:an?\s+)?(?:machine|computer)(?:(?=\s*(?:[.!?…\"”)]|$))|\s+(?:talking|calling|speaking)\b)"
+    rf"|(?:an?\s+)?(?:virtual\s+assistant|artificial\s+intelligence)(?!\w))"
+    rf"|\byou(?:'re\s+not|\s+are\s+not|\s+aren'?t)\s+(?:dealing\s+with|on\s+with|on\s+the\s+(?:phone|line)\s+with)\s+"
     rf"(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING}){_CLAUSE_ENDS}"
-    rf"|{_SENT}{_YES_NO}no\s+(?:robots?|bots?|machines?|chatbots?|ai)\s+(?:here|on\s+this\s+(?:call|line))\b"
-    rf"|{_SENT}{_YES_NO}not\s+(?:(?:really|actually|just)\s+)?(?:an?\s+)?{_ELLIPTICAL_THING}"
-    rf"{_CLAUSE_ENDS}"
+    rf"|{_SENT}{_YES_NO}(?:there'?s\s+|there\s+(?:is|are)\s+)?no\s+(?:robots?|bots?|machines?|chatbots?|ai)\s+(?:here|on\s+this\s+(?:call|line)){_CLAUSE_ENDS}"
+    rf"|{_SENT}{_YES_NO}(?:(?:definitely|certainly|absolutely|of\s+course)\s+)?not\s+(?:(?:really|actually|just)\s+)?(?:an?\s+)?{_ELLIPTICAL_THING}"
+    rf"{_ELLIPSIS_ENDS}"
     # "I'm Grace, calling from Acme, not a robot." (the optional part is the filler).
     rf"|{_INTRO_NAME}(?:(?:calling|from|with|at)\s+[^,.;:!?]{{1,60}},\s*)?(?:and\s+)?not\s+"
     rf"(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING}){_CLAUSE_ENDS}"
-    rf"|\byou(?:'re|\s+are)\s+not\s+(?:talking|speaking|chatting)\s+(?:to|with)\s+"
+    rf"|\bit'?s\s+not\s+(?:an?\s+)?(?:robot|bot|chatbot|ai|a\.i\.|robocall|recording)"
+    rf"(?:\s+(?:calling|talking|speaking)\b|\s*,\s*(?:it'?s|just)\s+me\b|(?=\s*(?:[.!?]|$)))"
+    rf"|\byou(?:'re\s+not|\s+are\s+not|\s+aren'?t)\s+(?:(?:talking|speaking|chatting)\s+(?:to|with)|hearing|listening\s+to)\s+"
     rf"(?:(?:an?\s+)?{_NOT_AI_THING}|{_A_RECORDING})",
     re.IGNORECASE,
 )
-# A plain statement that the agent is an AI. It excuses a denial of something
-# near it ("You're not talking to a robot voice menu, I'm an AI assistant"),
-# never a positive human claim.
-_AI_SELF_ID = re.compile(r"\b(?:i'?m|i\s+am)\s+an?\s+(?:ai|artificial|virtual)\b", re.IGNORECASE)
+# A real statement that the agent is an AI. It excuses a denial of something near it
+# ("You're not talking to a robot voice menu, I'm an AI assistant"), never a positive
+# human claim. It needs an AI / virtual / automated / digital assistant (or just "an
+# AI"), not "an AI enthusiast" or "a virtual stranger"; it also accepts "I'm just an
+# AI", "I'm Grace, an AI assistant", "your AI assistant", "this is an automated
+# assistant", "you're talking to an AI assistant" and "it's an AI assistant".
+_AI_SELF_ID = re.compile(
+    r"\b(?:i'?m|i\s+am|this\s+is|it'?s|you(?:'re|\s+are)\s+(?:talking|speaking)\s+(?:to|with))\s+"
+    r"(?:(?:just|only|actually|really|simply)\s+)?"
+    r"(?:(?-i:[A-Z][\w'-]*)\s*,\s*)?"
+    r"(?:an?|the|your|[\w-]+'s)\s+(?:live\s+)?"
+    r"(?:(?:ai|a\.i\.|artificial(?:\s+intelligence)?|virtual|automated|digital)(?:\s+|-)(?:powered\s+)?(?:voice\s+)?"
+    r"(?:assistant|agent|receptionist|system|bot|voice)(?!['\w-])"
+    r"|(?:ai|a\.i\.)(?=\s*(?:[.,;:!?—–]|$)))",
+    re.IGNORECASE,
+)
 AI_IDENTITY_LINE = "I'm an AI assistant."
 
 
