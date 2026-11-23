@@ -146,6 +146,32 @@ def test_the_products_detector_does_not_end_on_a_question():
     assert caller_signaled_end("Who is this?", previous_assistant_text=REFUSED_ENDING_LINE) is False
 
 
+async def test_refused_result_carries_the_instruction_and_an_accepted_one_does_not():
+    refused = await run_voice_action(_action_session(), ACTION_END_CALL, {"reason": "x"}, user_text=NO_END_WORDS)
+    accepted = await run_voice_action(_action_session(), ACTION_END_CALL, {"reason": "x"}, user_text="Goodbye.")
+    assert refused["status"] == "caller_intent_unconfirmed"
+    assert "Do not say goodbye" in refused["next_step"] and "stays open" in refused["next_step"]
+    assert refused["message"] == "The caller has not clearly ended the conversation."
+    assert refused["success"] is False and refused["confirmation_allowed"] is False
+    assert refused["ends_turn"] is True
+    assert "next_step" not in accepted
+
+
+async def test_the_tool_message_in_the_next_round_contains_the_instruction():
+    provider, rounds = _groq([(None, END_CALL), ("Sure, go ahead.", None)])
+
+    async def run(name, args):
+        return result_json(await run_voice_action(_action_session(), name, args, user_text=NO_END_WORDS))
+
+    out = [t async for t in provider.stream_chat_with_tools(
+        [Message(role=MessageRole.USER, content=NO_END_WORDS)],
+        tools=_tools(), tool_runner=run, max_tool_rounds=3)]
+    assert "".join(out) == "Sure, go ahead."
+    tool_messages = [m for m in rounds[1]["extra_messages"] if m.get("role") == "tool"]
+    assert len(tool_messages) == 1
+    assert "Do not say goodbye" in json.loads(tool_messages[0]["content"])["next_step"]
+
+
 def _opt_session():
     return SimpleNamespace(call_id="call-optout-log-1", conversation_history=[])
 

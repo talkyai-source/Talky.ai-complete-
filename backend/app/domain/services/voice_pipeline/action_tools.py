@@ -282,6 +282,12 @@ async def run_voice_action(
             # Words the model spoke with this decision were its closing; the
             # call stays open and the caller answers them (stream_tool_turn).
             result["ends_turn"] = True
+            # The whole result reaches the model as the tool message; this key
+            # tells it what to do next (message is never spoken to the caller).
+            result["next_step"] = (
+                "The call stays open. Reply to what the caller just said in one "
+                "short sentence. Do not say goodbye."
+            )
         else:
             try:
                 session._end_call_requested = True
