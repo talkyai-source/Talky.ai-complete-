@@ -64,3 +64,20 @@ async def test_a_reply_that_already_said_it_is_an_ai_is_left_alone():
         ["I'm an AI assistant. ", "This is Grace from All State Estimation."])
     assert submitted == ["I'm an AI assistant.", "This is Grace from All State Estimation."]
     assert _AI not in history and _AI not in transcript
+
+
+@pytest.mark.asyncio
+async def test_a_caller_who_shares_the_agents_name_is_spoken_unchanged():
+    reply = "Got it, it's Grace. And what's the best email for you?"
+    submitted, history, transcript = await _run([reply])
+    assert submitted == ["Got it, it's Grace.", "And what's the best email for you?"]
+    assert history == reply and transcript == reply
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_product_mention_does_not_stop_the_introduction_being_amended():
+    submitted, history, transcript = await _run(
+        ["We use an AI takeoff tool. ", "This is Grace from All State Estimation."])
+    assert submitted == ["We use an AI takeoff tool.",
+                         "This is Grace, an AI assistant from All State Estimation."]
+    assert _AI in history and _AI in transcript

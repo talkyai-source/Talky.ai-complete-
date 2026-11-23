@@ -236,8 +236,9 @@ REAL_INTROS = [
      "No problem — this is Grace, an AI assistant from All State Estimation.", "this_is"),
     ("Hello — I'm Grace, calling from All State Estimation.",
      "Hello — I'm Grace, an AI assistant, calling from All State Estimation.", "i_am"),
-    ("I'm Grace from All State Estimation — I'm calling about your estimate.",
-     "I'm Grace, an AI assistant from All State Estimation — I'm calling about your estimate.", "i_am"),
+    ("I'm Grace from All State Estimation — I'm calling about construction estimating and takeoff support.",
+     "I'm Grace, an AI assistant from All State Estimation — I'm calling about construction estimating and takeoff support.",
+     "i_am"),
     ("Evening — I'm Grace from All State Estimation.",
      "Evening — I'm Grace, an AI assistant from All State Estimation.", "i_am"),
     ("Hi there — it's Grace from All State Estimation.",
@@ -563,3 +564,169 @@ def test_a_new_clause_about_someone_else_is_not_a_claim(sentence, name):
 def test_a_named_claim_that_goes_on_describing_the_speaker_is_replaced(sentence, name):
     assert _claims_human(sentence)
     assert guard_spoken_sentence(_intro_session(name), sentence) == _AI_LINE
+
+
+# --- Review fixes to the model-introduction step (23 Nov 2026) ----------------
+# Fix 1: the guard never raises, whatever the stored name is.
+@pytest.mark.parametrize("name", [
+    " ".join(f"W{i}" for i in range(500)),
+    "x" * 5000,
+])
+def test_a_huge_agent_name_never_raises_and_is_fast(name):
+    # fails before: RecursionError on the 500-word name
+    first_word = name.split()[0]
+    sentence = f"Hi there, this is {first_word} from Acme."
+    session = _intro_session(name)
+    started = time.perf_counter()
+    first = add_ai_identity(session, sentence)
+    cold = time.perf_counter() - started
+    started = time.perf_counter()
+    second = add_ai_identity(session, sentence)
+    warm = time.perf_counter() - started
+    assert first == second
+    assert first in (sentence, f"Hi there, this is {first_word}, an AI assistant from Acme.")
+    assert cold < 0.3 and warm < 0.005, (cold, warm)
+
+
+def test_a_name_longer_than_four_words_is_matched_by_its_first_four_words():
+    name = "Anna Maria Louise Smith Jones Brown"
+    assert add_ai_identity(_intro_session(name), "This is Anna Maria Louise Smith from Acme.") \
+        == "This is Anna Maria Louise Smith, an AI assistant from Acme."
+
+
+def test_a_name_of_regex_characters_cannot_raise_or_match_wrongly():
+    session = _intro_session("G.*(race+")
+    assert add_ai_identity(session, "This is Grace from Acme.") == "This is Grace from Acme."
+    assert add_ai_identity(session, "This is G.*(race+ from Acme.") \
+        == "This is G.*(race+, an AI assistant from Acme."
+
+
+def test_any_error_inside_the_step_returns_the_sentence(monkeypatch, caplog):
+    from app.domain.services.voice_pipeline import ai_identity_intro as mod
+
+    def boom(*_a, **_k):
+        raise RuntimeError("secret words")
+    monkeypatch.setattr(mod, "_patterns", boom)
+    caplog.set_level(logging.DEBUG)
+    s = "This is Grace from Acme."
+    assert add_ai_identity(_intro_session(), s) == s
+    assert "RuntimeError" in caplog.text and "secret words" not in caplog.text
+
+
+# Fix 2: a caller who shares the agent's name is not called an AI assistant.
+# fails before: all of these were amended.
+@pytest.mark.parametrize("sentence", [
+    "Got it, it's Grace.",
+    "Thanks, so it's Grace at grace@example.com?",
+    "So this is Grace, right?",
+    "This is Grace speaking?",
+    "It's Grace, isn't it?",
+    "Just to confirm, this is Grace, the business owner?",
+    "It's Grace who handles that.",
+])
+def test_a_caller_who_shares_the_agents_name_is_not_called_an_ai(sentence):
+    assert guard_spoken_sentence(_intro_session(), sentence) == sentence
+
+
+@pytest.mark.parametrize("sentence,expected", [
+    # regression: these were amended before and stay amended
+    ("Hi, this is Grace from Acme, is now a good time?",
+     "Hi, this is Grace, an AI assistant from Acme, is now a good time?"),
+    ("It's Grace.", "It's Grace, an AI assistant."),
+    ("Hi there, it's Grace!", "Hi there, it's Grace, an AI assistant!"),
+    ("Yes, it's Grace.", "Yes, it's Grace, an AI assistant."),
+    ("Oh, it's Grace from Acme.", "Oh, it's Grace, an AI assistant from Acme."),
+    ("Got it, it's Grace here from Acme.", "Got it, it's Grace, an AI assistant, here from Acme."),
+    ("Is that right? It's Grace again.", "Is that right? It's Grace, an AI assistant, again."),
+    ("Sure, it's Grace calling from Acme?", "Sure, it's Grace, an AI assistant, calling from Acme?"),
+])
+def test_the_introduction_forms_that_stay_amended(sentence, expected):
+    assert guard_spoken_sentence(_intro_session(), sentence) == expected
+
+
+@pytest.mark.parametrize("name,sentence", [
+    ("May", "It's May already, so the season has started."),
+    ("Chase", "It's Chase that you bank with, then."),
+    ("Grant", "It's Grant funded."),
+    ("Rose", "It's Rose gold."),
+    ("Will", "Will here be fine for you?"),
+])
+def test_names_that_are_ordinary_capitalised_words_are_not_amended(name, sentence):
+    assert guard_spoken_sentence(_intro_session(name), sentence) == sentence
+
+
+def test_known_limit_this_is_june_the_busiest_month_is_amended():
+    # Known limit: "this is <Name>," cannot tell a month from an introduction;
+    # it stays amended (wordy, not harmful).
+    assert guard_spoken_sentence(_intro_session("June"), "This is June, the busiest month.") \
+        == "This is June, an AI assistant, the busiest month."
+
+
+# Fix 3: two more real wordings.
+@pytest.mark.parametrize("sentence,expected", [
+    ("My name's Grace, I'm calling from All State Estimation.",
+     "My name's Grace, an AI assistant, I'm calling from All State Estimation."),
+    ("Hi there, Grace calling from All State Estimation.",
+     "Hi there, Grace, an AI assistant, calling from All State Estimation."),
+    ("My name’s Grace from Acme.", "My name’s Grace, an AI assistant from Acme."),
+])
+def test_two_more_real_wordings_are_amended(sentence, expected):
+    assert guard_spoken_sentence(_intro_session(), sentence) == expected
+
+
+# Fix 4: "already says it" means the speaker says it about itself.
+@pytest.mark.parametrize("sentence,expected", [
+    ("This is Grace from All State Estimation, and we offer an AI takeoff tool.",
+     "This is Grace, an AI assistant from All State Estimation, and we offer an AI takeoff tool."),
+    ("This is Grace from Acme, you can also ask our AI assistant online.",
+     "This is Grace, an AI assistant from Acme, you can also ask our AI assistant online."),
+    ("This is Grace from Acme, an AI-powered estimating company.",
+     "This is Grace, an AI assistant from Acme, an AI-powered estimating company."),
+    ("This is Grace, a human, not an AI.",
+     "This is Grace, an AI assistant, a human, not an AI."),
+])
+def test_a_mention_of_ai_that_is_not_the_speaker_does_not_suppress_the_insertion(sentence, expected):
+    assert guard_spoken_sentence(_intro_session(), sentence) == expected
+
+
+def test_an_earlier_product_mention_does_not_suppress_the_insertion():
+    s = "This is Grace from Acme."
+    assert guard_spoken_sentence(_intro_session(spoken=["We use an AI takeoff tool."]), s) \
+        == "This is Grace, an AI assistant from Acme."
+
+
+@pytest.mark.parametrize("sentence", [
+    "This is Grace, an AI assistant from Acme.",
+    "Hi, this is Grace from Acme, an AI assistant.",
+    "I'm Grace, your virtual assistant.",
+    "This is Grace from Acme, I'm an AI.",
+    "This is Grace from Acme, I'm just an automated assistant.",
+    "This is Grace, a digital voice assistant from Acme.",
+    "Hi, this is Grace, an AI assistant from All State Estimation, on a recorded line. Who am I speaking with?",
+])
+def test_a_sentence_where_the_speaker_says_it_is_an_ai_is_never_amended_twice(sentence):
+    assert guard_spoken_sentence(_intro_session(), sentence) == sentence
+
+
+def test_an_earlier_sentence_where_the_speaker_says_it_is_an_ai_suppresses_it():
+    s = "This is Grace from Acme."
+    for earlier in ("I'm an AI assistant.", "I am a virtual assistant.", "I'm just an automated assistant."):
+        assert guard_spoken_sentence(_intro_session(spoken=[earlier]), s) == s
+
+
+def test_a_denial_is_not_the_speaker_saying_it():
+    from app.domain.services.voice_pipeline.ai_identity_intro import _speaker_says_ai
+
+    assert not _speaker_says_ai("I'm not an AI.")
+    assert not _speaker_says_ai("We are not an AI company, we sell tools.")
+    assert _speaker_says_ai("I'm an AI.")
+
+
+def test_the_new_rules_are_linear_on_long_input():
+    for make in (lambda: "it is " * 8000, lambda: "Hi, " * 12000 + "it is Grace",
+                 lambda: "this is Grace? " * 3500, lambda: "I'm " * 12000):
+        session = _intro_session("Grace Miller")
+        text = make()
+        started = time.perf_counter()
+        add_ai_identity(session, text)
+        assert time.perf_counter() - started < 0.2

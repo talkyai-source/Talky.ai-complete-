@@ -1,4 +1,4 @@
-"""Three narrow, deterministic checks on each sentence before it is spoken.
+"""Four narrow, deterministic checks on each sentence before it is spoken.
 
 Release review 2026-10-08: the conversational-model redesign removed the
 deterministic speech guards, and its own offline contracts then failed:
