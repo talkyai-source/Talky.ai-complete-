@@ -51,10 +51,14 @@ def previous_assistant_turn(history) -> str:
 # These are questions whose negative answer ends the conversation, not business-topic labels.
 # Anything unrecognised stays a question about its own subject, so a short
 # negative reply cannot let a model hang up on an declined optional offer.
-_NEGATIVE_REPLY_ENDS_CALL = re.compile(
+_ANYTHING_ELSE_QUESTION = re.compile(
     r"(?:is there |do you need |can (?:i|we) help (?:you )?with )?anything else"
     r"(?: (?:i|we) can (?:help(?: you)?(?: with)?|do(?: for you)?)| you (?:need|want to (?:ask|discuss)))?"
-    r"(?: today| before (?:we|you) go)?|"
+    r"(?: today| before (?:we|you) go)?",
+    re.I,
+)
+_NEGATIVE_REPLY_ENDS_CALL = re.compile(
+    _ANYTHING_ELSE_QUESTION.pattern + r"|"
     r"(?:do you have|have you got|got) (?:a|one|a quick) (?:minute|moment)(?: to (?:talk|chat))?|"
     r"is (?:now|this) (?:a )?good time(?: to (?:talk|chat))?",
     re.I,
@@ -99,10 +103,42 @@ def _call_end_position(text: Optional[str], pattern: re.Pattern, previous_assist
     return accepted[-1] if accepted else -1
 
 
+# A bare "No" ends the call only right after the agent's own "anything else?" question
+# (24 Nov 2026). Whole reply: no / nope / nah / naw, a short body, a courtesy tail; no "?"; at most
+# 12 words. No two alternatives spell the same words, so a long non-match cannot backtrack badly.
+_NEG_LEAD = r"(?:no|nope|nah|naw)(?: (?:no|nope|nah))*"
+_NEG_BODY = (r"(?:not really|nothing(?: else)?|i don'?t think so|"
+             r"(?:i'?m|we'?re|i am|we are) (?:good|fine|ok|okay|alright|all right|all good|sorted|all set)|"
+             r"all good|that'?s (?:fine|everything|great|all|it)|not (?:right now|at the moment|today))")
+_NEG_TAIL = (r"(?: (?:thanks|thank you|thank you very much|thanks a lot|cheers|ta|mate|love|sir|madam|ma'?am|dear|"
+             r"bye|goodbye|have a (?:good|nice|great) (?:day|one|evening)|take care|you too|appreciate it))*")
+_BARE_NEGATIVE = re.compile(
+    r"(?:" + _NEG_LEAD + r"(?: " + _NEG_BODY + r")?|" + _NEG_BODY + r")" + _NEG_TAIL, re.I)
+
+
+def _ends_with_anything_else(previous_assistant_text: Optional[str]) -> bool:
+    """The agent's last sentence is its own "anything else?" question (and nothing follows it)."""
+    text = str(previous_assistant_text or "").strip().strip("\"'“”")
+    if not text.endswith("?"):
+        return False
+    last = re.split(r"(?<=[.!?])\s+", text[:-1])[-1]
+    return bool(_ANYTHING_ELSE_QUESTION.fullmatch(" ".join(last.lower().replace("’", "'").split())))
+
+
+def _bare_negative_after_anything_else(text: Optional[str], previous_assistant_text: Optional[str]) -> bool:
+    said = str(text or "").replace("’", "'")
+    if "?" in said or not _ends_with_anything_else(previous_assistant_text):
+        return False
+    words = " ".join(re.sub(r"[.,!;:—–…-]", " ", said).lower().split())
+    return 0 < len(words.split()) <= 12 and bool(_BARE_NEGATIVE.fullmatch(words))
+
+
 def caller_signaled_end(text: Optional[str], *, previous_assistant_text: Optional[str] = None) -> bool:
     """True if the caller's own words clearly signal ending the call."""
     from app.domain.services.voice_pipeline.identity_disposition import dnc_assertion_position
     position = max(_call_end_position(text, _CALLER_END_INTENT, previous_assistant_text), dnc_assertion_position(text))
+    if position < 0 and _bare_negative_after_anything_else(text, previous_assistant_text):
+        return True
     return position >= 0 and not continuation_after(text, position)
 
 
