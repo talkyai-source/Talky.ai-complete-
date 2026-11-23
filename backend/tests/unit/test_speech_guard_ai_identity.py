@@ -196,3 +196,201 @@ def test_denying_being_a_recording_is_still_replaced(sentence):
     from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
 
     assert guard_spoken_sentence(object(), sentence) == "I'm an AI assistant."
+
+
+# --- The model's own introductions say it is an AI (23 Nov 2026) -------------
+import logging
+import re
+import time
+
+from app.domain.services.voice_pipeline.ai_identity_intro import add_ai_identity
+from app.domain.services.voice_pipeline.inbound_answer_greeting import says_it_is_ai
+
+_CALL_ID = "7ad487e3-52a6-4b0e-9d0b-6f1c2a8e9b11"
+_CO = "All State Estimation"
+_INTRO_LOGGER = "app.domain.services.voice_pipeline.ai_identity_intro"
+
+
+def _intro_session(name="grace", spoken=(), company=_CO):
+    cfg = SimpleNamespace(company_name=company, agent_name=name)
+    return SimpleNamespace(agent_config=cfg, _voice_action_results={}, conversation_history=[],
+                           _spoken_sentences=list(spoken), call_id=_CALL_ID)
+
+
+# (before, after, pattern): every introduction found in the 23 and 20 Nov calls.
+REAL_INTROS = [
+    ("Hi there, this is Grace from All State Estimation.",
+     "Hi there, this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("Hi, this is Grace from All State Estimation.",
+     "Hi, this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("Hi there — this is Grace from All State Estimation.",
+     "Hi there — this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("Hi there, this is Grace from All State Estimation — sorry, I think we got cut off.",
+     "Hi there, this is Grace, an AI assistant from All State Estimation — sorry, I think we got cut off.",
+     "this_is"),
+    ("Morning Sam, this is Grace from All State Estimation.",
+     "Morning Sam, this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("Hi Sam, this is Grace from All State Estimation.",
+     "Hi Sam, this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("No problem — this is Grace from All State Estimation.",
+     "No problem — this is Grace, an AI assistant from All State Estimation.", "this_is"),
+    ("Hello — I'm Grace, calling from All State Estimation.",
+     "Hello — I'm Grace, an AI assistant, calling from All State Estimation.", "i_am"),
+    ("I'm Grace from All State Estimation — I'm calling about your estimate.",
+     "I'm Grace, an AI assistant from All State Estimation — I'm calling about your estimate.", "i_am"),
+    ("Evening — I'm Grace from All State Estimation.",
+     "Evening — I'm Grace, an AI assistant from All State Estimation.", "i_am"),
+    ("Hi there — it's Grace from All State Estimation.",
+     "Hi there — it's Grace, an AI assistant from All State Estimation.", "it_is"),
+    ("Hi there, Grace from All State Estimation — I'll be quick.",
+     "Hi there, Grace, an AI assistant from All State Estimation — I'll be quick.", "greeting_name"),
+    ("Hi there, Grace from All State Estimation.",
+     "Hi there, Grace, an AI assistant from All State Estimation.", "greeting_name"),
+]
+# The two real wordings of an agent called Alex.
+ALEX_INTROS = [
+    ("Hi there, this is Alex from All State Estimation Ltd.",
+     "Hi there, this is Alex, an AI assistant from All State Estimation Ltd.", "this_is"),
+    ("It's Alex here from All State Estimation Ltd.",
+     "It's Alex, an AI assistant, here from All State Estimation Ltd.", "it_is"),
+]
+
+
+@pytest.mark.parametrize("before,after,where", REAL_INTROS)
+def test_every_real_introduction_gains_an_ai_identity(before, after, where, caplog):
+    caplog.set_level(logging.INFO)
+    out = guard_spoken_sentence(_intro_session(), before)
+    print(f"{before!r} -> {out!r}")
+    assert out == after
+    assert says_it_is_ai(out)
+    assert f"where={where}" in caplog.text
+
+
+@pytest.mark.parametrize("before,after,where", ALEX_INTROS)
+def test_alex_introductions_gain_an_ai_identity(before, after, where):
+    out = guard_spoken_sentence(_intro_session("Alex"), before)
+    print(f"{before!r} -> {out!r}")
+    assert out == after and says_it_is_ai(out)
+
+
+@pytest.mark.parametrize("sentence", [
+    "Hi, this is Grace, an AI assistant from All State Estimation, on a recorded line. Who am I speaking with?",
+    "Hi there, this is Grace, an AI from All State Estimation.",
+    "Hi, I'm Grace, your AI assistant from All State Estimation.",
+    "This is Grace, a virtual assistant from All State Estimation.",
+    "This is Grace, an automated assistant from All State Estimation.",
+    "I'm Grace, an artificial intelligence calling from All State Estimation.",
+])
+def test_a_sentence_that_already_says_it_is_an_ai_is_unchanged(sentence):
+    assert guard_spoken_sentence(_intro_session(), sentence) == sentence
+
+
+def test_an_earlier_sentence_of_the_same_reply_that_said_it_stops_a_second_insertion():
+    s = "This is Grace from All State Estimation."
+    assert guard_spoken_sentence(_intro_session(spoken=["I'm an AI assistant."]), s) == s
+    # The converse: nothing said it yet, so it is added.
+    assert guard_spoken_sentence(_intro_session(spoken=["Hi there."]), s) \
+        == "This is Grace, an AI assistant from All State Estimation."
+
+
+@pytest.mark.parametrize("sentence", [
+    "Am I speaking with Grace?",
+    "Thanks, Grace.",
+    "this is Grace?",
+    "Is Grace here today?",
+    "This is about Grace's estimate.",
+    "This is Grace's estimate.",
+    'The note says "this is Grace from All State Estimation" so I checked.',
+    "He said “I'm Grace from All State Estimation” to me.",
+    "This is Grace Smith from the office.",
+    "This is Graceful and calm.",
+])
+def test_someone_else_named_like_the_agent_is_not_an_introduction(sentence):
+    assert guard_spoken_sentence(_intro_session(), sentence) == sentence
+
+
+@pytest.mark.parametrize("name,sentence", [
+    ("", "This is Grace from All State Estimation."),
+    (None, "This is Grace from All State Estimation."),
+    ("   ", "I'm Grace from All State Estimation."),
+    ("Max", "This is max capacity."),
+    ("Will", "I'm willing to help."),
+    ("Max", "This is max capacity from the office."),
+])
+def test_missing_name_or_a_common_word_changes_nothing_and_logs_nothing(name, sentence, caplog):
+    caplog.set_level(logging.INFO)
+    assert guard_spoken_sentence(_intro_session(name), sentence) == sentence
+    assert "ai_identity_added" not in caplog.text
+
+
+@pytest.mark.parametrize("name,sentence,expected", [
+    ("grace", "This is Grace from Acme.", "This is Grace, an AI assistant from Acme."),
+    ("GRACE", "This is Grace from Acme.", "This is Grace, an AI assistant from Acme."),
+    ("Grace Miller", "This is Grace from Acme.", "This is Grace, an AI assistant from Acme."),
+    ("Grace Miller", "This is Grace Miller from Acme.", "This is Grace Miller, an AI assistant from Acme."),
+    ("grace miller", "Hi there, Grace Miller from Acme.", "Hi there, Grace Miller, an AI assistant from Acme."),
+    ("Grace Miller", "This is Grace Smith from Acme.", "This is Grace Smith from Acme."),
+    ("Grace", "This is grace from Acme.", "This is grace from Acme."),
+    ("Grace", "Grace speaking.", "Grace, an AI assistant, speaking."),
+    ("Grace", "Hello, Grace here.", "Hello, Grace, an AI assistant, here."),
+    ("Grace", "My name is Grace.", "My name is Grace, an AI assistant."),
+    ("Grace", "I’m Grace from Acme.", "I’m Grace, an AI assistant from Acme."),
+    ("Mary-Ann", "This is Mary-Ann from Acme.", "This is Mary-Ann, an AI assistant from Acme."),
+])
+def test_stored_name_case_and_several_words(name, sentence, expected):
+    assert guard_spoken_sentence(_intro_session(name), sentence) == expected
+
+
+def test_a_human_claim_still_wins_over_an_introduction():
+    out = guard_spoken_sentence(_intro_session(), "This is Grace from Acme and I'm a real person.")
+    assert out == "I'm an AI assistant for All State Estimation."
+
+
+@pytest.mark.parametrize("sentence", [
+    "Soy Grace de All State Estimation.",
+    "Hola, soy Grace de All State Estimation.",
+    "Bonjour, je suis Grace de All State Estimation.",
+])
+def test_non_english_is_unchanged(sentence):
+    assert guard_spoken_sentence(_intro_session(), sentence) == sentence
+
+
+def test_a_title_after_the_name_gives_the_wordy_but_true_result():
+    assert guard_spoken_sentence(
+        _intro_session(), "This is Grace, the scheduling assistant from Acme.",
+    ) == "This is Grace, an AI assistant, the scheduling assistant from Acme."
+
+
+def test_the_log_line_carries_the_pattern_and_no_word_of_the_reply(caplog):
+    caplog.set_level(logging.DEBUG)
+    reply = "Hi there, this is Grace from All State Estimation."
+    guard_spoken_sentence(_intro_session(), reply)
+    lines = [r for r in caplog.records if r.name == _INTRO_LOGGER]
+    assert len(lines) == 1
+    text = lines[0].getMessage()
+    assert text == "ai_identity_added call_id=7ad487e3-52a where=this_is"
+    for word in ("Hi", "there", "Grace", "All", "State", "Estimation"):
+        assert word not in text
+
+
+@pytest.mark.parametrize("make", [
+    lambda: "this is " * 6250,
+    lambda: "Hi " + "-" * 50000,
+    lambda: " " * 50000,
+    lambda: "Hi there, " * 5000,
+    lambda: "this is Grace " * 3500,
+])
+def test_matching_is_linear_on_long_input(make):
+    text = make()
+    session = _intro_session("Grace Miller")
+    started = time.perf_counter()
+    add_ai_identity(session, text)
+    assert time.perf_counter() - started < 0.2
+
+
+def test_replacement_lines_are_not_rewritten_again():
+    # An earlier rule REPLACED the sentence: the product's own words are spoken as is.
+    assert guard_spoken_sentence(_intro_session(), "I'm a real person.") \
+        == "I'm an AI assistant for All State Estimation."
+    assert guard_spoken_sentence(_intro_session(), "I have sent the email. This is Grace from Acme.") \
+        == "I'm not able to do that from this call."

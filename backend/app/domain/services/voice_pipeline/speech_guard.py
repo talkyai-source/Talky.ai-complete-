@@ -26,6 +26,10 @@ already states instead of reinterpreting the conversation:
    person", "I am not a bot"), is never spoken; "I'm an AI assistant for
    <company>." replaces it.
 
+4. A sentence that introduces the agent by its stored name without saying it
+   is an AI ("this is Grace from ...") gets ", an AI assistant" after the name
+   (ai_identity_intro.py). It runs last, so the replacements above still win.
+
 Everything else passes through unchanged.
 """
 from __future__ import annotations
@@ -35,6 +39,7 @@ from typing import Any, Iterable, Optional
 
 from app.domain.models.conversation import MessageRole
 from app.domain.services.voice_pipeline.action_tools import safe_failure_speech
+from app.domain.services.voice_pipeline.ai_identity_intro import add_ai_identity
 
 # "I have sent the email", "We've just emailed it", "I sent you the link".
 # Object words keep historical statements ("we sent you a quote last month")
@@ -379,4 +384,4 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
         getattr(session, "conversation_history", ())
     ):
         return RELATIONSHIP_ACK_LINE
-    return sentence
+    return add_ai_identity(session, sentence)
