@@ -334,6 +334,7 @@ export function setTokenProvider(fn: (() => string | null) | null, writer?: (tok
 const FRESH_LOGIN_GRACE_MS = 15000;
 
 export function markFreshLogin() {
+    _refusedRenewalFor = null;
     _sessionExpiredFired = false;
     _freshLoginUntil = Date.now() + FRESH_LOGIN_GRACE_MS;
 }
@@ -346,6 +347,7 @@ export function markFreshLogin() {
  * bouncing the now-anonymous user.
  */
 export function clearFreshLoginGrace() {
+    _refusedRenewalFor = null;
     _freshLoginUntil = 0;
 }
 
@@ -368,6 +370,7 @@ export function setSessionExpiredHandler(fn: (() => void) | null) {
  * next 401 fires the redirect again.
  */
 export function resetSessionExpiredLatch() {
+    _refusedRenewalFor = null;
     _sessionExpiredFired = false;
 }
 
@@ -429,6 +432,10 @@ function defaultTokenStorage(): TokenStorage {
 // a thundering herd doesn't trigger N rotations.
 type RefreshResult = { ok: boolean; status?: number; accessToken?: string; userId?: string; tenantId?: string };
 const _refreshInFlight = new Map<string, Promise<RefreshResult>>();
+// The identity whose renewal the server REFUSED (401/403). Until a new sign-in,
+// another identity or a sibling tab's renewed token, asking again with the same
+// dead cookie only fills the server log. Module state only: a page load starts clean.
+let _refusedRenewalFor: string | null = null;
 const REFRESH_TIMEOUT_MS = 10_000;
 let _refreshTimeoutMs = REFRESH_TIMEOUT_MS;
 
@@ -461,6 +468,7 @@ function rotatedSuccessor(epoch: number, from: string | null): string | null {
  * flight with `from` stay valid instead of failing as an account change.
  */
 export function adoptSiblingTabRotation(from: string, to: string) {
+    _refusedRenewalFor = null;
     recordRotation(_identityEpoch, from, to);
 }
 
@@ -505,6 +513,7 @@ async function tryRefresh(baseUrl: string, refreshUrl: string, key: string, head
 export function __resetRefreshStateForTests() {
     _refreshInFlight.clear();
     _rotations.clear();
+    _refusedRenewalFor = null;
 }
 
 export function createHttpClient(config: HttpClientConfig) {
@@ -572,6 +581,8 @@ export function createHttpClient(config: HttpClientConfig) {
             scope.token = rotated;
             return true;
         }
+        const refusalKey = JSON.stringify(scope.identity);
+        if (_refusedRenewalFor === refusalKey) return false;
         const key = JSON.stringify([refreshUrl, scope.epoch, scope.identity, scope.token]);
         const result = await tryRefresh(baseUrl, refreshUrl, key, identityHeaders(scope), () => assertScope(scope, opts));
         // A concurrent request in this same scope can adopt the same refresh.
@@ -598,6 +609,7 @@ export function createHttpClient(config: HttpClientConfig) {
             setToken(result.accessToken);
             scope.token = result.accessToken;
         }
+        if (!result.ok && (result.status === 401 || result.status === 403)) _refusedRenewalFor = refusalKey;
         if (!result.ok && result.status !== 401 && result.status !== 403) {
             // Only a refresh the server REJECTED means the session is gone. A
             // restart, a 5xx or a dropped/timed-out connection says nothing
