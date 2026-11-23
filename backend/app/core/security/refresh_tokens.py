@@ -156,7 +156,7 @@ async def rotate_refresh_token(
             # holds its old cookie). The token is refused as always, but nothing
             # new happened, so it is not reported as a theft.
             logger.warning(
-                "refresh.revoked_token_presented family=%s user=%s",
+                "refresh.used_token_of_ended_signin family=%s user=%s",
                 row["family_id"],
                 row["user_id"],
             )

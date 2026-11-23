@@ -146,7 +146,7 @@ async def test_ended_signin_presented_three_times_is_three_refusals_and_no_theft
 
     assert not [r for r in caplog.records if "refresh.reuse_detected" in r.getMessage()]
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
-    warned = _records(caplog, RT_LOGGER, "refresh.revoked_token_presented")
+    warned = _records(caplog, RT_LOGGER, "refresh.used_token_of_ended_signin")
     assert len(warned) == 2 and all(r.levelno == logging.WARNING for r in warned)
     # the family stays revoked with the reason the route gave it
     assert all(r["revoked_reason"] == "logout" for r in conn.rows.values() if r["family_id"] == family_id)
@@ -196,6 +196,8 @@ async def test_used_token_of_a_fully_revoked_family_changes_no_row_and_is_not_re
     raw, token_id, family_id = await rt.issue_initial_refresh_token(conn, user_id=str(uuid.uuid4()))
     await rt.rotate_refresh_token(conn, presented_token=raw)
     await rt.revoke_family_by_token(conn, presented_token=raw, reason="logout")
+    # Minutes later, as in production: well outside the allowance for two racing requests.
+    conn.rows[token_id]["used_at"] -= timedelta(minutes=5)
     before = {k: dict(v) for k, v in conn.rows.items()}
     conn.statements.clear()
     caplog.clear()
@@ -205,7 +207,8 @@ async def test_used_token_of_a_fully_revoked_family_changes_no_row_and_is_not_re
     # The protective statement still runs, exactly as before; it finds nothing to revoke.
     assert len(conn.writes()) == 1 and "revoked_reason = 'reuse_detected'" in conn.writes()[0]
     assert conn.rows == before
-    assert len(_records(caplog, RT_LOGGER, "refresh.revoked_token_presented")) == 1
+    assert len(_records(caplog, RT_LOGGER, "refresh.used_token_of_ended_signin")) == 1
+    assert not _records(caplog, RT_LOGGER, "refresh.revoked_token_presented")   # its own name
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
