@@ -733,6 +733,7 @@ async def preview_prompt(
         first_words = await outbound_first_words(
             getattr(db_client, "pool", None), getattr(current_user, "tenant_id", None),
             agent_name=body.agent_name, company_name=body.company_name,
+            opening_mode=opening_mode,
         )
 
     return CampaignPromptPreviewResponse(

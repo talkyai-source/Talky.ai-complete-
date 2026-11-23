@@ -52,28 +52,34 @@ async def test_own_text_default_placement_is_sentence_first():
     d = _decision(text=OWN + " Press 9 to opt out of recording.")
     out = await _preview(d)
     assert out == {"notice_first": spoken_disclosure_text(d), "opening": PLAIN,
-                   "notice_in_opening": False}
+                   "notice_in_opening": False, "waits_for_person": False,
+                   "notice_alone": spoken_disclosure_text(d), "notice_depends_on_place": False}
     assert "Press 9" not in out["notice_first"]
 
 
 async def test_platform_wording_is_inside_the_opening():
     out = await _preview(_decision(text=PLATFORM))
-    assert out == {"notice_first": None, "opening": RECORDED, "notice_in_opening": True}
+    assert out == {"notice_first": None, "opening": RECORDED, "notice_in_opening": True,
+                   "waits_for_person": False, "notice_alone": "This call may be recorded for quality and training purposes.",
+                   "notice_depends_on_place": False}
 
 
 async def test_stored_in_opening_follows_the_platform_switch(monkeypatch):
     d = _decision(placement="in_opening")
     monkeypatch.setenv(SWITCH, "1")
-    assert await _preview(d) == {"notice_first": None, "opening": RECORDED, "notice_in_opening": True}
+    on = await _preview(d)
+    assert (on["notice_first"], on["opening"], on["notice_in_opening"]) == (None, RECORDED, True)
+    assert on["notice_alone"] == OWN
     monkeypatch.delenv(SWITCH)
-    assert await _preview(d) == {"notice_first": OWN, "opening": PLAIN, "notice_in_opening": False}
+    off = await _preview(d)
+    assert (off["notice_first"], off["opening"], off["notice_in_opening"]) == (OWN, PLAIN, False)
 
 
 async def test_no_notice_owed_is_the_plain_opening():
-    assert await _preview(_decision(required=False, text=None)) == {
-        "notice_first": None, "opening": PLAIN, "notice_in_opening": False}
-    assert await _preview(_decision(required=False, text=None, record=False)) == {
-        "notice_first": None, "opening": PLAIN, "notice_in_opening": False}
+    want = {"notice_first": None, "opening": PLAIN, "notice_in_opening": False,
+            "waits_for_person": False, "notice_alone": None, "notice_depends_on_place": False}
+    assert await _preview(_decision(required=False, text=None)) == want
+    assert await _preview(_decision(required=False, text=None, record=False)) == want
 
 
 async def test_a_failing_policy_read_returns_none_with_one_warning(caplog):
@@ -95,12 +101,16 @@ async def test_the_preview_writes_no_placement_line_and_no_ledger_entry(caplog):
     assert rps._DISCLOSURE_LEDGER == {} or len(rps._DISCLOSURE_LEDGER) == 0
 
 
-@pytest.mark.parametrize("decision, name", [
-    (_decision(), "own"), (_decision(text=PLATFORM), "platform"),
-    (_decision(required=False, text=None), "none"),
+@pytest.mark.parametrize("decision, name, switch", [
+    (_decision(), "own", None), (_decision(text=PLATFORM), "platform", None),
+    (_decision(required=False, text=None), "none", None),
+    (_decision(placement="in_opening"), "own_in_opening", "1"),
 ])
-async def test_the_preview_equals_what_the_outgoing_call_speaks(monkeypatch, decision, name):
+async def test_the_preview_equals_what_the_outgoing_call_speaks(monkeypatch, decision, name, switch):
     from tests.unit import test_outbound_ai_disclosure_opener as h
+
+    if switch:
+        monkeypatch.setenv(SWITCH, switch)
 
     orig = h._call_session
     monkeypatch.setattr(h, "_call_session", lambda first_name=None, **kw: orig(None, **kw))
@@ -131,7 +141,7 @@ def _body(direction="outbound", mode=None):
 
 _USER = SimpleNamespace(id="u", tenant_id="t1")
 _DB = SimpleNamespace(pool=object())
-_FW = {"notice_first": None, "opening": "x", "notice_in_opening": True}
+_FW = {"notice_first": None, "opening": "x", "notice_in_opening": True, "waits_for_person": True, "notice_alone": "n", "notice_depends_on_place": True}
 
 
 async def test_route_sets_the_field_for_outbound_and_not_otherwise():
@@ -142,7 +152,8 @@ async def test_route_sets_the_field_for_outbound_and_not_otherwise():
         assert out.outbound_first_words.model_dump() == _FW
         kw = m.await_args
         assert kw.args == (_DB.pool, "t1")
-        assert kw.kwargs == {"agent_name": "Grace", "company_name": "Acme"}
+        assert kw.kwargs == {"agent_name": "Grace", "company_name": "Acme",
+                             "opening_mode": "agent_first"}
         inbound = await preview_prompt(_body("inbound"), current_user=_USER, db_client=_DB)
         assert inbound.outbound_first_words is None
         rt = await preview_prompt(_body(mode="realtime"), current_user=_USER, db_client=_DB)
@@ -177,3 +188,109 @@ def test_placement_for_equals_decide_and_logs_nothing(monkeypatch, caplog, text,
             d, text, opener_available=avail, pinned=pinned, call_id="c1", path="cascaded")
     assert pure == full
     assert len(caplog.records) == 1
+
+
+# ---- second round -------------------------------------------------------
+
+from tests.unit.test_recording_policy import _BASE_ROW, _FakePool  # noqa: E402
+
+UUID = "11111111-1111-4111-8111-111111111111"
+
+
+class _BrokenPool:
+    def acquire(self, *a, **k):
+        raise ConnectionError("db down")
+
+
+async def _real(pool, tenant=UUID, **kw):
+    return await outbound_first_words(pool, tenant, agent_name="Sarah",
+                                      company_name="All State Estimation", **kw)
+
+
+@pytest.mark.parametrize("pool, tenant", [(_BrokenPool(), UUID), (_FakePool(None), "not-a-uuid")])
+async def test_a_failed_policy_read_is_not_shown_as_a_notice(caplog, pool, tenant):
+    with caplog.at_level(logging.INFO):
+        out = await _real(pool, tenant)
+    assert out is None
+    warns = [r.getMessage() for r in caplog.records
+             if r.name == "app.domain.services.first_words_preview"]
+    assert warns == ["first_words_preview_unavailable error=policy_lookup_failed"]
+
+
+async def test_an_absent_row_is_still_shown_as_the_default_notice():
+    out = await _real(_FakePool(None))
+    assert out is not None and out["notice_in_opening"] is True
+
+
+async def test_waits_for_person_follows_the_opening_mode():
+    row = {**_BASE_ROW, "announcement_text": OWN}
+    assert (await _real(_FakePool(row), opening_mode="callee_first"))["waits_for_person"] is True
+    assert (await _real(_FakePool(row), opening_mode="agent_first"))["waits_for_person"] is False
+    assert (await _real(_FakePool(row)))["waits_for_person"] is False
+
+
+async def test_notice_alone_is_the_sentence_said_without_an_opening():
+    own = await _preview(_decision())
+    assert own["notice_alone"] == OWN
+    plat = await _preview(_decision(text=PLATFORM))
+    assert plat["notice_alone"] == spoken_disclosure_text(_decision(text=PLATFORM))
+    assert plat["notice_alone"].startswith("This call may be recorded for quality")
+    assert (await _preview(_decision(required=False, text=None)))["notice_alone"] is None
+
+
+async def test_notice_depends_on_place_through_the_real_decide():
+    one = {**_BASE_ROW, "default_consent_mode": "one_party", "announcement_text": OWN}
+    two = {**_BASE_ROW, "default_consent_mode": "two_party", "announcement_text": OWN}
+    off = {**_BASE_ROW, "default_consent_mode": "disabled"}
+    d = await rps.RecordingPolicyService(_FakePool(one)).decide(tenant_id=UUID)
+    assert d.reason == "tenant_policy_one_party_two_party_destination"
+    out = await _real(_FakePool(one))
+    assert out["notice_depends_on_place"] is True and out["notice_first"] == OWN
+    assert (await _real(_FakePool(two)))["notice_depends_on_place"] is False
+    off_out = await _real(_FakePool(off))
+    assert off_out["notice_depends_on_place"] is False and off_out["notice_alone"] is None
+
+
+async def test_one_info_line_per_run_without_notice_text(caplog):
+    with caplog.at_level(logging.INFO, logger="app.domain.services.first_words_preview"):
+        await _preview(_decision(text=PLATFORM))
+        await _preview(_decision())
+        await _preview(_decision(required=False, text=None))
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines == [
+        "first_words_preview tenant=tenant-1 notice=in_opening waits_for_person=false",
+        "first_words_preview tenant=tenant-1 notice=first waits_for_person=false",
+        "first_words_preview tenant=tenant-1 notice=none waits_for_person=false",
+    ]
+    assert not any("recorded" in m or "Acme" in m for m in lines)
+
+
+@pytest.mark.parametrize("decision", [_decision(), _decision(text=PLATFORM),
+                                      _decision(required=False, text=None)])
+async def test_non_greeting_first_words_say_the_notice_alone_and_no_opening(decision):
+    import types
+
+    from app.domain.services.voice_pipeline.caller_first_disclosure import (
+        speak_disclosure_before_first_reply,
+    )
+    from tests.unit import test_outbound_ai_disclosure_opener as h
+
+    log = h._Log()
+    session = h._call_session(None)
+    voice_session = types.SimpleNamespace(
+        call_id=h.CALL_UUID, call_session=session,
+        pipeline=h._Pipeline(log), media_gateway=h._Gateway(log), tts_provider=h._Tts(log),
+        config=types.SimpleNamespace(voice_id="v", tts_sample_rate=8000),
+    )
+    session._voice_session_ref = voice_session
+    container = types.SimpleNamespace(is_initialized=True, db_pool=object())
+    with patch("app.core.container.get_container", return_value=container), patch.object(
+        rps.RecordingPolicyService, "decide", new=AsyncMock(return_value=decision),
+    ):
+        said_opener = await speak_disclosure_before_first_reply(
+            session, "I am busy, what is this about")
+    out = await _preview(decision)
+    assert said_opener is False
+    assert [e for e in log.events if e[0] == "tts"] == (
+        [("tts", out["notice_alone"])] if out["notice_alone"] else [])
+    assert all(m.content != out["opening"] for m in session.conversation_history)

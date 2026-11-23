@@ -483,6 +483,24 @@ class OutboundFirstWordsResponse(BaseModel):
         ...,
         description="True when the recording words are said inside the opening instead of as a separate sentence.",
     )
+    waits_for_person: bool = Field(
+        default=False,
+        description="True when the campaign waits for the person's first words before saying anything.",
+    )
+    notice_alone: Optional[str] = Field(
+        default=None,
+        description=(
+            "The sentence said on its own when the person's first words are not a greeting, so no "
+            "opening is said; null when no notice is owed."
+        ),
+    )
+    notice_depends_on_place: bool = Field(
+        default=False,
+        description=(
+            "True when this account owes a notice only because of the place called (one-party "
+            "account): a call to a place that needs none says the plain opening."
+        ),
+    )
 
 
 class CampaignPromptPreviewResponse(BaseModel):
