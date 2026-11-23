@@ -1,0 +1,82 @@
+# Held-out sentences, written AFTER the proposed patterns were frozen (round 2) and never used to tune them.
+# C| must be caught (a request to stop calling / be removed); N| must not be caught.
+C|Can you just stop calling this phone.
+C|Please, I'm begging you, stop ringing.
+C|stop phoning my mum's number
+C|I don't want any more of these calls.
+C|i want you to stop calling my number
+C|Do me a favour and take my number off.
+C|Wipe my number from your records.
+C|Don't call this house again.
+C|You can take me off your list now.
+C|please put my number on the do not call
+C|i dont want to receive any more calls
+C|I'd like to unsubscribe from your calls.
+C|Remove my details from your system.
+C|Don't contact this number again.
+C|i want off your list
+C|Erase my number please.
+C|Never ring this house again.
+C|stop calling me every day
+C|Cease calling me.
+C|Quit ringing this number.
+C|Leave this number alone and stop calling.
+C|I'm asking you nicely, no more calls.
+C|we want no more calls from your firm
+C|I've had enough, stop ringing us.
+C|stop calling me i have told you before
+C|Don't call us again, we're not interested.
+C|No more phone calls please, thanks.
+C|take me off your database
+C|Kindly remove this number from your list.
+C|Please don't ring this number any more.
+C|Stop calling my landline.
+C|don't bother ringing me
+C|I don't want you ringing here.
+C|Remove us please.
+C|Stop calling, stop texting.
+C|Delete my phone number from your list.
+C|Get my details off your system.
+C|i do not want to be contacted by you again
+C|why do you keep ringing me take me off your list
+C|what part of stop calling me dont you understand
+N|Don't call me before eleven, I work nights.
+N|Can you call me on my mobile after six?
+N|I told the gas company to stop calling me.
+N|My nan says they never call back.
+N|Stop calling it a bargain, mate.
+N|I'm not asking to be removed, just curious.
+N|Will you be calling me again next week?
+N|Remove the second item from the quote.
+N|Delete my old address, I moved.
+N|They've stopped calling me since I paid.
+N|Can I take you off speaker now?
+N|Don't call me late at night please.
+N|Please don't call me during the school run.
+N|My phone keeps ringing with spam.
+N|We never call our customers on Sundays.
+N|Don't ring the bell, the baby's asleep.
+N|Stop, can you say the price again?
+N|Don't hang up, I want to hear more.
+N|Call me back on Thursday afternoon.
+N|No more questions from me, carry on.
+N|Take the VAT off and what's the total?
+N|Who told you to call me?
+N|Why would I want to be removed?
+N|Is there a way to stop the paper bills?
+N|I'd rather you called my office number.
+N|Don't call me at home, call me at the shop.
+N|Do not call me Mister, it's Doctor.
+N|He asked them to take his name off the list.
+N|I want my old number removed from my account, not this one.
+N|Can I opt out of the call recording please?
+N|How would I unsubscribe if I wanted to?
+N|What if I wanted to opt out later?
+N|Stop me if I'm wrong, but is it twelve months?
+N|You should stop calling it a free trial.
+N|I'll stop by your office next week.
+N|My husband never calls me back either.
+N|Does the do not call list cover mobiles?
+N|Don't text me the details, email them.
+N|Can you remove the late fee from my account?
+N|Don't call my husband about this, he's not well.
