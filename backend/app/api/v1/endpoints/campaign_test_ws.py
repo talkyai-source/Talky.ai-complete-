@@ -633,7 +633,7 @@ async def campaign_test_websocket(
     from app.core.security.legal_gate import acceptance_missing
     try:
         legal_missing = await acceptance_missing(
-            SimpleNamespace(id=user_id, tenant_id=tenant_id, role=None), db_client.pool)
+            SimpleNamespace(id=user_id, tenant_id=tenant_id, role="user"), db_client.pool)
     except Exception:  # noqa: BLE001 - a failed read is never "accepted"
         logger.error("campaign_test_ws: legal acceptance lookup failed", exc_info=True)
         await websocket.send_json({"type": "error", "code": "authorization_unavailable",

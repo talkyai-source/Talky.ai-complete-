@@ -126,10 +126,12 @@ def _remember_accepted(key: tuple) -> None:
 
 
 async def _missing_versions(user, pool):
-    """None when nothing is owed or enforced, else (terms, privacy) the user has not accepted.
+    """None when nothing is enforced for this user, else the current versions to check against.
 
-    Switch off: returns before any read. A failed read raises; it is never
-    treated as accepted.
+    Makes no read. None for: the switch off, a platform admin, a user without
+    a tenant, or versions that are not set (logged once). Otherwise
+    (terms, privacy, the legal_acceptance module); whether THIS user has
+    accepted them is decided by ``_owed``.
     """
     global _unset_versions_logged
     if not getattr(config.get_settings(), "legal_acceptance_required", False):
