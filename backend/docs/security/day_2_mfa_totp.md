@@ -698,7 +698,7 @@ Work through each section in order. Only mark a phase complete when every item i
 - [ ] `POST /auth/login` after disable → normal single-step flow (no MFA challenge)
 
 #### Recovery code regeneration
-- [ ] `POST /auth/mfa/recovery-codes/regenerate` with wrong TOTP → 401
+- [ ] `POST /auth/mfa/recovery-codes/regenerate` with wrong TOTP → 400 (`mfa_code_invalid`)
 - [ ] `POST /auth/mfa/recovery-codes/regenerate` with valid TOTP → 200 with 10 new codes
 - [ ] After regenerate, old codes no longer work in `POST /auth/mfa/verify`
 - [ ] After regenerate, `recovery_codes` table has 10 new rows with different hashes
