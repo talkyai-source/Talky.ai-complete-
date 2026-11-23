@@ -23,9 +23,18 @@ export function forgetSignIn(): void {
     try { window.sessionStorage.removeItem(KEY); } catch { /* Storage blocked: no line. */ }
 }
 
+function onSignInPage(): boolean {
+    const path = window.location.pathname;
+    return path === "/auth/login" || path.startsWith("/auth/login/");
+}
+
 export function noteSignInEnded(): void {
     try {
         if (read() !== SIGNED_IN) return;
+        // Already on the sign-in page: the page has read the marker by now, so a
+        // mark written here would only surface on a later reload. Nothing is left
+        // to explain; the tab simply forgets that it held a sign-in.
+        if (onSignInPage()) { window.sessionStorage.removeItem(KEY); return; }
         window.sessionStorage.setItem(KEY, `${ENDED_PREFIX}${Date.now()}`);
     } catch { /* Storage blocked: no line. */ }
 }
