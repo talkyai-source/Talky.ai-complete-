@@ -468,6 +468,23 @@ class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     )
 
 
+class OutboundFirstWordsResponse(BaseModel):
+    """What an outgoing recorded call of this account says first."""
+
+    notice_first: Optional[str] = Field(
+        default=None,
+        description="The account's own recording sentence, said first as its own sentence; null when none is said first.",
+    )
+    opening: str = Field(
+        ...,
+        description="The opening sentence the agent says (carries ', on a recorded line' when notice_in_opening is true).",
+    )
+    notice_in_opening: bool = Field(
+        ...,
+        description="True when the recording words are said inside the opening instead of as a separate sentence.",
+    )
+
+
 class CampaignPromptPreviewResponse(BaseModel):
     """Response body for ``POST /campaigns/preview-prompt``."""
 
@@ -510,6 +527,15 @@ class CampaignPromptPreviewResponse(BaseModel):
         description=(
             "Always false for a successful preview. Over-budget drafts are rejected "
             "with the same error as save/start; content is never elided."
+        ),
+    )
+    outbound_first_words: Optional[OutboundFirstWordsResponse] = Field(
+        default=None,
+        description=(
+            "For an outgoing call on the standard voice pipeline: what the call says first for this "
+            "account's recording policy (its own notice sentence, then the opening; or the opening "
+            "with the recording words inside). Null for incoming calls, the Realtime pipeline, or "
+            "when the policy could not be read."
         ),
     )
 

@@ -60,6 +60,36 @@ class NoticePlacement:
     said: str
 
 
+def placement_for(
+    decision: Any,
+    text: Optional[str],
+    *,
+    opener_available: bool,
+    pinned: bool,
+) -> NoticePlacement:
+    """Choose where the notice `text` is said. Pure: writes no log line.
+
+    `decide_notice_placement` is this plus the one per-call log line; the
+    campaign preview calls this alone so it never writes evidence about a call.
+    """
+    stored = normalize_placement(getattr(decision, "outbound_notice_placement", None))
+    choice_on = placement_choice_enabled()
+    if not text:
+        return NoticePlacement(False, "no_notice", "none")
+    if not opener_available:
+        return NoticePlacement(False, "opener_not_spoken", "notice_alone")
+    if is_platform_notice_text(text):
+        return NoticePlacement(True, "platform_wording", "opening_with_recorded_line")
+    if pinned:
+        return NoticePlacement(False, "incoming_line_text", "notice_then_opening")
+    if stored == IN_OPENING and choice_on:
+        return NoticePlacement(True, "account_choice", "opening_with_recorded_line")
+    if stored == IN_OPENING:
+        # The account chose it, but the platform's switch is off: said as by default.
+        return NoticePlacement(False, "account_choice_switched_off", "notice_then_opening")
+    return NoticePlacement(False, "account_sentence_first", "notice_then_opening")
+
+
 def decide_notice_placement(
     decision: Any,
     text: Optional[str],
@@ -72,21 +102,7 @@ def decide_notice_placement(
     """Choose where the notice `text` is said on this turn, and log it once."""
     stored = normalize_placement(getattr(decision, "outbound_notice_placement", None))
     choice_on = placement_choice_enabled()
-    if not text:
-        result = NoticePlacement(False, "no_notice", "none")
-    elif not opener_available:
-        result = NoticePlacement(False, "opener_not_spoken", "notice_alone")
-    elif is_platform_notice_text(text):
-        result = NoticePlacement(True, "platform_wording", "opening_with_recorded_line")
-    elif pinned:
-        result = NoticePlacement(False, "incoming_line_text", "notice_then_opening")
-    elif stored == IN_OPENING and choice_on:
-        result = NoticePlacement(True, "account_choice", "opening_with_recorded_line")
-    elif stored == IN_OPENING:
-        # The account chose it, but the platform's switch is off: said as by default.
-        result = NoticePlacement(False, "account_choice_switched_off", "notice_then_opening")
-    else:
-        result = NoticePlacement(False, "account_sentence_first", "notice_then_opening")
+    result = placement_for(decision, text, opener_available=opener_available, pinned=pinned)
     logger.info(
         "recording_notice_placement call_id=%s path=%s stored=%s choice_switch=%s said=%s why=%s policy_reason=%s",
         str(call_id)[:12], path, stored, "on" if choice_on else "off",
