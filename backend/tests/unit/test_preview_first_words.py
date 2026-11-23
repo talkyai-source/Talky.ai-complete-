@@ -256,7 +256,10 @@ async def test_one_info_line_per_run_without_notice_text(caplog):
         await _preview(_decision(text=PLATFORM))
         await _preview(_decision())
         await _preview(_decision(required=False, text=None))
-    lines = [r.getMessage() for r in caplog.records]
+    # Only the preview's own lines: the policy functions it calls write lines of their
+    # own (left as they are), and whether those are captured depends on the log level.
+    lines = [r.getMessage() for r in caplog.records
+             if r.name == "app.domain.services.first_words_preview"]
     assert lines == [
         "first_words_preview tenant=tenant-1 notice=in_opening waits_for_person=false",
         "first_words_preview tenant=tenant-1 notice=first waits_for_person=false",
