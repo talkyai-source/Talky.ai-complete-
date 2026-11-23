@@ -75,6 +75,10 @@ class ContactListOut(BaseModel):
     contact_count: int
     created_at: Optional[str] = None
     permission: ContactListPermission = ContactListPermission()
+    # Set only by the permission-confirm routes: how many contacts were queued for
+    # calling by the confirmation (null = not attempted) and a plain-words result.
+    queued_for_calling: Optional[int] = None
+    message: Optional[str] = None
 
 
 class ContactListToggle(BaseModel):
@@ -555,6 +559,25 @@ async def record_contact_list_permission(
         # Someone recorded one between our read and the conditional update.
         raise already
     updated = resp.data[0]
+    queued_for_calling: Optional[int] = None
+    message: Optional[str] = None
+    if bool(updated.get("is_active", True)):
+        from app.api.v1.endpoints.contact_permission_confirm import (
+            queue_confirmed_contacts_if_running,
+        )
+
+        outcome, queued = await queue_confirmed_contacts_if_running(
+            db_client, campaign_id=campaign_id,
+            tenant_id=str(current_user.tenant_id), list_id=list_id,
+        )
+        if outcome == "queued":
+            queued_for_calling = queued
+            message = f"Permission recorded. {queued} contacts were queued for calling."
+        elif outcome == "failed":
+            message = (
+                "Permission recorded. The contacts could not be queued just now; "
+                "use Call this list."
+            )
     return ContactListOut(
         id=str(updated["id"]),
         name=updated.get("name") or "Untitled list",
@@ -565,6 +588,8 @@ async def record_contact_list_permission(
         ),
         created_at=str(updated.get("created_at")) if updated.get("created_at") else None,
         permission=_permission_out({**row, **updated}),
+        queued_for_calling=queued_for_calling,
+        message=message,
     )
 
 
