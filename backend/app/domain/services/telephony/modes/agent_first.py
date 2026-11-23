@@ -201,7 +201,6 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         DISCLOSURE_TRANSMITTED,
         RecordingPolicyService,
         callee_country,
-        is_platform_notice_text,
         record_callee_country,
         record_disclosure_state,
         spoken_disclosure_text,
@@ -292,7 +291,11 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
                 raise RuntimeError("pinned recording disclosure is empty")
         else:
             text = spoken_disclosure_text(decision)
-        as_opener = bool(opener_with_notice and text and is_platform_notice_text(text))
+        from app.domain.services.notice_placement import decide_notice_placement
+        as_opener = decide_notice_placement(
+            decision, text, opener_available=bool(opener_with_notice),
+            pinned=pinned_override is not None, call_id=call_id, path="cascaded",
+        ).in_opening
         if as_opener:
             text = opener_with_notice
         if not text:

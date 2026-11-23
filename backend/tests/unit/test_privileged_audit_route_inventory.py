@@ -69,6 +69,7 @@ AUDITED = {
     ("POST", "/alerts/{alert_id}/ack"): record("alerts", "ack_alert", "unit/test_alert_and_assistant_model_audit_20261120.py"),
     ("POST", "/alerts/{alert_id}/resolve"): record("alerts", "resolve_alert", "unit/test_alert_and_assistant_model_audit_20261120.py"),
     ("PUT", "/assistant/model"): record("assistant_config", "set_assistant_model", "unit/test_alert_and_assistant_model_audit_20261120.py"),
+    ("PUT", "/recordings/policy/outbound-notice-placement"): record("recording_notice_placement", "put_outbound_notice_placement", "unit/test_recording_notice_placement_endpoint.py"),
     ("POST", "/rbac/roles/{role_id}/permissions"): record("rbac.roles", "add_permission_to_role"),
     ("DELETE", "/rbac/roles/{role_id}/permissions"): record("rbac.roles", "remove_permission_from_role"),
     ("POST", "/rbac/tenant-users"): record("rbac.tenant_users", "add_user_to_tenant"),

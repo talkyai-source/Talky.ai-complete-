@@ -124,7 +124,6 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
         DISCLOSURE_NOT_REQUIRED,
         RecordingPolicyService,
         callee_country,
-        is_platform_notice_text,
         record_callee_country,
         record_disclosure_state,
         spoken_disclosure_text,
@@ -211,12 +210,17 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
                 raise RuntimeError("pinned recording disclosure is empty")
         else:
             text = spoken_disclosure_text(decision)
+        from app.domain.services.notice_placement import decide_notice_placement
+        placement = decide_notice_placement(
+            decision, text, opener_available=True, pinned=pinned is not None,
+            call_id=call_id, path="realtime",
+        )
         if not text:
             voice_session._recording_policy_decided = True
             record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
             logger.info("recording_disclosure_not_required call_id=%s reason=%s", str(call_id)[:12], reason)
             g = gate(realtime_opening_line(config), "not_required", reason=reason)
-        elif is_platform_notice_text(text):
+        elif placement.in_opening:
             g = gate(realtime_opening_line(config, recorded_line=True), "platform_in_opener",
                      owed=True, reason=reason)
         elif len(normalize_words(f"{text} {realtime_opening_line(config)}")) > MAX_REQUIRED_WORDS:

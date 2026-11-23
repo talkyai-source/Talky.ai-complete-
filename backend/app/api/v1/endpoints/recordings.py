@@ -36,6 +36,7 @@ from app.core.security.rbac import (
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services import media_privacy
+from app.domain.services.notice_placement import own_sentence_for_display, placement_choice_enabled
 from app.domain.services.recording_service import S3Client
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
@@ -217,6 +218,12 @@ class RecordingPolicyResponse(BaseModel):
     retention_days: Optional[int] = None
     updated_at: Optional[str] = None
     effect: str
+    # Where outgoing calls say the notice; None when the server's database has
+    # no such column yet (or no policy is saved).
+    outbound_notice_placement: Optional[str] = None
+    # The account's own sentence as spoken first; None when it is empty or the
+    # platform wording (already said inside the opening sentence).
+    outbound_notice_own_sentence: Optional[str] = None
 
 
 def _policy_effect(mode: Optional[str]) -> str:
@@ -242,6 +249,11 @@ def _policy_response(row: Any) -> RecordingPolicyResponse:
         retention_days=row.get("retention_days"),
         updated_at=updated.isoformat() if hasattr(updated, "isoformat") else (str(updated) if updated else None),
         effect=_policy_effect(row.get("default_consent_mode")),
+        # Offered to the settings screen only while the platform's switch is on.
+        outbound_notice_placement=(
+            row.get("outbound_notice_placement") if placement_choice_enabled() else None
+        ),
+        outbound_notice_own_sentence=own_sentence_for_display(row.get("announcement_text")),
     )
 
 

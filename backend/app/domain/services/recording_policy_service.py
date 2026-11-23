@@ -78,6 +78,9 @@ class RecordingDecision:
     opt_out_dtmf_digit: Optional[str]
     retention_days: int
     reason: str  # machine-readable; logged for audit
+    # Where an outgoing call says the notice: "own_sentence_first" (default,
+    # today's behaviour) or "in_opening". Chosen in notice_placement.py.
+    outbound_notice_placement: str = "own_sentence_first"
 
 
 # Owner decision, 18 November 2026: a tenant with no saved policy is recorded,
@@ -157,6 +160,9 @@ class RecordingPolicyService:
         announcement_text = row["announcement_text"]
         dtmf = row["opt_out_dtmf_digit"]
         two_party_codes = set(row["two_party_country_codes"] or [])
+        # row.get: a server whose database has no such column yet reads the default.
+        from app.domain.services.notice_placement import normalize_placement
+        placement = normalize_placement(row.get("outbound_notice_placement"))
 
         if mode == CONSENT_DISABLED:
             return RecordingDecision(
@@ -183,6 +189,7 @@ class RecordingPolicyService:
                     opt_out_dtmf_digit=dtmf,
                     retention_days=retention_days,
                     reason="tenant_policy_one_party_two_party_destination",
+                    outbound_notice_placement=placement,
                 )
             return RecordingDecision(
                 should_record=True,
@@ -205,6 +212,7 @@ class RecordingPolicyService:
             announcement_text=announcement_text if needs_announcement else None,
             opt_out_dtmf_digit=dtmf if needs_announcement else None,
             retention_days=retention_days,
+            outbound_notice_placement=placement,
             reason=(
                 "tenant_policy_two_party_announce"
                 if needs_announcement
