@@ -241,18 +241,19 @@ async def _listless(admin, tenant, campaign):
 
 
 async def test_python_token_equals_postgres_token(db):
-    """Same rows, same token: a NULL phone, many ids (uuid order == lowercase text order,
-    so the Python sort by text and the Postgres sort by uuid cannot differ), and no rows."""
+    """Same rows, same token: an empty phone (the column is NOT NULL, so a NULL cannot
+    occur), many ids (uuid order == lowercase text order, so the Python sort by text and the
+    Postgres sort by uuid cannot differ), and no rows."""
     admin, tenant, _other, campaign, _oc, _inbound, _user = db
     assert await _pg_token(admin, tenant, campaign) == cpc.ungrouped_token([])
     for _ in range(12):
         await _lead(admin, tenant, campaign)
-    null_phone = uuid4()
+    empty_phone = uuid4()
     await admin.execute(
-        "INSERT INTO leads(id,tenant_id,campaign_id,phone_number,status) VALUES($1,$2,$3,NULL,'pending')",
-        null_phone, tenant, campaign)
+        "INSERT INTO leads(id,tenant_id,campaign_id,phone_number,status) VALUES($1,$2,$3,'','pending')",
+        empty_phone, tenant, campaign)
     rows = await _listless(admin, tenant, campaign)
-    assert len(rows) == 13 and any(r["phone_number"] is None for r in rows)
+    assert len(rows) == 13 and any(r["phone_number"] == "" for r in rows)
     assert await _pg_token(admin, tenant, campaign) == cpc.ungrouped_token(rows)
     # the move statement returns what the token needs, and its token matches too
     async with admin.transaction():
@@ -289,8 +290,8 @@ async def test_live_call_sql_returns_only_this_tenants_real_live_calls(db):
 
     async def call(t, c, lead, status, is_test=False):
         await admin.execute(
-            "INSERT INTO calls (id,tenant_id,campaign_id,lead_id,status,direction,is_test) "
-            "VALUES ($1,$2,$3,$4,$5,'outbound',$6)", uuid4(), t, c, lead, status, is_test)
+            "INSERT INTO calls (id,tenant_id,campaign_id,lead_id,phone_number,status,direction,is_test) "
+            "VALUES ($1,$2,$3,$4,'+15550001001',$5,'outbound',$6)", uuid4(), t, c, lead, status, is_test)
 
     await call(tenant, campaign, mine["live"], "in_progress")
     await call(tenant, campaign, mine["test"], "in_progress", is_test=True)   # a test call
