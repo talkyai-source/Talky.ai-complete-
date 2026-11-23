@@ -2082,10 +2082,20 @@ class DialerWorker:
                 reap_stuck_calls,
             )
 
-            async with self._acquire_db() as conn:
-                await reap_stuck_jobs(conn)
-                await reap_stuck_calls(conn)
-                await reap_orphaned_scheduled_jobs(conn)
+            # Each reaper gets its own connection and its own try/except so one
+            # failing reaper cannot stop the other two from running.
+            for name, reaper in (
+                ("reap_stuck_jobs", reap_stuck_jobs),
+                ("reap_stuck_calls", reap_stuck_calls),
+                ("reap_orphaned_scheduled_jobs", reap_orphaned_scheduled_jobs),
+            ):
+                try:
+                    async with self._acquire_db() as conn:
+                        await reaper(conn)
+                except Exception as exc:
+                    logger.warning(
+                        "reaper_failed name=%s error=%s", name, type(exc).__name__
+                    )
         except Exception as exc:
             logger.warning("reaper tick failed: %s", exc)
         # Self-heal the Redis in-flight ZSET: age out members whose call ended
@@ -2104,10 +2114,17 @@ class DialerWorker:
                     "SELECT DISTINCT tenant_id FROM campaigns "
                     "WHERE direction='outbound' AND status IN ('running', 'active')"
                 )
-                return [str(r["tenant_id"]) for r in rows] if rows else []
+                result = [str(r["tenant_id"]) for r in rows] if rows else []
+            self._active_tenants_failures = 0
+            return result
 
         except Exception as e:
-            logger.error(f"Failed to get active tenants: {e}")
+            self._active_tenants_failures += 1
+            logger.error(
+                "dialer_active_tenants_read_failed consecutive=%d error=%s",
+                self._active_tenants_failures,
+                type(e).__name__,
+            )
             return []
 
     async def _tenant_minutes_exhausted(self, tenant_id: str) -> bool:
@@ -4553,6 +4570,11 @@ class DialerWorker:
     HEARTBEAT_INTERVAL = 60
     HEARTBEAT_TTL = 180
     HEARTBEAT_REDIS_KEY = "dialer:heartbeat_ts"
+    #: After this many consecutive failed reads of the active-accounts list the
+    #: worker cannot work, so it stops writing the Redis heartbeat key.
+    HEARTBEAT_WITHHOLD_AFTER_FAILURES = 5
+    _active_tenants_failures = 0
+    _heartbeat_withheld = False
 
     async def _heartbeat(self) -> None:
         """Liveness heartbeat loop — the single place this worker proves it is
@@ -4583,8 +4605,18 @@ class DialerWorker:
             )
 
             # Layer 1 — Redis heartbeat for the health API. Best-effort.
+            failures = self._active_tenants_failures
+            withhold = failures >= self.HEARTBEAT_WITHHOLD_AFTER_FAILURES
+            if withhold:
+                self._heartbeat_withheld = True
+                logger.error(
+                    "dialer_heartbeat_withheld consecutive_failures=%d", failures
+                )
+            elif self._heartbeat_withheld:
+                self._heartbeat_withheld = False
+                logger.warning("dialer_heartbeat_resumed")
             try:
-                if self._redis is not None:
+                if self._redis is not None and not withhold:
                     await self._redis.setex(
                         self.HEARTBEAT_REDIS_KEY,
                         self.HEARTBEAT_TTL,
