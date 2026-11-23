@@ -1,0 +1,40 @@
+# Sentences a careful person would argue about. Format: sentence || decision (catch / not) || why.
+# Rule used for every decision: a missed opt-out is a compliance miss (worse); a wrong catch loses one lead
+# and an account admin can delete the do-not-call row (DELETE /api/v1/dnc/{id}). Catch when the words are
+# a request about calls to this number; do not catch when they are clearly about something else.
+Stop calling me Dave. || catch || no comma does not prove a naming complaint; a dropped comma on "stop calling me, Dave" is more likely on a cold call
+stop calling me sir || catch || "stop calling me, sir" is the common reading on an unwanted call
+Don't call me mate. || catch || UK "don't call me, mate" is an opt-out; the naming complaint needs a tail ("I'm not your mate")
+Don't call me love. || catch || same as "mate": vocative more likely; a naming complaint usually says more
+Don't call me sweetheart, it's patronising. || not || the tail explains it is about the word
+Don't call back, I'll call you when I'm ready. || catch || the words refuse callbacks; a do-not-call row blocks only our outgoing calls, their own call still works
+Don't call me, I'll call you. || catch || same as above
+Don't call me, call my wife. || catch || a refusal of calls to this number; the wife's number is a different row
+Stop calling my mum, she's ninety. || catch || said on the number being called: the number is hers or shared; stop calling it
+Stop calling him, he passed away last year. || catch || a request about this number; nobody here wants the calls
+Stop calling her. || catch || on a cold call "her" is the person on the lead; stop calling this number
+Stop bothering me. || not || the owner counts hostile dismissals as do-not-call, but "leave me alone" is only an end today; the model's quote path covers it ("bother" is a contact word in verified_opt_out); adding "quit bothering me" to the floor breaks test_model_verified_opt_out.py:164
+Leave me alone. || not || the owner's rule keeps it an end, not a do-not-call (end_session_action.py:29)
+I'm on the do not call list. || catch || the caller is telling us not to call; recording it is the safe side
+I'm registered with the TPS. || catch || UK Telephone Preference Service: a marketing call to this number is not allowed; the caller is asserting it
+Is my number on your do not call list? || not || a question; the model should answer and offer removal
+I want to be removed from your list if this is a sales call. || catch || the condition is met on a sales call; we are one
+If you call again I'll report you. || catch || a threat that only makes sense as "do not call again"
+Don't call me at this number. || catch || the do-not-call row is per number: exactly what was asked
+Don't call me on this number, call my mobile. || catch || the row is per number; the mobile is a different number
+Stop emailing me. || not || not about calls; the model may still flag it with a quote; email is not a contact word in _CONTACT
+I don't want to hear from you. || catch || without a time it refuses future contact (the inspection's sentence with "again" removed)
+I don't want any of this. || not || a decline of the offer, not of future calls
+Not interested, don't call again. || catch || explicit
+Please stop. || not || no object: could be "stop talking"; the model decides
+Stop. || not || same
+Enough calls. || catch || a refusal of more calls
+That's enough, stop calling. || catch || explicit
+Unsubscribe me from the emails. || catch || "unsubscribe" is already a floor phrase today; changing it is out of scope
+No more calls today please. || not || a time limit ("today")
+I'll block your number. || not || a statement about their phone; the model decides
+Never again. || not || no word for calling; could be about anything
+Get lost. || not || owner list excludes it (test_hostile_dismissal_opt_out.py:20-21)
+I want to opt out. || not || moved out of must_catch in round 3: right after the recording notice it most likely means the recording; the model's quote path covers it ("opt out" is in _REMOVAL, end_session_action.py:170)
+opt out please || not || same as above
+Can I opt out? || not || same: after "this call is recorded" it is about the recording
