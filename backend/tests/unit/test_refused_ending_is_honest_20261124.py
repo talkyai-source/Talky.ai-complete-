@@ -269,20 +269,34 @@ async def _run_turns(llm, session, *said):
 
 
 async def test_the_refused_ending_line_is_not_spoken_twice_running():
+    # Replies the detector still refuses after the question. (A plain "No" ends the call since
+    # the bare-negative rule: the next test.)
     llm, _ = _silent_end_caller()
     session = _action_session()
-    said = await _run_turns(llm, session, NO_END_WORDS, "No.", "I said no.")
+    said = await _run_turns(llm, session, NO_END_WORDS, "I'm busy.", "I said I'm busy.")
     assert said[:2] == [REFUSED_ENDING_LINE, REFUSED_ENDING_AGAIN_LINE]
     assert all(x != y for x, y in zip(said, said[1:]))  # never the same line twice running
     assert REFUSED_ENDING_AGAIN_LINE == "Okay, no problem." and "?" not in REFUSED_ENDING_AGAIN_LINE
 
 
+async def test_a_plain_no_after_the_question_ends_the_call_with_goodbye():
+    # The question invites "No". With the bare-negative rule that reply backs the model's
+    # request to end, so the person hears "Goodbye." and not the same question again.
+    llm, _ = _silent_end_caller()
+    session = _action_session()
+    said = await _run_turns(llm, session, NO_END_WORDS, "No.")
+    assert said == [REFUSED_ENDING_LINE, "Goodbye."]
+    assert session._end_call_requested is True
+
+
 async def test_a_refused_do_not_call_is_answered_with_ask_again_never_no_problem(caplog):
+    # A wording the detector does not take as a request to stop and whose quote cannot be
+    # verified. ("I don't want to hear from you again" used to be one; it is recognised now.)
     caplog.set_level(logging.INFO)
     llm, rounds = _silent_end_caller({"reason": "opt out", "do_not_call": True,
-                                      "opt_out_quote": "I don't want to hear from you again"})
+                                      "opt_out_quote": "I'm registered with the TPS"})
     session = _action_session()
-    (text,) = await _run_turns(llm, session, "I don't want to hear from you again.")
+    (text,) = await _run_turns(llm, session, "I'm registered with the TPS.")
     assert text == ASK_AGAIN_LINE == "Sorry, could you say that once more?"
     assert not text.startswith("No problem")
     assert getattr(session, "_caller_opted_out", False) is not True
