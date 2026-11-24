@@ -246,7 +246,8 @@ async def test_teardown_database_failure_never_creates_disk_only_orphan(fixture,
         is_initialized=True, db_pool=pool, db_client=SimpleNamespace(pool=pool)
     )
     monkeypatch.setattr("app.core.container.get_container", lambda: container)
-    monkeypatch.setattr("app.core.db.get_db", unavailable)
+    # The calls lookup uses the tenant-scoped connection (acquire_with_tenant).
+    monkeypatch.setattr(recording, "acquire_with_tenant", unavailable)
     monkeypatch.setattr(recording, "RecordingService", lambda _: fixture.service)
     gateway = SimpleNamespace(
         get_recording_buffer=lambda _: [b"\x01\x00" * 9600],
@@ -282,6 +283,8 @@ async def test_teardown_stub_preserves_authoritative_tenant(fixture, monkeypatch
     async def fetch(query, *args):
         if "FROM campaigns" in query:
             return None if case == "foreign-campaign" else {"id": UUID(CAMPAIGN)}
+        if "FROM calls WHERE tenant_id" in query:
+            return {"id": UUID(CALL)}  # the save's own binding check (the stub row exists by then)
         return None  # No previous calls row, exercising actual standalone stub path.
 
     conn.fetchrow.side_effect = fetch
@@ -290,9 +293,16 @@ async def test_teardown_stub_preserves_authoritative_tenant(fixture, monkeypatch
     async def acquire(*args, **kwargs):
         yield conn
 
+    @asynccontextmanager
+    async def acquire_for_tenant(pool, tenant, **kwargs):
+        # Every connection of the save must name the recording's OWN account.
+        assert str(tenant) == TENANT
+        yield conn
+
     conn.transaction = acquire
     pool = SimpleNamespace(acquire=acquire)
-    monkeypatch.setattr("app.core.db.get_db", acquire)
+    # The calls lookup uses the tenant-scoped connection (acquire_with_tenant).
+    monkeypatch.setattr(recording, "acquire_with_tenant", acquire_for_tenant)
     monkeypatch.setattr(
         "app.core.container.get_container",
         lambda: SimpleNamespace(
