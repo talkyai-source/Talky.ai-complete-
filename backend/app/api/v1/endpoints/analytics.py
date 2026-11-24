@@ -5,6 +5,8 @@ Calls finish as status='ended'/'completed' with the real result in `outcome`,
 so series are classified by `outcome` (keying on `status` under-counts badly).
 Supports hour/day/week/month buckets and a per-campaign breakdown.
 """
+import logging
+
 from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
@@ -24,6 +26,8 @@ from app.domain.services.call_outcomes import (
 from app.domain.services.reporting_time import (
     ReportingTimeUnavailable, calendar_range, resolve_reporting_zone,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 _require_analytics_read = require_permission(Permission.ANALYTICS_READ)
@@ -277,7 +281,8 @@ async def get_best_time_to_call(
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.execute()
         if getattr(response, "error", None):
-            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+            logger.error("analytics best-time read failed tenant=%s: %s", current_user.tenant_id, response.error)
+            raise HTTPException(status_code=500, detail="Failed to fetch analytics")
 
         buckets: Dict[int, dict] = {
             h: {"total": 0, "answered": 0, "failed": 0, "goal": 0} for h in range(24)
@@ -342,7 +347,8 @@ async def get_retry_effectiveness(
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.execute()
         if getattr(response, "error", None):
-            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+            logger.error("analytics retry-effectiveness read failed tenant=%s: %s", current_user.tenant_id, response.error)
+            raise HTTPException(status_code=500, detail="Failed to fetch analytics")
 
         # Group calls per lead, then order each lead's calls by time so we can
         # assign a 1-based attempt ordinal.
@@ -436,7 +442,8 @@ async def get_call_analytics(
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.order("created_at").execute()
         if getattr(response, "error", None):
-            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+            logger.error("analytics calls read failed tenant=%s: %s", current_user.tenant_id, response.error)
+            raise HTTPException(status_code=500, detail="Failed to fetch analytics")
 
         if window is not None:
             buckets, counts, minutes = _window_buckets(response.data or [], now, window, zone)
@@ -514,7 +521,8 @@ async def get_call_analytics_by_campaign(
         query = apply_tenant_filter(query, current_user.tenant_id)
         response = query.order("created_at").execute()
         if getattr(response, "error", None):
-            raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {response.error}")
+            logger.error("analytics by-campaign read failed tenant=%s: %s", current_user.tenant_id, response.error)
+            raise HTTPException(status_code=500, detail="Failed to fetch analytics")
 
         # campaign_id -> {bucket_key -> counts}
         per_campaign: Dict[str, Dict[str, dict]] = {}

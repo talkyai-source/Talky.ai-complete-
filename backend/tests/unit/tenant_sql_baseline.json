@@ -319,10 +319,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f535ebf0acf3f3cbd67ff4f74aebf8ae4fae55da4283c72d01438f7004f8db06",
+      "id": "2ea32bf6876f9366bf33ada032fdec4993cac1fdc30da46cf99f5948bfbc6a19",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
-      "line": 612,
+      "line": 620,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {branch} FROM {Attribute(value=Name(id='rel', ctx=Load()), attr='table', ctx=Load())} WHERE id = ANY($1){branch}",
@@ -1032,10 +1032,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "420a71370469a919783d49d1a0fd32e9da0c0a251f16c83434f45ca30480c5cf",
+      "id": "6df5c4ce5b2be4eaafa4e0b383876f02c215d09d3ba7d9cbfecb55333f4cc762",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
-      "line": 549,
+      "line": 557,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {base_select} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])}",
@@ -2514,10 +2514,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d54d06c68f9e646780b12cc0c728c2a4e2ee9f35211f01e686dfe0ce49b46c18",
+      "id": "5080cc38b015a6ed24793e6f980853564aec88a6a82960841157834dfa313a75",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_insert",
-      "line": 716,
+      "line": 724,
       "method": "fetchrow",
       "tables": [],
       "sql": "{branch}",
@@ -3067,10 +3067,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "fc825f15e66889bcefa01288f70d00389d5684ab31001fe407f77eb0617f5100",
+      "id": "6f87a592267c6f9ec827f85bc62f51dd26516c9c4920e0da4d788aa95f7f61b4",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 938,
+      "line": 953,
       "method": "execute",
       "tables": [
         "tenant_quota_usage"
@@ -4153,10 +4153,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "898de508c7167f073c07395faa4b41e3d92ac79231c3e26bd7ee02723bb8a73a",
+      "id": "9f40afe98fe323a6e4962b945878de031c1bdbf947c0c6babe49b1046c5a9ac8",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_async",
-      "line": 262,
+      "line": 270,
       "method": "execute",
       "tables": [],
       "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
@@ -4263,10 +4263,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "50ef6f87e8148b6df561da7b6cacb3133c151527813cf4ca2ff85aa79805e76b",
+      "id": "c37ad22b43e247142055014837f8f03aba2125baee1f7034724d42d55728783a",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_update",
-      "line": 743,
+      "line": 751,
       "method": "fetch",
       "tables": [],
       "sql": "UPDATE {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} {unpacked} RETURNING *",
@@ -4584,10 +4584,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "38b8982e0952aec57b6b91bab82a07be6c2de2ddf41aef727853aba6578944a1",
+      "id": "2e19645d8f6a0353ec1a601d3e2a1a1f40ce6bea4b94705ca5c73c77fd9c28a2",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
-      "line": 681,
+      "line": 689,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {unpacked} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])} {IfExp(test=Compare(left=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=JoinedStr(values=[Constant(value='LIMIT '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))} {IfExp(test=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), body=JoinedStr(values=[Constant(value='OFFSET '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))}",
@@ -5063,10 +5063,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e361ebefe4e8632e4c221bb8808946e1a5bf1d578cd7b0c28acfe7135549b3b9",
+      "id": "95905c66e571eb9f306a0e97ef8efd5b54447f4ab2c35e97d009565818548690",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 940,
+      "line": 955,
       "method": "fetchval",
       "tables": [
         "tenant_quota_usage"
@@ -5266,10 +5266,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d34fedae9701164912ee5dc5c038d61a5a934f17d4eacb8202ec1e92b36d4743",
+      "id": "2cf5376fdc2388714726baeef767a881159b3d1bb43a86484ae0868e40f14041",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
-      "line": 678,
+      "line": 686,
       "method": "fetchval",
       "tables": [],
       "sql": "SELECT COUNT(*) FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked}",
@@ -5518,10 +5518,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "381d282d11cade8552142b94f5b63c7fac259c6fe70b7396c0a456fafe7af9c5",
+      "id": "53d02068118ec38665e58cddd3812cdaf2e7a9c9fe963c9e167c350318850b08",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._execute_async",
-      "line": 868,
+      "line": 883,
       "method": "execute",
       "tables": [],
       "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
@@ -6248,10 +6248,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8a49b8a6d0623742b9f26d29de2e8c39a8e82f916cfd3f095663c9824beea8f5",
+      "id": "f23163f63516c76ff0279ba5123cf827d57e1c2f30a88845a630acabfc8c0d3d",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_upsert",
-      "line": 787,
+      "line": 795,
       "method": "fetchrow",
       "tables": [],
       "sql": "INSERT INTO {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='keys', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_cols', ctx=Load())], keywords=[])}) {branch} RETURNING *",
@@ -6627,7 +6627,7 @@
       "id": "d5834f3d398bce7a78c1fb266e4ea528f08133c12afc364e8993cc5bea14e9b7",
       "file": "app/api/v1/endpoints/mfa/status.py",
       "function": "disable_mfa",
-      "line": 126,
+      "line": 131,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -7103,10 +7103,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a50cc71e39e0db89e054789f8aee8b0911cd790634d0a0a8e4881ba041bc8a09",
+      "id": "90cb4b4023eabb30b76652bd41a7957eca1db5f8c38580784f64aa23987b29e5",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_campaign_counter",
-      "line": 919,
+      "line": 934,
       "method": "fetchrow",
       "tables": [
         "campaigns"
@@ -7543,10 +7543,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d1ed13b1ed732e7b54544af13066e50bfec75394dab3712e7eab85608340e318",
+      "id": "5b3f1f0b06a3f1eb4fe0178e929d7ee6b5d3a404a00b5c8b3e160e254c12e2bd",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_delete",
-      "line": 800,
+      "line": 808,
       "method": "fetch",
       "tables": [],
       "sql": "DELETE FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} RETURNING *",
@@ -9106,7 +9106,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1d55779ad6f02d1e322f279b618c557b98af97892278424720547e1d08ab8c33",
+      "id": "2ce9e3af4cf37a2011360d2dc2ab8bb0e228dc7eb943262c62e6b1ee75a1e491",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1333,
@@ -9272,7 +9272,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "8fa96cdf8d64ac0f3a1205bb0b730673cdd050e2aa3c8af8dbab9ddebbddd89e",
+      "id": "e4352da32233669afff12471ea8058f08216c32da9ba254cc1fda7419be7cae3",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 883,
@@ -9840,7 +9840,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "5ff8d39f9719ee07d345e37a439b897d549bc3f423e323d6a62bd89dd28ac4ab",
+      "id": "5d5af22aa88a3752d1d1aec0f4a441284cb29cbab8287e510cf958ec9a64ac91",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1709,
@@ -10150,7 +10150,7 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "a5faf84f0bcad5c025719f694124348a1e89a4ab74cda1f1ab96014a9ec85552",
+      "id": "a6bdebefc087f46d29c508ad0c10b22c10d270055d122b39582667182de538a9",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2459,
@@ -10321,7 +10321,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "bf4773f0ffb9876e744bdd9147a84ef121ded6c54ebde627f695c8eb9532bd32",
+      "id": "d22b7b08d6746d3166f101b1ca328d7be0293695d8606a090d8e999705b8650a",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1160,
@@ -10419,7 +10419,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "cd7bf62e5ce805391603c422274091487f5fb2bb619bb13a9c63cfc2f525aafd",
+      "id": "e7fbc856ec5fd71b566aa69c48455aa92cd57fdcb0306977c06add59042e7a59",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 2296,

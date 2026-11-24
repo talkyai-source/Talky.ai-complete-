@@ -897,7 +897,7 @@ async def create_campaign(
         response = db_client.table("campaigns").insert(insert_payload).execute()
         if response.error:
             logger.error(f"Error creating campaign: {response.error}")
-            raise HTTPException(status_code=500, detail=f"Failed to create campaign: {response.error}")
+            raise HTTPException(status_code=500, detail="Failed to create campaign")
         if not response.data:
             logger.error("Campaign insert returned no rows for tenant=%s name=%s", current_user.tenant_id, insert_payload["name"])
             raise HTTPException(status_code=500, detail="Failed to create campaign")

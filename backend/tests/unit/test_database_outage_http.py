@@ -105,6 +105,24 @@ async def test_eight_routes_connect_socket_failures_are_retryable(monkeypatch, m
     assert_retryable(response)
 
 
+@pytest.mark.parametrize("method,path", ROUTES)
+async def test_eight_routes_connect_timeout_is_retryable(monkeypatch, method, path):
+    # No connection within the limit is "try again later" too, not an ordinary failure
+    # that a route could answer as "not found" or as an empty list.
+    import asyncio
+
+    app = mounted_app(monkeypatch)
+    connect = AsyncMock(side_effect=asyncio.TimeoutError())
+    monkeypatch.setattr(adapter.asyncpg, "connect", connect)
+    response = await request(app, method, path)
+    assert connect.await_count == 1
+    # 503 with a time to retry after. The analytics routes answer with their own sentence
+    # and 10 seconds (their timezone read comes first); the others with the shared 5.
+    assert response.status_code == 503, response.text
+    assert response.headers["Retry-After"] in {"5", "10"}
+    assert "TimeoutError" not in response.text and "timed out" not in response.text
+
+
 @pytest.mark.parametrize("wrapper", ["direct", "cause", "context", "runtime"])
 @pytest.mark.parametrize("error_type", DRIVER_ERRORS[2:])
 async def test_connection_error_type_survives_cause_and_context(error_type, wrapper):

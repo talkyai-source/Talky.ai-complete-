@@ -116,7 +116,7 @@ def connect_queue(monkeypatch):
     """
     queue: List[FakeConn] = []
 
-    async def fake_connect(_dsn: str):
+    async def fake_connect(_dsn: str, **_kwargs):
         assert queue, "No fake connection queued for asyncpg.connect"
         return queue.pop(0)
 
