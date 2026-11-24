@@ -58,6 +58,15 @@ test("it appears when /auth/me says an acceptance is owed, with the words, both 
     assert.equal((screen.getByRole("button", { name: BUTTON }) as HTMLButtonElement).disabled, false);
 });
 
+test("it offers a Contact us link to the public contact page, opening in a new tab", () => {
+    show();
+    const link = screen.getByRole("link", { name: "Contact us" });
+    assert.equal(link.getAttribute("href"), "/contact");
+    assert.equal(link.getAttribute("target"), "_blank");
+    assert.equal(link.getAttribute("rel"), "noopener noreferrer");
+    assert.ok(screen.getByText(/Questions\?/));
+});
+
 test("it does not appear when the field is false, missing, or the user is not known yet", () => {
     for (const next of [{ ...owed, legal_acceptance_required: false }, { id: "u1", email: "u@example.test", role: "tenant_admin" }, null,
         { ...owed, legal_acceptance_required: "true" }, { ...owed, terms_version: null }]) {
