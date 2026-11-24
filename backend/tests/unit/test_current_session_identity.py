@@ -65,7 +65,9 @@ class Conn:
             return {"password_hash": "h"}
         if "SELECT family_id FROM refresh_tokens" in sql:
             self.family_lookups.append((sql, args))
-            if args[0] == hashlib.sha256(RT.encode()).hexdigest():
+            # the family belongs to USER (in TENANT): the lookup must ask for both
+            if (args[0] == hashlib.sha256(RT.encode()).hexdigest() and str(args[1]) == USER
+                    and (len(args) < 3 or args[2] == TENANT)):
                 return {"family_id": FAMILY}
             return None
         if "FROM user_mfa" in sql:
@@ -170,6 +172,28 @@ async def test_self_revoke_refused_for_authenticated_session_without_cookie(conn
             CURRENT, user, db, talky_sid=None, request=make_request(CURRENT))
     assert refused.value.status_code == 400
     assert conn.session_revokes == []
+
+
+@pytest.mark.parametrize("spelled", [CURRENT.upper(), CURRENT.replace("-", "")])
+async def test_self_revoke_is_refused_however_the_own_id_is_spelled(conn, spelled):
+    # The database matches a session id in any letter case, so the guard compares values.
+    for kwargs in ({"talky_sid": None, "request": make_request(CURRENT)},
+                   {"talky_sid": "synthetic-sid", "request": make_request(None)}):
+        with pytest.raises(HTTPException) as refused:
+            await sessions_ep.revoke_specific_session(spelled, user, db, **kwargs)
+        assert refused.value.status_code == 400
+    assert conn.session_revokes == []
+
+
+async def test_a_refresh_cookie_of_another_user_keeps_no_family(conn):
+    # Someone else's refresh cookie names no family of THIS user: every token is revoked.
+    other = SimpleNamespace(id="dddddddd-0000-4000-8000-000000000009", tenant_id=TENANT)
+    await mfa_ep.disable_mfa(make_request(CURRENT), MFADisableRequest(password="pw"), other, db,
+                             talky_rt=RT)
+    assert len(conn.refresh_updates[-1]) == 3
+    await password_ep.change_password(
+        make_request(CURRENT), body, SimpleNamespace(), other, db, audit, talky_sid=None, talky_rt=RT)
+    assert len(conn.refresh_updates[-1]) == 3
 
 
 async def test_revoking_another_session_still_works_without_cookie(conn):

@@ -133,8 +133,8 @@ async def disable_mfa(
         # P3.2 — Disabling MFA is a security-affecting action. Force every
         # OTHER device/session to re-authenticate so a thief who stole one
         # session (then disabled MFA from it) can't keep using the long-
-        # tail sessions elsewhere. The CURRENT session keeps working
-        # until its JWT (15-min TTL) naturally expires.
+        # tail sessions elsewhere. The CURRENT session is kept, and so is
+        # its own refresh family (below), so this device stays signed in.
         current_session_id = getattr(getattr(request, "state", None), "authenticated_session_id", None)
         if current_session_id:
             sessions_revoked = await revoke_other_user_sessions(
@@ -152,8 +152,9 @@ async def disable_mfa(
         # Same rule as change-password: the current device's refresh family
         # (from its own talky_rt cookie) stays alive; with no determinable
         # family, revoke all. The lookup names the account explicitly; a user
-        # with no account (platform staff) has no family kept and is asked to
-        # sign in again, as before.
+        # with no account (platform staff) has no family kept: their session
+        # stays, and they sign in again when its access token next needs
+        # renewing.
         current_family_id = None
         if isinstance(talky_rt, str) and talky_rt and current_user.tenant_id:
             family = await conn.fetchrow(

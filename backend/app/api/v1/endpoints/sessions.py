@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -45,6 +46,18 @@ from app.core.security.sessions import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+def _same_session(a, b) -> bool:
+    """Session ids are UUIDs: compare the values, not how they are spelled.
+
+    The database matches an id in any letter case, so a spelled comparison let
+    a customer end their own current session by writing its id in capitals.
+    """
+    try:
+        return UUID(str(a)) == UUID(str(b))
+    except (ValueError, AttributeError, TypeError):
+        return str(a) == str(b)
 
 
 # =============================================================================
@@ -265,7 +278,7 @@ async def revoke_specific_session(
             getattr(request, "state", None), "authenticated_session_id", None
         )
         if authenticated_id:
-            if str(authenticated_id) == session_id:
+            if _same_session(authenticated_id, session_id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot revoke current session. Use /auth/logout instead.",
@@ -276,7 +289,7 @@ async def revoke_specific_session(
                 "SELECT id FROM security_sessions WHERE session_token_hash = $1",
                 current_hash,
             )
-            if current_session and str(current_session["id"]) == session_id:
+            if current_session and _same_session(current_session["id"], session_id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot revoke current session. Use /auth/logout instead.",
