@@ -145,16 +145,17 @@ async def start_campaign(
             # confirm card shows and voice mode speaks beside "Applied".
             note = CampaignService._withheld_note(withheld).strip()
             if getattr(started, "leads_selected", None) == 0:
-                # Every contact was held back: the campaign is running (they are
-                # queued once permission is confirmed) but nothing is dialled, so
-                # do not say calling started. ``jobs_enqueued == 0`` is NOT this
-                # test: a large start and a resume report 0 while calls go out.
+                # This start selected nobody: every pending contact was held back.
+                # The campaign is running (they are queued once permission is
+                # confirmed; retries already scheduled still go out), so do not
+                # say calling started. ``jobs_enqueued == 0`` is NOT this test: a
+                # large start and a resume report 0 while new calls go out.
                 answer["message"] = (
                     f"Campaign '{campaign.get('name')}' is running, but no contact was queued. {note}"
                 )
                 answer["notice"] = f"No contact was queued. {note}"
             else:
-                answer["message"] += f" {note}"
+                answer["message"] += f". {note}"
                 answer["notice"] = note
             answer["jobs_withheld"] = withheld
         return answer

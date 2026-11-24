@@ -308,7 +308,7 @@ async def test_start_with_some_contacts_held_back_reports_count_and_explanation(
 
     assert result["success"] is True
     assert result["jobs_enqueued"] == 2 and result["jobs_withheld"] == 1
-    assert result["message"] == "Campaign 'Roofing Leads' has been started" + note(1)
+    assert result["message"] == "Campaign 'Roofing Leads' has been started. " + note(1).strip()
     assert result["notice"] == note(1).strip()
 
 
@@ -329,7 +329,7 @@ async def test_start_with_nothing_queued_yet_is_not_mistaken_for_every_contact_h
     result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
 
     assert result["success"] is True
-    assert result["message"] == "Campaign 'Roofing Leads' has been started" + note(1)
+    assert result["message"] == "Campaign 'Roofing Leads' has been started. " + note(1).strip()
     assert result["notice"] == note(1).strip()
     assert "No contact was queued" not in result["message"] + result["notice"]
 
