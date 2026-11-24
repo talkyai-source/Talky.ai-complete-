@@ -8329,7 +8329,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3209,
+      "line": 3212,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8339,14 +8339,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3209.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3212.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3556,
+      "line": 3559,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8356,14 +8356,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3556.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3559.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3636,
+      "line": 3639,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8374,7 +8374,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3636.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3639.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -9106,7 +9106,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "f240e432d8678ef1383756e6b21f33a06ec8704a5527edc3aaa5bba2a76f4fe6",
+      "id": "7eab492c6142ae18314a9991d5006e3da86b0b12e4e95a9bad215279b7ebeaa4",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1338,
@@ -9272,7 +9272,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "db1aff232c9f2c6d67e160f7e40d5a37f54172b51815c2f879d5536474a386ca",
+      "id": "8cb42c879838c2628e4cd7e189b1c765d4c8c7b36cac507038fcd978004f3472",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 888,
@@ -9840,7 +9840,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "293633c41c2a743127943a54f328ed5c0d4e23f1f5472c782fe87b6315922289",
+      "id": "a961a3204fc4fd82b98ff44050304dfbaafd89bb9ca3ba820af91fc471ef80e0",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1714,
@@ -10150,7 +10150,7 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "d9b1fac1f7893f451c0b618b63789e9d49b92628b1231e37c5e2b2c39a830288",
+      "id": "164fdce4c433d2de040d54c40bc366462c0e15cf96205f25698178926706e12d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2467,
@@ -10321,7 +10321,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "d51845cd2a2ba62083e526eda0354aa710fa4ca426f26bfb2132d79b9fb7ccd0",
+      "id": "a9966ce4ec94ab0863ee7f80d352c5530ff895fcffeb359a45edf80a93538634",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1165,
@@ -10419,7 +10419,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "49437b3624802ef985e88296515d9fad28ae58b03b5a30d773cc69e615326f70",
+      "id": "3cfef4bf3d516eb8bfe4c1e1a19783e21768ffd7a59fbaf09a9960e6d82c02be",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 2303,

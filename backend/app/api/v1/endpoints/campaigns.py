@@ -2552,7 +2552,9 @@ async def list_campaign_contacts(
         query = db_client.table("leads").select(
             "*", count="exact"
         ).eq("campaign_id", campaign_id).neq("status", "deleted")
-        
+        if current_user.tenant_id:
+            query = query.eq("tenant_id", current_user.tenant_id)
+
         # Apply filters
         if status:
             query = query.eq("status", status)
