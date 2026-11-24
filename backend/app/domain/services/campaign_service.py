@@ -897,7 +897,9 @@ class CampaignService:
             raise
         except Exception as e:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
-            raise CampaignError(f"Failed to start campaign: {str(e)}")
+            # The detail is in the log line above. A CampaignError's message can reach
+            # a customer (the Salesforce callback returns it), so it carries none.
+            raise CampaignError("Failed to start campaign") from e
 
     @staticmethod
     def _withheld_note(count: int) -> str:

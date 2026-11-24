@@ -533,3 +533,21 @@ def test_dispatch_hint_takes_names_only():
     assert hint("unsupported operand type(s) for +: 'int' and 'str'") == ""
     assert hint("got an unexpected keyword argument '" + MARKER + "'") == ""
     assert hint(MARKER) == ""
+
+
+def test_a_failed_start_carries_no_driver_text_in_its_campaign_error(monkeypatch):
+    # The message of a CampaignError can reach a customer (the Salesforce callback returns it).
+    import asyncio
+
+    from app.domain.services.campaign_service import CampaignError, CampaignService
+
+    svc = CampaignService(object())
+
+    async def boom(*_a, **_k):
+        raise RuntimeError(MARKER)
+
+    monkeypatch.setattr(svc, "get_campaign", boom)
+    with pytest.raises(CampaignError) as raised:
+        asyncio.run(svc.start_campaign("c1", tenant_id=TENANT))
+    assert str(raised.value) == "Failed to start campaign"
+    assert isinstance(raised.value.__cause__, RuntimeError)
