@@ -814,6 +814,87 @@ async def test_no_provider_attempt_leaves_worker_intent_actionable(monkeypatch):
     assert path.events[-1] == "end_session"
 
 
+async def _names_reaching_prewarm(monkeypatch, *, context, body_first=None, body_last=None):
+    path = _install_call_path(
+        monkeypatch,
+        campaign_rows=[_campaign(), _campaign()],
+        internal_intent_row=_internal_intent_row(),
+        adapter_name="unsupported-provider",
+    )
+
+    async def fresh_context(_lead_id, _tenant_id):
+        return context
+
+    monkeypatch.setattr(telephony_bridge, "_load_agent_lead_context", fresh_context)
+    path.body.lead_first_name = body_first
+    path.body.lead_last_name = body_last
+    await _assert_call_error(path, 503)
+    assert "prewarm" in path.events
+    return path.prewarm_kwargs["lead_first_name"], path.prewarm_kwargs["lead_last_name"]
+
+
+@pytest.mark.asyncio
+async def test_call_greets_with_contact_current_name_when_job_has_none(monkeypatch):
+    names = await _names_reaching_prewarm(
+        monkeypatch, context={"first_name": "Sian", "last_name": "Roberts"}
+    )
+    assert names == ("Sian", "Roberts")
+
+
+@pytest.mark.asyncio
+async def test_contact_current_name_wins_over_stale_job_copy(monkeypatch):
+    names = await _names_reaching_prewarm(
+        monkeypatch,
+        context={"first_name": "Sian", "last_name": "Roberts"},
+        body_first="Old",
+        body_last="Copy",
+    )
+    assert names == ("Sian", "Roberts")
+
+
+@pytest.mark.asyncio
+async def test_job_name_copy_is_fallback_when_no_context(monkeypatch):
+    names = await _names_reaching_prewarm(
+        monkeypatch, context=None, body_first="Ann", body_last="Lee"
+    )
+    assert names == ("Ann", "Lee")
+
+
+@pytest.mark.asyncio
+async def test_job_name_copy_is_fallback_when_context_has_no_name(monkeypatch):
+    names = await _names_reaching_prewarm(
+        monkeypatch,
+        context={"job_title": "Director"},
+        body_first="Ann",
+        body_last="Lee",
+    )
+    assert names == ("Ann", "Lee")
+
+
+@pytest.mark.asyncio
+async def test_both_name_parts_come_from_one_source(monkeypatch):
+    """A contact renamed after queuing, with the last name cleared: the queued copy
+    still says "Old Lee". The call must not be told "Sian Lee", a name nobody has."""
+    names = await _names_reaching_prewarm(
+        monkeypatch,
+        context={"first_name": "Sian"},
+        body_first="Old",
+        body_last="Lee",
+    )
+    assert names == ("Sian", None)
+
+
+@pytest.mark.asyncio
+async def test_a_last_name_alone_on_file_is_not_joined_to_the_old_first_name(monkeypatch):
+    names = await _names_reaching_prewarm(
+        monkeypatch,
+        context={"last_name": "Roberts"},
+        body_first="Old",
+        body_last="Lee",
+    )
+    assert names == (None, "Roberts")
+
+
 @pytest.mark.asyncio
 async def test_trunk_refusal_happens_before_provider_warmup(monkeypatch):
     path = _install_call_path(

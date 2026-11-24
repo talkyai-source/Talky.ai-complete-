@@ -1909,10 +1909,19 @@ async def make_call(request: Request, body: MakeCallRequest):
     # via effective_tenant_id above; never re-derive it from the raw body.
     first_speaker = body.first_speaker
     agent_name = body.agent_name
-    lead_first_name = body.lead_first_name
-    lead_last_name = body.lead_last_name
     lead_company = body.lead_company
     lead_context = await _load_agent_lead_context(body.lead_id, effective_tenant_id)
+    # The contact's CURRENT name wins over the copy the job was queued with: a
+    # name added after queuing (a sheet uploaded again) must reach this call.
+    # Both parts come from ONE source: the copy is an older version of the same
+    # row, so mixing them could give a renamed contact a name nobody has.
+    _fresh_lead = lead_context or {}
+    if _fresh_lead.get("first_name") or _fresh_lead.get("last_name"):
+        lead_first_name = _fresh_lead.get("first_name")
+        lead_last_name = _fresh_lead.get("last_name")
+    else:
+        lead_first_name = body.lead_first_name
+        lead_last_name = body.lead_last_name
 
     # Single-owner guard. Only the process holding the ARI owner lock may
     # originate — its the only one with a live Asterisk connection and the
