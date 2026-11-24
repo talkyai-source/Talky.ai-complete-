@@ -196,15 +196,30 @@ async def execute_action_plan(
         }
 
     except ValueError as e:
+        from pydantic import ValidationError
+
+        if isinstance(e, ValidationError):
+            # Where and what, never the rejected values: the same rule as the HTTP
+            # validation handler. Without it the model cannot tell which step to fix.
+            hints = "; ".join(
+                f"{'.'.join(str(part) for part in err.get('loc', ()))}: {err.get('msg', '')}"
+                for err in e.errors(include_url=False, include_context=False, include_input=False)[:5]
+            )
+            logger.warning("Action plan validation error: %s", hints)
+            return {"success": False,
+                    "error": f"The action plan's steps are not valid. {hints}".strip()}
         return {"success": False, "error": tool_error_text(
             e, "The action plan's steps are not valid. Check each step's details.",
             tool="execute_action_plan", public=(ValueError,))}
     except Exception as e:
         from app.services.assistant_agent_service import ActionPlanNotSavedError
 
+        # On the preview nothing has run; on Apply some steps may have.
         return {"success": False, "error": tool_error_text(
-            e, "The action plan could not be completed. Check its status before running it again.",
-            tool="execute_action_plan", public=(ActionPlanNotSavedError,))}
+            e,
+            "The action plan could not be completed. Check its status before running it again."
+            if confirm else "The action plan could not be prepared.",
+            tool="execute_action_plan", public=(ActionPlanNotSavedError,), retry_hint=not confirm)}
 
 
 async def _preview_plan(tenant_id, db_client, intent, actions, context, conversation_id, actor):

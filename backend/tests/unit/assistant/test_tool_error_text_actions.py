@@ -75,7 +75,7 @@ async def _cancel_meeting(monkeypatch, exc):
 
 
 MEETING_CASES = [
-    (_check_availability, "Could not check calendar availability for that date and timezone."),
+    (_check_availability, "Could not check calendar availability."),
     (_book_meeting, "The meeting was not booked."),
     (_update_meeting, "The meeting was not changed."),
     (_cancel_meeting, "The meeting was not cancelled."),
@@ -213,7 +213,9 @@ async def test_action_plan_plain_value_error_is_kept(monkeypatch):
 
 # --- execute_action_plan (everything that is not a ValueError) ----------------
 
-PLAN_SENTENCE = "The action plan could not be completed. Check its status before running it again."
+# On the preview nothing has run; only Apply (confirm) may have run some steps.
+PLAN_SENTENCE = "The action plan could not be prepared."
+PLAN_APPLY_SENTENCE = "The action plan could not be completed. Check its status before running it again."
 
 
 async def test_action_plan_catch_all_masks_a_plain_runtime_error(monkeypatch, caplog):
@@ -320,3 +322,43 @@ async def test_plan_step_insert_failure_is_masked(caplog):
     text = json.dumps(result, default=str)
     assert "leads_phone_key" not in text and "DETAIL" not in text
     _assert_masked(result, caplog)
+
+
+# --- review of 24 November -----------------------------------------------------
+async def test_action_plan_apply_failure_says_check_its_status_and_nothing_more(monkeypatch, caplog):
+    _authorize_raising(monkeypatch, ConnectionRefusedError(MARKER))
+    result = await workflow.execute_action_plan(
+        TENANT, object(), intent="Send", actions=[{"type": "send_sms"}], confirm=True,
+    )
+    # no "Try again in a moment." after "Check its status before running it again."
+    assert result == {"success": False, "error": PLAN_APPLY_SENTENCE}
+    _assert_masked(result, caplog)
+
+
+async def test_action_plan_preview_validation_error_names_the_field_not_the_value(monkeypatch):
+    async def allowed(*_a, **_k):
+        return None
+
+    monkeypatch.setattr(dispatch_module, "_authorize_action_tool", allowed)
+    result = await workflow.execute_action_plan(
+        TENANT, object(), intent="Book",
+        actions=[{"type": "book_meeting", "title": "Quarterly review +447700900123"}],
+        actor_user_id="u1",
+    )
+    assert result["success"] is False
+    assert result["error"].startswith("The action plan's steps are not valid. ")
+    assert "start_time" in result["error"]                    # WHICH field: the model can fix it
+    assert "+447700900123" not in result["error"]            # never the rejected values
+    assert "Quarterly review" not in result["error"]
+
+
+async def test_send_email_preview_keeps_the_reauthorize_message(monkeypatch):
+    text = "The authorization refresh is unresolved. Wait for completion or reauthorize before review."
+
+    async def boom(*_a, **_k):
+        raise ReviewedConnectorChanged(text)
+
+    monkeypatch.setattr("app.services.email_service.get_email_service",
+                        lambda _db: SimpleNamespace(review_connector=boom))
+    result = await comms.send_email(TENANT, object(), to=["a@example.com"], subject="Hi", body="Hello")
+    assert result["error"] == text and result["success"] is False

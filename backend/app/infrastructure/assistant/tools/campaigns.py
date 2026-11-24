@@ -22,7 +22,9 @@ from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
-_START_FAILED = "The campaign could not be started. Check its status before trying again."
+# "Could not be confirmed", not "could not be started": some of the failures that end
+# here come AFTER the campaign was set running and calls were queued.
+_START_UNCONFIRMED = "The campaign start could not be confirmed. Check its status before trying again."
 
 
 class StartCampaignInput(BaseModel):
@@ -131,21 +133,28 @@ async def start_campaign(
                 "campaign_id": campaign_id,
             }
 
-        # Log action
-        db_client.table("assistant_actions").insert({
-            "tenant_id": tenant_id,
-            "type": "start_campaign",
-            "status": "completed",
-            "triggered_by": "chat",
-            "conversation_id": conversation_id,
-            "campaign_id": campaign_id,
-            "input_data": json.dumps({"campaign_id": campaign_id}),
-            "output_data": json.dumps({
-                "previous_status": current_status,
-                "jobs_enqueued": started.jobs_enqueued,
-            }),
-            "completed_at": datetime.utcnow().isoformat()
-        }).execute()
+        # Log action. The campaign IS started at this point: a failure to write this
+        # record must not turn the answer into "not started".
+        try:
+            db_client.table("assistant_actions").insert({
+                "tenant_id": tenant_id,
+                "type": "start_campaign",
+                "status": "completed",
+                "triggered_by": "chat",
+                "conversation_id": conversation_id,
+                "campaign_id": campaign_id,
+                "input_data": json.dumps({"campaign_id": campaign_id}),
+                "output_data": json.dumps({
+                    "previous_status": current_status,
+                    "jobs_enqueued": started.jobs_enqueued,
+                }),
+                "completed_at": datetime.utcnow().isoformat()
+            }).execute()
+        except Exception as audit_exc:  # noqa: BLE001
+            logger.error(
+                "start_campaign: action record not written campaign=%s error_type=%s",
+                campaign_id, type(audit_exc).__name__,
+            )
 
         answer = {
             "success": True,
@@ -186,7 +195,8 @@ async def start_campaign(
         return {"success": False, "error": exc.message}
     except CampaignError as exc:
         return {"success": False, "error": tool_error_text(
-            exc, _START_FAILED, tool="start_campaign",
+            exc, _START_UNCONFIRMED, tool="start_campaign", retry_hint=False,
             public=(CampaignReadinessError, CampaignPermissionCheckUnavailable))}
     except Exception as e:
-        return {"success": False, "error": tool_error_text(e, _START_FAILED, tool="start_campaign")}
+        return {"success": False, "error": tool_error_text(
+            e, _START_UNCONFIRMED, tool="start_campaign", retry_hint=False)}

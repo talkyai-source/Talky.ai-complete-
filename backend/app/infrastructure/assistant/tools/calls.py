@@ -154,7 +154,8 @@ async def initiate_call(
         return {"success":True,"status":"queued","confirmation_allowed":True,
                 "dialer_job_id":job.job_id,"message":f"Call to {phone} has been queued.","phone_number":phone}
     except Exception as e:
-        logger.error("Error initiating call: %s", type(e).__name__)
+        if confirm:  # the preview's failure is logged by tool_error_text below
+            logger.error("Error initiating call: %s", type(e).__name__)
         return {"success": False, "status": "unknown" if confirm else "failed", "confirmation_allowed":False,
                 "dialer_job_id": getattr(job, "job_id", None),
                 "error": "Call scheduling could not be confirmed." if confirm else tool_error_text(

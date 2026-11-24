@@ -120,7 +120,7 @@ async def check_availability(
         return {"success": False, "error": e.message, "calendar_required": True}
     except Exception as e:
         return {"success": False, "error": tool_error_text(
-            e, "Could not check calendar availability for that date and timezone.",
+            e, "Could not check calendar availability.",
             tool="check_availability", public=(ValueError, ConnectorLookupError))}
 
 

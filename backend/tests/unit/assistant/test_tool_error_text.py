@@ -321,7 +321,7 @@ def _service_raising(monkeypatch, exc):
     monkeypatch.setattr(campaigns_tool, "_get_campaign_service", lambda _db: _Service())
 
 
-START_SENTENCE = "The campaign could not be started. Check its status before trying again."
+START_SENTENCE = "The campaign start could not be confirmed. Check its status before trying again."
 
 
 async def test_start_campaign_masks_runtime_error(monkeypatch, caplog):
@@ -415,6 +415,121 @@ async def test_dispatch_bad_arguments_text_is_fixed(monkeypatch):
         "get_campaigns", TENANT, SimpleNamespace(pool=object()), None, {"bogus": MARKER},
         actor_user_id="u1",
     )
+    # The NAME of the argument the model got wrong is given back; its value is not.
     assert result == {
-        "error": "Invalid arguments for get_campaigns. Check the parameter names and values."
+        "error": "Invalid arguments for get_campaigns. Unexpected argument 'bogus'."
+                 " Check the parameter names and values."
     }
+    assert "leads_phone_key" not in json.dumps(result) and "+447700900123" not in json.dumps(result)
+
+
+# --- review of 24 November -----------------------------------------------------
+class _StartedService:
+    """The campaign start itself succeeds."""
+
+    async def get_campaign(self, campaign_id, tenant_id=None):
+        return {"id": campaign_id, "name": "Spring", "status": "draft", "direction": "outbound"}
+
+    async def start_campaign(self, campaign_id, tenant_id=None):
+        return SimpleNamespace(success=True, jobs_enqueued=3, jobs_withheld=0,
+                               leads_selected=3, error=None, message="started")
+
+
+class _ActionRecordRefused:
+    """The record of the action, written AFTER the start, hits a refused connection."""
+
+    def table(self, _name):
+        return self
+
+    def insert(self, _row):
+        return self
+
+    def execute(self):
+        raise ConnectionRefusedError(MARKER)
+
+
+async def test_start_campaign_that_started_is_not_called_a_failure_when_its_record_fails(monkeypatch, caplog):
+    # The campaign is running and three calls are queued. A failed write of the action's
+    # record used to turn the answer into "The campaign could not be started ...".
+    from app.infrastructure.assistant.tools import campaigns as campaigns_tool
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(campaigns_tool, "_get_campaign_service", lambda _db: _StartedService())
+    result = await campaigns_tool.start_campaign(TENANT, _ActionRecordRefused(), campaign_id="c1", confirm=True)
+    assert result["success"] is True and "error" not in result
+    assert result["jobs_enqueued"] == 3
+    assert "leads_phone_key" not in json.dumps(result, default=str)
+    lost = [r for r in caplog.records if "action record not written" in r.getMessage()]
+    assert len(lost) == 1 and lost[0].levelno == logging.ERROR
+
+
+async def test_start_campaign_dispatch_failure_does_not_say_not_started(monkeypatch):
+    # Raised by the service AFTER the campaign was set running, with calls already queued.
+    from app.domain.services.campaign_service import CampaignDispatchError
+
+    _service_raising(monkeypatch, CampaignDispatchError(
+        "Dialer queue batch dispatch could not be confirmed", jobs_enqueued=2, jobs_pending=5))
+    result = await start_campaign(TENANT, object(), campaign_id="c1", confirm=True)
+    assert result == {"success": False, "error": START_SENTENCE}
+    assert "could not be started" not in result["error"]
+
+
+async def test_start_campaign_sentence_gets_no_second_instruction(monkeypatch):
+    # "Check its status before trying again. Try again in a moment." contradicted itself.
+    _service_raising(monkeypatch, ConnectionRefusedError(MARKER))
+    result = await start_campaign(TENANT, object(), campaign_id="c1", confirm=True)
+    assert result == {"success": False, "error": START_SENTENCE}
+
+
+def test_helper_retry_hint_can_be_switched_off():
+    assert tool_error_text(ConnectionRefusedError("x"), "fb", tool="t") == "fb Try again in a moment."
+    assert tool_error_text(ConnectionRefusedError("x"), "fb", tool="t", retry_hint=False) == "fb"
+
+
+def test_helper_always_leaves_a_record_when_the_message_cannot_be_read(caplog):
+    class Unreadable(ValueError):
+        def __str__(self):
+            raise RuntimeError("no text")
+
+    caplog.set_level(logging.INFO)
+    assert tool_error_text(Unreadable(), "fb", tool="t", public=(Unreadable,)) == "fb"
+    failed = [r for r in caplog.records if "assistant_tool_failed" in r.getMessage()]
+    assert len(failed) == 1 and failed[0].levelno == logging.ERROR
+
+
+async def test_initiate_call_preview_failure_writes_one_error_record(monkeypatch, caplog):
+    from app.domain.services import phone_number_normalizer as pn
+    from app.infrastructure.assistant.tools.calls import initiate_call
+
+    def boom(*_a, **_k):
+        raise RuntimeError(MARKER)
+
+    monkeypatch.setattr(pn, "normalize_phone_for_capture", boom)
+    caplog.set_level(logging.INFO)
+    await initiate_call(TENANT, SimpleNamespace(pool=object()), phone_number="+14155551234", campaign_id="c1")
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1, [r.getMessage() for r in errors]
+
+
+async def test_dispatch_names_the_arguments_the_model_left_out(monkeypatch):
+    async def tool(_tenant, _db, *, campaign_id, list_id):
+        return {"ok": True}
+
+    _dispatch_ready(monkeypatch, tool)
+    result = await dispatch_module.dispatch_tool(
+        "get_campaigns", TENANT, SimpleNamespace(pool=object()), None, {}, actor_user_id="u1",
+    )
+    assert result == {
+        "error": "Invalid arguments for get_campaigns. Missing: 'campaign_id' and 'list_id'."
+                 " Check the parameter names and values."
+    }
+
+
+def test_dispatch_hint_takes_names_only():
+    hint = dispatch_module._bad_argument_hint
+    assert hint("f() got an unexpected keyword argument 'limit'") == " Unexpected argument 'limit'."
+    assert hint("f() missing 1 required positional argument: 'campaign_id'") == " Missing: 'campaign_id'."
+    # a TypeError raised INSIDE a tool has unknown text: no hint
+    assert hint("unsupported operand type(s) for +: 'int' and 'str'") == ""
+    assert hint("got an unexpected keyword argument '" + MARKER + "'") == ""
+    assert hint(MARKER) == ""

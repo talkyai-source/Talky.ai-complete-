@@ -10,6 +10,7 @@ Keeping the routing here means the two execution paths can never drift.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -287,6 +288,29 @@ async def _authorize_action_tool(
     return None
 
 
+_UNEXPECTED_ARGUMENT = re.compile(r"got an unexpected keyword argument '([A-Za-z_][A-Za-z0-9_]{0,63})'")
+_MISSING_ARGUMENTS = re.compile(
+    r"missing \d+ required (?:positional|keyword-only) arguments?: "
+    r"((?:'[A-Za-z_][A-Za-z0-9_]{0,63}'(?:, and | and |, )?)+)$"
+)
+
+
+def _bad_argument_hint(text: str) -> str:
+    """Name the argument a binding ``TypeError`` complains about, and nothing else.
+
+    Only argument NAMES (identifiers the model itself sent or left out) are taken
+    from the text; a ``TypeError`` raised inside a tool has unknown text and gets
+    no hint.
+    """
+    match = _UNEXPECTED_ARGUMENT.search(text)
+    if match:
+        return f" Unexpected argument '{match.group(1)}'."
+    match = _MISSING_ARGUMENTS.search(text)
+    if match:
+        return f" Missing: {match.group(1)}."
+    return ""
+
+
 async def dispatch_tool(
     func_name: str,
     tenant_id: str,
@@ -413,6 +437,7 @@ async def dispatch_tool(
         # Bad / extra kwargs from the model — surface as a tool error rather
         # than crashing the turn.
         logger.warning("dispatch_tool %s bad args %s: %s", func_name, call_args, exc)
-        return {"error": f"Invalid arguments for {func_name}. Check the parameter names and values."}
+        return {"error": f"Invalid arguments for {func_name}.{_bad_argument_hint(str(exc))}"
+                         " Check the parameter names and values."}
     except Exception as exc:  # tool internals already guard, but be safe
         return {"error": tool_error_text(exc, "The request could not be completed.", tool=func_name)}
