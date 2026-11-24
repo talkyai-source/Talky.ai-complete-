@@ -324,3 +324,34 @@ async def test_verifying_a_valid_id_passes_it_on_in_canonical_form(conn, monkeyp
 
 
 # ---- 6. two-factor off: a re-hash of the same password is not "credentials changed" ----
+
+def _mfa_off_with_locked_hash(conn, monkeypatch, locked_hash):
+    # The row read without a lock holds "h"; the typed password matches "h" and
+    # "h-rehashed" (the same password, upgraded elsewhere) but not "someone-else-changed-it".
+    monkeypatch.setattr(mfa_ep, "verify_password", lambda typed, stored: stored in ("h", "h-rehashed"))
+    monkeypatch.setattr(
+        mfa_ep, "lock_authenticated_credential_change", AsyncMock(return_value={"password_hash": locked_hash}))
+    writes: list[str] = []
+    original = conn.execute
+
+    async def recording_execute(sql, *args):
+        writes.append(sql)
+        return await original(sql, *args)
+
+    conn.execute = recording_execute
+    return writes
+
+
+async def test_mfa_disable_after_a_rehash_of_the_same_password_goes_through(conn, monkeypatch):
+    writes = _mfa_off_with_locked_hash(conn, monkeypatch, "h-rehashed")
+    await mfa_ep.disable_mfa(make_request(CURRENT), MFADisableRequest(password="pw"), user, db, talky_rt=RT)
+    assert any("UPDATE user_mfa" in sql for sql in writes)
+
+
+async def test_mfa_disable_after_the_password_really_changed_is_401_and_writes_nothing(conn, monkeypatch):
+    writes = _mfa_off_with_locked_hash(conn, monkeypatch, "someone-else-changed-it")
+    with pytest.raises(HTTPException) as refused:
+        await mfa_ep.disable_mfa(make_request(CURRENT), MFADisableRequest(password="pw"), user, db, talky_rt=RT)
+    assert refused.value.status_code == 401
+    assert refused.value.detail == "Credentials changed. Please sign in again."
+    assert writes == []

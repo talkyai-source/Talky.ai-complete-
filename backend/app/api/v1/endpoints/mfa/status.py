@@ -95,7 +95,12 @@ async def disable_mfa(
             )
 
         locked = await lock_authenticated_credential_change(conn, request, current_user)
-        if locked["password_hash"] != pw_row["password_hash"]:
+        # A different stored hash is not always a different password: a
+        # sign-in on another device may have re-hashed the same one. Refuse
+        # only when the typed password no longer matches what is stored now.
+        if locked["password_hash"] != pw_row["password_hash"] and not verify_password(
+            body.password, locked["password_hash"]
+        ):
             raise HTTPException(401, "Credentials changed. Please sign in again.")
 
         # Check MFA is actually enabled
