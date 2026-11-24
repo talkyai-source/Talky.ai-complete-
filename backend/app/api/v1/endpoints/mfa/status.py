@@ -6,9 +6,11 @@ recovery codes so a stolen session can't quietly downgrade the account.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
@@ -17,7 +19,8 @@ from app.core.security.credential_issuance import lock_authenticated_credential_
 from app.core.security.password import verify_password
 from app.core.security.recovery import count_remaining_codes, invalidate_all_codes
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
-from app.core.security.sessions import revoke_all_user_sessions
+from app.core.security.cookies import REFRESH_COOKIE_NAME
+from app.core.security.sessions import revoke_all_user_sessions, revoke_other_user_sessions
 
 from .schemas import MFADisableRequest, MFAStatusResponse
 
@@ -55,6 +58,7 @@ async def disable_mfa(
     body: MFADisableRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
+    talky_rt: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME),
 ) -> dict[str, str]:
     """
     Disable MFA for the current user.
@@ -131,15 +135,42 @@ async def disable_mfa(
         # session (then disabled MFA from it) can't keep using the long-
         # tail sessions elsewhere. The CURRENT session keeps working
         # until its JWT (15-min TTL) naturally expires.
-        sessions_revoked = await revoke_all_user_sessions(
-            conn,
-            current_user.id,
-            reason="mfa_disabled",
-        )
+        current_session_id = getattr(getattr(request, "state", None), "authenticated_session_id", None)
+        if current_session_id:
+            sessions_revoked = await revoke_other_user_sessions(
+                conn,
+                current_user.id,
+                str(current_session_id),
+                reason="mfa_disabled",
+            )
+        else:
+            sessions_revoked = await revoke_all_user_sessions(
+                conn,
+                current_user.id,
+                reason="mfa_disabled",
+            )
+        # Same rule as change-password: the current device's refresh family
+        # (from its own talky_rt cookie) stays alive; with no determinable
+        # family, revoke all. The lookup names the account explicitly; a user
+        # with no account (platform staff) has no family kept and is asked to
+        # sign in again, as before.
+        current_family_id = None
+        if isinstance(talky_rt, str) and talky_rt and current_user.tenant_id:
+            family = await conn.fetchrow(
+                "SELECT family_id FROM refresh_tokens "
+                "WHERE tenant_id = $3::uuid AND token_hash = $1 AND user_id = $2 "
+                "AND revoked_at IS NULL",
+                hashlib.sha256(talky_rt.encode()).hexdigest(),
+                current_user.id,
+                str(current_user.tenant_id),
+            )
+            if family and family["family_id"]:
+                current_family_id = str(family["family_id"])
         refresh_revoked = await revoke_all_user_refresh_tokens(
             conn,
             current_user.id,
             reason="mfa_disabled",
+            exclude_family_id=current_family_id,
         )
 
     logger.info(

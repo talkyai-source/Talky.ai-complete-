@@ -56,6 +56,7 @@ from .lifecycle import create_session, validate_session
 from .revocation import (
     purge_expired_sessions,
     revoke_all_user_sessions,
+    revoke_other_user_sessions,
     revoke_session_by_id,
     revoke_session_by_token,
 )
@@ -92,6 +93,7 @@ __all__ = [
     # Revocation
     "purge_expired_sessions",
     "revoke_all_user_sessions",
+    "revoke_other_user_sessions",
     "revoke_session_by_id",
     "revoke_session_by_token",
     # Queries
