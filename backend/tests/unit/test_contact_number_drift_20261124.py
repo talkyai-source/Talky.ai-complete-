@@ -11,8 +11,9 @@ with. Two guards now close that:
 * settlement: the retry carries the contact's saved number and the job row is
   re-pointed to it.
 
-"Cannot tell" (an empty side, a job number that is not strict E.164, a number that
-does not parse) always means: dial as before, one log line, never drop.
+"Cannot tell" (an empty side, a job number that is not strict E.164, a contact
+number without a country code, a number that does not parse) always means: dial as
+before, one log line, never drop.
 
 Voice callbacks (``action_execution.py:402-407``): a callback is booked only when
 the confirmed phone equals the lead's number, so a callback to a different,
@@ -386,7 +387,8 @@ async def test_a_repoint_that_matches_no_row_keeps_the_copy(monkeypatch, caplog)
     conn = _RetryConn(contact={"phone_number": NEW}, repoint=None)
     _, retry_args = await _settle(monkeypatch, conn)
     assert retry_args[1]["phone_number"] == OLD
-    assert any(r.getMessage().startswith("dialer_retry_number_not_moved") for r in caplog.records)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("dialer_retry_number_not_moved")]
+    assert len(lines) == 1 and "cause=job_moved" in lines[0]
 
 
 @pytest.mark.asyncio
@@ -461,7 +463,9 @@ async def test_a_contact_number_that_is_not_strict_is_never_written_onto_the_ret
     _, retry_args = await _settle(monkeypatch, conn)
     assert conn.repoints == []
     assert retry_args[1]["phone_number"] == OLD
-    assert any(r.getMessage().startswith("dialer_retry_number_not_moved") for r in caplog.records)
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("dialer_retry_number_not_moved")]
+    assert len(lines) == 1 and "cause=contact_not_strict" in lines[0]
+    assert NEW[-6:] not in lines[0] and spaced[-6:] not in lines[0]
 
     w = _worker()
     _conn_pool(w, fetchrow={"phone_number": spaced})

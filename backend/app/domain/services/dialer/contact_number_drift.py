@@ -11,8 +11,9 @@ number. Two guards use the helpers below:
   the job row to it (``carry_contact_number_into_retry``).
 
 "Cannot tell" is never a reason to drop: an empty side, a job number that is not
-strict E.164, or a number that does not parse gives ``None`` and the job is dialled
-as before (the existing invalid-number skip and the call guard decide those).
+strict E.164, a contact number without a country code, or a number that does not
+parse gives ``None`` and the job is dialled as before (the existing invalid-number
+skip and the call guard decide those).
 
 Logs carry 8-character ids only: never a phone number, never exception text.
 """
@@ -126,8 +127,12 @@ async def carry_contact_number_into_retry(
     if verdict is None:
         logger.info("dialer_retry_number_unknown job=%s lead=%s action=keep_copy", *ids)
     elif verdict and moved is None:
+        # Two different situations: the contact holds a number that may not be
+        # written onto a job, or the job row was no longer waiting as a retry.
+        cause = "job_moved" if is_strict_e164(str(current)) else "contact_not_strict"
         logger.warning(
-            "dialer_retry_number_not_moved job=%s lead=%s action=keep_copy", *ids
+            "dialer_retry_number_not_moved job=%s lead=%s cause=%s action=keep_copy",
+            *ids, cause,
         )
     elif verdict:
         retry_job_data["phone_number"] = str(current)
