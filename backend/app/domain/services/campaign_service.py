@@ -55,6 +55,11 @@ class StartCampaignResult:
     # CONTACT_PERMISSION_DIAL_GATE: contacts left out because their list has no
     # confirmed permission to call (0 whenever the switch is off).
     jobs_withheld: int = 0
+    # Contacts this start selected for dialling. 0 = nothing was selected.
+    # ``jobs_enqueued`` cannot say that: a large start queues in the
+    # background and a resume releases parked jobs, both with 0 there.
+    # None = the result was built without it (unknown).
+    leads_selected: Optional[int] = None
 
 
 class CampaignError(Exception):
@@ -619,6 +624,7 @@ class CampaignService:
                     jobs_enqueued=0,
                     campaign_id=campaign_id,
                     jobs_withheld=sum(withheld_out),
+                    leads_selected=0,
                 )
 
             # 4. Build the exact durable job set. PostgreSQL is the dispatch
@@ -856,6 +862,7 @@ class CampaignService:
                     campaign_id=campaign_id,
                     jobs_dispatching=len(jobs_to_dispatch),
                     jobs_withheld=sum(withheld_out),
+                    leads_selected=len(leads),
                 )
 
             # 7. Dispatch the durable outbox. A false enqueue result is a real
@@ -883,6 +890,7 @@ class CampaignService:
                 campaign_id=campaign_id,
                 queue_stats=stats,
                 jobs_withheld=sum(withheld_out),
+                leads_selected=len(leads),
             )
 
         except CampaignError:

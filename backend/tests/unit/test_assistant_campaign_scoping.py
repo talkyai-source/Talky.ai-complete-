@@ -261,7 +261,7 @@ def _start_tool_client():
     return MagicMock()
 
 
-def _fake_start_service(monkeypatch, *, enqueued, withheld):
+def _fake_start_service(monkeypatch, *, enqueued, withheld, selected=None, dispatching=0):
     from app.domain.services.campaign_service import CampaignService, StartCampaignResult
     from app.infrastructure.assistant.tools import campaigns as tool
 
@@ -273,6 +273,7 @@ def _fake_start_service(monkeypatch, *, enqueued, withheld):
             return StartCampaignResult(
                 success=True, message="x", jobs_enqueued=enqueued,
                 campaign_id=campaign_id, jobs_withheld=withheld,
+                jobs_dispatching=dispatching, leads_selected=selected,
             )
 
     monkeypatch.setattr(tool, "_get_campaign_service", lambda _db: _Service())
@@ -283,26 +284,54 @@ def _fake_start_service(monkeypatch, *, enqueued, withheld):
 async def test_start_with_every_contact_held_back_does_not_say_calling_started(monkeypatch):
     from app.infrastructure.assistant.tools.campaigns import start_campaign
 
-    note = _fake_start_service(monkeypatch, enqueued=0, withheld=3)
+    note = _fake_start_service(monkeypatch, enqueued=0, withheld=3, selected=0)
     result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
 
+    # The start WAS applied (the campaign is running, and its contacts are queued once
+    # permission is confirmed), so this is not a failure; but nothing is dialled, and the
+    # answer and the card's notice say so.
+    assert result["success"] is True and "error" not in result
     assert result["jobs_withheld"] == 3 and result["jobs_enqueued"] == 0
-    assert note(3).strip() in result["message"]
-    assert result["success"] is False and result["status"] == "failed"
-    assert "has been started" not in result["message"]
-    assert "started" not in result["error"].lower()
+    assert result["message"] == (
+        "Campaign 'Roofing Leads' is running, but no contact was queued. " + note(3).strip())
+    assert result["notice"] == "No contact was queued. " + note(3).strip()
+    assert "started" not in result["message"].lower()
+    assert "started" not in result["notice"].lower()
 
 
 @pytest.mark.asyncio
 async def test_start_with_some_contacts_held_back_reports_count_and_explanation(monkeypatch):
     from app.infrastructure.assistant.tools.campaigns import start_campaign
 
-    note = _fake_start_service(monkeypatch, enqueued=2, withheld=1)
+    note = _fake_start_service(monkeypatch, enqueued=2, withheld=1, selected=2)
     result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
 
     assert result["success"] is True
     assert result["jobs_enqueued"] == 2 and result["jobs_withheld"] == 1
     assert result["message"] == "Campaign 'Roofing Leads' has been started" + note(1)
+    assert result["notice"] == note(1).strip()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected, dispatching", [
+    (250, 250),   # a large start: its calls are queued in the background
+    (4, 0),       # a resume: its parked calls are released, none newly queued
+    (None, 0),    # a result built without the count: unknown is never "nothing"
+])
+async def test_start_with_nothing_queued_yet_is_not_mistaken_for_every_contact_held_back(
+        monkeypatch, selected, dispatching):
+    # ``jobs_enqueued == 0`` with contacts held back is NOT "no contact was queued":
+    # calls are going out in each of these shapes.
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    note = _fake_start_service(
+        monkeypatch, enqueued=0, withheld=1, selected=selected, dispatching=dispatching)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+
+    assert result["success"] is True
+    assert result["message"] == "Campaign 'Roofing Leads' has been started" + note(1)
+    assert result["notice"] == note(1).strip()
+    assert "No contact was queued" not in result["message"] + result["notice"]
 
 
 @pytest.mark.asyncio

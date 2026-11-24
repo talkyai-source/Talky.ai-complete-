@@ -133,28 +133,29 @@ async def start_campaign(
             "completed_at": datetime.utcnow().isoformat()
         }).execute()
 
-        withheld = int(getattr(started, "jobs_withheld", 0) or 0)
-        if withheld and not started.jobs_enqueued:
-            # Every contact was held back by the permission check: nothing is
-            # dialled, so do not say calling started.
-            note = CampaignService._withheld_note(withheld).strip()
-            return {
-                "success": False,
-                "status": "failed",
-                "error": f"No contacts were queued. {note}",
-                "message": note,
-                "campaign_id": campaign_id,
-                "jobs_enqueued": started.jobs_enqueued,
-                "jobs_withheld": withheld,
-            }
         answer = {
             "success": True,
             "message": f"Campaign '{campaign.get('name')}' has been started",
             "campaign_id": campaign_id,
             "jobs_enqueued": started.jobs_enqueued,
         }
+        withheld = int(getattr(started, "jobs_withheld", 0) or 0)
         if withheld:
-            answer["message"] += CampaignService._withheld_note(withheld)
+            # The permission check held contacts back. ``notice`` is what the
+            # confirm card shows and voice mode speaks beside "Applied".
+            note = CampaignService._withheld_note(withheld).strip()
+            if getattr(started, "leads_selected", None) == 0:
+                # Every contact was held back: the campaign is running (they are
+                # queued once permission is confirmed) but nothing is dialled, so
+                # do not say calling started. ``jobs_enqueued == 0`` is NOT this
+                # test: a large start and a resume report 0 while calls go out.
+                answer["message"] = (
+                    f"Campaign '{campaign.get('name')}' is running, but no contact was queued. {note}"
+                )
+                answer["notice"] = f"No contact was queued. {note}"
+            else:
+                answer["message"] += f" {note}"
+                answer["notice"] = note
             answer["jobs_withheld"] = withheld
         return answer
     except CampaignNotFoundError:
