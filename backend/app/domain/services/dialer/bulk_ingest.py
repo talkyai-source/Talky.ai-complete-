@@ -37,6 +37,7 @@ from app.domain.services.campaign_direction_guard import (
     OutboundCampaignDirectionConflict,
     raise_for_outbound_direction_guard,
 )
+from app.domain.services.dialer.removed_dnc_marks import removed_marked_phones
 
 logger = logging.getLogger(__name__)
 
@@ -341,6 +342,9 @@ def ingest_lead_records(
     live_phones, deleted_by_phone, nameless_live = _load_existing(
         db_client, campaign_id, tenant_id
     )
+    removed_marked = removed_marked_phones(
+        db_client, campaign_id=campaign_id, tenant_id=tenant_id
+    )
 
     seen: set[str] = set()
     to_insert: list[dict] = []
@@ -380,14 +384,19 @@ def ingest_lead_records(
 
         revive_id = deleted_by_phone.pop(phone, None)
         if revive_id is not None:
-            to_revive.append({
+            revive_entry = {
                 "id": revive_id,
                 "first_name": rec.first_name,
                 "last_name": rec.last_name,
                 "email": rec.email,
                 "custom_fields": _custom_fields_with_company(rec),
                 **_expanded_lead_columns(rec),
-            })
+            }
+            # A removed contact's do-not-call mark comes back with the number;
+            # the mark wins over the sheet's value (as the website's add does).
+            if phone in removed_marked:
+                revive_entry["do_not_call"] = True
+            to_revive.append(revive_entry)
             live_phones.add(phone)
             continue
 
