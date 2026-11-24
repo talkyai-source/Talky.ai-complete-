@@ -29,6 +29,10 @@ function intervalOf(qc: ReturnType<typeof renderWithQueryClient>["qc"]) {
     const { query, options } = pollOptions(qc);
     return (options.refetchInterval as (q: unknown) => unknown)(query);
 }
+function refetchesOnFocus(qc: ReturnType<typeof renderWithQueryClient>["qc"]) {
+    const { query, options } = pollOptions(qc);
+    return (options.refetchOnWindowFocus as (q: unknown) => unknown)(query);
+}
 
 beforeEach(() => { notificationsStore.setIdentity(null); notificationsStore.setIdentity(A); });
 afterEach(() => { cleanup(); notificationsStore.setIdentity(null); backendApi.alerts.list = originalAlerts; });
@@ -49,6 +53,7 @@ for (const [code, status] of [["legal_acceptance_required", 403], ["forbidden", 
         const world = renderWithQueryClient(createElement(Account, { fetcher: async () => { calls += 1; throw refusal(code, status); } }));
         await waitFor(() => assert.equal(world.qc.getQueryCache().getAll()[0].state.status, "error"));
         assert.equal(intervalOf(world.qc), false);
+        assert.equal(refetchesOnFocus(world.qc), false);
         await new Promise(resolve => setTimeout(resolve, 1300));
         assert.equal(calls, 1, "no retry");
     });
@@ -60,6 +65,7 @@ test("account alert poll still retries an ordinary 500 and keeps its interval", 
     await waitFor(() => assert.ok(calls >= 2), { timeout: 4000 });
     await waitFor(() => assert.equal(world.qc.getQueryCache().getAll()[0].state.status, "error"), { timeout: 4000 });
     assert.equal(intervalOf(world.qc), 10_000);
+    assert.equal(refetchesOnFocus(world.qc), true);
 });
 
 test("alerts poll stops on legal_acceptance_required: no refetch interval, no retry", async () => {
@@ -68,6 +74,7 @@ test("alerts poll stops on legal_acceptance_required: no refetch interval, no re
     const world = renderWithQueryClient(createElement(Alerts));
     await waitFor(() => assert.equal(world.qc.getQueryCache().getAll()[0].state.status, "error"));
     assert.equal(intervalOf(world.qc), false);
+    assert.equal(refetchesOnFocus(world.qc), false);
     await new Promise(resolve => setTimeout(resolve, 1300));
     assert.equal(calls, 1, "no retry");
 });
@@ -79,4 +86,5 @@ test("alerts poll still retries an ordinary 500 and keeps its interval", async (
     await waitFor(() => assert.ok(calls >= 2), { timeout: 4000 });
     await waitFor(() => assert.equal(world.qc.getQueryCache().getAll()[0].state.status, "error"), { timeout: 4000 });
     assert.equal(intervalOf(world.qc), 10_000);
+    assert.equal(refetchesOnFocus(world.qc), true);
 });
