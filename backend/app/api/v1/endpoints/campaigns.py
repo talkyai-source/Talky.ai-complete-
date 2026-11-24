@@ -2202,6 +2202,8 @@ async def add_contact_to_campaign(
         ).eq(
             "phone_number", normalized_phone
         ).execute()
+        if getattr(existing, "error", None) is not None:
+            raise HTTPException(status_code=500, detail="Failed to add contact")
 
         live = [r for r in (existing.data or []) if r.get("status") != "deleted"]
         if live:
@@ -2426,6 +2428,8 @@ async def update_contact_in_campaign(
             ).in_(
                 "status", list(NOT_ORIGINATED_JOB_STATUSES),
             ).execute()
+            if getattr(cancelled_jobs, "error", None) is not None:
+                raise HTTPException(status_code=500, detail="Failed to update contact")
             try:
                 if getattr(cancelled_jobs, "data", None):
                     # A cancelled retry leaves the lead 'called', which no Start
@@ -2618,14 +2622,24 @@ async def remove_contact_from_campaign(
                 tenant_id=current_user.tenant_id,
             )
         except Exception as exc:
-            logger.warning("remove_contact: job cancel failed for %s: %s", contact_id, exc)
+            cancelled = None
+            logger.error(
+                "remove_contact: queued calls not cancelled contact=%s error_type=%s",
+                contact_id, type(exc).__name__,
+            )
 
         logger.info(
             f"Contact {contact_id} removed from campaign {campaign_id} "
             f"(cancelled {cancelled} active job(s))"
         )
 
-        return {"message": "Contact removed successfully", "cancelled_jobs": cancelled}
+        body = {"message": "Contact removed successfully", "cancelled_jobs": cancelled}
+        if cancelled is None:
+            body["warning"] = (
+                "Queued calls for this contact could not be cancelled now. "
+                "The contact is removed, so the dialler will not call it."
+            )
+        return body
         
     except HTTPException:
         raise
