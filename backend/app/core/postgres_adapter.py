@@ -270,7 +270,7 @@ class QueryBuilder:
             logger.error("PostgresAdapter query error: %s", e, exc_info=True)
             if isinstance(e, DATABASE_RETRYABLE_ERRORS):
                 raise
-            return PostgrestResponse(error=str(e))
+            return PostgrestResponse(error=str(e) or type(e).__name__)
         finally:
             if conn:
                 await conn.close()
@@ -876,7 +876,7 @@ class RpcBuilder:
             logger.error("PostgresAdapter RPC error (%s): %s", self.name, e, exc_info=True)
             if isinstance(e, DATABASE_RETRYABLE_ERRORS):
                 raise
-            return PostgrestResponse(error=str(e))
+            return PostgrestResponse(error=str(e) or type(e).__name__)
         finally:
             if conn:
                 await conn.close()

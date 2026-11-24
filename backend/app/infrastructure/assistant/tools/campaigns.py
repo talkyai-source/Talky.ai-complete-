@@ -99,9 +99,19 @@ async def start_campaign(
 
         current_status = campaign.get("status")
         if not confirm:
+            from app.domain.services.dialer.permission_gate import contact_permission_dial_gate_mode
+
+            if contact_permission_dial_gate_mode() == "on":
+                question = (
+                    f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts "
+                    "whose list has a recorded permission to call; the others are held back "
+                    "until permission is confirmed."
+                )
+            else:
+                question = f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts."
             return {
                 "success": True, "status": "preview", "confirmation_allowed": False,
-                "message": f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts.",
+                "message": question,
                 "preview": True,
                 "changes": [
                     {"field": "Campaign", "before": None, "after": campaign.get("name") or campaign_id},
