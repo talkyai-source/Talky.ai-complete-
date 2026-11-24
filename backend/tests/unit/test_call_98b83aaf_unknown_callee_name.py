@@ -41,7 +41,7 @@ def test_the_name_slot_is_recognised_in_any_case():
     assert script_greets_callee_by_name(SCRIPT)
     assert script_greets_callee_by_name("Hello {first_name}, quick one")
     assert not script_greets_callee_by_name("Say [repeat email slowly]")
-    assert find_unfilled_slots(SCRIPT) == ["[First Name]"]
+    assert find_unfilled_slots(SCRIPT) == []
 
 
 def test_no_name_on_file_tells_the_agent_to_greet_without_one():

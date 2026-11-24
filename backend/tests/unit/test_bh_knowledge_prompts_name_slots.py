@@ -25,7 +25,7 @@ def test_brace_name_slot_is_still_a_callee_name_slot_after_sanitising(script):
     cleaned = sanitize_tenant_text(script)
     assert "{" not in cleaned and "}" not in cleaned
     assert script_greets_callee_by_name(cleaned) is True
-    assert find_unfilled_slots(cleaned), cleaned
+    assert find_unfilled_slots(cleaned) == [], cleaned
 
 
 def test_other_braces_are_still_neutralised_to_parentheses():

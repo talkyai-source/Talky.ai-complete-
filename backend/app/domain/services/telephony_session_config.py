@@ -416,6 +416,10 @@ def find_unfilled_slots(guidance: str) -> list:
     """Square-bracket slots in campaign guidance that would be spoken blank."""
     out = []
     for match in _UNFILLED_SLOT_RE.findall(str(guidance or "")):
+        # A slot for the callee's name is resolved on every call (the call is given
+        # the name, or told to greet without one), so it is never spoken as a blank.
+        if _CALLEE_NAME_SLOT_RE.fullmatch(match):
+            continue
         inner = match[1:-1].replace("_", " ").lower()
         if any(hint in inner for hint in _SPOKEN_SLOT_HINTS):
             out.append(match)
