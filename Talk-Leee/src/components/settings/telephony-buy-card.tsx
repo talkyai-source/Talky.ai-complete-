@@ -160,6 +160,7 @@ export function TelephonyBuyCard() {
                 open={open}
                 onOpenChange={setOpen}
                 title="Documentation is required:"
+                description="To buy a phone number, we need the documents that destination regulations require. Choose business use or personal use and upload both documents."
                 size="lg"
                 footer={
                     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

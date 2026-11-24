@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Iterator, Optional
 
 import asyncpg
+from asyncpg.pgproto.pgproto import UUID as _driver_uuid
 
 from app.core.postgres_adapter import Client
 from app.core.db import DatabasePoolTimeoutError, _ACQUIRE_TIMEOUT_S
@@ -88,8 +89,27 @@ _RETRY_IDENTITY_KEYS = (
     "lead_first_name", "lead_last_name", "lead_company",
 )
 
-# ``mark_as_spam`` reasons that mean "stop calling this number" (suppression).
-_MARK_AS_SUPPRESSION_REASONS = frozenset({"spam", "unavailable"})
+# ``mark_as_spam`` reasons that mean "the line is dead": the lead is finished but the
+# number is NOT suppressed. Every other reason, a known one ("spam", "unavailable")
+# or one this code does not know ("dnc", "stop"), is recorded as spam and therefore
+# means "stop calling this number".
+_MARK_AS_DEAD_LINE_REASONS = frozenset({"invalid", "disconnected"})
+
+
+
+def _is_uuid(value) -> bool:
+    """True when the database driver would accept ``value`` as a UUID.
+
+    Python's ``UUID()`` is looser (braces, a ``urn:uuid:`` prefix); the driver
+    refuses those and the failure comes back as a returned error. Such an id
+    can match no row, so it is a plain not-found, never a server error.
+    This asks the driver's own parser, so the two cannot disagree.
+    """
+    try:
+        _driver_uuid(str(value))
+    except Exception:  # noqa: BLE001 - any refusal means "not an id"
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -1720,6 +1740,11 @@ class CallService:
             "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
 
+        if getattr(call_res, "error", None) is not None:
+            if not _is_uuid(call_id):
+                return None
+            raise RuntimeError("mark_goal_achieved: calls write failed")
+
         call_rows = call_res.data or []
         if not call_rows:
             # Zero affected rows == nonexistent OR another tenant's call.
@@ -1739,6 +1764,8 @@ class CallService:
                 "last_outcome": CallOutcome.GOAL_ACHIEVED.value,
                 "completed_at": datetime.utcnow().isoformat(),
             }).eq("id", job_id).eq("tenant_id", tenant_id).execute()
+            if getattr(job_res, "error", None) is not None:
+                raise RuntimeError("mark_goal_achieved: dialer job write failed")
             if not (job_res.data or []):
                 logger.warning(
                     "mark_goal_achieved: call %s updated but dialer_job %s "
@@ -1756,16 +1783,38 @@ class CallService:
 
         ``leads.status`` alone is rewritten by a re-import into another
         campaign (fresh 'pending' lead for the same number), and CallGuard only
-        reads ``dnc_entries`` / ``leads.do_not_call``. Never raises: the lead
-        flag above is already written; a failure here is logged loudly.
+        reads ``dnc_entries`` / ``leads.do_not_call``.
+
+        What a retry cannot fix (a number that will not normalise, a client
+        without a pool) is logged loudly and the mark stands: the lead flag
+        above is already written. A FAILED list write raises, so the webhook
+        answers an error and its sender tries again: until the list holds the
+        number, the same number in another campaign or a re-import would still
+        be dialled. Every earlier write sets fixed values and the add is
+        "add or refresh", so the retry is safe.
         """
+        if not phone_number:
+            # The call's contact row is missing: no contact was flagged and there
+            # is no number to put on the list.
+            logger.error(
+                "mark_as_spam: no contact number for this mark, nothing added to "
+                "the DNC list tenant=%s", tenant_id,
+            )
+            return
         try:
             normalized = normalize_e164_for_storage(str(phone_number or ""))
             pool = getattr(self._db_client, "pool", None)
             if pool is None:
                 raise RuntimeError("no database pool on the call service client")
             from app.domain.services.dnc_service import DNCService, SOURCE_MANUAL_ADMIN
-
+        except Exception as exc:
+            logger.error(
+                "mark_as_spam: lead flagged do_not_call but the DNC list write "
+                "failed tenant=%s number_tail=%s: %s",
+                tenant_id, str(phone_number or "")[-4:], exc,
+            )
+            return
+        try:
             await DNCService(pool).add(
                 tenant_id=str(tenant_id), e164=normalized,
                 source=SOURCE_MANUAL_ADMIN, reason=f"mark_as_{reason}",
@@ -1773,9 +1822,10 @@ class CallService:
         except Exception as exc:
             logger.error(
                 "mark_as_spam: lead flagged do_not_call but the DNC list write "
-                "failed tenant=%s number_tail=%s: %s",
-                tenant_id, str(phone_number or "")[-4:], exc,
+                "failed tenant=%s number_tail=%s error_type=%s",
+                tenant_id, str(phone_number or "")[-4:], type(exc).__name__,
             )
+            raise RuntimeError("mark_as_spam: do-not-call list write failed") from exc
 
     async def mark_as_spam(
         self,
@@ -1806,7 +1856,12 @@ class CallService:
             "unavailable": CallOutcome.UNAVAILABLE,
             "disconnected": CallOutcome.DISCONNECTED,
         }
+        # "Spam" and " SPAM " are the same reason as "spam". A reason this code does
+        # not know is recorded as spam (the default below), so it must suppress like
+        # spam too: it used to answer "Marked as ..." and leave the number callable.
+        reason = str(reason or "spam").strip().lower()
         outcome = outcome_map.get(reason, CallOutcome.SPAM)
+        suppress = reason not in _MARK_AS_DEAD_LINE_REASONS
 
         resolved_lead_id: Optional[str] = None
 
@@ -1815,6 +1870,10 @@ class CallService:
             # request never performs a partial write.
             sel = self._db_client.table("calls").select("id, lead_id").eq(
                 "id", call_id).eq("tenant_id", tenant_id).single().execute()
+            if getattr(sel, "error", None) is not None:
+                if not _is_uuid(call_id):
+                    return None
+                raise RuntimeError("mark_as_spam: call read failed")
             call_row = sel.data
             if not call_row:
                 logger.warning(
@@ -1837,6 +1896,8 @@ class CallService:
                 "outcome": outcome.value,
                 "updated_at": datetime.utcnow().isoformat(),
             }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
+            if getattr(upd, "error", None) is not None:
+                raise RuntimeError("mark_as_spam: call write failed")
             if not (upd.data or []):
                 # Row vanished / changed tenant between select and update.
                 logger.warning(
@@ -1852,11 +1913,10 @@ class CallService:
             resolved_lead_id = str(lead_id) if lead_id is not None else None
 
         if resolved_lead_id:
-            # Only a human "stop calling this number" (spam / unavailable) is a
-            # do-not-call. invalid / disconnected mean the line is dead: the
+            # Every reason is a "stop calling this number" (do-not-call) except
+            # the two below. invalid / disconnected mean the line is dead: the
             # lead is finished ('failed', which a restart can reset) but NOT
             # suppressed, matching the outcome rules above.
-            suppress = reason in _MARK_AS_SUPPRESSION_REASONS
             lead_update = {
                 "status": "dnc" if suppress else "failed",
                 "updated_at": datetime.utcnow().isoformat(),
@@ -1867,6 +1927,10 @@ class CallService:
             lead_res = self._db_client.table("leads").update(
                 lead_update
             ).eq("id", resolved_lead_id).eq("tenant_id", tenant_id).execute()
+            if getattr(lead_res, "error", None) is not None:
+                if not call_id and not _is_uuid(resolved_lead_id):
+                    return None
+                raise RuntimeError("mark_as_spam: lead write failed")
             if not (lead_res.data or []):
                 if not call_id:
                     # Lead-only request, foreign/nonexistent lead → nothing
@@ -1888,10 +1952,10 @@ class CallService:
             # Neither identifier supplied — nothing to do; do not fake success.
             return None
 
-        if resolved_lead_id and reason in _MARK_AS_SUPPRESSION_REASONS:
+        if resolved_lead_id and suppress:
             await self._add_spam_mark_to_dnc_list(
                 tenant_id, lead_res.data[0].get("phone_number") if (lead_res.data or []) else None,
-                reason,
+                reason if reason in outcome_map else "spam",
             )
 
         logger.info(

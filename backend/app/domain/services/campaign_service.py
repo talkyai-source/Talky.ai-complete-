@@ -1130,9 +1130,16 @@ class CampaignService:
         # pending/calling selection nor the failed/skipped reset picks 'called'
         # up. Snapshot them first, hand them back to 'pending' after the cancel.
         retry_lead_ids = self._leads_awaiting_retry(campaign_id, scoped_tenant)
-        cleared_jobs = cancel_active_jobs_for_campaign(
-            self.db_client, campaign_id, reason=REASON_CAMPAIGN_STOPPED,
-        )
+        try:
+            cleared_jobs = cancel_active_jobs_for_campaign(
+                self.db_client, campaign_id, reason=REASON_CAMPAIGN_STOPPED,
+            )
+        except Exception as exc:
+            cleared_jobs = None
+            logger.error(
+                "stop_campaign: queued jobs not cancelled campaign=%s error_type=%s",
+                campaign_id, type(exc).__name__,
+            )
         self._release_leads_to_pending(retry_lead_ids, campaign_id, scoped_tenant)
         # Drain the Redis queue too so jobs already dequeued into Redis don't
         # get processed after the stop. Best-effort — never block the stop.

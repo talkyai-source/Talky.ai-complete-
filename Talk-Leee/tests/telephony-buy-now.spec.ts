@@ -38,6 +38,7 @@ const CARD_LINES = [
     "Info: Each destination has its own regulations, which may vary from region to region.",
 ];
 const TITLE = "Documentation is required:";
+const DESCRIPTION = "To buy a phone number, we need the documents that destination regulations require. Choose business use or personal use and upload both documents.";
 const EMPTY = "Click to upload or drag and drop";
 const MESSAGE = "Thank you. Your documents have been submitted.";
 /** "2026-12-20" -> "20 December 2026", worked out here without the code under test. */
@@ -421,6 +422,11 @@ const escape = async (page: Page) => { await page.keyboard.press("Escape"); awai
 async function expectWindowFits(page: Page, width: number, state: "empty" | "filled") {
     const layout = await probe(page, "windowLayout");
     expect(layout.title, "title").toBe(TITLE);
+    // The description, word for word, shown under the heading and read out as the window's description.
+    const description = page.getByRole("dialog", { name: TITLE }).getByText(DESCRIPTION, { exact: true });
+    await expect(description, "description").toBeVisible();
+    await expect(page.getByRole("dialog", { name: TITLE }), "description read out with the window").toHaveAccessibleDescription(DESCRIPTION);
+    expect(await description.evaluate((el) => el.previousElementSibling?.textContent ?? null), "description directly under the heading").toBe(TITLE);
     expect(layout.titleAtTop, "title at the top").toBe(true);
     expect(layout.cardTitles).toEqual(["1. Business Use", "2. Personal Use"]);
     expect(layout.arrangement, "cards").toBe(width >= SIDE_BY_SIDE_FROM ? "side by side" : "stacked");

@@ -95,3 +95,83 @@ def test_goal_achieved_accepts_valid_signature(monkeypatch):
     r = client.post("/api/v1/webhooks/call/goal-achieved", content=payload, headers=headers)
     assert r.status_code == 200
     assert r.json()["call_id"] == "c1"
+
+
+def _post_signed(client, monkeypatch, service, path, body):
+    class _Container:
+        call_service = service
+
+    import app.core.container as container
+    monkeypatch.setattr(container, "get_container", lambda: _Container())
+    headers = create_webhook_signature_headers(body, SECRET)
+    headers["X-Tenant-ID"] = "t1"
+    return client.post(path, content=body, headers=headers)
+
+
+class _ErrorResult:
+    data = None
+    error = "SECRET-DRIVER-TEXT"
+
+
+class _ErrorQuery:
+    def update(self, *_a, **_k):
+        return self
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, *_a, **_k):
+        return self
+
+    def single(self):
+        return self
+
+    def execute(self):
+        return _ErrorResult()
+
+
+class _ErrorClient:
+    def table(self, _name):
+        return _ErrorQuery()
+
+
+_UUID = "11111111-1111-1111-1111-111111111111"
+
+
+def test_goal_achieved_database_error_is_500_without_driver_text(monkeypatch):
+    from app.domain.services.call_service import CallService
+
+    client = _client(monkeypatch, secret=SECRET)
+    r = _post_signed(
+        client, monkeypatch, CallService(db_client=_ErrorClient()),
+        "/api/v1/webhooks/call/goal-achieved",
+        ('{"call_id":"%s"}' % _UUID).encode(),
+    )
+    assert r.status_code == 500
+    assert "SECRET-DRIVER-TEXT" not in r.text
+
+
+def test_mark_spam_database_error_is_500_without_driver_text(monkeypatch):
+    from app.domain.services.call_service import CallService
+
+    client = _client(monkeypatch, secret=SECRET)
+    r = _post_signed(
+        client, monkeypatch, CallService(db_client=_ErrorClient()),
+        "/api/v1/webhooks/call/mark-spam",
+        ('{"call_id":"%s"}' % _UUID).encode(),
+    )
+    assert r.status_code == 500
+    assert "SECRET-DRIVER-TEXT" not in r.text
+
+
+def test_goal_achieved_service_none_is_still_404(monkeypatch):
+    class _CS:
+        async def mark_goal_achieved(self, tenant_id, call_id):
+            return None
+
+    client = _client(monkeypatch, secret=SECRET)
+    r = _post_signed(
+        client, monkeypatch, _CS(),
+        "/api/v1/webhooks/call/goal-achieved", b'{"call_id":"c1"}',
+    )
+    assert r.status_code == 404
