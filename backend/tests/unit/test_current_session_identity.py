@@ -328,7 +328,8 @@ async def test_verifying_a_valid_id_passes_it_on_in_canonical_form(conn, monkeyp
 def _mfa_off_with_locked_hash(conn, monkeypatch, locked_hash):
     # The row read without a lock holds "h"; the typed password matches "h" and
     # "h-rehashed" (the same password, upgraded elsewhere) but not "someone-else-changed-it".
-    monkeypatch.setattr(mfa_ep, "verify_password", lambda typed, stored: stored in ("h", "h-rehashed"))
+    monkeypatch.setattr(
+        mfa_ep, "verify_password", lambda typed, stored: typed == "pw" and stored in ("h", "h-rehashed"))
     monkeypatch.setattr(
         mfa_ep, "lock_authenticated_credential_change", AsyncMock(return_value={"password_hash": locked_hash}))
     writes: list[str] = []

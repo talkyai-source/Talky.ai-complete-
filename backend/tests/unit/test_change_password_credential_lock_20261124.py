@@ -96,7 +96,9 @@ def conn(monkeypatch):
 
     monkeypatch.setattr(password_ep, "acquire_with_tenant", factory)
     # the typed password matches the stored hash "h" and its re-hash, nothing else
-    monkeypatch.setattr(password_ep, "verify_password", lambda typed, stored: stored in ("h", "h-rehashed"))
+    monkeypatch.setattr(
+        password_ep, "verify_password",
+        lambda typed, stored: typed == body.old_password and stored in ("h", "h-rehashed"))
     monkeypatch.setattr(password_ep, "hash_password", lambda p: "new-hash")
     monkeypatch.setattr(password_ep, "lock_authenticated_credential_change", lock, raising=False)
     audit.log.reset_mock()
