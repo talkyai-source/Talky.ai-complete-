@@ -13,6 +13,7 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterator, Optional
+from uuid import UUID
 
 import asyncpg
 
@@ -90,6 +91,15 @@ _RETRY_IDENTITY_KEYS = (
 
 # ``mark_as_spam`` reasons that mean "stop calling this number" (suppression).
 _MARK_AS_SUPPRESSION_REASONS = frozenset({"spam", "unavailable"})
+
+
+def _is_uuid(value) -> bool:
+    """True when ``value`` parses as a UUID (a non-UUID id is a plain not-found)."""
+    try:
+        UUID(str(value))
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -1720,6 +1730,11 @@ class CallService:
             "updated_at": datetime.utcnow().isoformat(),
         }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
 
+        if getattr(call_res, "error", None) is not None:
+            if not _is_uuid(call_id):
+                return None
+            raise RuntimeError("mark_goal_achieved: calls write failed")
+
         call_rows = call_res.data or []
         if not call_rows:
             # Zero affected rows == nonexistent OR another tenant's call.
@@ -1739,6 +1754,8 @@ class CallService:
                 "last_outcome": CallOutcome.GOAL_ACHIEVED.value,
                 "completed_at": datetime.utcnow().isoformat(),
             }).eq("id", job_id).eq("tenant_id", tenant_id).execute()
+            if getattr(job_res, "error", None) is not None:
+                raise RuntimeError("mark_goal_achieved: dialer job write failed")
             if not (job_res.data or []):
                 logger.warning(
                     "mark_goal_achieved: call %s updated but dialer_job %s "
@@ -1815,6 +1832,10 @@ class CallService:
             # request never performs a partial write.
             sel = self._db_client.table("calls").select("id, lead_id").eq(
                 "id", call_id).eq("tenant_id", tenant_id).single().execute()
+            if getattr(sel, "error", None) is not None:
+                if not _is_uuid(call_id):
+                    return None
+                raise RuntimeError("mark_as_spam: call read failed")
             call_row = sel.data
             if not call_row:
                 logger.warning(
@@ -1837,6 +1858,8 @@ class CallService:
                 "outcome": outcome.value,
                 "updated_at": datetime.utcnow().isoformat(),
             }).eq("id", call_id).eq("tenant_id", tenant_id).execute()
+            if getattr(upd, "error", None) is not None:
+                raise RuntimeError("mark_as_spam: call write failed")
             if not (upd.data or []):
                 # Row vanished / changed tenant between select and update.
                 logger.warning(
@@ -1867,6 +1890,10 @@ class CallService:
             lead_res = self._db_client.table("leads").update(
                 lead_update
             ).eq("id", resolved_lead_id).eq("tenant_id", tenant_id).execute()
+            if getattr(lead_res, "error", None) is not None:
+                if not call_id and not _is_uuid(resolved_lead_id):
+                    return None
+                raise RuntimeError("mark_as_spam: lead write failed")
             if not (lead_res.data or []):
                 if not call_id:
                     # Lead-only request, foreign/nonexistent lead → nothing

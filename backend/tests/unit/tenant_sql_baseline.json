@@ -1225,7 +1225,7 @@
       "id": "1d5ab2815c22adf520f8e4ce4e73f408efeb048d9172e1f096d48b08f019777d",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 939,
+      "line": 949,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1463,10 +1463,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0c556b71bf9371edef7fdb991586040ca6350e552055e1bc646b80bd149cacf9",
+      "id": "b0baffef1d2dd8ea08b87a3931ec2b76670bbffc790a08e7758f185cddbf0c6f",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_campaign_counters_pooled",
-      "line": 1124,
+      "line": 1134,
       "method": "execute",
       "tables": [
         "campaigns"
@@ -1546,7 +1546,7 @@
       "id": "2bf1b11b64a94081c66d0219ef23b3cd6132f287c41670b479ef609fb687e36e",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._mark_retry_enqueued",
-      "line": 882,
+      "line": 892,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1660,7 +1660,7 @@
       "id": "31ac452775c17ab9d48d7403188a959d2999b93a220081a0f0b7a1b740700fe9",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_job_completion_pooled",
-      "line": 1338,
+      "line": 1348,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -2501,7 +2501,7 @@
       "id": "4d4343a00aee017677b942dff0380f14f671175a0716ed26e740ef89f05e23d8",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 956,
+      "line": 966,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -4330,7 +4330,7 @@
       "id": "89e4e442bd5ec0dacc64ccb79c8e6633e64dd7170d62d62b91659a310e38027b",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._active_caller_opt_out_pooled",
-      "line": 1035,
+      "line": 1045,
       "method": "fetchval",
       "tables": [
         "dnc_entries"
@@ -4780,7 +4780,7 @@
       "id": "9ba21c7910549b9e4ce262c3b509f554eddb275cb7f5de1413a9ce300e594116",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 546,
+      "line": 556,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -6343,7 +6343,7 @@
       "id": "cb71667fbab5e32bb9c82878417f97d0ab09d18c62e3492ec194cd08f093a628",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 611,
+      "line": 621,
       "method": "execute",
       "tables": [
         "calls"
@@ -7484,7 +7484,7 @@
       "id": "f7ef4cb0578e0b49273e327599ff47fd3fc8bae2d01b8db2beedd217cdb20409",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 800,
+      "line": 810,
       "method": "fetchrow",
       "tables": [
         "calls"
