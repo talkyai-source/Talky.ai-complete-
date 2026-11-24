@@ -17,6 +17,7 @@ const CARD_LINES = [
     "Info: Each destination has its own regulations, which may vary from region to region.",
 ];
 const TITLE = "Documentation is required:";
+const DESCRIPTION = "To buy a phone number, we need the documents that destination regulations require. Choose business use or personal use and upload both documents.";
 const BUSINESS = "1. Business Use";
 const PERSONAL = "2. Personal Use";
 const ITEMS: Record<string, [string, string]> = {
@@ -89,7 +90,7 @@ test("the card shows both lines word for word, above the Buy Now button, with no
 test("no window text is in the page before Buy Now is selected", () => {
     mount();
     assert.equal(isOpen(), false);
-    for (const text of [TITLE, BUSINESS, PERSONAL, ...ITEMS[BUSINESS], ...ITEMS[PERSONAL], "Submit", "Cancel", EMPTY]) {
+    for (const text of [TITLE, DESCRIPTION, BUSINESS, PERSONAL, ...ITEMS[BUSINESS], ...ITEMS[PERSONAL], "Submit", "Cancel", EMPTY]) {
         assert.equal(screen.queryByText(text), null, text);
     }
 });
@@ -100,6 +101,7 @@ test("Buy Now opens the window with every line word for word, Business Use first
     const text = dialog().textContent ?? "";
     const expected = [
         TITLE,
+        DESCRIPTION,
         BUSINESS, ITEMS[BUSINESS][0], EMPTY, ITEMS[BUSINESS][1], EMPTY, "Submit",
         PERSONAL, ITEMS[PERSONAL][0], EMPTY, ITEMS[PERSONAL][1], EMPTY, "Submit",
         "Cancel",
