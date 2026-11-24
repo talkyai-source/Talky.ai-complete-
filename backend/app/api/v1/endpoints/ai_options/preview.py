@@ -435,7 +435,7 @@ async def prefetch_all_voice_samples(current_user=Depends(get_current_user), db_
 
         except Exception as exc:
             logger.warning("Prefetch failed for voice %s: %s", voice_id, exc)
-            results["failed"].append({"voice_id": voice_id, "error": str(exc)})
+            results["failed"].append({"voice_id": voice_id, "error": "The voice sample could not be prepared."})
 
     # Run all voices concurrently (bounded by provider rate limits in practice).
     await asyncio.gather(*(_cache_one(v) for v in all_voices), return_exceptions=True)

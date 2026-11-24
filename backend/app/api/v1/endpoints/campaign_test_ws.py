@@ -1064,8 +1064,7 @@ async def campaign_test_websocket(
                     await websocket.send_json({
                         "type": "error",
                         "code": "realtime_ended",
-                        "message": "The realtime voice stopped"
-                        + (f": {reason}" if reason else "."),
+                        "message": "The realtime voice stopped.",
                     })
                     await websocket.close(code=1011, reason="realtime ended")
                 except Exception:  # noqa: BLE001 - the socket may already be gone
