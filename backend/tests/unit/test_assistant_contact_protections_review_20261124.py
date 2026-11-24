@@ -1,7 +1,10 @@
 """What the review of the assistant's contact protections changed (24 November 2026).
 
-1. A save that fails AFTER the contact's queued calls were cancelled puts the contact
-   back: it was left ``called`` with nothing queued, which no Start selects.
+1. A save that fails AFTER the contact's queued calls were cancelled makes the contact
+   selectable again: it was left ``called`` with nothing queued, which no Start
+   selects. It is NOT queued at that point (a second check's finding): that would
+   ring, at once, the number the customer is replacing. Applying again queues it
+   with the new number.
 2. A status reset the database layer RETURNS as an error is logged, as a raised one is.
 3. Order: cancel the queued calls, save, and only then hand the contact back.
 """
@@ -45,16 +48,19 @@ class _SaveQ(_JobsQ):
             db.fail_saves -= 1
             if db.save_raises:
                 raise RuntimeError(DB_TEXT)
+            if db.save_matches_nothing:
+                return SimpleNamespace(data=[], count=0, error=None)
             # what the database layer returns for the unique index (it does not raise)
             return SimpleNamespace(data=None, count=0, error=DB_TEXT)
         return super().execute()
 
 
 class _SaveDB(_JobsDB):
-    def __init__(self, *, fail_saves=0, save_raises=False):
+    def __init__(self, *, fail_saves=0, save_raises=False, save_matches_nothing=False):
         super().__init__()
         self.fail_saves = fail_saves
         self.save_raises = save_raises
+        self.save_matches_nothing = save_matches_nothing
         self.calls = []
 
     def table(self, name):
@@ -85,15 +91,17 @@ def test_a_refused_save_after_the_cancel_puts_the_contact_back(monkeypatch):
     assert first["applied"] is False and first["error"] == "lead_write_conflict"
     assert DB_TEXT not in repr(first)
     assert _jobs(db) == {"j2": "cancelled"}
-    # its calls are gone and its number is unchanged: selectable again, and queued
+    # its calls are gone and its number is unchanged: selectable again, but NOT
+    # queued: nothing may ring the old number because an edit failed
     assert (lead["phone_number"], lead["status"]) == (OLD, "pending")
-    service.start_campaign.assert_awaited_once_with(**QUEUED_L1)
+    service.start_campaign.assert_not_awaited()
 
-    # the answer says "preview the change again": the customer does, and applies
+    # the answer says "preview the change again": the customer does, and applies;
+    # now it is queued, once, with the new number saved
     second = _edit(db)
     assert second["applied"] is True
     assert (lead["phone_number"], lead["status"]) == (NEW, "pending")
-    assert service.start_campaign.await_count == 2
+    service.start_campaign.assert_awaited_once_with(**QUEUED_L1)
 
 
 def test_a_save_that_raises_after_the_cancel_puts_the_contact_back(monkeypatch):
@@ -105,7 +113,20 @@ def test_a_save_that_raises_after_the_cancel_puts_the_contact_back(monkeypatch):
     out = _edit(db)
     assert out == {"error": OUTER}
     assert (lead["phone_number"], lead["status"]) == (OLD, "pending")
-    service.start_campaign.assert_awaited_once_with(**QUEUED_L1)
+    service.start_campaign.assert_not_awaited()
+
+
+def test_a_save_that_matches_no_row_after_the_cancel_puts_the_contact_back(monkeypatch):
+    """The contact or campaign changed in between: the layer returns no row and no error."""
+    service = _spy(monkeypatch)
+    db = _waiting_for_a_retry(_SaveDB(fail_saves=1, save_matches_nothing=True))
+    db.tables["campaigns"][0]["status"] = "running"
+    lead = db.tables["leads"][0]
+
+    out = _edit(db)
+    assert out["applied"] is False and out["error"] == "lead_write_conflict"
+    assert (lead["phone_number"], lead["status"]) == (OLD, "pending")
+    service.start_campaign.assert_not_awaited()
 
 
 def test_a_refused_save_with_nothing_cancelled_touches_no_status(monkeypatch):

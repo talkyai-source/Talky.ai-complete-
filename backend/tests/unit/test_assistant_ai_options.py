@@ -300,6 +300,7 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     # status hand-backs, which come after it and are scoped to this tenant's lead.
     lead_writes = [c for c in db._update_calls if c["table"] == "leads"]
     hand_backs = [c for c in lead_writes if c is not saves[0]]
+    assert len(hand_backs) == 1  # nothing was cancelled here: only the invalid-number reset
     assert all(c["payload"] == {"status": "pending"} for c in hand_backs)
     assert all(
         ("tenant_id", "t1") in c["eq"] and ("id", "lead-1") in c["eq"] for c in hand_backs

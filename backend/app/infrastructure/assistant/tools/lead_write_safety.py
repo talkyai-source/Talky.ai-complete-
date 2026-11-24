@@ -78,7 +78,12 @@ def release_called_contact(
 
     A cancelled retry leaves the lead ``called``, which no Start selects. Only for a
     contact whose calls THIS change cancelled: a ``called`` contact with nothing
-    queued has used its attempts and stays as it is.
+    queued has, as a rule, used its attempts and stays as it is.
+
+    Also the whole answer to a save that FAILED after the cancel: the contact is
+    made selectable again and nothing is queued. Queueing it there would ring,
+    at once, the number the customer is replacing; applying the change again
+    queues it with the new one.
     """
     try:
         response = db_client.table("leads").update({"status": "pending"}).eq(
@@ -143,18 +148,3 @@ async def queue_if_running(
             "manage_lead_queue_failed campaign=%s error=%s",
             str(campaign_id)[:8], type(exc).__name__,
         )
-
-
-async def put_back_after_failed_save(
-    db_client, campaign: dict, *, tenant_id: str, campaign_id: str, lead_id: str,
-) -> None:
-    """The save failed AFTER this contact's queued calls were cancelled. Never raises.
-
-    Its number is unchanged and its calls are gone: without this it would stay
-    ``called`` with nothing queued, which no Start selects. Make it selectable
-    again and, on a running campaign, queue it (with the number it still has).
-    """
-    release_called_contact(
-        db_client, tenant_id=tenant_id, campaign_id=campaign_id, lead_id=lead_id)
-    await queue_if_running(
-        db_client, campaign, tenant_id=tenant_id, campaign_id=campaign_id, lead_id=lead_id)
