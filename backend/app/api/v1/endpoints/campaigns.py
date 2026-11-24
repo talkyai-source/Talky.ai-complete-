@@ -2515,6 +2515,8 @@ async def list_campaign_contacts(
         # 1. Validate campaign exists. RLS scopes to the current tenant
         # automatically now that get_current_user is in the chain.
         campaign_response = db_client.table("campaigns").select("id, tenant_id").eq("id", campaign_id).execute()
+        if getattr(campaign_response, "error", None) is not None:
+            raise HTTPException(status_code=500, detail="The request could not be completed.")
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
         # Defense-in-depth tenant check.
@@ -2551,7 +2553,9 @@ async def list_campaign_contacts(
         ).range(
             offset, offset + page_size - 1
         ).execute()
-        
+        if getattr(response, "error", None) is not None:
+            raise HTTPException(status_code=500, detail="The request could not be completed.")
+
         return {
             "items": [_contact_response(row) for row in (response.data or [])],
             "page": page,
