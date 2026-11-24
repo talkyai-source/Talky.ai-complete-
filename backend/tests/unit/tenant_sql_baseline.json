@@ -9106,10 +9106,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "64e745199b6d73c15fce63e1fb5779e7e532a0dae555dd5a150826ce5c4281ac",
+      "id": "f240e432d8678ef1383756e6b21f33a06ec8704a5527edc3aaa5bba2a76f4fe6",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
-      "line": 1333,
+      "line": 1338,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign pacing",
@@ -9272,10 +9272,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "1185f7e3a9cfa6399579a424b2d318f23f33296035211c3dfea3e86ea085f001",
+      "id": "db1aff232c9f2c6d67e160f7e40d5a37f54172b51815c2f879d5536474a386ca",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
-      "line": 883,
+      "line": 888,
       "method": "_pinned_tts_provider",
       "tables": [],
       "sql": "create",
@@ -9840,10 +9840,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "2ebc36d470cb5019f4cabb1a130695699e38ff502e4f9a8b7dd7b8ca2d9b877a",
+      "id": "293633c41c2a743127943a54f328ed5c0d4e23f1f5472c782fe87b6315922289",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1709,
+      "line": 1714,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -10150,7 +10150,7 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "2fb8e6bfa4b2519df93d640788d52e42cd8143c8be0bd81591ee544e3d342cfd",
+      "id": "d9b1fac1f7893f451c0b618b63789e9d49b92628b1231e37c5e2b2c39a830288",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2467,
@@ -10321,10 +10321,10 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "dd3739b04841a8765a4db4ec2672024dbbb74caceda0078aef0b85da37d98880",
+      "id": "d51845cd2a2ba62083e526eda0354aa710fa4ca426f26bfb2132d79b9fb7ccd0",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
-      "line": 1160,
+      "line": 1165,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign",
@@ -10419,10 +10419,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "af576d55aec83bcd3e5a628bc7f595ea41e5c61339744c8cd372d569fcd5e070",
+      "id": "49437b3624802ef985e88296515d9fad28ae58b03b5a30d773cc69e615326f70",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2298,
+      "line": 2303,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",

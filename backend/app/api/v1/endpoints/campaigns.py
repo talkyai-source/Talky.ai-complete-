@@ -66,6 +66,11 @@ from app.api.v1.schemas.campaigns import (
     ContactListResponse,
 )
 from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
+from app.api.v1.endpoints._contact_phone_edit import (
+    DNC_MARK_TAKEN,
+    release_called_contact,
+    reset_invalid_number_skip,
+)
 
 load_dotenv()
 
@@ -2345,6 +2350,7 @@ async def update_contact_in_campaign(
             .eq("id", contact_id)
             .eq("campaign_id", campaign_id)
             .eq("tenant_id", current_user.tenant_id)
+            .neq("status", "deleted")
             .execute()
         )
         if getattr(existing, "error", None) is not None:
@@ -2354,6 +2360,7 @@ async def update_contact_in_campaign(
         contact = contact.model_copy(update=_normalized_optional_numbers(contact, default_country))
 
         update_payload: dict = {}
+        removed_marked = False
 
         if contact.phone_number is not None:
             try:
@@ -2361,23 +2368,28 @@ async def update_contact_in_campaign(
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": phone_number_error(contact.phone_number, default_country)}]) from e
 
-            # Reject duplicate within the campaign (excluding this same lead).
+            # Reject a live duplicate within the campaign (excluding this same lead).
+            # A removed row is read too: its do-not-call mark comes with the number.
             dupe = (
-                db_client.table("leads").select("id")
+                db_client.table("leads").select("id, status, do_not_call")
                 .eq("campaign_id", campaign_id)
                 .eq("tenant_id", current_user.tenant_id)
                 .eq("phone_number", normalized_phone)
-                .neq("status", "deleted")
                 .neq("id", contact_id)
                 .execute()
             )
             if getattr(dupe, "error", None) is not None:
                 raise HTTPException(status_code=500, detail="Failed to update contact")
-            if dupe.data:
+            dupe_rows = dupe.data or []
+            if any(r.get("status") != "deleted" for r in dupe_rows):
                 raise HTTPException(
                     status_code=409,
                     detail=f"Phone number {normalized_phone} already exists in this campaign",
                 )
+            removed_marked = any(
+                r.get("status") == "deleted" and bool(r.get("do_not_call"))
+                for r in dupe_rows
+            )
             update_payload["phone_number"] = normalized_phone
 
         provided = contact.model_fields_set
@@ -2418,6 +2430,12 @@ async def update_contact_in_campaign(
             "phone_number" in update_payload
             and update_payload["phone_number"] != existing.data[0].get("phone_number")
         )
+        # The mark of a removed contact with this number comes with the number
+        # (as in the add's revive); it wins over the form's value.
+        takes_dnc_mark = phone_changed and removed_marked
+        if takes_dnc_mark:
+            update_payload["do_not_call"] = True
+        cancelled_any = False
         if phone_changed:
             from app.domain.services.dialer.job_lifecycle import (
                 NOT_ORIGINATED_JOB_STATUSES,
@@ -2434,42 +2452,47 @@ async def update_contact_in_campaign(
             ).execute()
             if getattr(cancelled_jobs, "error", None) is not None:
                 raise HTTPException(status_code=500, detail="Failed to update contact")
-            try:
-                if getattr(cancelled_jobs, "data", None):
-                    # A cancelled retry leaves the lead 'called', which no Start
-                    # selects: move it back so the new number is dialled (G-F8).
-                    db_client.table("leads").update({"status": "pending"}).eq(
-                        "id", contact_id,
-                    ).eq("tenant_id", current_user.tenant_id).eq(
-                        "campaign_id", campaign_id,
-                    ).eq("status", "called").execute()
-                # A contact skipped for an invalid number is dialled again once the
-                # number is corrected (only that exact reason).
-                db_client.table("leads").update({"status": "pending"}).eq(
-                    "id", contact_id,
-                ).eq("tenant_id", current_user.tenant_id).eq(
-                    "campaign_id", campaign_id,
-                ).eq("status", "skipped").eq(
-                    "last_call_result", "invalid_phone_number",
-                ).execute()
-            except Exception as exc:  # noqa: BLE001 - the edit stands
-                logger.warning("contact_requeue_status_not_reset campaign=%s error=%s",
-                               str(campaign_id)[:8], type(exc).__name__)
+            cancelled_any = bool(getattr(cancelled_jobs, "data", None))
 
-        resp = (
-            db_client.table("leads")
-            .update(update_payload)
-            .eq("id", contact_id)
-            .eq("tenant_id", current_user.tenant_id)
-            .eq("campaign_id", campaign_id)
-            .execute()
-        )
-        updated = _require_contact_write(resp, campaign_id, "update")
+        try:
+            resp = (
+                db_client.table("leads")
+                .update(update_payload)
+                .eq("id", contact_id)
+                .eq("tenant_id", current_user.tenant_id)
+                .eq("campaign_id", campaign_id)
+                .neq("status", "deleted")
+                .execute()
+            )
+            updated = _require_contact_write(resp, campaign_id, "update")
+        except Exception:
+            if cancelled_any:
+                # The number is unchanged, so the contact is only made selectable
+                # again; nothing is queued, because that would ring the number
+                # being replaced.
+                release_called_contact(
+                    db_client, tenant_id=current_user.tenant_id,
+                    campaign_id=campaign_id, contact_id=contact_id)
+            raise
         logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
         if phone_changed:
-            await _queue_new_contacts_if_running(
-                db_client, campaign, campaign_id, current_user.tenant_id, str(contact_id))
-        return {"message": "Contact updated successfully", "contact": _contact_response(updated)}
+            # Both status resets run only after the save has succeeded.
+            if cancelled_any:
+                # A cancelled retry leaves the lead 'called', which no Start
+                # selects: move it back so the new number is dialled (G-F8).
+                release_called_contact(
+                    db_client, tenant_id=current_user.tenant_id,
+                    campaign_id=campaign_id, contact_id=contact_id)
+            reset_invalid_number_skip(
+                db_client, tenant_id=current_user.tenant_id,
+                campaign_id=campaign_id, contact_id=contact_id)
+            if not takes_dnc_mark:
+                await _queue_new_contacts_if_running(
+                    db_client, campaign, campaign_id, current_user.tenant_id, str(contact_id))
+        body = {"message": "Contact updated successfully", "contact": _contact_response(updated)}
+        if takes_dnc_mark:
+            body["warning"] = DNC_MARK_TAKEN
+        return body
 
     except HTTPException:
         raise
@@ -2602,10 +2625,12 @@ async def remove_contact_from_campaign(
         ).eq(
             "tenant_id", current_user.tenant_id
         ).execute()
-        
+        if getattr(existing, "error", None) is not None:
+            raise HTTPException(status_code=500, detail="Failed to remove contact")
+
         if not existing.data:
             raise HTTPException(status_code=404, detail="Contact not found in this campaign")
-        
+
         # Soft delete
         response = db_client.table("leads").update({
             "status": "deleted"
