@@ -510,7 +510,7 @@ async def create_campaign(
 
     if getattr(response, "error", None):
         logger.error("create_campaign: write error: %s", response.error)
-        return {"error": f"Could not create the campaign: {response.error}"}
+        return {"error": "Could not create the campaign."}
     if not getattr(response, "data", None):
         logger.error(
             "create_campaign: write returned no rows for tenant=%s name=%s overwrite=%s",

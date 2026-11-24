@@ -9106,7 +9106,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1d55779ad6f02d1e322f279b618c557b98af97892278424720547e1d08ab8c33",
+      "id": "2ce9e3af4cf37a2011360d2dc2ab8bb0e228dc7eb943262c62e6b1ee75a1e491",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1333,
@@ -9272,7 +9272,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "8fa96cdf8d64ac0f3a1205bb0b730673cdd050e2aa3c8af8dbab9ddebbddd89e",
+      "id": "e4352da32233669afff12471ea8058f08216c32da9ba254cc1fda7419be7cae3",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 883,
@@ -9840,7 +9840,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "5ff8d39f9719ee07d345e37a439b897d549bc3f423e323d6a62bd89dd28ac4ab",
+      "id": "5d5af22aa88a3752d1d1aec0f4a441284cb29cbab8287e510cf958ec9a64ac91",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1709,
@@ -10150,7 +10150,7 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "a5faf84f0bcad5c025719f694124348a1e89a4ab74cda1f1ab96014a9ec85552",
+      "id": "a6bdebefc087f46d29c508ad0c10b22c10d270055d122b39582667182de538a9",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2459,
@@ -10321,7 +10321,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "bf4773f0ffb9876e744bdd9147a84ef121ded6c54ebde627f695c8eb9532bd32",
+      "id": "d22b7b08d6746d3166f101b1ca328d7be0293695d8606a090d8e999705b8650a",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1160,
@@ -10419,7 +10419,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "cd7bf62e5ce805391603c422274091487f5fb2bb619bb13a9c63cfc2f525aafd",
+      "id": "e7fbc856ec5fd71b566aa69c48455aa92cd57fdcb0306977c06add59042e7a59",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 2296,
