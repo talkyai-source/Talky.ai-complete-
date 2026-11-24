@@ -521,3 +521,67 @@ async def test_suppression_flags_dnc_list_and_lead_flags(monkeypatch):
     assert await comms._sms_suppression(db, "t-1", "+15555550101") == "opted_out"
     Conn.flagged, DNC.listed = False, True
     assert await comms._sms_suppression(db, "t-1", "+15555550101") == "opted_out"
+
+
+# --- review of 24 November: reasons, and a failed do-not-call list write -----------
+def _fake_dnc(monkeypatch, fail_times=0):
+    state = {"added": [], "fails_left": fail_times}
+
+    class FakeDNC:
+        def __init__(self, pool):
+            pass
+
+        async def add(self, **kw):
+            if state["fails_left"]:
+                state["fails_left"] -= 1
+                raise RuntimeError("SECRET-DRIVER-TEXT")
+            state["added"].append(kw)
+
+    monkeypatch.setattr("app.domain.services.dnc_service.DNCService", FakeDNC)
+    return state
+
+
+@pytest.mark.parametrize("reason", ["Spam", " SPAM ", "dnc", "stop", "do_not_call", "Unavailable"])
+@pytest.mark.asyncio
+async def test_a_differently_spelled_or_unknown_reason_suppresses_like_spam(reason, monkeypatch):
+    # Such a reason was recorded as spam and answered "Marked as ...", but the number was
+    # left callable: the lead went to 'failed', which a restart resets to pending.
+    state = _fake_dnc(monkeypatch)
+    client = _Client(pool=object())
+    out = await CallService(db_client=client).mark_as_spam("t-1", call_id="call-1", reason=reason)
+    assert out is not None
+    lead_update = [p for t, p in client.log if t == "leads"][0]
+    assert lead_update["status"] == "dnc" and lead_update["do_not_call"] is True
+    assert len(state["added"]) == 1 and state["added"][0]["e164"] == "+442046132300"
+    expected = "mark_as_unavailable" if reason.strip().lower() == "unavailable" else "mark_as_spam"
+    assert state["added"][0]["reason"] == expected
+
+
+@pytest.mark.parametrize("reason", ["Invalid", " DISCONNECTED "])
+@pytest.mark.asyncio
+async def test_a_dead_line_reason_in_any_spelling_still_does_not_suppress(reason, monkeypatch):
+    state = _fake_dnc(monkeypatch)
+    client = _Client(pool=object())
+    await CallService(db_client=client).mark_as_spam("t-1", call_id="call-1", reason=reason)
+    lead_update = [p for t, p in client.log if t == "leads"][0]
+    assert lead_update["status"] == "failed" and "do_not_call" not in lead_update
+    assert state["added"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_dnc_list_write_is_an_error_and_the_retry_completes_it(monkeypatch):
+    # The lead is flagged, but until the LIST holds the number the same number in another
+    # campaign or a re-import would still be dialled. The sender must be told to try again.
+    state = _fake_dnc(monkeypatch, fail_times=1)
+    client = _Client(pool=object())
+    svc = CallService(db_client=client)
+    with pytest.raises(RuntimeError) as raised:
+        await svc.mark_as_spam("t-1", call_id="call-1", reason="spam")
+    assert str(raised.value) == "mark_as_spam: do-not-call list write failed"
+    assert "SECRET-DRIVER-TEXT" not in str(raised.value)
+    assert [p for t, p in client.log if t == "leads"][0]["do_not_call"] is True   # already flagged
+    assert state["added"] == []
+
+    out = await svc.mark_as_spam("t-1", call_id="call-1", reason="spam")          # the retry
+    assert out["message"] == "Marked as spam"
+    assert len(state["added"]) == 1

@@ -164,3 +164,29 @@ def test_zero_rows_still_none_for_foreign_uuid():
     assert _run(svc.mark_as_spam(tenant_id=TENANT_A, call_id=CALL_ID)) is None
     assert _run(svc.mark_as_spam(tenant_id=TENANT_A, lead_id=LEAD_ID)) is None
     _assert_unchanged(store)
+
+
+# --- review of 24 November: only what the DRIVER accepts counts as an id -----------
+@pytest.mark.parametrize("shape", ["{%s}", "urn:uuid:%s", "uuid:%s"])
+def test_an_id_the_driver_refuses_is_still_not_found(shape):
+    from asyncpg.pgproto import pgproto
+
+    call_id = shape % CALL_ID
+    # Python's UUID() parses these; the driver's own parser does not, and its refusal comes
+    # back as a returned error. Such an id can match no row: it stays None (404), and must
+    # not become a 500 that a signed sender retries for ever.
+    with pytest.raises(ValueError):
+        pgproto.UUID(call_id)
+    svc, _ = _service(_seed(), {("calls", "select"), ("calls", "update")})
+    assert _run(svc.mark_as_spam(tenant_id=TENANT_B, call_id=call_id)) is None
+    assert _run(svc.mark_goal_achieved(tenant_id=TENANT_B, call_id=call_id)) is None
+
+
+@pytest.mark.parametrize("spelled", [CALL_ID, CALL_ID.upper(), CALL_ID.replace("-", "")])
+def test_an_id_the_driver_accepts_with_a_failed_read_is_still_an_error(spelled):
+    from asyncpg.pgproto import pgproto
+
+    pgproto.UUID(spelled)  # the driver takes it
+    svc, _ = _service(_seed(), {("calls", "select"), ("calls", "update")})
+    with pytest.raises(RuntimeError):
+        _run(svc.mark_as_spam(tenant_id=TENANT_B, call_id=spelled))

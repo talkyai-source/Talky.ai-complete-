@@ -13,7 +13,6 @@ import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Iterator, Optional
-from uuid import UUID
 
 import asyncpg
 
@@ -89,17 +88,26 @@ _RETRY_IDENTITY_KEYS = (
     "lead_first_name", "lead_last_name", "lead_company",
 )
 
-# ``mark_as_spam`` reasons that mean "stop calling this number" (suppression).
-_MARK_AS_SUPPRESSION_REASONS = frozenset({"spam", "unavailable"})
+# ``mark_as_spam`` reasons that mean "the line is dead": the lead is finished but the
+# number is NOT suppressed. Every other reason, a known one ("spam", "unavailable")
+# or one this code does not know ("dnc", "stop"), is recorded as spam and therefore
+# means "stop calling this number".
+_MARK_AS_DEAD_LINE_REASONS = frozenset({"invalid", "disconnected"})
+
+# The id forms the database driver binds as a UUID: 32 hex digits, hyphens optional.
+_UUID_TEXT = re.compile(
+    r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
+)
 
 
 def _is_uuid(value) -> bool:
-    """True when ``value`` parses as a UUID (a non-UUID id is a plain not-found)."""
-    try:
-        UUID(str(value))
-    except (TypeError, ValueError):
-        return False
-    return True
+    """True when the database driver would accept ``value`` as a UUID.
+
+    Python's ``UUID()`` is looser (braces, a ``urn:uuid:`` prefix); the driver
+    refuses those and the failure comes back as a returned error. Such an id
+    can match no row, so it is a plain not-found, never a server error.
+    """
+    return bool(_UUID_TEXT.fullmatch(str(value)))
 
 
 @dataclass(frozen=True)
@@ -1773,8 +1781,15 @@ class CallService:
 
         ``leads.status`` alone is rewritten by a re-import into another
         campaign (fresh 'pending' lead for the same number), and CallGuard only
-        reads ``dnc_entries`` / ``leads.do_not_call``. Never raises: the lead
-        flag above is already written; a failure here is logged loudly.
+        reads ``dnc_entries`` / ``leads.do_not_call``.
+
+        What a retry cannot fix (a number that will not normalise, a client
+        without a pool) is logged loudly and the mark stands: the lead flag
+        above is already written. A FAILED list write raises, so the webhook
+        answers an error and its sender tries again: until the list holds the
+        number, the same number in another campaign or a re-import would still
+        be dialled. Every earlier write sets fixed values and the add is
+        "add or refresh", so the retry is safe.
         """
         try:
             normalized = normalize_e164_for_storage(str(phone_number or ""))
@@ -1782,7 +1797,14 @@ class CallService:
             if pool is None:
                 raise RuntimeError("no database pool on the call service client")
             from app.domain.services.dnc_service import DNCService, SOURCE_MANUAL_ADMIN
-
+        except Exception as exc:
+            logger.error(
+                "mark_as_spam: lead flagged do_not_call but the DNC list write "
+                "failed tenant=%s number_tail=%s: %s",
+                tenant_id, str(phone_number or "")[-4:], exc,
+            )
+            return
+        try:
             await DNCService(pool).add(
                 tenant_id=str(tenant_id), e164=normalized,
                 source=SOURCE_MANUAL_ADMIN, reason=f"mark_as_{reason}",
@@ -1790,9 +1812,10 @@ class CallService:
         except Exception as exc:
             logger.error(
                 "mark_as_spam: lead flagged do_not_call but the DNC list write "
-                "failed tenant=%s number_tail=%s: %s",
-                tenant_id, str(phone_number or "")[-4:], exc,
+                "failed tenant=%s number_tail=%s error_type=%s",
+                tenant_id, str(phone_number or "")[-4:], type(exc).__name__,
             )
+            raise RuntimeError("mark_as_spam: do-not-call list write failed") from exc
 
     async def mark_as_spam(
         self,
@@ -1823,7 +1846,12 @@ class CallService:
             "unavailable": CallOutcome.UNAVAILABLE,
             "disconnected": CallOutcome.DISCONNECTED,
         }
+        # "Spam" and " SPAM " are the same reason as "spam". A reason this code does
+        # not know is recorded as spam (the default below), so it must suppress like
+        # spam too: it used to answer "Marked as ..." and leave the number callable.
+        reason = str(reason or "spam").strip().lower()
         outcome = outcome_map.get(reason, CallOutcome.SPAM)
+        suppress = reason not in _MARK_AS_DEAD_LINE_REASONS
 
         resolved_lead_id: Optional[str] = None
 
@@ -1879,7 +1907,6 @@ class CallService:
             # do-not-call. invalid / disconnected mean the line is dead: the
             # lead is finished ('failed', which a restart can reset) but NOT
             # suppressed, matching the outcome rules above.
-            suppress = reason in _MARK_AS_SUPPRESSION_REASONS
             lead_update = {
                 "status": "dnc" if suppress else "failed",
                 "updated_at": datetime.utcnow().isoformat(),
@@ -1915,10 +1942,10 @@ class CallService:
             # Neither identifier supplied — nothing to do; do not fake success.
             return None
 
-        if resolved_lead_id and reason in _MARK_AS_SUPPRESSION_REASONS:
+        if resolved_lead_id and suppress:
             await self._add_spam_mark_to_dnc_list(
                 tenant_id, lead_res.data[0].get("phone_number") if (lead_res.data or []) else None,
-                reason,
+                reason if reason in outcome_map else "spam",
             )
 
         logger.info(
