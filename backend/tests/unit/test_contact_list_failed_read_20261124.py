@@ -76,3 +76,28 @@ def test_d_another_tenants_campaign_is_still_a_404():
         _list(db)
     assert caught.value.status_code == 404
     assert caught.value.detail == "Campaign not found"
+
+
+def test_e_another_tenants_row_with_this_campaign_id_is_not_returned():
+    db = _DB()
+    db.tables["leads"].append({
+        "id": "foreign", "tenant_id": "t2", "campaign_id": "c1",
+        "phone_number": "+442079460958", "status": "new",
+    })
+    out = _list(db)
+    assert [row["id"] for row in out["items"]] == ["lead1"]
+    assert out["total"] == 1
+
+
+def test_f_the_contacts_read_carries_its_own_tenant_filter():
+    seen = []
+
+    class _Recording(_DB):
+        def table(self, name):
+            q = super().table(name)
+            if name == "leads":
+                seen.append(q)
+            return q
+
+    _list(_Recording())
+    assert ("eq", "tenant_id", _b.USER.tenant_id) in seen[0].filters
