@@ -585,3 +585,18 @@ async def test_a_failed_dnc_list_write_is_an_error_and_the_retry_completes_it(mo
     out = await svc.mark_as_spam("t-1", call_id="call-1", reason="spam")          # the retry
     assert out["message"] == "Marked as spam"
     assert len(state["added"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_mark_without_a_contact_number_says_so_and_touches_no_list(monkeypatch, caplog):
+    # The call's contact row is missing: nothing was flagged and there is no number to list.
+    # The log line must say that, not "lead flagged ... list write failed".
+    import logging
+
+    state = _fake_dnc(monkeypatch)
+    with caplog.at_level(logging.ERROR):
+        await CallService(db_client=_Client(pool=object()))._add_spam_mark_to_dnc_list("t-1", None, "spam")
+    assert state["added"] == []
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("no contact number for this mark" in m for m in messages), messages
+    assert not any("lead flagged do_not_call" in m for m in messages), messages

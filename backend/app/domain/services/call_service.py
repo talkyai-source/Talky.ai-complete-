@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Iterator, Optional
 
 import asyncpg
+from asyncpg.pgproto.pgproto import UUID as _driver_uuid
 
 from app.core.postgres_adapter import Client
 from app.core.db import DatabasePoolTimeoutError, _ACQUIRE_TIMEOUT_S
@@ -94,10 +95,6 @@ _RETRY_IDENTITY_KEYS = (
 # means "stop calling this number".
 _MARK_AS_DEAD_LINE_REASONS = frozenset({"invalid", "disconnected"})
 
-# The id forms the database driver binds as a UUID: 32 hex digits, hyphens optional.
-_UUID_TEXT = re.compile(
-    r"[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}"
-)
 
 
 def _is_uuid(value) -> bool:
@@ -106,8 +103,13 @@ def _is_uuid(value) -> bool:
     Python's ``UUID()`` is looser (braces, a ``urn:uuid:`` prefix); the driver
     refuses those and the failure comes back as a returned error. Such an id
     can match no row, so it is a plain not-found, never a server error.
+    This asks the driver's own parser, so the two cannot disagree.
     """
-    return bool(_UUID_TEXT.fullmatch(str(value)))
+    try:
+        _driver_uuid(str(value))
+    except Exception:  # noqa: BLE001 - any refusal means "not an id"
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -1791,6 +1793,14 @@ class CallService:
         be dialled. Every earlier write sets fixed values and the add is
         "add or refresh", so the retry is safe.
         """
+        if not phone_number:
+            # The call's contact row is missing: no contact was flagged and there
+            # is no number to put on the list.
+            logger.error(
+                "mark_as_spam: no contact number for this mark, nothing added to "
+                "the DNC list tenant=%s", tenant_id,
+            )
+            return
         try:
             normalized = normalize_e164_for_storage(str(phone_number or ""))
             pool = getattr(self._db_client, "pool", None)
@@ -1903,8 +1913,8 @@ class CallService:
             resolved_lead_id = str(lead_id) if lead_id is not None else None
 
         if resolved_lead_id:
-            # Only a human "stop calling this number" (spam / unavailable) is a
-            # do-not-call. invalid / disconnected mean the line is dead: the
+            # Every reason is a "stop calling this number" (do-not-call) except
+            # the two below. invalid / disconnected mean the line is dead: the
             # lead is finished ('failed', which a restart can reset) but NOT
             # suppressed, matching the outcome rules above.
             lead_update = {

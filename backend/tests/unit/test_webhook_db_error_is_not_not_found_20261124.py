@@ -182,7 +182,10 @@ def test_an_id_the_driver_refuses_is_still_not_found(shape):
     assert _run(svc.mark_goal_achieved(tenant_id=TENANT_B, call_id=call_id)) is None
 
 
-@pytest.mark.parametrize("spelled", [CALL_ID, CALL_ID.upper(), CALL_ID.replace("-", "")])
+@pytest.mark.parametrize("spelled", [
+    CALL_ID, CALL_ID.upper(), CALL_ID.replace("-", ""),
+    "1111111-11111-1111-1111-111111111111",    # a hyphen in an odd place: the driver still takes it
+])
 def test_an_id_the_driver_accepts_with_a_failed_read_is_still_an_error(spelled):
     from asyncpg.pgproto import pgproto
 
