@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 from app.infrastructure.assistant.tools.campaigns import campaign_names
 from app.infrastructure.assistant.tools.date_ranges import (
     apply_range, local_day_range, normalize_range, resolve_reporting_zone, validate_range,
@@ -71,8 +72,7 @@ async def get_recent_calls(
             "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
         }
     except Exception as e:
-        logger.error(f"Error getting calls: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the calls.", tool="get_recent_calls", public=(ValueError,))}
 
 
 async def initiate_call(
@@ -154,7 +154,9 @@ async def initiate_call(
         return {"success":True,"status":"queued","confirmation_allowed":True,
                 "dialer_job_id":job.job_id,"message":f"Call to {phone} has been queued.","phone_number":phone}
     except Exception as e:
-        logger.error("Error initiating call: %s", type(e).__name__)
+        if confirm:  # the preview's failure is logged by tool_error_text below
+            logger.error("Error initiating call: %s", type(e).__name__)
         return {"success": False, "status": "unknown" if confirm else "failed", "confirmation_allowed":False,
                 "dialer_job_id": getattr(job, "job_id", None),
-                "error": "Call scheduling could not be confirmed." if confirm else str(e)}
+                "error": "Call scheduling could not be confirmed." if confirm else tool_error_text(
+                    e, "Could not prepare this call.", tool="initiate_call", public=(ValueError,))}

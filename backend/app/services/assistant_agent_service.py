@@ -47,6 +47,15 @@ class ActionNotAllowedError(Exception):
         super().__init__(self.message)
 
 
+class ActionPlanNotSavedError(RuntimeError):
+    """The plan could not be stored, so none of its actions ran.
+
+    Its message is written for the customer. It has a class of its own so the
+    assistant's tool can pass that message on by exact class: a plain
+    ``RuntimeError`` may carry a driver's or a provider's text.
+    """
+
+
 class AssistantAgentService:
     """
     Orchestrates multi-step action workflows with safety guardrails.
@@ -167,10 +176,10 @@ class AssistantAgentService:
                 plan.id = response.data[0]["id"]
                 logger.info(f"Created action plan {plan.id} with {len(validated_actions)} steps")
             else:
-                raise RuntimeError("The action plan could not be saved; no actions were run.")
+                raise ActionPlanNotSavedError("The action plan could not be saved; no actions were run.")
         except Exception as e:
             logger.error(f"Failed to persist action plan: {e}")
-            raise RuntimeError("The action plan could not be saved; no actions were run.") from e
+            raise ActionPlanNotSavedError("The action plan could not be saved; no actions were run.") from e
         
         return plan
     

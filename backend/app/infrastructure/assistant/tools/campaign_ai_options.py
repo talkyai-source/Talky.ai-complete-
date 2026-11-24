@@ -31,6 +31,7 @@ from app.infrastructure.assistant.tools.campaign_direction import (
     inbound_campaign_refusal,
     outbound_campaign_refusal,
 )
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -275,8 +276,9 @@ async def apply_campaign_voice(
         }
 
     except Exception as exc:
-        logger.error("apply_campaign_voice error: %s", exc)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(
+            exc, "The voice change could not be confirmed. Preview the change again.",
+            tool="apply_campaign_voice", retry_hint=False)}
 
 
 async def list_voices(
@@ -301,5 +303,4 @@ async def list_voices(
             voices.append(entry)
         return {"provider": tts_provider, "voices": voices}
     except Exception as exc:
-        logger.error("list_voices error: %s", exc)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(exc, "Could not load the voices for that provider.", tool="list_voices")}

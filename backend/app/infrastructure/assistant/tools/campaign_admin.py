@@ -25,6 +25,7 @@ from app.domain.services.campaign_knowledge_access import (
     campaign_knowledge_access_lease,
 )
 from app.domain.services.phone_number_normalizer import normalize_phone_number
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 from app.infrastructure.assistant.tools.campaign_direction import (
     inbound_campaign_refusal,
     outbound_campaign_refusal,
@@ -179,8 +180,7 @@ async def get_campaign_detail(
 
         return {"campaign": resp.data[0]}
     except Exception as exc:
-        logger.error("get_campaign_detail error: %s", exc)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(exc, "Could not read the campaign.", tool="get_campaign_detail")}
 
 
 async def get_knowledge_tree(
@@ -432,8 +432,9 @@ async def update_campaign_config(
         return result
 
     except Exception as exc:
-        logger.error("update_campaign_config error: %s", exc)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(
+            exc, "The campaign update could not be confirmed. Preview the change again.",
+            tool="update_campaign_config", retry_hint=False)}
 
 
 async def update_knowledge_node(
@@ -782,5 +783,6 @@ async def manage_lead(
         return {"applied": True, "changes": diff_entries}
 
     except Exception as exc:
-        logger.error("manage_lead error: %s", exc)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(
+            exc, "The contact change could not be confirmed. Preview the change again.",
+            tool="manage_lead", public=(ValueError,), retry_hint=False)}

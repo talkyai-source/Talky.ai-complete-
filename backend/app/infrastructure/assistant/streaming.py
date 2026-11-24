@@ -380,9 +380,9 @@ async def stream_assistant_reply(
                 actor_user_id=user_id,
             )
             # Only explicitly classified inbox errors are safe to show here.
-            # dispatch_tool turns unexpected exceptions into raw strings for
-            # model-facing loops; exposing those directly could leak provider
-            # or database internals into chat.
+            # dispatch_tool and the tools now replace unexpected exceptions with
+            # fixed sentences (tool_errors.py), but this stays a second fence:
+            # nothing unclassified goes into chat from here.
             if not isinstance(result, dict) or result.get("success") is not True:
                 error_code = result.get("error_code") if isinstance(result, dict) else None
                 error_message = None

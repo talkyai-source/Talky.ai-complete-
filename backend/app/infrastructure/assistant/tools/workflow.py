@@ -4,8 +4,9 @@ Workflow orchestration tools for the assistant agent.
 
 import logging
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,8 @@ async def schedule_reminder(
         )
 
     except Exception as e:
-        logger.error(f"Error scheduling reminder: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The reminder was not scheduled.", tool="schedule_reminder", public=(ValueError,))}
 
 
 async def execute_action_plan(
@@ -195,11 +196,40 @@ async def execute_action_plan(
         }
 
     except ValueError as e:
-        logger.warning(f"Action plan validation error: {e}")
-        return {"success": False, "error": str(e)}
+        step, invalid = (e.step, e.error) if isinstance(e, _PlanStepInvalid) else (None, e)
+        if isinstance(invalid, ValidationError):
+            # Which step, which field and what is wrong with it; never the rejected
+            # values (the same rule as the HTTP validation handler). Without it the
+            # model cannot tell what to fix.
+            hints = "; ".join(
+                f"{'.'.join(str(part) for part in err.get('loc', ()))}: {err.get('msg', '')}"
+                for err in invalid.errors(include_url=False, include_context=False, include_input=False)[:5]
+            )
+            where = f"Step {step}: " if step else ""
+            logger.warning("Action plan validation error: %s%s", where, hints)
+            return {"success": False,
+                    "error": f"The action plan's steps are not valid. {where}{hints}".strip()}
+        return {"success": False, "error": tool_error_text(
+            e, "The action plan's steps are not valid. Check each step's details.",
+            tool="execute_action_plan", public=(ValueError,))}
     except Exception as e:
-        logger.error(f"Error executing action plan: {e}")
-        return {"success": False, "error": str(e)}
+        from app.services.assistant_agent_service import ActionPlanNotSavedError
+
+        # On the preview nothing has run; on Apply some steps may have.
+        return {"success": False, "error": tool_error_text(
+            e,
+            "The action plan could not be completed. Check its status before running it again."
+            if confirm else "The action plan could not be prepared.",
+            tool="execute_action_plan", public=(ActionPlanNotSavedError,), retry_hint=not confirm)}
+
+
+class _PlanStepInvalid(ValueError):
+    """One step's fields did not validate; carries which step, for the model."""
+
+    def __init__(self, step: int, error: ValidationError) -> None:
+        super().__init__(f"step {step} is not valid")
+        self.step = step
+        self.error = error
 
 
 async def _preview_plan(tenant_id, db_client, intent, actions, context, conversation_id, actor):
@@ -246,7 +276,10 @@ async def _preview_plan(tenant_id, db_client, intent, actions, context, conversa
                         parameters.pop("offset"),
                     ).isoformat()
         schema = ACTION_TOOLS[name]["input_schema"]
-        parameters = schema.model_validate(parameters).model_dump(exclude_none=True)
+        try:
+            parameters = schema.model_validate(parameters).model_dump(exclude_none=True)
+        except ValidationError as exc:  # say WHICH step, so the model can fix it
+            raise _PlanStepInvalid(index + 1, exc) from exc
         parameters.pop("confirm", None)
         if name in PROPOSAL_TOOLS:
             preview = await dispatch_tool(

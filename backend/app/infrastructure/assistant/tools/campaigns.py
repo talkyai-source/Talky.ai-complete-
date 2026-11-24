@@ -10,14 +10,23 @@ from app.core.postgres_adapter import Client
 from app.domain.services.campaign_service import (
     CampaignError,
     CampaignNotFoundError,
+    CampaignPermissionCheckUnavailable,
+    CampaignReadinessError,
     CampaignService,
     CampaignStateError,
 )
 from app.infrastructure.assistant.tools.campaign_direction import (
     outbound_campaign_refusal,
 )
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
+
+# "Could not be confirmed", not "could not be started": some of the failures that end
+# here come AFTER the campaign was set running and calls were queued.
+_START_UNCONFIRMED = "The campaign start could not be confirmed. Check its status before trying again."
+# The preview (confirm=False) has attempted no start, so it says only that.
+_START_NOT_PREPARED = "Could not prepare the campaign start."
 
 
 class StartCampaignInput(BaseModel):
@@ -75,8 +84,7 @@ async def get_campaigns(
             "campaigns": response.data
         }
     except Exception as e:
-        logger.error(f"Error getting campaigns: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the campaigns.", tool="get_campaigns")}
 
 
 async def start_campaign(
@@ -127,21 +135,33 @@ async def start_campaign(
                 "campaign_id": campaign_id,
             }
 
-        # Log action
-        db_client.table("assistant_actions").insert({
-            "tenant_id": tenant_id,
-            "type": "start_campaign",
-            "status": "completed",
-            "triggered_by": "chat",
-            "conversation_id": conversation_id,
-            "campaign_id": campaign_id,
-            "input_data": json.dumps({"campaign_id": campaign_id}),
-            "output_data": json.dumps({
-                "previous_status": current_status,
-                "jobs_enqueued": started.jobs_enqueued,
-            }),
-            "completed_at": datetime.utcnow().isoformat()
-        }).execute()
+        # Log action. The campaign IS started at this point: a failure to write this
+        # record must not turn the answer into "not started".
+        try:
+            _recorded = db_client.table("assistant_actions").insert({
+                "tenant_id": tenant_id,
+                "type": "start_campaign",
+                "status": "completed",
+                "triggered_by": "chat",
+                "conversation_id": conversation_id,
+                "campaign_id": campaign_id,
+                "input_data": json.dumps({"campaign_id": campaign_id}),
+                "output_data": json.dumps({
+                    "previous_status": current_status,
+                    "jobs_enqueued": started.jobs_enqueued,
+                }),
+                "completed_at": datetime.utcnow().isoformat()
+            }).execute()
+            if getattr(_recorded, "error", None) is not None:
+                logger.error(
+                    "start_campaign: action record not written campaign=%s error_type=returned_error",
+                    campaign_id,
+                )
+        except Exception as audit_exc:  # noqa: BLE001
+            logger.error(
+                "start_campaign: action record not written campaign=%s error_type=%s",
+                campaign_id, type(audit_exc).__name__,
+            )
 
         answer = {
             "success": True,
@@ -181,7 +201,11 @@ async def start_campaign(
                 return refusal
         return {"success": False, "error": exc.message}
     except CampaignError as exc:
-        return {"success": False, "error": exc.message}
+        return {"success": False, "error": tool_error_text(
+            exc, _START_UNCONFIRMED if confirm else _START_NOT_PREPARED,
+            tool="start_campaign", retry_hint=not confirm,
+            public=(CampaignReadinessError, CampaignPermissionCheckUnavailable))}
     except Exception as e:
-        logger.error(f"Error starting campaign: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, _START_UNCONFIRMED if confirm else _START_NOT_PREPARED,
+            tool="start_campaign", retry_hint=not confirm)}

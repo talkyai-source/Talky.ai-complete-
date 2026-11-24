@@ -6,6 +6,7 @@ import logging
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 from app.infrastructure.assistant.tools.date_ranges import (
     SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, normalize_range,
     resolve_reporting_zone, validate_range,
@@ -85,8 +86,7 @@ async def get_leads(
             "analysis_note": "Latest analysis is AI-generated guidance from its source call, not a caller-confirmed fact or completed action. Keep it distinct from follow_up_note.",
         }
     except Exception as e:
-        logger.error(f"Error getting leads: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the contacts.", tool="get_leads", public=(ValueError,))}
 
 
 async def get_qualified_leads(
@@ -144,8 +144,7 @@ async def get_qualified_leads(
             "note": "Present each by NAME and NUMBER. Qualification is a historical flag; newer AI analysis may change the next step. Keep latest analysis distinct from the operator's follow_up_note and from completed actions.",
         }
     except Exception as e:
-        logger.error(f"Error getting qualified leads: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the qualified leads.", tool="get_qualified_leads", public=(ValueError,))}
 
 
 class GetLeadFollowupInput(BaseModel):
@@ -283,5 +282,4 @@ async def get_lead_followup(
         )
         return result
     except Exception as e:
-        logger.error(f"get_lead_followup error: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read that contact's follow-up details.", tool="get_lead_followup")}
