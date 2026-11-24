@@ -351,6 +351,15 @@ def test_bulk_phone_problems_are_plain_422_entries(text, code):
 
 # ── the log carries the detail, once, masked ───────────────────────────────
 
+# A list id (a UUID) is not a phone number; everything else in a log line is checked.
+_UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
+
+
+def _assert_no_phone_digits(msg):
+    assert PHONE not in msg and PHONE[1:] not in msg, msg
+    assert not re.search(r"\+\d{7,}|\b\d{10,}\b", _UUID.sub("<id>", msg)), msg
+
+
 @pytest.mark.parametrize("route", ["paste", "bulk"])
 def test_exception_text_goes_to_one_warning_with_no_full_phone(route, caplog):
     caplog.set_level(logging.DEBUG)
@@ -364,11 +373,29 @@ def test_exception_text_goes_to_one_warning_with_no_full_phone(route, caplog):
     assert len(warnings) == 1, [r.getMessage() for r in caplog.records]
     assert "duplicate key" in warnings[0].getMessage()
     for r in caplog.records:
-        msg = r.getMessage()
-        assert PHONE not in msg and PHONE[1:] not in msg, msg
-        assert not re.search(r"\+\d{7,}|\b\d{10,}\b", msg), msg
+        _assert_no_phone_digits(r.getMessage())
     assert not any(r.levelno == logging.INFO and "duplicate key" in r.getMessage()
                    for r in caplog.records)
+
+
+def test_a_list_id_ending_in_digits_is_not_taken_for_a_phone_number(monkeypatch, caplog):
+    # The import's log line names the new list by its id, a random UUID. Its last group is
+    # twelve hex characters, all digits about once in 280 ids, and the phone check then
+    # failed at random. This is the id GitHub's run of 24 November 2026 drew.
+    from app.api.v1.endpoints import contact_lists
+
+    drawn = "814100da-fb2d-4e2b-954e-205929637364"
+    monkeypatch.setattr(contact_lists, "create_contact_list", lambda *a, **k: drawn)
+    caplog.set_level(logging.DEBUG)
+    _paste_call(_paste_text(5) + "\n" + PHONE, FailingDB())
+    messages = [r.getMessage() for r in caplog.records]
+    assert any(drawn in m for m in messages), messages
+    for msg in messages:
+        _assert_no_phone_digits(msg)
+    # the rule itself is as strict as before: a run of digits outside an id is still caught
+    for leak in ("called 07700900123 twice", "dialled +4420794", f"list={drawn} phone 2079460123456"):
+        with pytest.raises(AssertionError):
+            _assert_no_phone_digits(leak)
 
 
 def test_csv_ingest_failure_is_logged_once_masked(caplog):
