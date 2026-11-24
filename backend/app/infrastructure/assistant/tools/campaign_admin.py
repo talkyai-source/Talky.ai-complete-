@@ -24,7 +24,25 @@ from app.domain.services.campaign_knowledge_access import (
     CampaignKnowledgeNotFound,
     campaign_knowledge_access_lease,
 )
+from app.domain.services.dialer.job_lifecycle import (
+    REASON_LEAD_REMOVED,
+    cancel_active_jobs_for_lead,
+    cancel_not_originated_jobs_for_lead,
+)
 from app.domain.services.phone_number_normalizer import normalize_phone_number
+from app.infrastructure.assistant.tools.lead_write_safety import (
+    N1,
+    S3,
+    S4,
+    S5,
+    S6,
+    S7,
+    W1,
+    hand_back_after_phone_change,
+    queue_if_running,
+    revive_choice,
+    rows_with_phone,
+)
 from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 from app.infrastructure.assistant.tools.campaign_direction import (
     inbound_campaign_refusal,
@@ -574,13 +592,16 @@ async def manage_lead(
 
         campaign_resp = (
             db_client.table("campaigns")
-            .select("id,direction,script_config")
+            .select("id,direction,script_config,status")
             .eq("id", campaign_id)
             .eq("tenant_id", tenant_id)
             .execute()
         )
+        if getattr(campaign_resp, "error", None) is not None:
+            raise RuntimeError("manage_lead: campaign read failed")
         if not campaign_resp.data:
             return {"error": "campaign not found"}
+        campaign = campaign_resp.data[0]
         refusal = outbound_campaign_refusal([campaign_resp.data[0]])
         if refusal:
             return refusal
@@ -625,7 +646,51 @@ async def manage_lead(
                 "call_attempts": 0,
             }
 
+            # Same lookup as the website's add: a live row is a duplicate; a removed
+            # row is revived (keeping its do-not-call flag), never replaced by a new one.
+            try:
+                live, deleted = rows_with_phone(
+                    db_client, tenant_id=tenant_id, campaign_id=campaign_id,
+                    phone=normalized_phone)
+            except Exception as exc:
+                return {"error": tool_error_text(exc, S3, tool="manage_lead")}
+            if live:
+                return {"error": S4}
+
+            revive_id = None
+            revive_values: Dict[str, Any] = {}
+            revive_before: Dict[str, Any] = {}
+            keep = False
+            if deleted:
+                revive_id, keep = revive_choice(deleted)
+                revive_values = {"status": "pending", "do_not_call": keep}
+                if fn is not None:
+                    revive_values["first_name"] = fn
+                if ln is not None:
+                    revive_values["last_name"] = ln
+                revive_before = {
+                    "id": revive_id,
+                    "phone_number": normalized_phone,
+                    "status": "deleted",
+                    "do_not_call": keep,
+                }
+
             if not confirm:
+                if revive_id is not None:
+                    revive_preview: Dict[str, Any] = {
+                        "preview": True,
+                        "changes": [
+                            {
+                                "field": "lead",
+                                "before": revive_before,
+                                "after": {**revive_before, **revive_values},
+                            }
+                        ],
+                        "note": "Not applied yet. Call again with confirm=true to apply.",
+                    }
+                    if keep:
+                        revive_preview["warnings"] = [W1]
+                    return revive_preview
                 return {
                     "preview": True,
                     "changes": [
@@ -636,6 +701,28 @@ async def manage_lead(
                         }
                     ],
                     "note": "Not applied yet. Call again with confirm=true to apply.",
+                }
+
+            if revive_id is not None:
+                revived = (
+                    db_client.table("leads")
+                    .update(revive_values)
+                    .eq("id", revive_id)
+                    .eq("tenant_id", tenant_id)
+                    .eq("campaign_id", campaign_id)
+                    .execute()
+                )
+                conflict = _lead_write_conflict(revived)
+                if conflict:
+                    return conflict
+                await queue_if_running(
+                    db_client, campaign, tenant_id=tenant_id,
+                    campaign_id=campaign_id, lead_id=revive_id)
+                return {
+                    "applied": True,
+                    "changes": [
+                        {"field": "lead", "before": revive_before, "after": revived.data[0]}
+                    ],
                 }
 
             # Insert
@@ -651,6 +738,9 @@ async def manage_lead(
             if conflict:
                 return conflict
             inserted = resp.data[0]
+            await queue_if_running(
+                db_client, campaign, tenant_id=tenant_id,
+                campaign_id=campaign_id, lead_id=lead_data["id"], count_new=True)
             return {
                 "applied": True,
                 "changes": [{"field": "lead", "before": None, "after": inserted}],
@@ -670,6 +760,8 @@ async def manage_lead(
                 .eq("campaign_id", campaign_id)
                 .execute()
             )
+            if getattr(resp, "error", None) is not None:
+                raise RuntimeError("manage_lead: contact read failed")
             if not resp.data:
                 return {"error": "lead not found"}
 
@@ -701,12 +793,27 @@ async def manage_lead(
             if conflict:
                 return conflict
 
-            return {
+            # Same as DELETE /campaigns/{id}/contacts/{contact_id}: take the removed
+            # contact's calls off the queue; a failure is reported, the removal stands.
+            remove_notice: Optional[str] = None
+            try:
+                cancel_active_jobs_for_lead(
+                    db_client, lead_id, reason=REASON_LEAD_REMOVED, tenant_id=tenant_id)
+            except Exception as exc:  # noqa: BLE001 - the removal stands
+                logger.warning(
+                    "manage_lead_remove_cancel_failed lead=%s error_type=%s",
+                    str(lead_id)[:8], type(exc).__name__)
+                remove_notice = N1
+
+            removed: Dict[str, Any] = {
                 "applied": True,
                 "changes": [
                     {"field": "lead", "before": existing_lead, "after": {"status": "deleted"}}
                 ],
             }
+            if remove_notice:
+                removed["notice"] = remove_notice
+            return removed
 
         # ---- UPDATE ----------------------------------------------------------
         # action == "update"
@@ -722,6 +829,8 @@ async def manage_lead(
             .eq("campaign_id", campaign_id)
             .execute()
         )
+        if getattr(resp, "error", None) is not None:
+            raise RuntimeError("manage_lead: contact read failed")
         if not resp.data:
             return {"error": "lead not found"}
 
@@ -761,12 +870,39 @@ async def manage_lead(
                 "note": "No changes detected.",
             }
 
+        # A changed number must not belong to another live contact of this campaign
+        # (the website's edit refuses it too). Checked on the preview and again on apply.
+        phone_changed = (
+            "phone_number" in candidate
+            and candidate["phone_number"] != current.get("phone_number")
+        )
+        if phone_changed:
+            try:
+                live_rows, _removed = rows_with_phone(
+                    db_client, tenant_id=tenant_id, campaign_id=campaign_id,
+                    phone=candidate["phone_number"])
+            except Exception as exc:
+                return {"error": tool_error_text(exc, S6, tool="manage_lead")}
+            if any(str(r.get("id")) != str(lead_id) for r in live_rows):
+                return {"error": S5}
+
         if not confirm:
             return {
                 "preview": True,
                 "changes": diff_entries,
                 "note": "Not applied yet. Call again with confirm=true to apply.",
             }
+
+        # A queued job carries its own copy of the number: cancel the not-yet-originated
+        # jobs BEFORE the save (a failed cancel saves nothing), hand the contact back AFTER.
+        cancelled = 0
+        if phone_changed:
+            try:
+                cancelled = cancel_not_originated_jobs_for_lead(
+                    db_client, lead_id, tenant_id=tenant_id,
+                    last_error="contact_phone_changed")
+            except Exception as exc:
+                return {"applied": False, "error": tool_error_text(exc, S7, tool="manage_lead")}
 
         write_response = (
             db_client.table("leads")
@@ -779,6 +915,14 @@ async def manage_lead(
         conflict = _lead_write_conflict(write_response)
         if conflict:
             return conflict
+
+        if phone_changed:
+            hand_back_after_phone_change(
+                db_client, tenant_id=tenant_id, campaign_id=campaign_id,
+                lead_id=lead_id, cancelled=cancelled)
+            await queue_if_running(
+                db_client, campaign, tenant_id=tenant_id,
+                campaign_id=campaign_id, lead_id=lead_id)
 
         return {"applied": True, "changes": diff_entries}
 

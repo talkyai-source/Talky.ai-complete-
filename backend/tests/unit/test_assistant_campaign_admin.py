@@ -72,6 +72,9 @@ class _FakeQuery:
     def neq(self, field, value):
         return self
 
+    def in_(self, field, values):
+        return self
+
     def order(self, *args, **kwargs):
         return self
 
@@ -834,9 +837,15 @@ async def test_manage_lead_remove_confirm_soft_deletes():
     assert result.get("applied") is True
     # Must be a soft delete via update, not hard delete
     assert db._delete_calls == [], "Hard delete must not be used; use soft-delete (update status)"
-    assert len(db._update_calls) == 1
-    assert db._update_calls[0]["payload"] == {"status": "deleted"}
-    assert ("campaign_id", "c1") in db._update_calls[0]["eq"]
+    # A removal also takes the contact's queued calls off the queue (website parity):
+    # one leads update (the soft delete) and one dialer_jobs update (the cancel).
+    lead_updates = [c for c in db._update_calls if c["table"] == "leads"]
+    job_updates = [c for c in db._update_calls if c["table"] == "dialer_jobs"]
+    assert len(db._update_calls) == 2
+    assert len(lead_updates) == 1 and len(job_updates) == 1
+    assert lead_updates[0]["payload"] == {"status": "deleted"}
+    assert ("campaign_id", "c1") in lead_updates[0]["eq"]
+    assert ("tenant_id", "t1") in job_updates[0]["eq"]
 
 
 @pytest.mark.asyncio
