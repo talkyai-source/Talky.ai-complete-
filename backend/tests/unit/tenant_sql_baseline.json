@@ -4793,7 +4793,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bd38d9e9ac432f13534ab707387a3b2e871f728f139a4375b2931af139f5e061",
+      "id": "f461e2327d6c59a5f0bd9dd279cb41686ed29e436f1074b82ebd52c9ca302552",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
       "line": 949,
@@ -6324,7 +6324,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d1a6be5f2bd9ee5c19a3712437d6e1ff2f46120cdca94f29eb50af15d335b41b",
+      "id": "d09b7b584604d96e3882c57b3db79496f3c7bf2f1c61dd4d4aae63b715971748",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
       "line": 950,

@@ -55,6 +55,19 @@ def test_notice_survives_saved_receipt_merge(monkeypatch):
     assert outcome["notice"] == NOTICE
 
 
+def test_notice_is_dropped_when_the_saved_receipt_says_not_applied(monkeypatch):
+    # The tool said success, but the saved receipt does not confirm the change: the frame is
+    # "not applied", so it carries no notice and the note is the receipt's error.
+    monkeypatch.setattr(assistant_ws, "public_action_receipt", lambda row: {
+        "action_id": "act-1", "success": False, "confirmation_allowed": False,
+        "status": "unknown", "receipt": {}, "error": "No durable proof."})
+    outcome = proposal_apply_result(
+        "p1", PROPOSAL, {"success": True, "action_id": "act-1", "notice": NOTICE})
+    assert outcome["applied"] is False
+    assert "notice" not in outcome
+    assert proposal_outcome_note(outcome) == "No durable proof."
+
+
 def test_provider_accepted_note_keeps_its_sentence_and_appends_notice():
     outcome = {"applied": True, "receipt": {"provider_status": "accepted"}, "notice": NOTICE}
     assert proposal_outcome_note(outcome) == f"The provider accepted the request. Delivery is not confirmed. {NOTICE}"
