@@ -15,6 +15,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.password import (
     PasswordValidationError,
     hash_password,
@@ -106,6 +107,13 @@ async def change_password(
         new_hash = hash_password(new_password)
 
         async with conn.transaction():
+            # Same fence as turning two-factor off: lock the profile row and
+            # re-check the session before anything is written, and refuse if the
+            # password changed since the typed one was verified.
+            locked = await lock_authenticated_credential_change(conn, request, current_user)
+            if locked["password_hash"] != row["password_hash"]:
+                raise HTTPException(401, "Credentials changed. Please sign in again.")
+
             await conn.execute(
                 """
                 UPDATE user_profiles

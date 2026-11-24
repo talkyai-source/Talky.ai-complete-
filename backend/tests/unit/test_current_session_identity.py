@@ -109,6 +109,7 @@ def conn(monkeypatch):
         monkeypatch.setattr(module, "verify_password", lambda *a: True)
     monkeypatch.setattr(password_ep, "hash_password", lambda p: "new-hash")
     monkeypatch.setattr(mfa_ep, "lock_authenticated_credential_change", AsyncMock(return_value={"password_hash": "h"}))
+    monkeypatch.setattr(password_ep, "lock_authenticated_credential_change", AsyncMock(return_value={"password_hash": "h"}))
     monkeypatch.setattr(mfa_ep, "invalidate_all_codes", AsyncMock())
     monkeypatch.setattr(sessions_ep, "acquire_connection", factory)
     return c
