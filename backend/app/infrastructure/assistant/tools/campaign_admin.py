@@ -38,6 +38,7 @@ from app.infrastructure.assistant.tools.lead_write_safety import (
     S6,
     S7,
     W1,
+    W2,
     hand_back_after_phone_change,
     put_back_after_failed_save,
     queue_if_running,
@@ -824,7 +825,7 @@ async def manage_lead(
         # Read current lead (scoped to tenant)
         resp = (
             db_client.table("leads")
-            .select("id,phone_number,first_name,last_name,email,status,campaign_id")
+            .select("id,phone_number,first_name,last_name,email,status,campaign_id,do_not_call")
             .eq("id", lead_id)
             .eq("tenant_id", tenant_id)
             .eq("campaign_id", campaign_id)
@@ -877,22 +878,39 @@ async def manage_lead(
             "phone_number" in candidate
             and candidate["phone_number"] != current.get("phone_number")
         )
+        marks_dnc = False
         if phone_changed:
             try:
-                live_rows, _removed = rows_with_phone(
+                live_rows, removed_rows = rows_with_phone(
                     db_client, tenant_id=tenant_id, campaign_id=campaign_id,
                     phone=candidate["phone_number"])
             except Exception as exc:
                 return {"error": tool_error_text(exc, S6, tool="manage_lead")}
             if any(str(r.get("id")) != str(lead_id) for r in live_rows):
                 return {"error": S5}
+            # A do-not-call mark belongs to the number: when a removed row of this
+            # campaign carries it, the contact taking the number takes the mark too
+            # (the add's revive keeps it the same way). Shown on the preview.
+            marks_dnc = (
+                any(bool(r.get("do_not_call")) for r in removed_rows)
+                and current.get("do_not_call") is not True
+            )
+            if marks_dnc:
+                candidate["do_not_call"] = True
+                diff_entries = _build_diff(
+                    {k: current.get(k) for k in candidate},
+                    candidate,
+                )
 
         if not confirm:
-            return {
+            update_preview: Dict[str, Any] = {
                 "preview": True,
                 "changes": diff_entries,
                 "note": "Not applied yet. Call again with confirm=true to apply.",
             }
+            if marks_dnc:
+                update_preview["warnings"] = [W2]
+            return update_preview
 
         # A queued job carries its own copy of the number: cancel the not-yet-originated
         # jobs BEFORE the save (a failed cancel saves nothing), hand the contact back AFTER.
@@ -934,11 +952,15 @@ async def manage_lead(
             hand_back_after_phone_change(
                 db_client, tenant_id=tenant_id, campaign_id=campaign_id,
                 lead_id=lead_id, cancelled=cancelled)
-            await queue_if_running(
-                db_client, campaign, tenant_id=tenant_id,
-                campaign_id=campaign_id, lead_id=lead_id)
+            if not marks_dnc:
+                await queue_if_running(
+                    db_client, campaign, tenant_id=tenant_id,
+                    campaign_id=campaign_id, lead_id=lead_id)
 
-        return {"applied": True, "changes": diff_entries}
+        updated: Dict[str, Any] = {"applied": True, "changes": diff_entries}
+        if marks_dnc:
+            updated["notice"] = W2
+        return updated
 
     except Exception as exc:
         return {"error": tool_error_text(

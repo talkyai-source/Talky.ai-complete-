@@ -26,6 +26,10 @@ W1 = (
     "This number was removed from the campaign earlier and is marked do not call. "
     "It comes back marked do not call, so it will not be dialled."
 )
+W2 = (
+    "This number was removed from the campaign earlier and is marked do not call. "
+    "The contact takes that mark with the number, so it will not be dialled."
+)
 
 
 def rows_with_phone(db_client, *, tenant_id: str, campaign_id: str, phone: str) -> Tuple[List[Any], List[Any]]:
