@@ -103,9 +103,9 @@ async def start_campaign(
 
             if contact_permission_dial_gate_mode() == "on":
                 question = (
-                    f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts "
-                    "whose list has a recorded permission to call; the others are held back "
-                    "until permission is confirmed."
+                    f"Start campaign '{campaign.get('name')}'? It will begin calling the contacts "
+                    "whose list has a recorded permission to call. Contacts without one are "
+                    "held back."
                 )
             else:
                 question = f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts."

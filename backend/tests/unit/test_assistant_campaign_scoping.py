@@ -373,8 +373,8 @@ async def test_start_preview_with_the_check_on_does_not_promise_every_contact(mo
     result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A)
 
     assert result == _expected_preview(
-        "Start campaign 'Roofing Leads'? It will begin calling its contacts whose list has a "
-        "recorded permission to call; the others are held back until permission is confirmed.")
+        "Start campaign 'Roofing Leads'? It will begin calling the contacts whose list has a "
+        "recorded permission to call. Contacts without one are held back.")
 
 
 @pytest.mark.asyncio
