@@ -133,12 +133,32 @@ async def start_campaign(
             "completed_at": datetime.utcnow().isoformat()
         }).execute()
 
-        return {
+        answer = {
             "success": True,
             "message": f"Campaign '{campaign.get('name')}' has been started",
             "campaign_id": campaign_id,
             "jobs_enqueued": started.jobs_enqueued,
         }
+        withheld = int(getattr(started, "jobs_withheld", 0) or 0)
+        if withheld:
+            # The permission check held contacts back. ``notice`` is what the
+            # confirm card shows and voice mode speaks beside "Applied".
+            note = CampaignService._withheld_note(withheld).strip()
+            if getattr(started, "leads_selected", None) == 0:
+                # This start selected nobody: every pending contact was held back.
+                # The campaign is running (they are queued once permission is
+                # confirmed; retries already scheduled still go out), so do not
+                # say calling started. ``jobs_enqueued == 0`` is NOT this test: a
+                # large start and a resume report 0 while new calls go out.
+                answer["message"] = (
+                    f"Campaign '{campaign.get('name')}' is running, but no contact was queued. {note}"
+                )
+                answer["notice"] = f"No contact was queued. {note}"
+            else:
+                answer["message"] += f". {note}"
+                answer["notice"] = note
+            answer["jobs_withheld"] = withheld
+        return answer
     except CampaignNotFoundError:
         return {"success": False, "error": "Campaign not found"}
     except CampaignStateError as exc:

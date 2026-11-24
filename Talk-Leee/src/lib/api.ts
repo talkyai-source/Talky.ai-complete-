@@ -543,7 +543,6 @@ class ApiClient {
             path,
             method,
             suppressAuthRedirect: true,
-            skipAuthRefresh: true,
             body: {
                 old_password: oldPassword,
                 new_password: newPassword,
@@ -655,7 +654,6 @@ class ApiClient {
             path,
             method,
             suppressAuthRedirect: true,
-            skipAuthRefresh: true,
             body: { password },
             timeoutMs: 10_000,
         });

@@ -11,6 +11,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi } from "@/lib/backend-api";
 import type { AlertItem, AlertSeverity, AlertStatus, AlertType } from "@/lib/campaign-performance";
+import { isLegalAcceptanceRequired } from "@/lib/app-query-client";
 import { useNotificationsState } from "@/lib/notifications-client";
 import { notificationScopeKey, notificationsStore } from "@/lib/notifications";
 
@@ -112,14 +113,16 @@ export function useAlerts(filters: {
             }
             return data.items.map((r) => mapAlert(r as RawAlertItem));
         },
-        refetchInterval: () => {
+        refetchInterval: (query) => {
+            // The terms dialog is up: stop polling refused routes (the page is loaded again after acceptance).
+            if (isLegalAcceptanceRequired(query.state.error)) return false;
             if (typeof document === "undefined") return false;
             return document.visibilityState === "hidden" ? false : 10_000;
         },
-        refetchOnWindowFocus: true,
+        refetchOnWindowFocus: (query) => !isLegalAcceptanceRequired(query.state.error),
         refetchOnReconnect: true,
         staleTime: 5_000,
-        retry: (failureCount, error) => error.name !== "AbortError" && failureCount < 1,
+        retry: (failureCount, error) => error.name !== "AbortError" && !isLegalAcceptanceRequired(error) && failureCount < 1,
     });
     return { ...query, data: scopeKey && hydrated ? query.data : undefined };
 }

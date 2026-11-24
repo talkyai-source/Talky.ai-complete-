@@ -197,6 +197,34 @@ async def revoke_session_by_id(
     return updated
 
 
+async def revoke_other_user_sessions(
+    conn: asyncpg.Connection,
+    user_id: str,
+    current_session_id: str,
+    *,
+    reason: str,
+) -> int:
+    """
+    Revoke every active session of *user_id* except the one whose id is
+    *current_session_id* (the session the request was authenticated with).
+
+    Built only from the existing list and single-session revoke statements,
+    so it needs no session-token hash (a bearer-token sign-in has no
+    ``talky_sid`` cookie to hash). Returns the number revoked.
+    """
+    from .queries import get_active_sessions_detailed
+
+    revoked = 0
+    for row in await get_active_sessions_detailed(conn, user_id=user_id):
+        if str(row["id"]) == str(current_session_id):
+            continue
+        if await revoke_session_by_id(
+            conn, session_id=str(row["id"]), user_id=user_id, reason=reason
+        ):
+            revoked += 1
+    return revoked
+
+
 async def purge_expired_sessions(conn: asyncpg.Connection) -> int:
     """
     Hard-delete sessions that are both expired AND revoked.

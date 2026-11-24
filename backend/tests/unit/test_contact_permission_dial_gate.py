@@ -247,11 +247,17 @@ async def test_switch_on_single_list_dial_also_requires_a_confirmed_list(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_switch_on_an_unreadable_confirmation_lookup_fails_closed(monkeypatch):
+async def test_switch_on_an_unreadable_confirmation_lookup_at_start_is_a_retryable_error(monkeypatch):
+    # At Start a failed lookup is an error the customer can retry (503), not a
+    # mass hold-back that reads as "no permission". The dial-time check is separate.
+    from app.domain.services.campaign_service import CampaignError
+
     _gate_on(monkeypatch)
     db = _FakeDB(fail_tables={"contact_lists"})
     _seed(db)
-    assert await _pending_ids(db) == set()
+    with pytest.raises(CampaignError) as raised:
+        await _pending_ids(db)
+    assert raised.value.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -698,3 +704,130 @@ async def test_call_this_list_says_why_when_its_contacts_were_withheld(monkeypat
 async def test_call_this_list_message_is_unchanged_when_nothing_was_withheld(monkeypatch):
     out = await _call_one_list(monkeypatch, withheld=0)
     assert out.message == "List activated — 0 contact(s) queued for dialing."
+
+
+# ---------------------------------------------------------------------------
+# Review of 24 November 2026: the shapes the first fix missed.
+# ---------------------------------------------------------------------------
+
+
+def _lists_read_answers_with_an_error_result(db, error_text):
+    """The real database layer does not raise for most failures: it answers
+    ``data=None, error=<text>`` (app/core/postgres_adapter.py). Only the
+    permission read (the select naming consent_confirmed_at) fails here."""
+    from types import SimpleNamespace
+
+    real = db.table
+
+    def table(name):
+        q = real(name)
+        if name != "contact_lists":
+            return q
+        cols = {}
+        orig_select, orig_execute = q.select, q.execute
+
+        def select(*columns, **kw):
+            cols["c"] = " ".join(str(c) for c in columns)
+            return orig_select(*columns, **kw)
+
+        def execute():
+            if "consent_confirmed_at" in cols.get("c", ""):
+                return SimpleNamespace(data=None, count=None, error=error_text)
+            return orig_execute()
+
+        q.select, q.execute = select, execute
+        return q
+
+    db.table = table
+    return db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_text", ["permission denied for table contact_lists", ""])
+async def test_switch_on_an_error_result_from_the_confirmation_read_at_start_is_a_retryable_error(
+        monkeypatch, error_text):
+    # An error RESULT is a failed read exactly like a raised one (an empty error
+    # text is what a bare timeout leaves): 503, campaign not started, nothing queued.
+    from app.domain.services.campaign_service import CampaignPermissionCheckUnavailable
+
+    monkeypatch.setenv(GATE, "on")
+    db = _lists_read_answers_with_an_error_result(
+        _start_db(pending_ok=2, pending_no=1), error_text)
+    with pytest.raises(CampaignPermissionCheckUnavailable) as raised:
+        await _start(db, monkeypatch)
+    assert raised.value.status_code == 503
+    assert db.tables["campaigns"][0]["status"] == "draft"
+    assert not db.tables.get("dialer_jobs")
+
+
+@pytest.mark.asyncio
+async def test_warn_an_error_result_from_the_confirmation_read_is_logged_as_a_failed_read(
+        monkeypatch, caplog):
+    # In warn mode nothing is held back either way, but the evidence line must not
+    # record a failed read as "every contact lacks permission, read fine".
+    import logging
+
+    monkeypatch.setenv(GATE, "warn")
+    db = _lists_read_answers_with_an_error_result(
+        _start_db(pending_ok=2, pending_no=1), "connection refused")
+    with caplog.at_level(logging.INFO):
+        result, _ = await _start(db, monkeypatch)
+    assert result.jobs_enqueued == 3 and result.jobs_withheld == 0
+    decisions = [r.getMessage() for r in caplog.records if "lookup=" in r.getMessage()]
+    assert decisions and all("lookup=failed" in line for line in decisions), decisions
+
+
+@pytest.mark.asyncio
+async def test_switch_on_start_reports_how_many_contacts_it_selected(monkeypatch):
+    monkeypatch.setenv(GATE, "on")
+    some, _ = await _start(_start_db(pending_ok=2, pending_no=1), monkeypatch)
+    assert (some.leads_selected, some.jobs_enqueued, some.jobs_withheld) == (2, 2, 1)
+    none, _ = await _start(_start_db(pending_no=3), monkeypatch)
+    assert (none.leads_selected, none.jobs_enqueued, none.jobs_withheld) == (0, 0, 3)
+
+
+@pytest.mark.asyncio
+async def test_switch_on_assistant_does_not_call_a_large_start_that_is_dialling_a_failure(monkeypatch):
+    # A start above the inline limit queues its calls in the background and reports
+    # jobs_enqueued == 0. With one contact held back the assistant used to answer
+    # "failed / No contacts were queued" while the campaign ran and calls were queued.
+    from unittest.mock import MagicMock
+
+    from app.domain.services.campaign_service import CampaignService
+    from app.infrastructure.assistant.tools import campaigns as tool
+
+    monkeypatch.setenv(GATE, "on")
+    monkeypatch.setenv("CAMPAIGN_START_INLINE_DISPATCH_MAX", "1")
+    db = _start_db(pending_ok=2, pending_no=1)
+    svc = CampaignService(db, queue_service=_StartQueue([True] * 20))
+    monkeypatch.setattr(tool, "_get_campaign_service", lambda _db: svc)
+    answer = await tool.start_campaign("tenant-1", MagicMock(), "campaign-1", confirm=True)
+
+    assert db.tables["campaigns"][0]["status"] == "running"
+    assert len(db.tables["dialer_jobs"]) == 2
+    assert answer["success"] is True and "error" not in answer
+    assert "has been started" in answer["message"]
+    assert answer["jobs_withheld"] == 1
+    assert "No contact was queued" not in answer["message"] + answer["notice"]
+
+
+@pytest.mark.asyncio
+async def test_switch_on_assistant_says_running_but_nothing_queued_when_every_contact_is_held_back(
+        monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.domain.services.campaign_service import CampaignService
+    from app.infrastructure.assistant.tools import campaigns as tool
+
+    monkeypatch.setenv(GATE, "on")
+    db = _start_db(pending_no=3)
+    svc = CampaignService(db, queue_service=_StartQueue([True] * 20))
+    monkeypatch.setattr(tool, "_get_campaign_service", lambda _db: svc)
+    answer = await tool.start_campaign("tenant-1", MagicMock(), "campaign-1", confirm=True)
+
+    assert db.tables["campaigns"][0]["status"] == "running"   # the start was applied
+    assert not db.tables.get("dialer_jobs")                   # and nothing is dialled
+    assert answer["success"] is True
+    assert "is running, but no contact was queued" in answer["message"]
+    assert answer["notice"].startswith("No contact was queued. 3 contacts were not queued")
+    assert "started" not in answer["message"].lower()

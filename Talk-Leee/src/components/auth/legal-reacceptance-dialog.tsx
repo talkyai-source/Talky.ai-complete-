@@ -113,6 +113,11 @@ export function LegalReacceptanceDialog({ onAccepted = reloadPage }: { onAccepte
                         I have read and accept the Terms of Service and the Privacy Policy
                     </label>
                 </div>
+                <p className="text-muted-foreground">
+                    Questions?{" "}
+                    <Link href="/contact" target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">Contact us</Link>
+                    {" "}(opens in a new tab).
+                </p>
                 {error ? (
                     <p id={errorId} role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p>
                 ) : null}

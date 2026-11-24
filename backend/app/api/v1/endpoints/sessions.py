@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -45,6 +46,18 @@ from app.core.security.sessions import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+
+def _same_session(a, b) -> bool:
+    """Session ids are UUIDs: compare the values, not how they are spelled.
+
+    The database matches an id in any letter case, so a spelled comparison let
+    a customer end their own current session by writing its id in capitals.
+    """
+    try:
+        return UUID(str(a)) == UUID(str(b))
+    except (ValueError, AttributeError, TypeError):
+        return str(a) == str(b)
 
 
 # =============================================================================
@@ -158,6 +171,13 @@ async def list_active_sessions(
             current_session_token_hash=current_token_hash,
         )
 
+    # The session this request authenticated with is the current one; the
+    # 24-hour talky_sid cookie only decides when the request carries no id.
+    authenticated_id = getattr(getattr(request, "state", None), "authenticated_session_id", None)
+    if authenticated_id:
+        for session in sessions:
+            session["is_current"] = str(session["id"]) == str(authenticated_id)
+
     # Find current session ID
     current_session_id = None
     for session in sessions:
@@ -199,6 +219,7 @@ async def revoke_specific_session(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     talky_sid: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+    request: Request = None,  # type: ignore[assignment]
 ) -> SessionRevokeResponse:
     """
     Revoke a specific session by ID (selective logout).
@@ -251,14 +272,24 @@ async def revoke_specific_session(
     """
     # Prevent revoking current session through this endpoint
     async with acquire_connection(db_client.pool) as conn:
-        # Check if this is the current session
-        if talky_sid:
+        # Check if this is the current session: the authenticated session id
+        # first, the talky_sid cookie only when the request carries no id.
+        authenticated_id = getattr(
+            getattr(request, "state", None), "authenticated_session_id", None
+        )
+        if authenticated_id:
+            if _same_session(authenticated_id, session_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Cannot revoke current session. Use /auth/logout instead.",
+                )
+        elif talky_sid:
             current_hash = hash_session_token(talky_sid)
             current_session = await conn.fetchrow(
                 "SELECT id FROM security_sessions WHERE session_token_hash = $1",
                 current_hash,
             )
-            if current_session and str(current_session["id"]) == session_id:
+            if current_session and _same_session(current_session["id"], session_id):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Cannot revoke current session. Use /auth/logout instead.",

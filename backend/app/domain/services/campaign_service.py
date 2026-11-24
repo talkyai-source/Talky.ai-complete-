@@ -55,6 +55,11 @@ class StartCampaignResult:
     # CONTACT_PERMISSION_DIAL_GATE: contacts left out because their list has no
     # confirmed permission to call (0 whenever the switch is off).
     jobs_withheld: int = 0
+    # Contacts this start selected for dialling. 0 = nothing was selected.
+    # ``jobs_enqueued`` cannot say that: a large start queues in the
+    # background and a resume releases parked jobs, both with 0 there.
+    # None = the result was built without it (unknown).
+    leads_selected: Optional[int] = None
 
 
 class CampaignError(Exception):
@@ -242,6 +247,18 @@ class CampaignReadinessError(CampaignError):
     def __init__(self, readiness: dict):
         super().__init__(readiness["reason"], status_code=409)
         self.reason_code = readiness["reason_code"]
+
+
+class CampaignPermissionCheckUnavailable(CampaignError):
+    """Start could not read which contacts have a recorded permission to call.
+
+    Retryable: nothing was queued and the campaign status was not changed.
+    """
+
+    MESSAGE = "The contacts' permission could not be checked. Nothing was queued; try again."
+
+    def __init__(self) -> None:
+        super().__init__(self.MESSAGE, status_code=503)
 
 
 class CampaignDispatchError(CampaignError):
@@ -607,6 +624,7 @@ class CampaignService:
                     jobs_enqueued=0,
                     campaign_id=campaign_id,
                     jobs_withheld=sum(withheld_out),
+                    leads_selected=0,
                 )
 
             # 4. Build the exact durable job set. PostgreSQL is the dispatch
@@ -844,6 +862,7 @@ class CampaignService:
                     campaign_id=campaign_id,
                     jobs_dispatching=len(jobs_to_dispatch),
                     jobs_withheld=sum(withheld_out),
+                    leads_selected=len(leads),
                 )
 
             # 7. Dispatch the durable outbox. A false enqueue result is a real
@@ -871,6 +890,7 @@ class CampaignService:
                 campaign_id=campaign_id,
                 queue_stats=stats,
                 jobs_withheld=sum(withheld_out),
+                leads_selected=len(leads),
             )
 
         except CampaignError:
@@ -1381,8 +1401,10 @@ class CampaignService:
 
         Skipped leads are not queued and not written: they stay pending and are
         picked up once the list is confirmed and the campaign is started again.
-        Unlike the inactive-list lookup this FAILS CLOSED: if the confirmation
-        cannot be read, nothing is selected ("not sure -> do not call"). The
+        Unlike the inactive-list lookup this does not guess: if the confirmation
+        cannot be read, Start is refused with a retryable 503 (nothing queued,
+        status unchanged) instead of reporting every contact as lacking
+        permission. The
         match is on (list id, tenant) so another tenant's list with the same id
         never confirms this tenant's contact.
         """
@@ -1406,6 +1428,11 @@ class CampaignService:
                 if scoped_tenant:
                     query = query.eq("tenant_id", scoped_tenant)
                 resp = query.execute()
+                # The database layer answers most failures with an error
+                # result (data=None, error=<text>) and does not raise.
+                # That is a failed read too, never "no list is confirmed".
+                if getattr(resp, "error", None) is not None:
+                    raise RuntimeError("contact_lists permission read returned an error")
                 confirmed = {
                     (str(r["id"]), str(r.get("tenant_id") or scoped_tenant))
                     for r in (getattr(resp, "data", None) or [])
@@ -1421,14 +1448,14 @@ class CampaignService:
                         "(warn mode: selecting every lead): %s", campaign_id, exc,
                     )
                     return leads
-                logger.warning(
+                # At Start a failed read is not "no permission": refuse so the
+                # customer can retry. The dial-time check stays fail-closed.
+                logger.error(
                     "permission-confirmation lookup failed for campaign %s "
-                    "(selecting no leads as fail-safe): %s",
-                    campaign_id, exc,
+                    "(start refused, nothing queued): %s",
+                    campaign_id, type(exc).__name__,
                 )
-                if withheld_out is not None:
-                    withheld_out.append(len(leads))
-                return []
+                raise CampaignPermissionCheckUnavailable() from exc
         kept = [
             l for l in leads
             if l.get("list_id")

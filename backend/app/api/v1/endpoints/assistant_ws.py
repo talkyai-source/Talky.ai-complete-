@@ -68,14 +68,19 @@ def proposal_apply_result(proposal_id, proposal, result):
             "status": ("scheduled" if result.get("status") == "scheduled" else "completed") if applied
                 else result.get("status", "unknown"), "output_data": result})
         outcome.update(proposal_receipt_result(proposal_id, saved))
+    notice = result.get("notice") if isinstance(result, dict) else None
+    if outcome.get("applied") and isinstance(notice, str) and notice.strip():
+        outcome["notice"] = notice.strip()[:600]
     return outcome
 
 
 def proposal_outcome_note(outcome):
     if outcome.get("applied"):
+        notice = outcome.get("notice")
+        tail = f" {notice}" if isinstance(notice, str) and notice else ""
         if outcome.get("receipt", {}).get("provider_status") in {"accepted", "provider_accepted"}:
-            return "The provider accepted the request. Delivery is not confirmed."
-        return "Applied the proposed changes."
+            return "The provider accepted the request. Delivery is not confirmed." + tail
+        return "Applied the proposed changes." + tail
     return outcome.get("error") or "The outcome is unconfirmed. Check the saved request before repeating it."
 
 

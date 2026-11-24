@@ -27,6 +27,7 @@ from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     hash_session_token,
     revoke_all_user_sessions,
+    revoke_other_user_sessions,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -118,14 +119,24 @@ async def change_password(
 
             # --- revoke all OTHER sessions (keep current session alive) --------
             # OWASP: "Invalidate all existing sessions on password change."
-            current_token_hash = hash_session_token(talky_sid) if talky_sid else None
-
-            await revoke_all_user_sessions(
-                conn,
-                current_user.id,
-                reason="password_change",
-                exclude_token_hash=current_token_hash,
-            )
+            # The current session is the one this request authenticated with;
+            # the 24-hour talky_sid cookie is only the fallback.
+            current_session_id = getattr(getattr(request, "state", None), "authenticated_session_id", None)
+            if current_session_id:
+                await revoke_other_user_sessions(
+                    conn,
+                    current_user.id,
+                    str(current_session_id),
+                    reason="password_change",
+                )
+            else:
+                current_token_hash = hash_session_token(talky_sid) if talky_sid else None
+                await revoke_all_user_sessions(
+                    conn,
+                    current_user.id,
+                    reason="password_change",
+                    exclude_token_hash=current_token_hash,
+                )
 
             # The current device's refresh family (from its own talky_rt
             # cookie) stays alive; with no determinable family, revoke all.

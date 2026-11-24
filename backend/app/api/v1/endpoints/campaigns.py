@@ -33,6 +33,7 @@ from app.domain.services.campaign_service import (
     CampaignDispatchError,
     CampaignError,
     CampaignNotFoundError,
+    CampaignPermissionCheckUnavailable,
     CampaignReadinessError,
     CampaignService,
     CampaignStateError,
@@ -1433,6 +1434,12 @@ async def start_campaign(
         if idempotency_key:
             await release_idempotency_lock(request)
         raise HTTPException(status_code=409, detail={"error": "campaign_not_ready", "reason_code": e.reason_code, "message": e.message})
+    except CampaignPermissionCheckUnavailable as e:
+        # Retryable, and written for the customer: nothing was queued and the
+        # campaign was not started (campaign_service logs the failed read).
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise HTTPException(status_code=503, detail=e.message)
     except CampaignError as e:
         if idempotency_key:
             await release_idempotency_lock(request)
