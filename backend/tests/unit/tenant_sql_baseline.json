@@ -176,7 +176,7 @@
       "id": "05a3d5dc18435b352986e9141fe1c4f749678c1691ceca3fcb2d267c7764bcd8",
       "file": "app/api/v1/endpoints/auth/password.py",
       "function": "change_password",
-      "line": 108,
+      "line": 109,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -4793,10 +4793,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "054c12e3b4947f2cf7c47fac3f92a431124ba00a07b1f4c3a665783678f7b801",
+      "id": "bd38d9e9ac432f13534ab707387a3b2e871f728f139a4375b2931af139f5e061",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 944,
+      "line": 949,
       "method": "fetchval",
       "tables": [
         "assistant_actions"
@@ -6324,10 +6324,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "977309ab267a992c2b09f45ababcdffbe42ddf1bf93be732994ca268f0b297e3",
+      "id": "d1a6be5f2bd9ee5c19a3712437d6e1ff2f46120cdca94f29eb50af15d335b41b",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 945,
+      "line": 950,
       "method": "fetch",
       "tables": [
         "assistant_actions"
@@ -6627,7 +6627,7 @@
       "id": "d5834f3d398bce7a78c1fb266e4ea528f08133c12afc364e8993cc5bea14e9b7",
       "file": "app/api/v1/endpoints/mfa/status.py",
       "function": "disable_mfa",
-      "line": 122,
+      "line": 126,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -6965,7 +6965,7 @@
       "id": "e1634b05b57d47130be8f17f5ac1211ce77cef64027b1d10ce49db8b4f29798b",
       "file": "app/api/v1/endpoints/mfa/status.py",
       "function": "disable_mfa",
-      "line": 76,
+      "line": 80,
       "method": "fetchrow",
       "tables": [
         "user_profiles"
@@ -7652,7 +7652,7 @@
       "id": "fe515def07cf978f5371eee347e771581fe01b053bd121f9131e817f5ea66a36",
       "file": "app/api/v1/endpoints/auth/password.py",
       "function": "change_password",
-      "line": 89,
+      "line": 90,
       "method": "fetchrow",
       "tables": [
         "user_profiles"
@@ -13025,7 +13025,7 @@
       "id": "0bb1b565af46fe815d1325d393d3a59644dab74ce6282b3797220795bf9afee7",
       "file": "app/api/v1/endpoints/auth/password.py",
       "function": "change_password",
-      "line": 134,
+      "line": 145,
       "method": "fetchrow",
       "tables": [
         "refresh_tokens"
@@ -13035,7 +13035,7 @@
       "unresolved": false,
       "bypass": false,
       "count": 1,
-      "reason": "Password change keeps the device that made the change signed in: the refresh-token family of the request's own cookie is read so it can be excluded from the revocation that follows. The row is bound by the token's hash AND the authenticated user's id; refresh tokens are owned by a user (including tenantless platform accounts), not by a tenant, exactly like the other refresh_tokens statements in auth/. An unknown or revoked token yields no family and everything is revoked as before. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/password.py:134.",
+      "reason": "Password change keeps the device that made the change signed in: the refresh-token family of the request's own cookie is read so it can be excluded from the revocation that follows. The row is bound by the token's hash AND the authenticated user's id; refresh tokens are owned by a user (including tenantless platform accounts), not by a tenant, exactly like the other refresh_tokens statements in auth/. An unknown or revoked token yields no family and everything is revoked as before. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/password.py:145.",
       "category": "individually_reviewed"
     },
     {

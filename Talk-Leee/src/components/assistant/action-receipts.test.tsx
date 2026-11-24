@@ -81,6 +81,34 @@ test("a saved reminder keeps its reference and scheduled status without claiming
     assert.equal(screen.queryByRole("button", { name: /^Apply$/ }), null);
 });
 
+const HELD_BACK_NOTICE = "No contact was queued. 3 contacts were not queued because no permission to call is recorded.";
+
+test("an applied result with a notice shows Applied and the notice", () => {
+    const result = withProposalResult({ proposalId: "start-proposal", tool: "start_campaign", status: "submitting" },
+        { status: "completed", applied: true, confirmation_allowed: true, notice: HELD_BACK_NOTICE });
+    assert.equal(result.notice, HELD_BACK_NOTICE);
+    render(<EditProposalCard proposal={result} onApply={() => {}} onReject={() => {}} />);
+    assert.ok(screen.getByText("Applied"));
+    assert.ok(screen.getByText(HELD_BACK_NOTICE));
+});
+
+test("an applied result without a notice renders no notice", () => {
+    const result = withProposalResult({ proposalId: "start-proposal", tool: "start_campaign", status: "submitting" },
+        { status: "completed", applied: true, confirmation_allowed: true });
+    assert.equal(result.notice, undefined);
+    const { container } = render(<EditProposalCard proposal={result} onApply={() => {}} onReject={() => {}} />);
+    assert.ok(screen.getByText("Applied"));
+    assert.equal(container.querySelector("p.text-amber-700"), null);
+});
+
+test("a result that is not applied ignores a notice", () => {
+    const result = withProposalResult({ proposalId: "start-proposal", tool: "start_campaign", status: "submitting" },
+        { status: "failed", applied: false, confirmation_allowed: false, error: "Could not start.", notice: HELD_BACK_NOTICE });
+    assert.equal(result.notice, undefined);
+    render(<EditProposalCard proposal={result} onApply={() => {}} onReject={() => {}} />);
+    assert.equal(screen.queryByText(HELD_BACK_NOTICE), null);
+});
+
 test("a workflow receipt keeps the saved plan reference while incomplete proof stays unknown", () => {
     const result = withProposalResult({ proposalId: "plan-proposal", tool: "execute_action_plan", status: "submitting" },
         { status: "completed", applied: true, confirmation_allowed: false, receipt: { plan_id: "saved-plan" } });
