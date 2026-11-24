@@ -170,6 +170,11 @@ async def _change(monkeypatch, talky_rt, family_row):
     monkeypatch.setattr(change, "validate_password_strength", lambda p: None)
     monkeypatch.setattr(change, "revoke_all_user_refresh_tokens", revoke_refresh)
     monkeypatch.setattr(change, "revoke_all_user_sessions", revoke_sessions)
+
+    async def lock(conn, request, current_user):
+        return {"password_hash": "stored"}
+
+    monkeypatch.setattr(change, "lock_authenticated_credential_change", lock)
     request = NS(headers={}, client=NS(host="203.0.113.9"))
     await change.change_password(
         request, ChangePasswordRequest(old_password="old", new_password="new-secret"), Response(),

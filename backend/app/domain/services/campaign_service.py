@@ -1400,7 +1400,8 @@ class CampaignService:
         has ``consent_confirmed_at`` set; a lead with no list is not confirmed.
 
         Skipped leads are not queued and not written: they stay pending and are
-        picked up once the list is confirmed and the campaign is started again.
+        queued as soon as permission is recorded on their list while the
+        campaign runs (or at its next start).
         Unlike the inactive-list lookup this does not guess: if the confirmation
         cannot be read, Start is refused with a retryable 503 (nothing queued,
         status unchanged) instead of reporting every contact as lacking
