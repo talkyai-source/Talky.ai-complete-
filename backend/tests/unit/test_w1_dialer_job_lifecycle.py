@@ -411,10 +411,24 @@ async def test_one_tenants_ten_live_calls_do_not_block_another_tenant(monkeypatc
     from app.domain.services import global_concurrency as gc
     from app.domain.services.dialer import legal_hours
 
-    # A UK weekday afternoon: the legal calling-hours floor is open for the
-    # job's London number, so only concurrency decides, whatever the hour the
-    # suite runs at.
-    monkeypatch.setattr(legal_hours, "_utcnow", lambda: datetime(2026, 11, 3, 14, 0, tzinfo=timezone.utc))
+    from app.domain.models import calling_rules as calling_rules_module
+
+    # A UK weekday afternoon, pinned for BOTH clocks the engine reads: the
+    # legal calling-hours floor (legal_hours._utcnow) and the tenant window and
+    # allowed days (CallingRules.is_within_time_window calls datetime.now(tz)
+    # with no seam, so the module's ``datetime`` name is replaced by a subclass
+    # that overrides ``now`` only). Only concurrency decides, whatever the
+    # hour or weekday the suite runs at (the window "00:00"-"23:59" is closed
+    # in the last minute of the real day).
+    pinned = datetime(2026, 11, 3, 14, 0, tzinfo=timezone.utc)
+
+    class _PinnedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return pinned.astimezone(tz) if tz is not None else pinned.replace(tzinfo=None)
+
+    monkeypatch.setattr(legal_hours, "_utcnow", lambda: pinned)
+    monkeypatch.setattr(calling_rules_module, "datetime", _PinnedDatetime)
 
     redis = fakeredis.FakeAsyncRedis(decode_responses=True)
     await redis.sadd(gc._ACTIVE_SET_KEY, *[f"call-{i}" for i in range(10)])
