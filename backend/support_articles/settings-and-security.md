@@ -98,6 +98,31 @@ Do not change production telephony configuration without testing, because incorr
 
 A campaign cannot place calls while its telephone route is not ready. If a campaign reports that the selected trunk is not ready, check its live status here.
 
+#### Buy Now
+
+Use **Buy Now** to buy a phone number in Telephony. Each destination has its own regulations, so the window lists the documents needed for business use or personal use and lets you upload them.
+
+The last card on the Telephony tab is shown to every signed-in user. Account admins see it after the rest of the Telephony settings. Other users see it after the note that phone lines are managed by their account admin.
+
+The card reads:
+
+- Minute charges vary by destination. Local conditions apply.
+- Info: Each destination has its own regulations, which may vary from region to region.
+
+1. Select **Buy Now**. A window titled **Documentation is required:** opens.
+2. The window has two cards, each listing its documents:
+   - **1. Business Use**
+     - A) Business registration
+     - B) Photo ID matching the business registration
+   - **2. Personal Use**
+     - A) Utility bill (proof of address)
+     - B) Photo ID matching the utility bill
+3. Under each document is an upload box that reads **Click to upload or drag and drop**. Select the box to choose a file, or drag a file onto it. Each box takes one file. The file name is then shown, with **Choose another** to replace the file and **Remove** to empty the box.
+4. Select **Submit** on the card you filled in. Each card has its own **Submit**, which works only when both of that card's boxes have a file.
+5. The window closes and the message **Thank you. Your documents have been submitted.** is shown.
+
+To close the window without submitting, select **Cancel**, press Escape or select outside the window. Files you chose are not kept when the window closes.
+
 #### Concurrent calls
 
 Your plan sets how many calls can run at once. Campaigns queue beyond that limit rather than failing. The pricing page lists the concurrency allowance for each plan.

@@ -626,6 +626,26 @@ async def campaign_test_websocket(
         await websocket.close(code=1008, reason="No tenant")
         return
 
+    # Legal acceptance (switch off: no read, no change): a test call runs the
+    # live agent. The role is not known at this handshake, so a platform admin
+    # who is bound to a tenant is treated as a tenant user here (fails closed).
+    from types import SimpleNamespace
+    from app.core.security.legal_gate import acceptance_missing
+    try:
+        legal_missing = await acceptance_missing(
+            SimpleNamespace(id=user_id, tenant_id=tenant_id, role="user"), db_client.pool)
+    except Exception:  # noqa: BLE001 - a failed read is never "accepted"
+        logger.error("campaign_test_ws: legal acceptance lookup failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return
+    if legal_missing:
+        await websocket.send_json({"type": "error", "code": "legal_acceptance_required",
+                                   "message": "Accept the current Terms and Privacy Policy to continue."})
+        await websocket.close(code=1008, reason="legal_acceptance_required")
+        return
+
     # RLS tenant context for any .table() lookups on this task.
     from app.core.security.tenant_isolation import set_current_tenant_id
 

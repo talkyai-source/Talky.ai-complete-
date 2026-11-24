@@ -364,6 +364,24 @@ async def assistant_chat(
             await websocket.close(code=1008, reason="No tenant")
             return
 
+        # Legal acceptance (switch off: no read, no change). The start_campaign
+        # tool places real calls, so a user who has not accepted gets no chat.
+        from types import SimpleNamespace
+        from app.core.security.legal_gate import acceptance_missing
+        try:
+            legal_missing = await acceptance_missing(SimpleNamespace(
+                id=user_id, tenant_id=tenant_id, role=principal.get("role")), db_client.pool)
+        except Exception as legal_err:
+            logger.error("assistant_ws: legal acceptance lookup failed type=%s", type(legal_err).__name__)
+            await websocket.close(code=1011, reason="Account verification unavailable")
+            return
+        if legal_missing:
+            await manager.send_json(connection_id, {
+                "type": "error", "code": "legal_acceptance_required",
+                "content": "Accept the current Terms and Privacy Policy to continue."})
+            await websocket.close(code=1008, reason="legal_acceptance_required")
+            return
+
         identity_context = assistant_session_context.set({
             "sub": user_id, "sid": payload["sid"], "tenant_id": tenant_id,
         })

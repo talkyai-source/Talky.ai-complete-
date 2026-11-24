@@ -20,7 +20,7 @@ loader._load = function (id, ...args) {
     if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user, refreshUser, logout }) };
     return originalLoad.call(this, id, ...args);
 };
-let Dialog: React.ComponentType;
+let Dialog: React.ComponentType<{ onAccepted?: () => void }>;
 try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports -- synchronous scoped boundary stubs above
     Dialog = require("./legal-reacceptance-dialog").LegalReacceptanceDialog;
@@ -32,13 +32,14 @@ const owed = { id: "u1", email: "u@example.test", role: "tenant_admin", tenant_i
 const BUTTON = /Accept and continue/;
 const BOX = /I have read and accept the Terms of Service and the Privacy Policy/;
 
+let accepted = 0;
 function show() {
-    return render(<QueryClientProvider client={new QueryClient()}><Dialog /></QueryClientProvider>);
+    return render(<QueryClientProvider client={new QueryClient()}><Dialog onAccepted={() => { accepted++; }} /></QueryClientProvider>);
 }
 let requests: Array<Record<string, unknown>>;
 let outcome: () => Promise<unknown>;
 beforeEach(() => {
-    pathname = "/dashboard"; user = { ...owed }; requests = []; pushed.length = 0;
+    accepted = 0; pathname = "/dashboard"; user = { ...owed }; requests = []; pushed.length = 0;
     refreshUser.mock.resetCalls(); logout.mock.resetCalls();
     outcome = async () => ({ accepted: true });
     mock.method(sharedHttpClient(), "request", async (opts: Record<string, unknown>) => { requests.push(opts); return outcome(); });
@@ -84,6 +85,7 @@ test("accepting sends the server's versions, re-reads /auth/me and closes", asyn
     assert.deepEqual(requests.map(r => [r.path, r.method, r.body]),
         [["/auth/legal-acceptance", "POST", { terms_version: "2026-11-01", privacy_version: "2026-11-02" }]]);
     assert.equal(refreshUser.mock.callCount(), 1);
+    assert.equal(accepted, 1, "the page is loaded again so every refused read recovers");
 });
 
 test("a failed save keeps the dialog open and says so in plain words", async () => {
@@ -95,6 +97,7 @@ test("a failed save keeps the dialog open and says so in plain words", async () 
     assert.match(alert.textContent ?? "", /We could not save your acceptance\. Please try again\./);
     assert.ok(screen.getByRole("dialog"));
     assert.equal(refreshUser.mock.callCount(), 0);
+    assert.equal(accepted, 0, "a failed save does not reload the page");
     assert.equal((screen.getByRole("button", { name: BUTTON }) as HTMLButtonElement).disabled, false);
 });
 

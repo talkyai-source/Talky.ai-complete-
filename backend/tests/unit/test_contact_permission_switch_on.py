@@ -213,11 +213,33 @@ async def test_off_start_logs_nothing(caplog):
 # ═══ 3. fakes for the routes ═════════════════════════════════════════════
 
 
+def _listless_rows(n):
+    return [
+        {"id": f"00000000-0000-0000-0000-00000000000{i}", "phone_number": f"+1416555010{i}"}
+        for i in range(n)
+    ]
+
+
+def _md5_of(rows):
+    """The token's string form written out independently of the endpoint's function:
+    'id:phone' pairs sorted by id, comma-joined, a missing phone as '', md5 of the UTF-8 text."""
+    import hashlib
+
+    pairs = sorted((str(r["id"]), r["phone_number"] or "") for r in rows)
+    return hashlib.md5(",".join(f"{i}:{p}" for i, p in pairs).encode("utf-8")).hexdigest()
+
+
 class _Conn:
     """Answers the new statements. ``listless`` are the campaign's leads with no list."""
 
-    def __init__(self, *, listless=3, status="running", pending=("p1", "p2"), waiting=(5, 3)):
+    def __init__(
+        self, *, listless=3, status="running", pending=("p1", "p2"), waiting=(5, 3),
+        rows=None, live=(), fail_live=False, token="a" * 32,
+    ):
         self.listless, self.status, self.pending, self.waiting = listless, status, list(pending), waiting
+        # the contacts the move statement returns (default: the ones BODY's token is for)
+        self.rows = list(rows) if rows is not None else _listless_rows(listless)
+        self.live, self.fail_live, self.token = set(live), fail_live, token
         self.calls: list = []
         self.lists: list = []
         self.moved = 0
@@ -245,10 +267,14 @@ class _Conn:
 
         self.calls.append((sql, args))
         if sql == cpc._MOVE_SQL:
-            self.moved = self.listless
-            return [{"id": f"m{i}"} for i in range(self.listless)]
+            self.moved = len(self.rows)
+            return [dict(r) for r in self.rows]
         if sql == cpc._PENDING_IDS_SQL:
             return [{"id": i} for i in self.pending]
+        if sql == cpc._LIVE_CALL_LEAD_IDS_SQL:
+            if self.fail_live:
+                raise RuntimeError("calls unreadable")
+            return [{"lead_id": i} for i in args[1] if i in self.live]
         raise AssertionError(sql)
 
     async def fetchval(self, sql, *args):
@@ -257,6 +283,8 @@ class _Conn:
         self.calls.append((sql, args))
         if sql == cpc._CAMPAIGN_STATUS_SQL:
             return self.status
+        if sql == cpc._UNGROUPED_TOKEN_SQL:
+            return self.token
         raise AssertionError(sql)
 
 
@@ -318,7 +346,7 @@ def _service_patch(monkeypatch, svc):
     monkeypatch.setattr(campaigns_ep, "_get_campaign_service", lambda _db: svc)
 
 
-BODY = {**GOOD, "expected_count": 3}
+BODY = {**GOOD, "expected_count": 3, "expected_token": _md5_of(_listless_rows(3))}
 
 
 # ═══ 4. the summary route ════════════════════════════════════════════════
@@ -338,7 +366,7 @@ async def test_summary_counts_and_mode(monkeypatch, mode, status, queues):
     assert out == {
         "dial_gate": mode or "off", "statement_version": "2026-11-v1",
         "waiting_without_permission": 312, "ungrouped_without_permission": 40,
-        "queues_on_confirm": queues,
+        "queues_on_confirm": queues, "ungrouped_token": "a" * 32,
     }
     assert conn.calls[0][1] == (TENANT, CAMPAIGN) and tx.scopes[0][0] == TENANT
 
@@ -429,8 +457,11 @@ async def test_ungrouped_count_changed_is_409_and_rolled_back(monkeypatch):
         await cpc.confirm_ungrouped_permission(CAMPAIGN, dict(BODY), _User2(), _db())
     assert exc.value.status_code == 409
     assert exc.value.detail == {
-        "code": "contact_count_changed",
-        "message": "The number of contacts without a list changed from 3 to 5. Check them and confirm again.",
+        "code": "contacts_changed",
+        "message": (
+            "The contacts without a list changed since you loaded this page. "
+            "Reload the page, check them and confirm again."
+        ),
     }
     # both statements ran INSIDE the one transaction block, which was exited by the
     # exception (a rollback): the list insert and the move are both undone
@@ -879,3 +910,173 @@ def test_contacts_queued_on_confirm_use_the_statuses_start_and_the_count_use():
 
     assert "l.status IN ('pending','calling')" in cpc._PENDING_IDS_SQL
     assert "tenant_id = $1::uuid" in cpc._PENDING_IDS_SQL
+
+
+# ── Added 23 Nov 2026: the confirmed set, not just its count; no queueing of a live call ──
+_CONTACTS_CHANGED = "contacts_changed"
+
+
+def test_ungrouped_token_form_is_pinned():
+    """One string form, defined once: sorted by id, 'id:phone', a NULL phone as ''."""
+    from app.api.v1.endpoints import contact_permission_confirm as cpc
+
+    a = {"id": "00000000-0000-0000-0000-000000000002", "phone_number": None}
+    b = {"id": "00000000-0000-0000-0000-000000000001", "phone_number": "+14165550101"}
+    assert cpc.ungrouped_token([a, b]) == cpc.ungrouped_token([b, a]) == _md5_of([a, b])
+    assert cpc.ungrouped_token([]) == _md5_of([])  # no contacts: md5 of the empty string
+    assert cpc.ungrouped_token([a]) != cpc.ungrouped_token([{**a, "phone_number": "+1"}])
+    assert cpc.ungrouped_token([a, b]) != cpc.ungrouped_token([a])
+
+
+@pytest.mark.asyncio
+async def test_summary_token_comes_from_one_scoped_read(monkeypatch):
+    conn = _Conn(token="b" * 32)
+    cpc, tx = _wire(monkeypatch, conn)
+    out = await cpc.get_contact_permission_summary(CAMPAIGN, _User2(), _db())
+    assert out["ungrouped_token"] == "b" * 32
+    token_calls = [c for c in conn.calls if c[0] == cpc._UNGROUPED_TOKEN_SQL]
+    assert len(token_calls) == 1 and token_calls[0][1] == (TENANT, CAMPAIGN)
+    assert "l.tenant_id = $1::uuid" in cpc._UNGROUPED_TOKEN_SQL
+    assert len(tx.scopes) == 1  # the count and the token are read in the same scope
+
+
+@pytest.mark.asyncio
+async def test_ungrouped_same_count_other_contact_is_409_and_rolled_back(monkeypatch):
+    """One contact removed and another added since the page loaded: still 3."""
+    monkeypatch.setenv(GATE, "on")
+    other = _listless_rows(3)
+    other[2] = {"id": "00000000-0000-0000-0000-0000000000ff", "phone_number": "+14165559999"}
+    conn = _Conn(rows=other)
+    cpc, tx = _wire(monkeypatch, conn)
+    svc = _Service()
+    _service_patch(monkeypatch, svc)
+    with pytest.raises(HTTPException) as exc:
+        await cpc.confirm_ungrouped_permission(CAMPAIGN, dict(BODY), _User2(), _db())
+    assert exc.value.status_code == 409 and exc.value.detail["code"] == _CONTACTS_CHANGED
+    assert len(conn.rows) == BODY["expected_count"]  # the count alone matched
+    assert [c[0] for c in conn.calls] == [
+        cpc._CAMPAIGN_STATUS_SQL, cpc._INSERT_LIST_SQL, cpc._MOVE_SQL,
+    ]
+    assert tx.rolled_back == 1 and tx.committed == 0 and svc.calls == []
+
+
+@pytest.mark.asyncio
+async def test_ungrouped_renumbered_contact_is_409(monkeypatch):
+    """The same contacts, one with a changed phone number: the person confirmed another number."""
+    renumbered = _listless_rows(3)
+    renumbered[1] = {**renumbered[1], "phone_number": "+14165550777"}
+    conn = _Conn(rows=renumbered)
+    cpc, tx = _wire(monkeypatch, conn)
+    with pytest.raises(HTTPException) as exc:
+        await cpc.confirm_ungrouped_permission(CAMPAIGN, dict(BODY), _User2(), _db())
+    assert exc.value.status_code == 409 and exc.value.detail["code"] == _CONTACTS_CHANGED
+    assert tx.rolled_back == 1 and tx.committed == 0
+
+
+@pytest.mark.asyncio
+async def test_ungrouped_a_contact_without_a_phone_number_still_confirms(monkeypatch):
+    rows = _listless_rows(2) + [{"id": "00000000-0000-0000-0000-0000000000aa", "phone_number": None}]
+    body = {**BODY, "expected_token": _md5_of(rows)}
+    conn = _Conn(rows=rows)
+    cpc, tx = _wire(monkeypatch, conn)
+    out = await cpc.confirm_ungrouped_permission(CAMPAIGN, body, _User2(), _db())
+    assert out["contacts_confirmed"] == 3 and tx.committed == 1 and tx.rolled_back == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("token", [
+    "MISSING", None, "", "a" * 31, "a" * 33, "A" * 32, "g" * 32, ("a" * 32) + "\n",
+    1234, ["a" * 32],
+])
+async def test_ungrouped_missing_or_bad_token_is_422_before_any_write(monkeypatch, token):
+    conn = _Conn()
+    cpc, tx = _wire(monkeypatch, conn)
+    body = {k: v for k, v in BODY.items() if k != "expected_token"}
+    if token != "MISSING":
+        body["expected_token"] = token
+    with pytest.raises(HTTPException) as exc:
+        await cpc.confirm_ungrouped_permission(CAMPAIGN, body, _User2(), _db())
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {
+        "code": "contact_permission_invalid", "field": "expected_token",
+        "message": "Reload the page and confirm again.",
+    }
+    assert conn.calls == [] and tx.scopes == []
+
+
+# -- queueing: a contact on a live call right now is not queued ------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_a_contact_on_a_live_call_is_not_queued(monkeypatch, caplog):
+    monkeypatch.setenv(GATE, "on")
+    caplog.set_level(logging.INFO)
+    conn = _Conn(pending=("p1", "p2", "p3"), live={"p2"})
+    cpc, _tx = _wire(monkeypatch, conn)
+    svc = _Service(jobs=2)
+    _service_patch(monkeypatch, svc)
+    out = await cpc.queue_confirmed_contacts_if_running(
+        _db(), campaign_id=CAMPAIGN, tenant_id=TENANT, list_id="L1")
+    assert out == ("queued", 2)
+    assert svc.calls[0]["only_lead_ids"] == ["p1", "p3"]
+    lines = [r.getMessage() for r in caplog.records if "contact_queue_skipped_live_call" in r.getMessage()]
+    assert len(lines) == 1 and "count=1" in lines[0] and "p2" not in lines[0]
+
+
+@pytest.mark.asyncio
+async def test_on_all_live_queues_nothing(monkeypatch):
+    monkeypatch.setenv(GATE, "on")
+    conn = _Conn(pending=("p1", "p2"), live={"p1", "p2"})
+    cpc, _tx = _wire(monkeypatch, conn)
+    svc = _Service()
+    _service_patch(monkeypatch, svc)
+    out = await cpc.queue_confirmed_contacts_if_running(
+        _db(), campaign_id=CAMPAIGN, tenant_id=TENANT, list_id="L1")
+    assert out == ("queued", 0) and svc.calls == []
+
+
+@pytest.mark.asyncio
+async def test_on_unreadable_live_check_queues_nothing_permission_kept(monkeypatch, caplog):
+    monkeypatch.setenv(GATE, "on")
+    caplog.set_level(logging.WARNING)
+    conn = _Conn(fail_live=True)
+    cpc, tx = _wire(monkeypatch, conn)
+    svc = _Service()
+    _service_patch(monkeypatch, svc)
+    out = await cpc.confirm_ungrouped_permission(CAMPAIGN, dict(BODY), _User2(), _db())
+    assert svc.calls == [] and out["queued_for_calling"] is None
+    assert out["message"].endswith(" They could not be queued just now; use Call this list on that list.")
+    assert out["contacts_confirmed"] == 3 and tx.committed >= 1  # the permission itself is saved
+    assert "contact_permission_queue_failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_live_check_is_tenant_scoped_and_skips_test_calls(monkeypatch):
+    from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+
+    monkeypatch.setenv(GATE, "on")
+    conn = _Conn(pending=("p1", "p2"))
+    cpc, tx = _wire(monkeypatch, conn)
+    _service_patch(monkeypatch, _Service())
+    await cpc.queue_confirmed_contacts_if_running(
+        _db(), campaign_id=CAMPAIGN, tenant_id=TENANT, list_id="L1")
+    live = [c for c in conn.calls if c[0] == cpc._LIVE_CALL_LEAD_IDS_SQL]
+    assert len(live) == 1
+    assert live[0][1] == (TENANT, ["p1", "p2"], list(CAMPAIGN_LIVE_CALL_STATUSES))
+    assert "c.tenant_id = $1::uuid" in cpc._LIVE_CALL_LEAD_IDS_SQL
+    assert "c.is_test IS NOT TRUE" in cpc._LIVE_CALL_LEAD_IDS_SQL
+    assert tx.scopes[0][0] == TENANT  # read inside the tenant's own scope
+
+
+@pytest.mark.asyncio
+async def test_list_confirm_skips_a_live_contact(monkeypatch):
+    from app.api.v1.endpoints import contact_lists as cl_ep
+
+    monkeypatch.setenv(GATE, "on")
+    db, conn = _confirm_list(monkeypatch)
+    conn.live = {"p1"}
+    svc = _Service(jobs=1)
+    _service_patch(monkeypatch, svc)
+    out = await cl_ep.record_contact_list_permission("L1", dict(GOOD), _User(), db)
+    assert svc.calls[0]["only_lead_ids"] == ["p2"]
+    assert out.queued_for_calling == 1

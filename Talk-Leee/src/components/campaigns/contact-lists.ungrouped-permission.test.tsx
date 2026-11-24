@@ -51,6 +51,8 @@ const summaryOn = (over: Partial<ContactPermissionSummary> = {}): ContactPermiss
     ungrouped_without_permission: 7, queues_on_confirm: false, ...over,
 });
 const OLD_HINT = "Leads not tied to an uploaded list. Import a CSV to group them.";
+// A stand-in for the 32-character fingerprint the server sends; built here so that no scanner takes it for a key.
+const SHOWN = "0123456789abcdef".repeat(2);
 const toasts = () => notificationsStore.getSnapshot().notifications.map((n) => `${n.title}|${n.message ?? ""}`);
 
 async function openDialog() {
@@ -90,10 +92,10 @@ test("nothing is posted until the block is complete; then the post carries expec
     notificationsStore.setIdentity({ tenantId: "tenant-a", userId: "user-a" });
     let reads = 0;
     dashboardApi.listContactLists = async () => { reads++; return reads === 1 ? [ungrouped] : []; };
-    dashboardApi.getContactPermissionSummary = async () => summaryOn();
+    dashboardApi.getContactPermissionSummary = async () => summaryOn({ ungrouped_token: SHOWN });
     const posted: unknown[][] = [];
-    dashboardApi.confirmUngroupedPermission = async (id, permission, expected) => {
-        posted.push([id, permission, expected]);
+    dashboardApi.confirmUngroupedPermission = async (id, permission, expected, token) => {
+        posted.push([id, permission, expected, token]);
         return { list: { ...ungrouped, id: "new" }, contacts_confirmed: 7, queued_for_calling: null, message: "Permission recorded for 7 contacts." };
     };
     mountLists();
@@ -104,7 +106,8 @@ test("nothing is posted until the block is complete; then the post carries expec
     fillContactPermission();
     fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
     await waitFor(() => assert.equal(posted.length, 1));
-    assert.deepEqual(posted[0], ["campaign-a", EXPECTED_PERMISSION, 7]);
+    // The fingerprint that came with the page goes back with the confirmation.
+    assert.deepEqual(posted[0], ["campaign-a", EXPECTED_PERMISSION, 7, SHOWN]);
     await waitFor(() => assert.equal(reads, 2));
     await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
     assert.equal(toasts().includes("Permission saved|Permission recorded for 7 contacts."), true);
@@ -161,4 +164,97 @@ test("an existing list's save shows the server's message when it sends one", asy
     await waitFor(() => assert.equal(saved, 1));
     await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
     assert.equal(toasts().includes("Permission saved|Permission recorded. 3 contacts were queued for calling."), true);
+});
+
+test("the fingerprint posted is the one loaded with the list on screen, not a later one", async () => {
+    notificationsStore.setIdentity({ tenantId: "tenant-a", userId: "user-a" });
+    dashboardApi.listContactLists = async () => [ungrouped];
+    let summaryReads = 0;
+    dashboardApi.getContactPermissionSummary = async () => {
+        summaryReads++;
+        return summaryOn({ ungrouped_token: summaryReads === 1 ? SHOWN : "f".repeat(32) });
+    };
+    const tokens: unknown[] = [];
+    dashboardApi.confirmUngroupedPermission = async (_id, _permission, _expected, token) => {
+        tokens.push(token);
+        return { list: { ...ungrouped, id: "new" }, contacts_confirmed: 7, queued_for_calling: null, message: "Permission recorded for 7 contacts." };
+    };
+    mountLists();
+    const dialog = await openDialog();
+    fillContactPermission();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
+    await waitFor(() => assert.equal(tokens.length, 1));
+    assert.equal(tokens[0], SHOWN);
+    // The summary was read once before the click (with the list); the next read comes after the save.
+    assert.equal(summaryReads >= 1, true);
+});
+
+test("an older server sends no fingerprint and is sent none", async () => {
+    notificationsStore.setIdentity({ tenantId: "tenant-a", userId: "user-a" });
+    dashboardApi.listContactLists = async () => [ungrouped];
+    dashboardApi.getContactPermissionSummary = async () => summaryOn();
+    const tokens: unknown[] = [];
+    dashboardApi.confirmUngroupedPermission = async (_id, _permission, _expected, token) => {
+        tokens.push(token);
+        return { list: { ...ungrouped, id: "new" }, contacts_confirmed: 7, queued_for_calling: null, message: "Permission recorded for 7 contacts." };
+    };
+    mountLists();
+    const dialog = await openDialog();
+    fillContactPermission();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
+    await waitFor(() => assert.equal(tokens.length, 1));
+    assert.equal(tokens[0], undefined);
+});
+
+test("the contacts changed although their number did not (409): the server's message, then the lists are read again", async () => {
+    let reads = 0;
+    dashboardApi.listContactLists = async () => { reads++; return [ungrouped]; };
+    dashboardApi.getContactPermissionSummary = async () => summaryOn({ ungrouped_token: SHOWN });
+    const message = "The contacts without a list changed since you loaded this page. Reload the page, check them and confirm again.";
+    dashboardApi.confirmUngroupedPermission = async () => {
+        throw new ApiClientError({ status: 409, code: "contacts_changed", message, details: { detail: { code: "contacts_changed", message } }, url: "u", method: "POST" });
+    };
+    mountLists();
+    const dialog = await openDialog();
+    fillContactPermission();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
+    await within(dialog).findByText(message);
+    await waitFor(() => assert.equal(reads, 2));
+});
+
+test("after a 409 the dialog cannot save again; reopening carries the fresh count and the fresh fingerprint", async () => {
+    const FRESH = "f".repeat(32);
+    let reads = 0;
+    dashboardApi.listContactLists = async () => { reads++; return [reads === 1 ? ungrouped : { ...ungrouped, contact_count: 9 }]; };
+    dashboardApi.getContactPermissionSummary = async () => summaryOn({ ungrouped_token: reads === 1 ? SHOWN : FRESH });
+    const message = "The number of contacts without a list changed from 7 to 9. Check them and confirm again.";
+    const posted: unknown[][] = [];
+    dashboardApi.confirmUngroupedPermission = async (_id, permission, expected, token) => {
+        posted.push([permission, expected, token]);
+        if (posted.length === 1) {
+            throw new ApiClientError({ status: 409, code: "contact_count_changed", message, details: { detail: { code: "contact_count_changed", message } }, url: "u", method: "POST" });
+        }
+        return { list: { ...ungrouped, id: "new" }, contacts_confirmed: 9, queued_for_calling: null, message: "Permission recorded for 9 contacts." };
+    };
+    mountLists();
+    const dialog = await openDialog();
+    fillContactPermission();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save confirmation" }));
+    await within(dialog).findByText(message);
+    await within(dialog).findByText("Close this and open it again to confirm the contacts as they are now.");
+    await waitFor(() => assert.equal(reads, 2));
+    const save = within(dialog).getByRole("button", { name: "Save confirmation" }) as HTMLButtonElement;
+    assert.equal(save.disabled, true);
+    fireEvent.click(save);
+    assert.equal(posted.length, 1, "no second request from the same dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
+    const again = await openDialog();
+    assert.ok(within(again).getByText("“Ungrouped”: 9 contacts"));
+    assert.equal(within(again).queryByText("Close this and open it again to confirm the contacts as they are now.") === null, true);
+    fillContactPermission();
+    fireEvent.click(within(again).getByRole("button", { name: "Save confirmation" }));
+    await waitFor(() => assert.equal(posted.length, 2));
+    assert.equal(posted[1][1], 9);
+    assert.equal(posted[1][2], FRESH);
 });

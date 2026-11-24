@@ -283,6 +283,21 @@ class _WithEndOfStream:
             return _EOS
 
 
+# Stand-in lines for a turn where the model produced nothing it could say.
+# After a refused ending the caller was heard; the line ends with a stand-alone
+# question so a soft decline ("No thanks") reads as an answer to it. A bare
+# "No" does not read as one (the detector refuses it).
+REFUSED_ENDING_LINE = "No problem. Is there anything else I can help with?"
+# Spoken instead when the refused request carried a do-not-call flag: it claims
+# nothing and gets the caller to say it again (the phrase check can then catch it).
+ASK_AGAIN_LINE = "Sorry, could you say that once more?"
+# Spoken instead of REFUSED_ENDING_LINE when that was the agent's previous turn
+# (no question, so the same line is never heard twice running).
+REFUSED_ENDING_AGAIN_LINE = "Okay, no problem."
+# Spoken instead of ASK_AGAIN_LINE when that was the agent's previous turn.
+ASK_ANOTHER_WAY_LINE = "Could you put that another way?"
+NOT_CAUGHT_LINE = "Sorry, I didn't quite catch that — could you say it again?"
+
 # A closing line already spoken before the cut: no second farewell.
 _GOODBYE_WORDS = re.compile(
     r"\b(?:good\s*-?\s*bye|bye|take care|have a (?:great|good|nice|lovely)|thanks? for your time)\b",
@@ -565,6 +580,10 @@ class TurnStreamer:
         edge_after_address = False
         # An end_call accepted this turn (for the farewell after a cut).
         end_call_accepted = False
+        # An end_call the caller's own words did not back, refused this turn.
+        end_call_refused = False
+        # ...and the model had flagged it do-not-call (nothing was recorded).
+        end_call_refused_dnc = False
         # Source hosts help sentence segmentation keep URLs intact.
         turn_grounding: list[str] = []
 
@@ -630,6 +649,11 @@ class TurnStreamer:
         # going silent, so it must not carry over from a previous turn.
         session._tts_delivery_failed = False
         session._tts_failure_reason = None
+        # A refused [[END_CALL]] marker (end_call.strip_and_flag) is per turn.
+        try:
+            session._end_call_marker_refused = False
+        except Exception:
+            object.__setattr__(session, "_end_call_marker_refused", False)
         # P1: this turn's epoch. A barge-in event that targeted an OLDER turn
         # (stale signal from a previous interruption) must not kill this fresh
         # reply. _barged() below ignores such stale events.
@@ -678,7 +702,7 @@ class TurnStreamer:
             _token_iter = _context_recovery()
         elif offered_tools:
             async def _voice_tool_runner(_name: str, _args: dict) -> str:
-                nonlocal round_boundary, end_call_accepted
+                nonlocal round_boundary, end_call_accepted, end_call_refused, end_call_refused_dnc
                 round_boundary = True
                 if _name != ACTION_END_CALL and _cut_now():
                     # Second lock: once the model has written the caller's side
@@ -739,6 +763,11 @@ class TurnStreamer:
                 if (str(result.get("action") or _name) == "end_call"
                         and result.get("status") == "accepted"):
                     end_call_accepted = True
+                if (str(result.get("action") or _name) == "end_call"
+                        and result.get("status") == "caller_intent_unconfirmed"):
+                    end_call_refused = True
+                    if (_args or {}).get("do_not_call") is True:
+                        end_call_refused_dnc = True
                 current = getattr(session, "_live_structured_state", _structured)
                 session._live_structured_state = reduce_live_state(
                     current,
@@ -1169,13 +1198,37 @@ class TurnStreamer:
             and not _barged()
             and not tool_filler.interrupted
         ):
-            recovery = "Goodbye." if caller_finished else "Sorry, I didn't quite catch that — could you say it again?"
+            marker_refused = getattr(session, "_end_call_marker_refused", False) is True
+            if caller_finished or end_call_accepted:
+                recovery, recovery_kind = "Goodbye.", "goodbye"
+            elif end_call_refused_dnc:
+                from app.domain.services.voice_pipeline.turn_runner import _same_utterance
+                if _same_utterance(previous_assistant_turn(messages), ASK_AGAIN_LINE):
+                    recovery, recovery_kind = ASK_ANOTHER_WAY_LINE, "ask_another_way"
+                else:
+                    recovery, recovery_kind = ASK_AGAIN_LINE, "ask_again"
+            elif end_call_refused or marker_refused:
+                from app.domain.services.voice_pipeline.turn_runner import _same_utterance
+                if _same_utterance(previous_assistant_turn(messages), REFUSED_ENDING_LINE):
+                    recovery, recovery_kind = REFUSED_ENDING_AGAIN_LINE, "refused_ending_again"
+                else:
+                    recovery, recovery_kind = REFUSED_ENDING_LINE, "refused_ending"
+            else:
+                recovery, recovery_kind = NOT_CAUGHT_LINE, "not_caught"
             await tool_filler.settle()
             if caller_finished:
                 session._end_call_requested = True
             logger.warning(
-                "zero_token_turn call=%s — LLM produced no speech; spoke recovery line",
+                "zero_token_turn call=%s — LLM produced no speech; spoke recovery line"
+                " cause=%s line=%s raw_chars=%d",
                 call_id,
+                "end_call_accepted" if end_call_accepted
+                else "end_call_refused_do_not_call" if end_call_refused_dnc
+                else "end_call_refused" if end_call_refused
+                else "end_call_marker_refused" if marker_refused
+                else "caller_signaled_end" if caller_finished else "no_action",
+                recovery_kind,
+                len(raw_response_text),
             )
             session.tts_active = True
             session._reply_audio_started = True

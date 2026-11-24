@@ -1434,7 +1434,7 @@
       "id": "280608689f03440186690f28eff74f9d1f339c4e966f5df456e135df63007be4",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_resolve_user_tenant",
-      "line": 286,
+      "line": 287,
       "method": "fetchrow",
       "tables": [
         "user_profiles"
@@ -1618,22 +1618,6 @@
       "sql": "{Call(func=Name(id='str', ctx=Load()), args=[BoolOp(op=Or(), values=[Call(func=Name(id='_field', ctx=Load()), args=[Name(id='fn', ctx=Load()), Constant(value='name')], keywords=[]), Constant(value='')])], keywords=[])}",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "2f2dff66f17d90169a9e12c7bcae5b7cf7af9245aa2ce4dcfac18690daa367bf",
-      "file": "app/domain/services/telephony/termination.py",
-      "function": "mark_termination_pending_and_load_context",
-      "line": 429,
-      "method": "execute",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET status='termination_pending', updated_at=NOW() WHERE id=$1::uuid AND status <> ALL($2::text[])",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2111,7 +2095,7 @@
       "id": "4202c64dd432da49421df75d377e5ba36a2123915c0c8ff288a4b48b82bffc33",
       "file": "app/domain/services/telephony/termination.py",
       "function": "mark_termination_pending_and_load_context",
-      "line": 441,
+      "line": 468,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -3278,7 +3262,7 @@
       "id": "677c7d1ca5ed2a384ffd96f9a7351e679b99d99dbab3dc31ded4cb8c0912740d",
       "file": "app/domain/services/telephony/termination.py",
       "function": "mark_termination_pending_and_load_context",
-      "line": 401,
+      "line": 426,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -3821,7 +3805,7 @@
       "id": "77393a88aba0c8522e53c1778868574ed5170377054b8ddfac4164ec008bc6e0",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_record_test_call",
-      "line": 391,
+      "line": 392,
       "method": "execute",
       "tables": [
         "calls"
@@ -4202,7 +4186,7 @@
       "id": "83b8f8d2cc18bc9dc0fe32b50ff447c01b8b200f49f4b5708a1112b8fe8e45ba",
       "file": "app/domain/services/telephony/termination.py",
       "function": "_load_persisted_inbound_terminal_duration",
-      "line": 521,
+      "line": 548,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -4809,10 +4793,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e36ef6e1139fbc434300f4d72d73a6a7053ad35354cf4ffdce64bd734792133d",
+      "id": "054c12e3b4947f2cf7c47fac3f92a431124ba00a07b1f4c3a665783678f7b801",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 926,
+      "line": 944,
       "method": "fetchval",
       "tables": [
         "assistant_actions"
@@ -6182,7 +6166,7 @@
       "id": "c835591fadd71e3465dd35e86a316457e4140bb8abe4304e22c8475939f0bb7a",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_has_test_membership",
-      "line": 228,
+      "line": 229,
       "method": "fetchval",
       "tables": [
         "tenant_users"
@@ -6340,10 +6324,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5f11c254817903808e79162db5c480212a099d2a7fa05a1aa4f89452db854c66",
+      "id": "977309ab267a992c2b09f45ababcdffbe42ddf1bf93be732994ca268f0b297e3",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 927,
+      "line": 945,
       "method": "fetch",
       "tables": [
         "assistant_actions"
@@ -7226,7 +7210,7 @@
       "id": "ef25cea65bfa178265845ddafaf76685520aefd99b267f7eadd819369aabe02b",
       "file": "app/api/v1/endpoints/campaign_test_ws.py",
       "function": "_finalise_test_call",
-      "line": 458,
+      "line": 459,
       "method": "execute",
       "tables": [
         "calls"
@@ -7530,7 +7514,7 @@
       "id": "f860535d9773f788aab4a7443e2c0c112bd4f85d91d9a498c970580f72de6e50",
       "file": "app/domain/services/telephony/termination.py",
       "function": "mark_termination_pending_and_load_context",
-      "line": 457,
+      "line": 484,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -12735,7 +12719,7 @@
       "id": "6b9ce372a5e98d77994f1b2decdd72838c232d601dc799ba3e941093d89a0a25",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "handle_paypal_webhook",
-      "line": 382,
+      "line": 381,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12745,7 +12729,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:382.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:381.",
       "category": "system_provider_receipt"
     },
     {
@@ -12769,7 +12753,7 @@
       "id": "374ad8c0069cdff9a19f35edd8267b51808a0e43609afa88d837037716d0beed",
       "file": "app/domain/services/paypal_webhooks.py",
       "function": "_fail",
-      "line": 430,
+      "line": 433,
       "method": "execute",
       "tables": [
         "paypal_webhook_events"
@@ -12779,7 +12763,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:430.",
+      "reason": "Global paypal_webhook_events receipt (migration 0101, platform-only row security, no tenant_id column on purpose). It is keyed by PayPal's own event id and written only AFTER PayPal has confirmed the notice's signature (PayPalClient.verify_webhook_signature answering SUCCESS); a webhook has no signed-in tenant, and idempotency must span tenants. The row holds ids, the event type and a SHA-256 of the body, never the body. Source: paypal_webhooks.handle_paypal_webhook. Exact reviewed operation: execute; app/domain/services/paypal_webhooks.py:433.",
       "category": "system_provider_receipt"
     },
     {

@@ -201,3 +201,48 @@ async def test_locked_database_bounds_save_and_cancellation_preserves_caller(pro
     # Lock release/retry saves actual evidence; canceled transactions did not poison the pool.
     monkeypatch.setattr(receipts, "_RECEIPT_WRITE_TIMEOUT_SECONDS", 5.0)
     assert (await receipts.persist_termination_receipt(value.db.pool, value.context, requested=False)).saved
+
+
+async def test_other_tenants_newer_call_with_same_reference_not_fenced(bound_call):
+    """The lookup must name the account in its own SQL.
+
+    It runs here through a pool WITHOUT the fixture's restricted role, the way production's
+    application role has run: row-level security does not hide the other account's call, so
+    only the statement's own predicate can. Without that predicate the lookup takes the other
+    account's NEWER call that answers to the same reference, and this test fails.
+    """
+    import os
+
+    import asyncpg
+
+    value = bound_call
+    db = value.db
+    other_tenant, other_call = uuid4(), uuid4()
+    shared_ref = "shared-ref-" + uuid4().hex[:12]
+    await db.admin.execute("UPDATE calls SET provider_call_id=$2 WHERE id=$1", value.call_id, shared_ref)
+    await db.admin.execute("INSERT INTO tenants(id,business_name) VALUES($1,'Synthetic other')", other_tenant)
+    unrestricted = await asyncpg.create_pool(os.environ["TEST_DATABASE_URL"], min_size=1, max_size=1,
+                                             timeout=5, command_timeout=10)
+    try:
+        # Incoming, so the rule that an outgoing call needs a campaign does not apply. It answers
+        # to the same reference through another column, so no uniqueness rule is involved either.
+        await db.admin.execute(
+            """INSERT INTO calls(id,tenant_id,phone_number,status,direction,external_call_uuid,created_at)
+               VALUES($1,$2,'+15550001002','in_progress','inbound',$3, NOW() + interval '1 minute')""",
+            other_call, other_tenant, shared_ref,
+        )
+        context = await mark_termination_pending_and_load_context(
+            unrestricted, call_reference=shared_ref, tenant_id=str(db.tenant),
+        )
+        assert context.call_id == str(value.call_id)
+        assert context.tenant_id == str(db.tenant)
+        assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", other_call) == "in_progress"
+        assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", value.call_id) == "termination_pending"
+        with pytest.raises(LookupError):
+            await mark_termination_pending_and_load_context(
+                unrestricted, call_reference=shared_ref, tenant_id=str(uuid4()),
+            )
+    finally:
+        await unrestricted.close()
+        await db.admin.execute("DELETE FROM calls WHERE id=$1", other_call)
+        await db.admin.execute("DELETE FROM tenants WHERE id=$1", other_tenant)

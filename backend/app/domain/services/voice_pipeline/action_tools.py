@@ -248,6 +248,7 @@ async def run_voice_action(
         call_args = dict(arguments or {})
         opted_out = call_args.get("do_not_call") is True and verified_opt_out(call_args, user_text)
         opt_out_recorded = False
+        flagged_dnc = call_args.get("do_not_call") is True
         if opted_out:
             # Do it before the goodbye can say it was done (same rule as the
             # end-session path). Teardown retries an unconfirmed write.
@@ -269,7 +270,10 @@ async def run_voice_action(
              or getattr(session, "_machine_screening", False) is True)
             and not continuation_after(user_text)
         )
-        if not opted_out and not machine and not end_call_intent_present(
+        # An opt-out the phrase check recorded earlier in the call lets the ending
+        # through, as on the text-marker path (end_call.model_end_call_allowed).
+        opted_out_earlier = getattr(session, "_caller_opted_out", False) is True
+        if not opted_out and not machine and not opted_out_earlier and not end_call_intent_present(
             user_text, previous_assistant_text=previous_assistant_text
         ):
             result = _result(
@@ -282,6 +286,15 @@ async def run_voice_action(
             # Words the model spoke with this decision were its closing; the
             # call stays open and the caller answers them (stream_tool_turn).
             result["ends_turn"] = True
+            # The whole result reaches the model as the tool message; this key
+            # tells it what to do next (message is never spoken to the caller).
+            result["next_step"] = (
+                "The call stays open. If you have not already spoken in this turn, "
+                "reply to what the caller just said in one short sentence. "
+                "Do not say goodbye."
+                + (" No opt-out was recorded; do not say they will not be "
+                   "contacted again." if flagged_dnc else "")
+            )
         else:
             try:
                 session._end_call_requested = True
@@ -311,12 +324,18 @@ async def run_voice_action(
                         if opted_out and opt_out_recorded else
                         " Opt-out not yet confirmed; do not say they were removed."
                         if opted_out else
+                        # The phrase check marked the caller earlier in this call:
+                        # saying "no opt-out was recorded" would be untrue.
+                        " The caller's opt-out was already noted earlier in this call."
+                        if opted_out_earlier and call_args.get("do_not_call") is True else
                         " No opt-out was recorded; do not say they were removed."
                         if call_args.get("do_not_call") is True else ""
                     ),
                 )
                 if opted_out:
                     result["opt_out"] = "recorded" if opt_out_recorded else "unconfirmed"
+                elif opted_out_earlier and call_args.get("do_not_call") is True:
+                    result["opt_out"] = "set_earlier"
                 elif call_args.get("do_not_call") is True:
                     result["opt_out"] = "not_recorded"
                 # A goodbye spoken with the request is not said twice (test
@@ -332,13 +351,23 @@ async def run_voice_action(
         )
 
     _record_result(session, result)
-    logger.info(
-        "voice_action_result call=%s action=%s success=%s status=%s",
+    log_line = "voice_action_result call=%s action=%s success=%s status=%s"
+    log_args: tuple[Any, ...] = (
         str(getattr(session, "call_id", "?"))[:12],
         result["action"],
         result["success"],
         result["status"],
     )
+    if action == ACTION_END_CALL:
+        # What happened to the ending and to a do-not-call flag; never words.
+        opt_out_log = (
+            ("recorded" if opt_out_recorded else "write_unconfirmed") if opted_out
+            else "set_earlier" if getattr(session, "_caller_opted_out", False) is True
+            else "quote_not_verified" if flagged_dnc else "none"
+        )
+        log_line += " do_not_call=%s opt_out=%s"
+        log_args += (flagged_dnc, opt_out_log)
+    logger.info(log_line, *log_args)
     return result
 
 

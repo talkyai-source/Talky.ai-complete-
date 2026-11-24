@@ -57,6 +57,7 @@ async def db():
         yield admin, tenant, other, campaign, other_campaign, inbound, user
     finally:
         for t in (tenant, other):
+            await admin.execute("DELETE FROM calls WHERE tenant_id=$1", t)
             await admin.execute("DELETE FROM leads WHERE tenant_id=$1", t)
             await admin.execute("DELETE FROM contact_lists WHERE tenant_id=$1", t)
             await admin.execute("DELETE FROM campaigns WHERE tenant_id=$1", t)
@@ -227,3 +228,76 @@ async def test_lead_permission_sql_distinguishes_the_three_states(db):
 
     assert [await missing(tenant, x) for x in (ok, old, none)] == [False, True, True]
     assert await missing(tenant, foreign) is None  # another tenant's lead: no row (= missing)
+
+
+async def _pg_token(admin, tenant, campaign):
+    return await admin.fetchval(cpc._UNGROUPED_TOKEN_SQL, str(tenant), str(campaign))
+
+
+async def _listless(admin, tenant, campaign):
+    return await admin.fetch(
+        "SELECT id, phone_number FROM leads WHERE tenant_id=$1 AND campaign_id=$2 "
+        "AND list_id IS NULL AND status <> 'deleted'", tenant, campaign)
+
+
+async def test_python_token_equals_postgres_token(db):
+    """Same rows, same token: an empty phone (the column is NOT NULL, so a NULL cannot
+    occur), many ids (uuid order == lowercase text order, so the Python sort by text and the
+    Postgres sort by uuid cannot differ), and no rows."""
+    admin, tenant, _other, campaign, _oc, _inbound, _user = db
+    assert await _pg_token(admin, tenant, campaign) == cpc.ungrouped_token([])
+    for _ in range(12):
+        await _lead(admin, tenant, campaign)
+    empty_phone = uuid4()
+    await admin.execute(
+        "INSERT INTO leads(id,tenant_id,campaign_id,phone_number,status) VALUES($1,$2,$3,'','pending')",
+        empty_phone, tenant, campaign)
+    rows = await _listless(admin, tenant, campaign)
+    assert len(rows) == 13 and any(r["phone_number"] == "" for r in rows)
+    assert await _pg_token(admin, tenant, campaign) == cpc.ungrouped_token(rows)
+    # the move statement returns what the token needs, and its token matches too
+    async with admin.transaction():
+        list_id, _row = await _insert_list(admin, tenant, campaign, _user)
+        moved = await admin.fetch(cpc._MOVE_SQL, str(tenant), str(campaign), str(list_id))
+    assert cpc.ungrouped_token(moved) == cpc.ungrouped_token(rows)
+
+
+async def test_token_ignores_other_tenants_and_deleted_contacts(db):
+    admin, tenant, other, campaign, other_campaign, _inbound, user = db
+    await _lead(admin, tenant, campaign)
+    base = await _pg_token(admin, tenant, campaign)
+    await _lead(admin, other, other_campaign)                       # another tenant
+    await _lead(admin, tenant, campaign, status="deleted")          # deleted
+    confirmed = await _confirmed_list(admin, tenant, campaign, user)
+    await _lead(admin, tenant, campaign, list_id=confirmed)         # has a list
+    assert await _pg_token(admin, tenant, campaign) == base
+    # asking with this tenant's id for the other tenant's campaign sees nothing of it
+    assert await _pg_token(admin, tenant, other_campaign) == cpc.ungrouped_token([])
+    # a new listless contact, or a changed number, changes the token
+    added = await _lead(admin, tenant, campaign)
+    with_added = await _pg_token(admin, tenant, campaign)
+    assert with_added != base
+    await admin.execute("UPDATE leads SET phone_number='+15550009998' WHERE id=$1", added)
+    assert await _pg_token(admin, tenant, campaign) != with_added
+
+
+async def test_live_call_sql_returns_only_this_tenants_real_live_calls(db):
+    from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+
+    admin, tenant, other, campaign, other_campaign, _inbound, _user = db
+    mine = {k: await _lead(admin, tenant, campaign) for k in ("live", "test", "ended", "idle")}
+    foreign = await _lead(admin, other, other_campaign)
+
+    async def call(t, c, lead, status, is_test=False):
+        await admin.execute(
+            "INSERT INTO calls (id,tenant_id,campaign_id,lead_id,phone_number,status,direction,is_test) "
+            "VALUES ($1,$2,$3,$4,'+15550001001',$5,'outbound',$6)", uuid4(), t, c, lead, status, is_test)
+
+    await call(tenant, campaign, mine["live"], "in_progress")
+    await call(tenant, campaign, mine["test"], "in_progress", is_test=True)   # a test call
+    await call(tenant, campaign, mine["ended"], "completed")                  # finished
+    await call(other, other_campaign, foreign, "in_progress")                 # another tenant
+    ids = [str(x) for x in (*mine.values(), foreign)]
+    rows = await admin.fetch(
+        cpc._LIVE_CALL_LEAD_IDS_SQL, str(tenant), ids, list(CAMPAIGN_LIVE_CALL_STATUSES))
+    assert {str(r["lead_id"]) for r in rows} == {str(mine["live"])}

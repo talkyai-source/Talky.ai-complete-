@@ -182,6 +182,22 @@ async def assistant_voice(
         await websocket.close(code=1008, reason="No tenant")
         return
 
+    # Legal acceptance (switch off: no read, no change): the agent's tools can
+    # start campaigns, so a user who has not accepted gets no voice session.
+    from types import SimpleNamespace
+    from app.core.security.legal_gate import acceptance_missing
+    try:
+        legal_missing = await acceptance_missing(SimpleNamespace(
+            id=user_id, tenant_id=tenant_id, role=principal.get("role")), db_client.pool)
+    except Exception:
+        await websocket.close(code=1011, reason="Account verification unavailable")
+        return
+    if legal_missing:
+        await websocket.send_json({"type": "error", "code": "legal_acceptance_required",
+                                   "content": "Accept the current Terms and Privacy Policy to continue."})
+        await websocket.close(code=1008, reason="legal_acceptance_required")
+        return
+
     # RLS tenant context for this task — the agent's tools query via .table()
     # which reads the tenant from a contextvar (HTTP sets it in middleware; a WS
     # must set it explicitly, else every query runs as the NIL tenant).

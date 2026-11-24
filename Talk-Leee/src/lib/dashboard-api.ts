@@ -490,6 +490,8 @@ export interface ContactPermissionSummary {
     waiting_without_permission: number;
     ungrouped_without_permission: number;
     queues_on_confirm: boolean;
+    /** Fingerprint of the contacts that are in no list, as the server saw them when it answered. Absent on an older server. */
+    ungrouped_token?: string;
 }
 
 /** Answer to POST /campaigns/{id}/contact-lists/ungrouped/permission. */
@@ -814,16 +816,26 @@ class DashboardApi {
         }
     }
 
-    /** Records the permission statement for exactly the contacts that belong to no list. */
+    /**
+     * Records the permission statement for exactly the contacts that belong to no list.
+     * `expectedToken` is the fingerprint that came with the page (the summary's
+     * `ungrouped_token`): the server refuses when the contacts are no longer the ones
+     * the person saw, even if their number is the same. Not sent to an older server.
+     */
     async confirmUngroupedPermission(
         campaignId: string,
         permission: ContactPermission,
         expectedCount: number,
+        expectedToken?: string,
     ): Promise<UngroupedPermissionResult> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contact-lists/ungrouped/permission`,
             method: "POST",
-            body: { ...permission, expected_count: expectedCount },
+            body: {
+                ...permission,
+                expected_count: expectedCount,
+                ...(expectedToken ? { expected_token: expectedToken } : {}),
+            },
         });
     }
 

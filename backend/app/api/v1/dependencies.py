@@ -342,6 +342,10 @@ async def get_current_user(
         business_name=row["business_name"],
         **meter.allowance(),
     )
+    # The legal-acceptance gate decides BEFORE the user is published to the
+    # request, so a refused request leaves no published user behind.
+    from app.core.security.legal_gate import enforce_legal_acceptance
+    await enforce_legal_acceptance(request, user, client.pool)
     _publish_current_user_scope(request, user, str(session["id"]))
     # This session's own server-recorded factor evidence, for /auth/me (G2).
     # Unknown (None), never False, when a legacy cookie session lacks the column.

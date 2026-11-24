@@ -162,6 +162,30 @@ async def test_close_is_refused_when_the_count_moved_or_the_row_is_young_and_stu
     assert (await _state(fixture, fixture.pp_stuck))["state"] == "failed"
 
 
+class _GenuineClient:
+    async def verify_webhook_signature(self, **kw):
+        return True
+
+
+async def test_close_refused_after_changed_body_redelivery(rv, monkeypatch):
+    from app.domain.services import paypal_webhooks as pw
+
+    fixture = rv
+    monkeypatch.setenv("PAYPAL_ENV", "sandbox")
+    monkeypatch.setenv("PAYPAL_WEBHOOK_ID", "wh-synthetic")
+    seen = (await _state(fixture, fixture.pp_event))["attempt_count"]
+    raw = json.dumps({"id": fixture.pp_event, "event_type": "PAYMENT.CAPTURE.COMPLETED",
+                      "resource_type": "capture", "resource": {"id": "CHANGED-BODY"}}).encode()
+    answer = await pw.handle_paypal_webhook(
+        fixture.pool, headers={}, raw_body=raw, client=_GenuineClient(), service=object(), plans=object())
+    assert answer == {"status": "needs_review"}
+    after = await _state(fixture, fixture.pp_event)
+    assert after["state"] == "needs_review" and after["attempt_count"] == seen + 1
+    with pytest.raises(ValueError, match="changed after the list was read"):
+        await _close(fixture, "paypal", fixture.pp_event, seen)
+    assert (await _state(fixture, fixture.pp_event))["state"] == "needs_review"
+
+
 async def test_a_stripe_review_closes_with_the_existing_log_and_rules(rv):
     fixture = rv
     out = await _close(fixture, "stripe", fixture.st_event, 1)
