@@ -9,6 +9,7 @@ Keeping the routing here means the two execution paths can never drift.
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import re
 from dataclasses import dataclass
@@ -288,26 +289,39 @@ async def _authorize_action_tool(
     return None
 
 
-_UNEXPECTED_ARGUMENT = re.compile(r"got an unexpected keyword argument '([A-Za-z_][A-Za-z0-9_]{0,63})'")
+_ARGUMENT_NAME = r"[A-Za-z_][A-Za-z0-9_]{0,63}"
+_UNEXPECTED_ARGUMENT = re.compile(
+    r"[\w.<>]+\(\) got an unexpected keyword argument '(" + _ARGUMENT_NAME + r")'"
+    r"(?:\. Did you mean '" + _ARGUMENT_NAME + r"'\?)?"
+)
 _MISSING_ARGUMENTS = re.compile(
-    r"missing \d+ required (?:positional|keyword-only) arguments?: "
-    r"((?:'[A-Za-z_][A-Za-z0-9_]{0,63}'(?:, and | and |, )?)+)$"
+    r"[\w.<>]+\(\) missing \d+ required (?:positional|keyword-only) arguments?: "
+    r"((?:'" + _ARGUMENT_NAME + r"'(?:, and | and |, )?){1,8})"
 )
 
 
-def _bad_argument_hint(text: str) -> str:
+def _bad_argument_hint(text: str, call_args, fn) -> str:
     """Name the argument a binding ``TypeError`` complains about, and nothing else.
 
-    Only argument NAMES (identifiers the model itself sent or left out) are taken
-    from the text; a ``TypeError`` raised inside a tool has unknown text and gets
-    no hint.
+    The whole message must be Python's own, and a name is given back only when
+    it is real: an unexpected argument must be one the model actually sent, a
+    missing one must be a parameter of the tool. Anything else gets no hint, so
+    neither a ``TypeError`` raised inside a tool nor an argument KEY made up to
+    look like a message can put words on the card.
     """
-    match = _UNEXPECTED_ARGUMENT.search(text)
+    match = _UNEXPECTED_ARGUMENT.fullmatch(text)
     if match:
-        return f" Unexpected argument '{match.group(1)}'."
-    match = _MISSING_ARGUMENTS.search(text)
+        name = match.group(1)
+        return f" Unexpected argument '{name}'." if name in (call_args or {}) else ""
+    match = _MISSING_ARGUMENTS.fullmatch(text)
     if match:
-        return f" Missing: {match.group(1)}."
+        names = re.findall("'(" + _ARGUMENT_NAME + ")'", match.group(1))
+        try:
+            parameters = set(inspect.signature(fn).parameters)
+        except (TypeError, ValueError):
+            parameters = set()
+        if names and all(name in parameters for name in names):
+            return " Missing: " + ", ".join(f"'{name}'" for name in names) + "."
     return ""
 
 
@@ -437,7 +451,7 @@ async def dispatch_tool(
         # Bad / extra kwargs from the model — surface as a tool error rather
         # than crashing the turn.
         logger.warning("dispatch_tool %s bad args %s: %s", func_name, call_args, exc)
-        return {"error": f"Invalid arguments for {func_name}.{_bad_argument_hint(str(exc))}"
+        return {"error": f"Invalid arguments for {func_name}.{_bad_argument_hint(str(exc), call_args, fn)}"
                          " Check the parameter names and values."}
     except Exception as exc:  # tool internals already guard, but be safe
         return {"error": tool_error_text(exc, "The request could not be completed.", tool=func_name)}

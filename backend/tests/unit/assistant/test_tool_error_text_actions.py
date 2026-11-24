@@ -342,12 +342,13 @@ async def test_action_plan_preview_validation_error_names_the_field_not_the_valu
     monkeypatch.setattr(dispatch_module, "_authorize_action_tool", allowed)
     result = await workflow.execute_action_plan(
         TENANT, object(), intent="Book",
-        actions=[{"type": "book_meeting", "title": "Quarterly review +447700900123"}],
+        # start_time is missing, and title has the wrong type AND carries a value
+        actions=[{"type": "book_meeting", "title": ["Quarterly review +447700900123"]}],
         actor_user_id="u1",
     )
     assert result["success"] is False
-    assert result["error"].startswith("The action plan's steps are not valid. ")
-    assert "start_time" in result["error"]                    # WHICH field: the model can fix it
+    assert result["error"].startswith("The action plan's steps are not valid. Step 1: ")   # WHICH step
+    assert "start_time" in result["error"] and "title" in result["error"]                # WHICH fields
     assert "+447700900123" not in result["error"]            # never the rejected values
     assert "Quarterly review" not in result["error"]
 

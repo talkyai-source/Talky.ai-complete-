@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 # "Could not be confirmed", not "could not be started": some of the failures that end
 # here come AFTER the campaign was set running and calls were queued.
 _START_UNCONFIRMED = "The campaign start could not be confirmed. Check its status before trying again."
+# The preview (confirm=False) has attempted no start, so it says only that.
+_START_NOT_PREPARED = "Could not prepare the campaign start."
 
 
 class StartCampaignInput(BaseModel):
@@ -136,7 +138,7 @@ async def start_campaign(
         # Log action. The campaign IS started at this point: a failure to write this
         # record must not turn the answer into "not started".
         try:
-            db_client.table("assistant_actions").insert({
+            _recorded = db_client.table("assistant_actions").insert({
                 "tenant_id": tenant_id,
                 "type": "start_campaign",
                 "status": "completed",
@@ -150,6 +152,11 @@ async def start_campaign(
                 }),
                 "completed_at": datetime.utcnow().isoformat()
             }).execute()
+            if getattr(_recorded, "error", None) is not None:
+                logger.error(
+                    "start_campaign: action record not written campaign=%s error_type=returned_error",
+                    campaign_id,
+                )
         except Exception as audit_exc:  # noqa: BLE001
             logger.error(
                 "start_campaign: action record not written campaign=%s error_type=%s",
@@ -195,8 +202,10 @@ async def start_campaign(
         return {"success": False, "error": exc.message}
     except CampaignError as exc:
         return {"success": False, "error": tool_error_text(
-            exc, _START_UNCONFIRMED, tool="start_campaign", retry_hint=False,
+            exc, _START_UNCONFIRMED if confirm else _START_NOT_PREPARED,
+            tool="start_campaign", retry_hint=not confirm,
             public=(CampaignReadinessError, CampaignPermissionCheckUnavailable))}
     except Exception as e:
         return {"success": False, "error": tool_error_text(
-            e, _START_UNCONFIRMED, tool="start_campaign", retry_hint=False)}
+            e, _START_UNCONFIRMED if confirm else _START_NOT_PREPARED,
+            tool="start_campaign", retry_hint=not confirm)}

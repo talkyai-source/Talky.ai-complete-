@@ -434,7 +434,7 @@ async def update_campaign_config(
     except Exception as exc:
         return {"error": tool_error_text(
             exc, "The campaign update could not be confirmed. Preview the change again.",
-            tool="update_campaign_config")}
+            tool="update_campaign_config", retry_hint=False)}
 
 
 async def update_knowledge_node(
@@ -785,4 +785,4 @@ async def manage_lead(
     except Exception as exc:
         return {"error": tool_error_text(
             exc, "The contact change could not be confirmed. Preview the change again.",
-            tool="manage_lead", public=(ValueError,))}
+            tool="manage_lead", public=(ValueError,), retry_hint=False)}

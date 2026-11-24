@@ -36,7 +36,6 @@ def tool_error_text(
     what to do next. Never raises, and never returns ``fallback`` without a log
     record.
     """
-    readable = True
     try:
         if type(exc) in public:
             text = str(exc).strip()
@@ -47,13 +46,12 @@ def tool_error_text(
                 )
                 return text
     except Exception:  # noqa: BLE001 - a message that cannot be read is not passed on
-        readable = False
+        pass
     try:
         logger.error(
             "assistant_tool_failed tool=%s error_type=%s",
             tool, type(exc).__name__,
-            # the traceback formatter reads the message too: leave it out when that raises
-            exc_info=(type(exc), exc, exc.__traceback__) if readable else None,
+            exc_info=(type(exc), exc, exc.__traceback__),
         )
         if retry_hint and isinstance(exc, DATABASE_RETRYABLE_ERRORS):
             return fallback + RETRY_HINT

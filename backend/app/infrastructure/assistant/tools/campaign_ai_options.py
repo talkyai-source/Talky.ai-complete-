@@ -278,7 +278,7 @@ async def apply_campaign_voice(
     except Exception as exc:
         return {"error": tool_error_text(
             exc, "The voice change could not be confirmed. Preview the change again.",
-            tool="apply_campaign_voice")}
+            tool="apply_campaign_voice", retry_hint=False)}
 
 
 async def list_voices(

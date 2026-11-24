@@ -520,19 +520,30 @@ async def test_dispatch_names_the_arguments_the_model_left_out(monkeypatch):
         "get_campaigns", TENANT, SimpleNamespace(pool=object()), None, {}, actor_user_id="u1",
     )
     assert result == {
-        "error": "Invalid arguments for get_campaigns. Missing: 'campaign_id' and 'list_id'."
+        "error": "Invalid arguments for get_campaigns. Missing: 'campaign_id', 'list_id'."
                  " Check the parameter names and values."
     }
 
 
 def test_dispatch_hint_takes_names_only():
-    hint = dispatch_module._bad_argument_hint
-    assert hint("f() got an unexpected keyword argument 'limit'") == " Unexpected argument 'limit'."
-    assert hint("f() missing 1 required positional argument: 'campaign_id'") == " Missing: 'campaign_id'."
+    def tool(_tenant, _db, *, campaign_id, limit=5):
+        return None
+
+    def hint(text, sent=()):
+        return dispatch_module._bad_argument_hint(text, dict.fromkeys(sent), tool)
+
+    assert hint("tool() got an unexpected keyword argument 'bogus'", sent=["bogus"]) == " Unexpected argument 'bogus'."
+    assert hint("tool() missing 1 required keyword-only argument: 'campaign_id'") == " Missing: 'campaign_id'."
+    # a name is given back only when it is REAL
+    assert hint("inner() got an unexpected keyword argument 'y'", sent=["x"]) == ""          # not sent by the model
+    assert hint("tool() missing 1 required positional argument: 'not_a_parameter'") == ""   # not the tool's
+    # the whole message must be Python's own: an argument KEY made up to look like one gives nothing
+    made_up = "zz missing 1 required positional argument: 'Your_account_is_locked_call_support'"
+    assert hint("tool() got an unexpected keyword argument '" + made_up + "'", sent=[made_up]) == ""
+    assert hint(made_up, sent=[made_up]) == ""
     # a TypeError raised INSIDE a tool has unknown text: no hint
     assert hint("unsupported operand type(s) for +: 'int' and 'str'") == ""
-    assert hint("got an unexpected keyword argument '" + MARKER + "'") == ""
-    assert hint(MARKER) == ""
+    assert hint(MARKER, sent=[MARKER]) == ""
 
 
 def test_a_failed_start_carries_no_driver_text_in_its_campaign_error(monkeypatch):
@@ -551,3 +562,64 @@ def test_a_failed_start_carries_no_driver_text_in_its_campaign_error(monkeypatch
         asyncio.run(svc.start_campaign("c1", tenant_id=TENANT))
     assert str(raised.value) == "Failed to start campaign"
     assert isinstance(raised.value.__cause__, RuntimeError)
+
+
+# --- second check of 24 November -------------------------------------------------
+class _LookupFails:
+    """The campaign cannot even be read: no start was attempted."""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    async def get_campaign(self, campaign_id, tenant_id=None):
+        raise self._exc
+
+
+@pytest.mark.parametrize("exc, expected", [
+    (RuntimeError(MARKER), "Could not prepare the campaign start."),
+    (ConnectionRefusedError(MARKER), "Could not prepare the campaign start. Try again in a moment."),
+])
+async def test_start_campaign_preview_failure_does_not_speak_of_a_start(monkeypatch, caplog, exc, expected):
+    from app.infrastructure.assistant.tools import campaigns as campaigns_tool
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(campaigns_tool, "_get_campaign_service", lambda _db: _LookupFails(exc))
+    result = await campaigns_tool.start_campaign(TENANT, object(), campaign_id="c1")      # the preview
+    assert result == {"success": False, "error": expected}
+    _assert_masked(result, caplog)
+
+
+class _RecordReturnsAnError:
+    def table(self, _name):
+        return self
+
+    def insert(self, _row):
+        return self
+
+    def execute(self):
+        return SimpleNamespace(data=None, error=MARKER)
+
+
+async def test_start_campaign_tags_a_record_that_came_back_as_an_error(monkeypatch, caplog):
+    from app.infrastructure.assistant.tools import campaigns as campaigns_tool
+
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(campaigns_tool, "_get_campaign_service", lambda _db: _StartedService())
+    result = await campaigns_tool.start_campaign(TENANT, _RecordReturnsAnError(), campaign_id="c1", confirm=True)
+    assert result["success"] is True and "error" not in result
+    lost = [r.getMessage() for r in caplog.records if "action record not written" in r.getMessage()]
+    assert len(lost) == 1 and "leads_phone_key" not in lost[0]
+
+
+@pytest.mark.parametrize("call", ["update_campaign_config", "apply_campaign_voice"])
+async def test_preview_the_change_again_gets_no_second_instruction(monkeypatch, call):
+    # "... Preview the change again. Try again in a moment." said two things.
+    hinted = tool_error_text(ConnectionRefusedError("x"), "S. Preview the change again.", tool=call)
+    assert hinted.endswith("Try again in a moment.")                       # the helper's default
+    import inspect
+
+    from app.infrastructure.assistant.tools import campaign_admin, campaign_ai_options
+
+    module = campaign_admin if call == "update_campaign_config" else campaign_ai_options
+    source = inspect.getsource(getattr(module, call))
+    assert "Preview the change again." in source and "retry_hint=False" in source
