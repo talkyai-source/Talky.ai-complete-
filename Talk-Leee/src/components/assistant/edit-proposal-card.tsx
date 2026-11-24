@@ -39,6 +39,8 @@ export interface ProposalData {
     actionStatus?: string;
     confirmationAllowed?: boolean;
     receipt?: ActionReceipt;
+    /** Plain-language note from the tool about an applied change (e.g. contacts held back). */
+    notice?: string;
 }
 
 /** Both dashboard modes consume the same durable result contract. */
@@ -59,6 +61,7 @@ export function withProposalResult(proposal: ProposalData, frame: Record<string,
         actionId: typeof frame.action_id === "string" ? frame.action_id : proposal.actionId,
         confirmationAllowed: frame.confirmation_allowed === true,
         receipt: receipt.success ? receipt.data : proposal.receipt,
+        notice: frame.applied === true && typeof frame.notice === "string" && frame.notice.trim() ? frame.notice.trim() : undefined,
     };
 }
 
@@ -156,6 +159,9 @@ export function EditProposalCard({
 
             {(status === "error" || status === "unknown") && error && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
+            )}
+            {status === "applied" && proposal.notice && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{proposal.notice}</p>
             )}
             {(status === "unknown" || status === "submitting" || status === "running") && (
                 <p className="mt-2 text-xs text-muted-foreground">Check the saved action record before sending again. <a className="underline" href="/assistant/actions">View actions</a></p>
