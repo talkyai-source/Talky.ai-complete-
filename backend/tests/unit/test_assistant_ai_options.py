@@ -296,6 +296,16 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     assert cancels[0]["payload"]["status"] == "cancelled"
     assert ("tenant_id", "t1") in cancels[0]["eq"] and ("lead_id", "lead-1") in cancels[0]["eq"]
     assert db._update_calls.index(cancels[0]) < db._update_calls.index(saves[0])
+    # Nothing else is written: besides the save, the only `leads` writes are the
+    # status hand-backs, which come after it and are scoped to this tenant's lead.
+    lead_writes = [c for c in db._update_calls if c["table"] == "leads"]
+    hand_backs = [c for c in lead_writes if c is not saves[0]]
+    assert all(c["payload"] == {"status": "pending"} for c in hand_backs)
+    assert all(
+        ("tenant_id", "t1") in c["eq"] and ("id", "lead-1") in c["eq"] for c in hand_backs
+    )
+    assert all(db._update_calls.index(c) > db._update_calls.index(saves[0]) for c in hand_backs)
+    assert len(db._update_calls) == len(cancels) + len(lead_writes)
 
     payload = saves[0]["payload"]
     assert payload["phone_number"] == "+14155550101"

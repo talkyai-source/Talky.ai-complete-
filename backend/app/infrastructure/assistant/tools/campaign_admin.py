@@ -39,6 +39,7 @@ from app.infrastructure.assistant.tools.lead_write_safety import (
     S7,
     W1,
     hand_back_after_phone_change,
+    put_back_after_failed_save,
     queue_if_running,
     revive_choice,
     rows_with_phone,
@@ -904,16 +905,29 @@ async def manage_lead(
             except Exception as exc:
                 return {"applied": False, "error": tool_error_text(exc, S7, tool="manage_lead")}
 
-        write_response = (
-            db_client.table("leads")
-            .update(candidate)
-            .eq("id", lead_id)
-            .eq("tenant_id", tenant_id)
-            .eq("campaign_id", campaign_id)
-            .execute()
-        )
+        # A save that fails after the cancel must not leave the contact with its
+        # calls gone and nothing to select it again: put it back, then report.
+        try:
+            write_response = (
+                db_client.table("leads")
+                .update(candidate)
+                .eq("id", lead_id)
+                .eq("tenant_id", tenant_id)
+                .eq("campaign_id", campaign_id)
+                .execute()
+            )
+        except Exception:
+            if cancelled:
+                await put_back_after_failed_save(
+                    db_client, campaign, tenant_id=tenant_id,
+                    campaign_id=campaign_id, lead_id=lead_id)
+            raise
         conflict = _lead_write_conflict(write_response)
         if conflict:
+            if cancelled:
+                await put_back_after_failed_save(
+                    db_client, campaign, tenant_id=tenant_id,
+                    campaign_id=campaign_id, lead_id=lead_id)
             return conflict
 
         if phone_changed:

@@ -58,6 +58,38 @@ def revive_choice(deleted_rows: List[Any]) -> Tuple[str, bool]:
     return ordered[0]["id"], any(bool(r.get("do_not_call")) for r in deleted_rows)
 
 
+def _log_reset_not_done(response, campaign_id: str) -> None:
+    """The database layer RETURNS most failures: a returned error is logged like a raised one."""
+    if getattr(response, "error", None) is not None:
+        logger.warning(
+            "manage_lead_requeue_status_not_reset campaign=%s error=returned",
+            str(campaign_id)[:8],
+        )
+
+
+def release_called_contact(
+    db_client, *, tenant_id: str, campaign_id: str, lead_id: str,
+) -> None:
+    """Make a contact whose queued calls were just cancelled selectable again. Never raises.
+
+    A cancelled retry leaves the lead ``called``, which no Start selects. Only for a
+    contact whose calls THIS change cancelled: a ``called`` contact with nothing
+    queued has used its attempts and stays as it is.
+    """
+    try:
+        response = db_client.table("leads").update({"status": "pending"}).eq(
+            "id", lead_id,
+        ).eq("tenant_id", tenant_id).eq(
+            "campaign_id", campaign_id,
+        ).eq("status", "called").execute()
+        _log_reset_not_done(response, campaign_id)
+    except Exception as exc:  # noqa: BLE001 - the contact change stands
+        logger.warning(
+            "manage_lead_requeue_status_not_reset campaign=%s error=%s",
+            str(campaign_id)[:8], type(exc).__name__,
+        )
+
+
 def hand_back_after_phone_change(
     db_client, *, tenant_id: str, campaign_id: str, lead_id: str, cancelled: int,
 ) -> None:
@@ -66,20 +98,18 @@ def hand_back_after_phone_change(
     A cancelled retry leaves the lead ``called``, which no Start selects; a contact
     skipped for an invalid number is dialled again once the number is corrected.
     """
+    if cancelled:
+        release_called_contact(
+            db_client, tenant_id=tenant_id, campaign_id=campaign_id, lead_id=lead_id)
     try:
-        if cancelled:
-            db_client.table("leads").update({"status": "pending"}).eq(
-                "id", lead_id,
-            ).eq("tenant_id", tenant_id).eq(
-                "campaign_id", campaign_id,
-            ).eq("status", "called").execute()
-        db_client.table("leads").update({"status": "pending"}).eq(
+        response = db_client.table("leads").update({"status": "pending"}).eq(
             "id", lead_id,
         ).eq("tenant_id", tenant_id).eq(
             "campaign_id", campaign_id,
         ).eq("status", "skipped").eq(
             "last_call_result", "invalid_phone_number",
         ).execute()
+        _log_reset_not_done(response, campaign_id)
     except Exception as exc:  # noqa: BLE001 - the contact change stands
         logger.warning(
             "manage_lead_requeue_status_not_reset campaign=%s error=%s",
@@ -109,3 +139,18 @@ async def queue_if_running(
             "manage_lead_queue_failed campaign=%s error=%s",
             str(campaign_id)[:8], type(exc).__name__,
         )
+
+
+async def put_back_after_failed_save(
+    db_client, campaign: dict, *, tenant_id: str, campaign_id: str, lead_id: str,
+) -> None:
+    """The save failed AFTER this contact's queued calls were cancelled. Never raises.
+
+    Its number is unchanged and its calls are gone: without this it would stay
+    ``called`` with nothing queued, which no Start selects. Make it selectable
+    again and, on a running campaign, queue it (with the number it still has).
+    """
+    release_called_contact(
+        db_client, tenant_id=tenant_id, campaign_id=campaign_id, lead_id=lead_id)
+    await queue_if_running(
+        db_client, campaign, tenant_id=tenant_id, campaign_id=campaign_id, lead_id=lead_id)
