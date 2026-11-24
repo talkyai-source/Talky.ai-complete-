@@ -223,7 +223,14 @@ class QueryBuilder:
     async def _execute_async(self) -> PostgrestResponse:
         conn = None
         try:
-            conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
+            try:
+                conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
+            except asyncio.TimeoutError as exc:
+                # No connection within the limit means "try again later", exactly
+                # like a refused connection: raise it as a retryable error (503).
+                # Returned as an error result, callers that read only ``.data``
+                # would take it for "no row".
+                raise _core_db.DatabasePoolTimeoutError("database connect timed out") from exc
             # Register the jsonb/json codec on this ad-hoc connection. The pool
             # registers it via init=, but these direct connections otherwise
             # wouldn't — and _coerce_bind_value passes dict/list values bound to
@@ -838,7 +845,14 @@ class RpcBuilder:
     async def _execute_async(self) -> PostgrestResponse:
         conn = None
         try:
-            conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
+            try:
+                conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
+            except asyncio.TimeoutError as exc:
+                # No connection within the limit means "try again later", exactly
+                # like a refused connection: raise it as a retryable error (503).
+                # Returned as an error result, callers that read only ``.data``
+                # would take it for "no row".
+                raise _core_db.DatabasePoolTimeoutError("database connect timed out") from exc
             # Register the jsonb/json codec on this ad-hoc connection (see the
             # matching note in the other _execute_async) so dict/list values
             # bound to jsonb columns are encoded — without it an insert/update

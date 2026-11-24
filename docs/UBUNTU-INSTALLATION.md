@@ -841,7 +841,7 @@ Database timeout settings:
 
 | Setting | Default | Scope |
 |---|---|---|
-| `PG_POOL_ACQUIRE_TIMEOUT` | `10` seconds | Positive finite wait for a pooled connection; expiry returns a retryable failure. |
+| `PG_POOL_ACQUIRE_TIMEOUT` | `10` seconds | Positive finite wait for a pooled connection, and for each connection the older database layer opens for a single call; expiry returns a retryable failure. |
 | `PG_STATEMENT_TIMEOUT_MS` | `60000` milliseconds | Positive transaction-local PostgreSQL statement limit in the shared transaction helpers. |
 | `PG_LOCK_TIMEOUT_MS` | `10000` milliseconds | Positive transaction-local PostgreSQL lock wait limit in the same helpers. |
 
