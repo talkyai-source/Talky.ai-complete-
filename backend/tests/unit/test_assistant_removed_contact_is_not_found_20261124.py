@@ -48,6 +48,26 @@ def test_a_removed_row_is_not_found(kw, confirm):
     assert _jobs(db) == jobs_before
 
 
+def test_a_row_removed_between_the_read_and_the_save_is_not_written(monkeypatch):
+    from tests.unit.test_live_risk_contacts import _JobsQ
+
+    class _Q(_JobsQ):
+        def execute(self):
+            if self._table == "leads" and self._op == "update" and "phone_number" in (self._payload or {}):
+                self._db.tables["leads"][0].update(status="deleted", do_not_call=True)
+            return super().execute()
+
+    class _DBx(_JobsDB):
+        def table(self, name):
+            return _Q(self, name)
+
+    db = _DBx()
+    out = _run(db, action="update", lead_id="l1", phone_number=NEW, confirm=True)
+    row = db.tables["leads"][0]
+    assert row["phone_number"] == "+14155550124", (out, row)
+    assert out.get("applied") is not True, out
+
+
 def test_a_live_row_is_still_updated_and_removed():
     db = _JobsDB()
     out = _run(db, action="update", lead_id="l1", first_name="Ann", confirm=True)
