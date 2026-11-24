@@ -270,6 +270,18 @@ async def revoke_specific_session(
     would sign the user out of EVERY device when they asked to sign out
     of one, which is a worse bug than this one.
     """
+    # Session ids are UUIDs: any other address is an unknown session, and must
+    # not reach the database (which would raise and answer 500). A valid id is
+    # passed on in its canonical spelling, the one form the database always
+    # accepts (braces or a urn prefix parse here but not there).
+    try:
+        session_id = str(UUID(session_id))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found or already revoked.",
+        )
+
     # Prevent revoking current session through this endpoint
     async with acquire_connection(db_client.pool) as conn:
         # Check if this is the current session: the authenticated session id

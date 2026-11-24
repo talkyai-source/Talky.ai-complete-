@@ -234,6 +234,45 @@ async def test_mfa_disable_for_a_user_without_an_account_keeps_no_family(conn):
     assert len(conn.refresh_updates[0]) == 3
 
 
+@pytest.mark.parametrize("bad", ["not-a-uuid", "123", "' OR 1=1 --", "aaaaaaaa-0000-0000-0000-00000000000g"])
+async def test_ending_a_session_with_a_non_uuid_id_is_404_without_a_database_call(monkeypatch, bad):
+    touched: list[str] = []
+
+    @asynccontextmanager
+    async def factory(*args, **kwargs):
+        touched.append("acquire")
+        yield Conn()
+
+    monkeypatch.setattr(sessions_ep, "acquire_connection", factory)
+    for kwargs in ({"talky_sid": None, "request": make_request(CURRENT)},
+                   {"talky_sid": "synthetic-sid", "request": make_request(None)}):
+        with pytest.raises(HTTPException) as refused:
+            await sessions_ep.revoke_specific_session(bad, user, db, **kwargs)
+        assert refused.value.status_code == 404
+        assert refused.value.detail == "Session not found or already revoked."
+    assert touched == []
+
+
+@pytest.mark.parametrize("spelled", [
+    OTHER_1.upper(), "{" + OTHER_1 + "}", "urn:uuid:" + OTHER_1, OTHER_1.replace("-", ""),
+])
+async def test_a_valid_other_id_in_any_spelling_revokes_by_its_canonical_form(conn, spelled):
+    # Every spelling that parses as a UUID reaches the database as the one canonical form
+    # (braces or a urn prefix would be rejected there and answer 500).
+    result = await sessions_ep.revoke_specific_session(
+        spelled, user, db, talky_sid=None, request=make_request(CURRENT))
+    assert result.revoked is True
+    assert conn.session_revokes == [("id", OTHER_1)]
+
+
+async def test_the_own_id_is_still_refused_with_400_after_the_id_check(conn):
+    with pytest.raises(HTTPException) as refused:
+        await sessions_ep.revoke_specific_session(
+            CURRENT, user, db, talky_sid=None, request=make_request(CURRENT))
+    assert refused.value.status_code == 400
+    assert conn.session_revokes == []
+
+
 async def test_mfa_disable_with_no_session_id_revokes_everything(conn):
     await mfa_ep.disable_mfa(make_request(None), MFADisableRequest(password="pw"), user, db,
                              talky_rt=None)
