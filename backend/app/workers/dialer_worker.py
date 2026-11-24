@@ -2467,7 +2467,13 @@ class DialerWorker:
             await self._publish_block(job, reason)
         if reason in ("lead_not_dialable", "contact_permission_missing", "lead_number_changed"):
             try:
-                await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
+                # A dropped retry still carries the reason of the attempt before it
+                # (for example no_answer), and the Call Issues card reads that first:
+                # for a changed number, record the real reason there too.
+                await self._update_job_status(
+                    job, JobStatus.SKIPPED, error=reason,
+                    reason=reason if reason == "lead_number_changed" else None,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "dialer_stale_payload_job_write_failed job=%s reason=%s err=%s",
