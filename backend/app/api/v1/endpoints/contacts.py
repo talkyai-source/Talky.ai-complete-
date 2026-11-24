@@ -831,6 +831,14 @@ async def bulk_import_contacts(
             )
             for i, v in enumerate(mapped_rows, start=2)
         ], default_country)
+        # A removed contact's do-not-call mark comes back with its number. Read
+        # once, before anything is written; a failed read ends the request.
+        removed_marked: set[str] = set()
+        if campaign_id:
+            from app.domain.services.dialer.removed_dnc_marks import removed_marked_phones
+            removed_marked = removed_marked_phones(
+                db_client, campaign_id=campaign_id, tenant_id=current_user.tenant_id,
+            )
         list_id = None
         if permission is not None:
             from app.api.v1.endpoints.contact_lists import create_contact_list
@@ -898,6 +906,8 @@ async def bulk_import_contacts(
                         "status": "pending",
                         "last_call_result": "pending"
                     }
+                    if phone in removed_marked:
+                        lead_row["do_not_call"] = True
                     if list_id is not None:
                         lead_row["list_id"] = list_id
                     write_response = db_client.table("leads").insert(lead_row).execute()
