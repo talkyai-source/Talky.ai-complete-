@@ -366,13 +366,24 @@ async def verify_session(
             detail="Ownership confirmation required.",
         )
 
+    # Same rule as revoke_specific_session: an id that is not a UUID is an
+    # unknown session and must not reach the database (which would raise and
+    # answer 500); a valid one goes on in canonical form.
+    try:
+        session_id = str(UUID(body.session_id))
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found or already revoked.",
+        )
+
     # Generate new fingerprint from current request
     new_fingerprint = generate_device_fingerprint(request)
 
     async with acquire_connection(db_client.pool) as conn:
         verified = await verify_suspicious_session(
             conn,
-            session_id=body.session_id,
+            session_id=session_id,
             user_id=current_user.id,
             new_fingerprint=new_fingerprint,
         )
@@ -386,12 +397,12 @@ async def verify_session(
     logger.info(
         "User verified suspicious session: user=%s session=%s",
         current_user.id,
-        body.session_id,
+        session_id,
     )
 
     return SessionVerificationResponse(
         detail="Session verified successfully. Suspicious flags cleared.",
-        session_id=body.session_id,
+        session_id=session_id,
         verified=True,
     )
 

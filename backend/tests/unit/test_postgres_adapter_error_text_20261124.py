@@ -11,7 +11,7 @@ from app.core.postgres_adapter import QueryBuilder, RpcBuilder
 
 
 def _raise_on_connect(monkeypatch, exc: BaseException) -> None:
-    async def fake_connect(_dsn: str):
+    async def fake_connect(_dsn: str, **_kwargs):
         raise exc
 
     monkeypatch.setattr(postgres_adapter.asyncpg, "connect", fake_connect)
@@ -60,3 +60,32 @@ async def test_retryable_error_is_still_raised(monkeypatch, run):
     _raise_on_connect(monkeypatch, ConnectionRefusedError())
     with pytest.raises(ConnectionRefusedError):
         await run()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run", [_query, _rpc], ids=["query", "rpc"])
+async def test_connect_waits_no_longer_than_the_pools_acquire_timeout(monkeypatch, run):
+    from app.core import db as core_db
+
+    monkeypatch.setattr(core_db, "_ACQUIRE_TIMEOUT_S", 3.25)
+    seen: list[dict] = []
+
+    async def fake_connect(_dsn: str, **kwargs):
+        seen.append(kwargs)
+        raise ValueError("stop here")
+
+    monkeypatch.setattr(postgres_adapter.asyncpg, "connect", fake_connect)
+    await run()
+    assert seen == [{"timeout": 3.25}]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run", [_query, _rpc], ids=["query", "rpc"])
+async def test_a_connect_timeout_is_returned_as_an_error_result(monkeypatch, run):
+    async def fake_connect(_dsn: str, **kwargs):
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(postgres_adapter.asyncpg, "connect", fake_connect)
+    response = await run()
+    assert response.error == "TimeoutError"
+    assert response.data is None

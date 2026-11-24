@@ -278,3 +278,80 @@ async def test_mfa_disable_with_no_session_id_revokes_everything(conn):
                              talky_rt=None)
     assert conn.session_revokes == [("bulk", None)]
     assert len(conn.refresh_updates[0]) == 3
+
+
+# ---- 5. verifying a session: the id comes in the body ------------------------------
+
+def _verify_request(session_id):
+    return sessions_ep.SessionVerificationRequest(session_id=session_id, confirm_ownership=True)
+
+
+@pytest.mark.parametrize("bad", ["not-a-uuid", "123", "aaaaaaaa-0000-0000-0000-00000000000g"])
+async def test_verifying_a_session_with_a_non_uuid_id_is_404_without_a_database_call(monkeypatch, bad):
+    touched: list[str] = []
+
+    @asynccontextmanager
+    async def factory(*args, **kwargs):
+        touched.append("acquire")
+        yield Conn()
+
+    async def fake_verify(conn_, **kwargs):
+        touched.append("verify")
+        return True
+
+    monkeypatch.setattr(sessions_ep, "acquire_connection", factory)
+    monkeypatch.setattr(sessions_ep, "verify_suspicious_session", fake_verify)
+    with pytest.raises(HTTPException) as refused:
+        await sessions_ep.verify_session(_verify_request(bad), make_request(None), user, db)
+    assert refused.value.status_code == 404
+    assert refused.value.detail == "Session not found or already revoked."
+    assert touched == []
+
+
+@pytest.mark.parametrize("spelled", [OTHER_1.upper(), "{" + OTHER_1 + "}", OTHER_1.replace("-", "")])
+async def test_verifying_a_valid_id_passes_it_on_in_canonical_form(conn, monkeypatch, spelled):
+    received: list[dict] = []
+
+    async def fake_verify(conn_, **kwargs):
+        received.append(kwargs)
+        return True
+
+    monkeypatch.setattr(sessions_ep, "verify_suspicious_session", fake_verify)
+    result = await sessions_ep.verify_session(_verify_request(spelled), make_request(None), user, db)
+    assert [r["session_id"] for r in received] == [OTHER_1]
+    assert result.session_id == OTHER_1
+    assert result.verified is True
+
+
+# ---- 6. two-factor off: a re-hash of the same password is not "credentials changed" ----
+
+def _mfa_off_with_locked_hash(conn, monkeypatch, locked_hash):
+    # The row read without a lock holds "h"; the typed password matches "h" and
+    # "h-rehashed" (the same password, upgraded elsewhere) but not "someone-else-changed-it".
+    monkeypatch.setattr(mfa_ep, "verify_password", lambda typed, stored: stored in ("h", "h-rehashed"))
+    monkeypatch.setattr(
+        mfa_ep, "lock_authenticated_credential_change", AsyncMock(return_value={"password_hash": locked_hash}))
+    writes: list[str] = []
+    original = conn.execute
+
+    async def recording_execute(sql, *args):
+        writes.append(sql)
+        return await original(sql, *args)
+
+    conn.execute = recording_execute
+    return writes
+
+
+async def test_mfa_disable_after_a_rehash_of_the_same_password_goes_through(conn, monkeypatch):
+    writes = _mfa_off_with_locked_hash(conn, monkeypatch, "h-rehashed")
+    await mfa_ep.disable_mfa(make_request(CURRENT), MFADisableRequest(password="pw"), user, db, talky_rt=RT)
+    assert any("UPDATE user_mfa" in sql for sql in writes)
+
+
+async def test_mfa_disable_after_the_password_really_changed_is_401_and_writes_nothing(conn, monkeypatch):
+    writes = _mfa_off_with_locked_hash(conn, monkeypatch, "someone-else-changed-it")
+    with pytest.raises(HTTPException) as refused:
+        await mfa_ep.disable_mfa(make_request(CURRENT), MFADisableRequest(password="pw"), user, db, talky_rt=RT)
+    assert refused.value.status_code == 401
+    assert refused.value.detail == "Credentials changed. Please sign in again."
+    assert writes == []
