@@ -1,0 +1,253 @@
+# Round-3 reviewer's ordinary sentences and short turns (24 Nov 2026). Written fresh, none tuned on.
+# Label: N| not a request to stop being called (a catch is wrong); A| arguable (a careful reader could go either way).
+# --- the caller GIVES a number (callback, inbound, details)
+N|Take my number.
+N|Yeah, take my number.
+N|Okay take my number please.
+N|Right, take this number.
+N|Just take my number.
+N|Take my number. It's 07700 900461.
+N|Take this number. Oh seven seven double oh.
+N|Take my number now.
+N|Can you take my number.
+N|Could you take my number.
+N|Will you take my number.
+N|Would you take my number.
+N|You need to take my number.
+N|I want you to take my number.
+N|I'd like you to take my number.
+N|I need you to take my number.
+N|Please take my number, thanks.
+N|Ok. Take my number. Ready?
+N|Take my number. Call me on that instead.
+N|Take my number. My wife will answer.
+N|No, take my number. The office one is wrong.
+N|Look, take my number. I'll be in all day.
+N|Take this number. It's my direct line.
+N|Listen, take my number. Got a pen?
+N|Hey take my number mate.
+N|I said take my number.
+N|Take my number, love.
+N|Take my number. Then we can talk next week.
+N|Take this number, okay.
+N|Erm, take my number.
+# --- answering the agent: "any more calls from them?" / call-blocker, nuisance-call support
+N|No. No more calls.
+N|No, no more calls.
+N|Yeah, no more calls.
+N|Yeah. No more calls since Monday.
+N|Since you blocked them? No more calls.
+N|They stopped. No more calls.
+N|The scam people? No more calls, thanks.
+N|It worked. No more calls.
+N|Honestly, no more calls.
+N|Not a thing. No more calls.
+N|No more phone calls. It's been quiet.
+N|The blocker's great. No more calls at all.
+N|Since the engineer came? No more calls ever.
+N|We changed the number. No more calls.
+N|Ok so no more calls. Brilliant.
+# --- choosing a plan or a product: no call minutes wanted
+N|Data only. I don't want any calls.
+N|Just the broadband. We don't want any calls.
+N|The SIM is for my tablet. I don't want any calls.
+N|Texts and data please. I don't want any calls on it.
+N|For the alarm line? We don't want any calls.
+N|I just want the internet. I don't want any calls thanks.
+N|The cheaper bundle. We don't want any calls at all.
+N|No landline package. I don't want any calls.
+# --- for now, right now: a time, not a permanent request
+N|I'm at work. I don't want any calls right now.
+N|I'm driving. No more calls right now.
+N|I'm in a meeting. I don't want any calls now.
+N|We're having dinner. We don't want any calls right now.
+N|I'm on the other line. No more calls now please.
+N|I don't want any calls right now.
+N|No more calls right now, thanks.
+N|We don't want any calls now, okay.
+N|I don't want any more calls right now, I mean it.
+N|Baby's asleep. No more calls right now.
+N|Please, no more calls right now.
+N|I don't want you to call me again right now.
+N|We don't want you ringing us again right now.
+N|Don't call me again right now.
+N|Don't ring me again right now.
+N|Don't phone this number again right now.
+N|Don't contact me again right now.
+N|Seriously, I don't want any calls right now.
+N|Not today. No more calls now.
+N|Look, no more calls right now, okay.
+# --- a time the recogniser put into its own sentence
+N|Don't call me again. Until Friday.
+N|Don't call me again. Tomorrow.
+N|Don't ring me again. Today.
+N|Don't phone me again. Before ten.
+N|Do not call me again. After six.
+N|Don't contact me again. Until next month.
+N|Don't call us again. Tonight.
+N|Don't ring us again. This week.
+N|Don't call me again. Until I ring you.
+N|Don't call here again. Today please.
+N|Don't ring here again. Before noon.
+N|I don't want you to call me again. Until Monday.
+N|I don't want you ringing me again. Today.
+N|No more calls. Today.
+N|No more calls. This week.
+N|No more calls. Until the new year.
+N|No more calls. Before Christmas.
+N|No more calls. Tonight.
+N|Stop ringing. Till after lunch.
+N|Stop phoning me. Until the bill's sorted.
+N|Quit calling. For a week or so.
+N|I don't want any calls. Today.
+N|I don't want any more calls. This week.
+N|Never call me. Before nine.
+N|Never ring here. After eight.
+N|Remove my number. Till the move is done.
+N|Don't call me anymore. Today.
+N|Don't ring this number again. Until tomorrow.
+N|Don't phone here anymore. This morning.
+N|No more calls please. Until four.
+# --- the next sentence takes it back
+N|No more calls. Actually no, it's fine, ring me.
+N|Remove my number. Actually no, keep it.
+N|Stop ringing. No wait, sorry, go on.
+N|Remove my number. Hang on, don't.
+N|No more calls. Oh, never mind, I'll listen.
+N|Quit calling. Only joking, go on.
+N|Take us off the list. No, scratch that.
+N|Remove this number. Sorry, my mistake, leave it.
+N|I don't want any more calls. Well, maybe one more.
+N|Stop phoning. Unless it's about the refund.
+N|No more calls. Except about the delivery.
+N|Remove my number. Unless you've got a better price.
+N|Never call here again. Kidding, kidding.
+N|No more calls. Just kidding, what's the offer?
+N|Stop contacting me. Well, not you, the other lot.
+# --- a different number or a different person
+N|Stop ringing my mobile. Use the landline.
+N|Don't call my mobile again. Ring the house.
+N|Never call my landline. Only the mobile.
+N|Don't ring my house again. My mum's ill. Ring my mobile.
+N|Stop calling my landline. Call the mobile.
+N|Never ring my mobile. It's for work only.
+N|Don't phone my landline anymore. Use this one.
+N|Remove this number. Use my new one.
+N|Delete this number. It was my old one, use the new one.
+N|Remove this number from the records. I've got a new one now.
+N|Stop phoning my phone. Ring my husband's.
+N|Don't contact my mobile again. Email me.
+N|Never phone my house. Ring the shop.
+N|Quit ringing my landline. My mobile is better.
+N|Stop ringing my house. Ring me at work.
+# --- a list that is not the calling list
+N|We're on the waiting list for the survey. Take us off the list.
+N|The heat pump scheme? Remove us from the list.
+N|The guest list for Saturday. Take us off the list.
+N|Take us off the list. We've had the boiler done already.
+N|There's a list for the free check. Remove us from the list.
+N|We booked the cleaning. Take us off the list, we cancelled.
+N|The school trip list. Take us off the list.
+N|Remove us from the list. Johnny's not going any more.
+N|Take us off the list. The flat is sold.
+N|The repair queue. Take us off the list.
+# --- naming: the agent called them a name
+N|Quit calling me mate.
+N|Quit calling me love.
+N|Quit calling me pal.
+N|Stop phoning me love.
+N|Cease calling me mate.
+N|Quit calling us mate.
+# --- quoting, dictation, reading out, notes
+N|Write this down. No more calls.
+N|My notes say. No more calls.
+N|The letter said. Remove my number.
+N|It says on the form. Stop phoning.
+N|The sign on the gate. No more calls.
+N|He shouted. Stop ringing.
+N|My husband told them. No more calls.
+N|She wrote. Remove my number.
+N|The text read. Stop contacting me.
+N|Last time they promised. No more calls.
+N|Item two. Remove my number.
+N|Step three. Remove this number.
+N|The heading is. No more calls.
+N|Point one. Take my number.
+N|The message was. Quit calling.
+# --- someone else on the line or in the room
+N|Tom, stop ringing. Sorry, that's my son on the bell.
+N|Stop ringing. Sorry, the kids are on the doorbell.
+N|Stop phoning. Sorry, I was talking to my daughter.
+N|Kids, no more calls. Sorry, they keep using my phone.
+N|Stop ringing. Sorry, the alarm keeps going off.
+N|Stop ringing. Oh, that's the other phone.
+N|Quit calling. Sorry, the dog keeps barking.
+N|No more calls. I'm telling my assistant, sorry.
+N|Stop phoning me. My sister keeps doing it, sorry, go on.
+N|Remove my number. That's what I told the bank, sorry, carry on.
+# --- the bell or a device
+N|Stop ringing... my ears.
+N|The bell won't... stop ringing.
+N|I wish it would... stop ringing.
+N|It keeps going... stop ringing.
+N|My phone... stop ringing.
+# --- a short report about the past or someone else
+N|Last year I said. No more calls.
+N|My neighbour? Never call here.
+N|That's what my dad said. Never call here again.
+N|Your colleague promised. No more calls.
+N|We agreed last week. No more calls.
+N|I asked the other company. Remove my number.
+N|The bank? Stop contacting me.
+N|Sky. I don't want any more calls.
+N|BT and Virgin. Stop phoning me.
+N|The council. Stop ringing my house.
+# --- a question without a question mark, or a check
+N|Can you remove my number from the delivery.
+N|So, no more calls.
+N|Right, so no more calls.
+N|Okay so no more calls then.
+N|So no more calls, understood.
+N|Well, no more calls then, okay.
+N|Hang on. No more calls.
+N|Wait. No more calls.
+N|Hold on. Remove my number.
+N|What. Remove my number.
+N|Hmm. No more calls.
+N|Really. No more calls.
+N|Is that right. No more calls.
+N|Sorry. Stop ringing.
+# --- records, accounts, typing
+N|I want to update my details. Remove my number. I've got a new one.
+N|On the account. Remove my number. Use the email.
+N|Delete this number. It's a duplicate.
+N|Remove my number from the system. My son's will be on it.
+N|Remove this number from the database. It's the fax.
+N|Remove my number. From the old account.
+N|Remove my number. From the website.
+N|Remove my number. Off the invoice.
+N|Take my number off. The invoice I mean.
+N|Remove this number. From the emergency contacts.
+# --- channel change (the design's own rule says not a do-not-call request)
+A|No more calls. Just email me.
+A|Stop ringing. Text me instead.
+A|I don't want any calls. Send me a letter.
+A|No more phone calls. WhatsApp me.
+A|Stop phoning. Email is fine.
+A|Quit calling. Write to me.
+A|I don't want any more calls. Email only.
+A|No more calls please. Send it in the post.
+A|Stop contacting me by phone. Email me.
+A|Never call here again. Use the email.
+# --- fewer calls, partial
+A|No more calls. One a month is enough.
+A|Stop ringing every day. Once a week.
+A|No more calls. Just the one on Friday.
+A|I don't want any more calls. Except the appointment reminder.
+A|Remove my number. But keep the email on.
+# --- arguable short ones
+A|Take us off the list.
+A|Remove us from the list.
+A|Remove this number.
+A|No more calls.
+A|Stop ringing.

@@ -1,0 +1,284 @@
+# Ordinary sentences (NOT a request to be put on the do-not-call list). Written 24 Nov 2026 by the round-2 reviewer.
+# Grouped by the form whose words they share. None of them was tuned on.
+# --- G1 stop / quit / cease + calling, ringing, phoning, contacting
+My phone just wouldn't stop ringing this morning.
+The alarm panel keeps beeping and I can't get it to stop ringing.
+I can't get the doorbell to stop ringing.
+Can you make the phone stop ringing?
+How long before the bell will stop ringing on its own
+Once I've paid the balance, will you stop contacting me?
+So after the payment goes through you'll stop contacting me about the arrears?
+I've told Vodafone to stop phoning me, it's them not you.
+I have asked Sky to stop phoning me, can you check you're not Sky?
+The council should stop phoning me about the bins.
+My ex needs to stop contacting me, can you change the account password?
+EE need to stop contacting me about the upgrade, not you.
+Can you get your engineer to stop ringing my wife's phone and ring mine?
+Stop ringing every day, once a week is plenty.
+Quit calling three times a day, once is enough.
+Stop phoning so many times, once a fortnight is fine.
+Stop phoning twice a day, one call is enough.
+Please stop ringing at eight in the morning, ring after ten.
+Stop phoning me at work, ring me at home.
+Stop phoning me on my mobile, use the landline please.
+Stop contacting me by phone, email me instead.
+Stop phoning, start emailing, that's all I ask.
+Stop contacting me on this number, I've got a new one, it's 07700 900123.
+Stop phoning this number, my new number is 07700 900456.
+Stop ringing the office number, ring my mobile.
+Stop phoning here, phone my mobile.
+Stop ringing here, ring the shop.
+Stop ringing my house phone, ring my mobile.
+Stop calling my work phone, ring the mobile.
+Can the system stop ringing me before I've finished my shift?
+Yeah my phone did stop ringing eventually.
+Tell him to stop phoning here and use my mobile.
+I'll tell my son to stop ringing me about it.
+Can you ask the courier to stop phoning me and just leave it with next door?
+Make it stop ringing!
+Did the engineer quit contacting you as well?
+Why does the doorbell not stop ringing when I press it?
+Once the claim is closed will you stop contacting us?
+Has the bank said they'll cease contacting you?
+# --- G1b texting / messaging
+Can you stop texting me? I prefer calls.
+Please stop texting me. Just ring me if you need me.
+Stop texting me, ring me, I never read texts.
+Stop messaging me, I'd rather you phoned.
+Stop texting me now, the code worked.
+Stop messaging us please, a phone call is better.
+Stop texting this number, ring it instead.
+Stop texting me, call me.
+# --- G2 never + call, ring, phone, contact + me / us / here / this number
+The doctor's surgery will never phone us back.
+Our accountant would never phone us about that, so it was a scam.
+My son would never phone me at work.
+The bank would never phone me and ask for my PIN, would they?
+The landlord never phones us back.
+You'd never phone this number, would you?
+I'd never phone here on a Sunday.
+The estate agent never rings here anymore.
+My wife never rings this phone, it's my work line.
+You lot never phone me back when you say you will.
+Honestly the plumber never phones us back.
+# --- G3 don't (you) call / ring / phone / contact
+Don't ring back, it's sorted now.
+Don't phone back, the engineer came already.
+Don't ring back, I found the receipt.
+No, don't ring back, my husband fixed it.
+Don't bother calling me back about the quote, I've accepted it.
+Don't bother ringing me back, it's working now.
+Don't bother phoning me back, I'll pop in.
+Don't bother calling me back, I've sorted it.
+Don't ring here, ring my mobile.
+Don't ring this number, ring 07700 900123.
+Don't phone this number, phone my wife's.
+Don't ring my mobile again, ring the house phone.
+Don't call my mobile again, call my work number.
+Don't ring my work phone again, ring my mobile.
+Don't phone my mobile again, it's broken, ring the landline.
+Don't call my landline again, the line's dead, try my mobile.
+Don't contact here, contact head office.
+Please don't ring, the baby's asleep.
+Tell the driver don't ring, just leave it in the porch.
+When the driver comes please don't ring, the baby will be asleep.
+Don't ring, the dog goes mad, just come round the back.
+No, don't call, I'll be in the shop on Monday.
+No, don't call, I'm going away for a fortnight.
+No don't ring, I'll be out.
+Nah, don't phone, I'm in a meeting, try at four.
+No, don't ring twice a day, once is enough.
+Don't phone so many times, once a week is fine.
+Don't ring every day, every other day is fine.
+Don't you call me sweetheart.
+Don't you dare call me Dave.
+Don't you call me a liar.
+Don't you dare call me a time waster.
+Don't you ever call me love again.
+Don't ring again till the parts are in.
+Don't phone again before the parts come in.
+Don't call, just pop round, I'm in all day.
+No, don't ring, come to the door.
+Don't phone, it's easier if you come in person.
+Please don't phone anymore today, I'm shattered.
+Don't phone back now, I'm driving.
+Don't contact again, I mean don't contact the old address again, I've moved.
+Don't phone me late, phone me early.
+Shall I call you back tomorrow? No, don't call tomorrow, call Friday.
+No, don't ring back today, ring Thursday.
+No, don't ring back, I'll ring you.
+Oh don't ring back, I'll get my husband to ring you.
+Don't phone back on that number, it's my work one.
+# --- G4 remove / delete / erase / wipe / scrub + me / my number / my details
+Can you remove my details from the system and put the new ones in?
+Delete my details from the system, they're duplicated.
+Remove my name from the system, the surname has a typo.
+Delete my number from your records, it's a typo.
+Remove my number from the database, it's got a digit missing.
+Can you remove my info from the database and re-add it, it's corrupted?
+Please remove my name from the books, I've retired, but keep my wife on.
+Delete my name from the register, I've moved out, my daughter still lives there.
+Wipe my details from the old system, the migration copied them twice.
+Remove my number from the records and put my husband's instead of mine.
+Erase my data from the trial, I want to start the real plan fresh.
+Remove me as the second driver.
+Delete my number, the one ending 456, it's my old one.
+Remove my details, I'm on there twice.
+Remove us from the joint policy, we've separated.
+Remove my phone number from the invoice please, it's printed on it.
+Delete my details from the order, it's a gift, put my sister's.
+Can you remove my name from the system as the emergency contact?
+Remove this number from the account, it's my late father's, put mine.
+Delete this number from the system, the new one is on the form.
+Remove my contact details from the website listing please.
+Erase my info from the leaflet you printed.
+# --- G5 take / get + item + off
+Get me off hold please, I've been waiting ages.
+Take my name off, it's my ex-husband's account now.
+Take my details off your system, they're wrong, I'll give you the right ones.
+Take us off the joint account and put it in my name only.
+Get my number off the invoice, I don't want it printed.
+Take my name off the system as the key holder, my neighbour has the keys now.
+Take my details off the old system and put them on the new one.
+Can you take my information off the shared file?
+# --- G6 want off the list
+I want off the waiting list, I've found another plumber.
+I want off the mailing list but not the phone list.
+I want to be off the waiting list now, the job's done.
+I want off the system as the account holder, put my son on.
+# --- G7 want / need to be removed / my number removed
+I want my number removed from the records and replaced with my new mobile.
+I need my name removed from the contact list for the school, my wife is the contact now.
+I'd like my details deleted from the system and re-entered, they're all wrong.
+I need my number removed, it's showing on my invoices.
+I need my name taken off, I'm not the account holder anymore.
+I'd like my details removed from the system as guarantor.
+I need us removed from the system as joint owners, the house is sold.
+I want to be removed from the system as the emergency contact for my mum.
+I want to be taken off the system as key holder.
+I'd like to be removed from the records as the named driver.
+# --- G6b can I be removed
+Can I be taken off, er, the joint account?
+Could I be removed, as in removed as the named driver?
+Can I be removed from the system as the emergency contact?
+Could I be taken off the system as account holder and put my son on?
+Can we be removed from the records as guarantors now the loan's paid?
+Can I be taken off the records as the tenant, I moved out in June?
+# --- G7 no more calls
+No more phone calls, let's do it on Zoom.
+No more calls, just texts from now on.
+No more calls, emails only.
+No more calls to my mobile, ring the landline.
+No more calls to my work number, ring my personal one.
+No more calling twice a day, once is enough.
+No more calls every day, maybe once a week.
+No more calls three times a day please, once is fine.
+Yeah no more calling, I'm going to bed.
+Okay no more calls tonight, I'm off to bed.
+No more calls, the engineer's been and it's fixed.
+No more calls about the boiler, it's been fixed.
+Right, no more calls from the survey team, I've done the survey.
+No more phone calls, I'll pop into the branch.
+No more calls, WhatsApp is easier.
+No more calls please, letters are better for me.
+No more calls, video calls are easier.
+No more calls, Teams is better for me.
+Great, so no more calls then, it's all sorted.
+Lovely, no more calls, the refund's come through.
+No more calls, the delivery came.
+# --- G8 don't want more / these / your calls
+I don't want more calls, I want fewer.
+I don't want more calls, once a month is plenty.
+I don't want more calls, just one a week.
+I don't want any more calls about the boiler, it's working.
+I don't want these calls, I want a proper visit.
+I don't want your calls, I want the email you promised.
+I don't want more calls than I need, so once a month.
+I don't want any more calls from your sales team, just the engineer.
+I don't want any more calls from you about the delivery, it's arrived.
+I don't want to get more calls, just put the next appointment in writing.
+# --- G9 don't want you to call
+I don't want you calling here, call my mobile.
+I don't want you to ring me, I want you to text me.
+I don't want you to call me, I want my husband to deal with it, call him.
+I don't want you to contact me, I'd rather my solicitor dealt with it, contact him.
+I never want anyone to call me at dinner time.
+I never want you to ring me before nine.
+I never want anyone phoning me on a Sunday.
+I don't want anyone to call me about it, my son handles it.
+I don't want you to phone here, phone my work.
+I don't want you contacting me, I want you contacting my daughter, she has power of attorney.
+I don't want anyone ringing here, ring the office.
+I don't want you to call me, I want the engineer to call me.
+I don't want you to ring me now, I'm at the hospital.
+I don't want you to phone me, my wife deals with the bills.
+# --- G10 don't want to be called / contacted
+I don't want to be contacted by your partners.
+I don't want to be contacted by your partner companies, only by you.
+I don't want to be contacted by your sales team, just the engineer.
+I don't want to be called, I want to be emailed.
+I don't want to be rung on this number, it's my work.
+I don't want to be phoned here, phone my mobile.
+I don't want to be contacted by your third parties, tick that box.
+I don't want to be contacted by anyone else, just you.
+I don't want to be called again until the parts are in.
+I don't want to be called please, my hearing's bad, text me.
+# --- G11 hear from you
+I don't want to hear from you until the parts arrive.
+I don't want to hear from you, I want to hear from your manager.
+I don't want to hear from you again until the refund's in my account.
+I never want to hear from you again unless it's good news about my claim.
+# --- G12 opt out of calls
+Do I have to opt out of your calls separately from the emails?
+Will I need to opt out of these calls every year?
+I want to opt out of the calls on Sundays only.
+Can I opt out of the calls being recorded?
+Can I opt out of the calls from the survey team but keep the appointment reminders?
+Is there a way to opt out of the calls, but keep the texts?
+I'd like to opt out of all calls except the engineer's.
+How do I opt out of the calls for my mum, she has dementia?
+# --- G14 can you not call
+Can you not call me now, I'm driving, call me in an hour.
+Could you not ring me now? I'm in a meeting.
+Could you not contact me again until the bill's sorted?
+Could you not phone here, phone my mobile.
+Would you not call me, but call my husband, he deals with it.
+Can you not ring me again today, I'm at work.
+Could you not ring me again before Thursday, I'm away.
+Can you not phone me now please, I'm in the car, try at six.
+Will you not ring me, I'll ring you when it arrives.
+Could you not call this number, it's my mum's, call mine.
+Could you not ring here, it wakes the baby, ring my mobile.
+# --- G13 no call list / do not call registry / dnc
+Is my number on the no call list?
+My mum's on the no call list but I'm not.
+Does the do not call registry cover mobiles?
+Is the do not call registry free to join?
+How long does the do not call registry take to work?
+Are you on the no call list yourselves?
+Put my mum on the do not call list, she keeps getting scam calls from other firms, but I still want yours.
+# --- hyphens, curly apostrophes, run-ons (STT forms)
+Does the do-not-call list cover mobiles?
+Is my number on the do-not-call list?
+Don’t ring back, it’s sorted now.
+Don’t phone back, I’ve found it.
+Don’t you call me sweetheart.
+No more calls, e-mails only.
+don't ring back its sorted now thanks
+no more calls just texts from now on
+i don't want you to ring me i want you to text me
+can you not call me now im driving call me in an hour
+dont ring my mobile again ring the house phone
+stop ringing every day once a week is plenty
+I have told Sky to stop phoning me cant you see I am with BT
+# --- request for another time / fewer calls, said in other forms
+Shall I ring back tomorrow? No, don't ring tomorrow, ring Friday.
+Shall I call you back later? No don't, I'll call you.
+Shall I call you back later? No, don't call, I'll email you.
+Shall I phone you back this afternoon? No, don't phone, I'll pop in.
+Can I give you a ring next week? No, don't ring next week, I'm away, ring the week after.
+Shall we call you on this number? No, don't call this number, use my mobile.
+Shall I ring back? No need, don't ring back, all sorted.
+Would you like a call back? No, don't call back, I'll come in on Saturday.
+Do you want us to ring you back? No, don't bother, I'll ring the branch.
+Do you want us to ring you back? No, don't ring back, I'll check online.
