@@ -28,7 +28,7 @@ def test_bulk_insert_binds_each_rows_own_columns(monkeypatch):
     )
     conn.on_fetchrow("INSERT INTO leads", {"id": "x"})
 
-    async def fake_connect(_dsn):
+    async def fake_connect(_dsn, **_kwargs):
         return conn
 
     monkeypatch.setattr(postgres_adapter.asyncpg, "connect", fake_connect)

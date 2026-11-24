@@ -28,6 +28,7 @@ import asyncpg
 import jwt
 
 from app.core.config import get_settings
+from app.core import db as _core_db
 from app.core.db import DATABASE_RETRYABLE_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -222,7 +223,7 @@ class QueryBuilder:
     async def _execute_async(self) -> PostgrestResponse:
         conn = None
         try:
-            conn = await asyncpg.connect(_DATABASE_URL)
+            conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
             # Register the jsonb/json codec on this ad-hoc connection. The pool
             # registers it via init=, but these direct connections otherwise
             # wouldn't — and _coerce_bind_value passes dict/list values bound to
@@ -837,7 +838,7 @@ class RpcBuilder:
     async def _execute_async(self) -> PostgrestResponse:
         conn = None
         try:
-            conn = await asyncpg.connect(_DATABASE_URL)
+            conn = await asyncpg.connect(_DATABASE_URL, timeout=_core_db._ACQUIRE_TIMEOUT_S)
             # Register the jsonb/json codec on this ad-hoc connection (see the
             # matching note in the other _execute_async) so dict/list values
             # bound to jsonb columns are encoded — without it an insert/update
