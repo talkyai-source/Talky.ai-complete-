@@ -1428,6 +1428,11 @@ class CampaignService:
                 if scoped_tenant:
                     query = query.eq("tenant_id", scoped_tenant)
                 resp = query.execute()
+                # The database layer answers most failures with an error
+                # result (data=None, error=<text>) and does not raise.
+                # That is a failed read too, never "no list is confirmed".
+                if getattr(resp, "error", None) is not None:
+                    raise RuntimeError("contact_lists permission read returned an error")
                 confirmed = {
                     (str(r["id"]), str(r.get("tenant_id") or scoped_tenant))
                     for r in (getattr(resp, "data", None) or [])

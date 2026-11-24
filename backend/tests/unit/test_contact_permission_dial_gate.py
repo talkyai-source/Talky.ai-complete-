@@ -711,6 +711,72 @@ async def test_call_this_list_message_is_unchanged_when_nothing_was_withheld(mon
 # ---------------------------------------------------------------------------
 
 
+def _lists_read_answers_with_an_error_result(db, error_text):
+    """The real database layer does not raise for most failures: it answers
+    ``data=None, error=<text>`` (app/core/postgres_adapter.py). Only the
+    permission read (the select naming consent_confirmed_at) fails here."""
+    from types import SimpleNamespace
+
+    real = db.table
+
+    def table(name):
+        q = real(name)
+        if name != "contact_lists":
+            return q
+        cols = {}
+        orig_select, orig_execute = q.select, q.execute
+
+        def select(*columns, **kw):
+            cols["c"] = " ".join(str(c) for c in columns)
+            return orig_select(*columns, **kw)
+
+        def execute():
+            if "consent_confirmed_at" in cols.get("c", ""):
+                return SimpleNamespace(data=None, count=None, error=error_text)
+            return orig_execute()
+
+        q.select, q.execute = select, execute
+        return q
+
+    db.table = table
+    return db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_text", ["permission denied for table contact_lists", ""])
+async def test_switch_on_an_error_result_from_the_confirmation_read_at_start_is_a_retryable_error(
+        monkeypatch, error_text):
+    # An error RESULT is a failed read exactly like a raised one (an empty error
+    # text is what a bare timeout leaves): 503, campaign not started, nothing queued.
+    from app.domain.services.campaign_service import CampaignPermissionCheckUnavailable
+
+    monkeypatch.setenv(GATE, "on")
+    db = _lists_read_answers_with_an_error_result(
+        _start_db(pending_ok=2, pending_no=1), error_text)
+    with pytest.raises(CampaignPermissionCheckUnavailable) as raised:
+        await _start(db, monkeypatch)
+    assert raised.value.status_code == 503
+    assert db.tables["campaigns"][0]["status"] == "draft"
+    assert not db.tables.get("dialer_jobs")
+
+
+@pytest.mark.asyncio
+async def test_warn_an_error_result_from_the_confirmation_read_is_logged_as_a_failed_read(
+        monkeypatch, caplog):
+    # In warn mode nothing is held back either way, but the evidence line must not
+    # record a failed read as "every contact lacks permission, read fine".
+    import logging
+
+    monkeypatch.setenv(GATE, "warn")
+    db = _lists_read_answers_with_an_error_result(
+        _start_db(pending_ok=2, pending_no=1), "connection refused")
+    with caplog.at_level(logging.INFO):
+        result, _ = await _start(db, monkeypatch)
+    assert result.jobs_enqueued == 3 and result.jobs_withheld == 0
+    decisions = [r.getMessage() for r in caplog.records if "lookup=" in r.getMessage()]
+    assert decisions and all("lookup=failed" in line for line in decisions), decisions
+
+
 @pytest.mark.asyncio
 async def test_switch_on_start_reports_how_many_contacts_it_selected(monkeypatch):
     monkeypatch.setenv(GATE, "on")
