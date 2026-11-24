@@ -65,6 +65,7 @@ test("it offers a Contact us link to the public contact page, opening in a new t
     assert.equal(link.getAttribute("target"), "_blank");
     assert.equal(link.getAttribute("rel"), "noopener noreferrer");
     assert.ok(screen.getByText(/Questions\?/));
+    assert.match(link.parentElement?.textContent ?? "", /Contact us \(opens in a new tab\)\./);
 });
 
 test("it does not appear when the field is false, missing, or the user is not known yet", () => {
