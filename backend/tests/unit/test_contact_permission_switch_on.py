@@ -178,14 +178,20 @@ async def test_warn_lookup_failure_selects_all(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
-async def test_on_lookup_failure_still_fails_closed_and_logs(monkeypatch, caplog):
+async def test_on_lookup_failure_at_start_is_a_retryable_error_and_logs(monkeypatch, caplog):
+    # At Start a failed lookup is an error the customer can retry (503), not a
+    # mass hold-back: nothing is reported as withheld.
+    from app.domain.services.campaign_service import CampaignError
+
     monkeypatch.setenv(GATE, "on")
     caplog.set_level(logging.INFO, logger=LOG)
     db = _FakeDB(fail_tables={"contact_lists"})
     _seed(db)
     out: list = []
-    assert await _service(db)._get_pending_leads("c1", withheld_out=out) == []
-    assert out == [4]
+    with pytest.raises(CampaignError) as raised:
+        await _service(db)._get_pending_leads("c1", withheld_out=out)
+    assert raised.value.status_code == 503
+    assert out == []
     assert "mode=on" in caplog.text and "lookup=failed" in caplog.text
 
 
@@ -1080,3 +1086,95 @@ async def test_list_confirm_skips_a_live_contact(monkeypatch):
     out = await cl_ep.record_contact_list_permission("L1", dict(GOOD), _User(), db)
     assert svc.calls[0]["only_lead_ids"] == ["p2"]
     assert out.queued_for_calling == 1
+
+
+# ═══ P-A2: a failed permission lookup at Start is "try again", not "no permission" ══
+
+PLAIN_503 = "The contacts' permission could not be checked. Nothing was queued; try again."
+
+
+def _failing_lists(db):
+    real = db.table
+
+    def table(name):
+        if name == "contact_lists":
+            raise RuntimeError("boom 4155550101 Ann Example")
+        return real(name)
+
+    db.table = table
+    return db
+
+
+@pytest.mark.asyncio
+async def test_on_failed_lookup_at_start_refuses_cleanly_and_changes_nothing(monkeypatch, caplog):
+    from app.domain.services.campaign_service import CampaignError
+
+    monkeypatch.setenv(GATE, "on")
+    caplog.set_level(logging.INFO)
+    db = _failing_lists(_start_db(pending_ok=2, pending_no=1))
+    with pytest.raises(CampaignError) as raised:
+        await _start(db, monkeypatch)
+    assert raised.value.status_code == 503 and raised.value.message == PLAIN_503
+    assert db.tables["campaigns"][0]["status"] == "draft"
+    assert db.tables["dialer_jobs"] == []
+    errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert len(errors) == 1
+    text = errors[0].getMessage()
+    assert "campaign-1" in text and "4155550101" not in text and "Ann" not in text
+    assert "+1415555" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", [None, "warn"])
+async def test_off_and_warn_failed_lookup_at_start_change_nothing(monkeypatch, mode):
+    if mode:
+        monkeypatch.setenv(GATE, mode)
+    db = _failing_lists(_start_db(pending_ok=2, pending_no=1))
+    result, _ = await _start(db, monkeypatch)
+    assert result.jobs_enqueued == 3 and result.jobs_withheld == 0
+    assert result.message == "Campaign campaign-1 started"
+    assert db.tables["campaigns"][0]["status"] == "running"
+
+
+@pytest.mark.asyncio
+async def test_start_route_answers_503_with_the_plain_message(monkeypatch):
+    # The Start button's answer says what happened and that it can be tried again; it is
+    # not the generic "Failed to start campaign" of other service errors.
+    from app.api.v1.endpoints import campaigns as campaigns_ep
+    from app.domain.services.campaign_service import CampaignPermissionCheckUnavailable
+
+    class _Conn:
+        async def fetchrow(self, query, *args):
+            return {"id": TENANT, "status": "active", "subscription_status": "active",
+                    "suspended_at": None, "suspended_by": None, "suspension_reason": None,
+                    "white_label_partner_id": None, "formal_partner_id": None,
+                    "formal_partner_status": None, "active_holds": [], "authority_scope_ok": True}
+
+    @asynccontextmanager
+    async def acquire(pool, tenant_id):
+        yield _Conn()
+
+    class _Svc:
+        async def get_campaign(self, campaign_id):
+            return {"id": campaign_id, "script_config": {}, "calling_config": {}}
+
+        async def start_campaign(self, **kwargs):
+            raise CampaignPermissionCheckUnavailable()
+
+    async def minutes(tenant_id):
+        return SimpleNamespace(state="known", exhausted=False, allocated=100,
+                               used_minutes=0, remaining_minutes=100)
+
+    monkeypatch.setattr(campaigns_ep, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(campaigns_ep, "_get_campaign_service", lambda _db: _Svc())
+    monkeypatch.setattr(campaigns_ep, "_reject_inbound_campaign_mutation", lambda *a, **k: None)
+    monkeypatch.setattr("app.domain.services.minutes_quota.tenant_minutes_status", minutes)
+    with pytest.raises(HTTPException) as refused:
+        await campaigns_ep.start_campaign(
+            campaign_id=CAMPAIGN, request=SimpleNamespace(), start_request=None,
+            current_user=SimpleNamespace(id="actor-1", tenant_id=TENANT),
+            idempotency_key=None, db_client=SimpleNamespace(pool=object()))
+    assert refused.value.status_code == 503
+    assert refused.value.detail == (
+        "The contacts' permission could not be checked. Nothing was queued; try again.")
+    assert refused.value.detail == CampaignPermissionCheckUnavailable.MESSAGE

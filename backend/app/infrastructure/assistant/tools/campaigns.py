@@ -133,12 +133,30 @@ async def start_campaign(
             "completed_at": datetime.utcnow().isoformat()
         }).execute()
 
-        return {
+        withheld = int(getattr(started, "jobs_withheld", 0) or 0)
+        if withheld and not started.jobs_enqueued:
+            # Every contact was held back by the permission check: nothing is
+            # dialled, so do not say calling started.
+            note = CampaignService._withheld_note(withheld).strip()
+            return {
+                "success": False,
+                "status": "failed",
+                "error": f"No contacts were queued. {note}",
+                "message": note,
+                "campaign_id": campaign_id,
+                "jobs_enqueued": started.jobs_enqueued,
+                "jobs_withheld": withheld,
+            }
+        answer = {
             "success": True,
             "message": f"Campaign '{campaign.get('name')}' has been started",
             "campaign_id": campaign_id,
             "jobs_enqueued": started.jobs_enqueued,
         }
+        if withheld:
+            answer["message"] += CampaignService._withheld_note(withheld)
+            answer["jobs_withheld"] = withheld
+        return answer
     except CampaignNotFoundError:
         return {"success": False, "error": "Campaign not found"}
     except CampaignStateError as exc:

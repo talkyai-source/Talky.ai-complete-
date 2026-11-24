@@ -252,3 +252,69 @@ def test_every_argument_a_tool_schema_offers_is_accepted_by_its_function():
         if missing:
             rejected[spec["name"]] = missing
     assert rejected == {}
+
+
+# --- start_campaign: the answer says how many contacts were held back --------
+
+def _start_tool_client():
+    from unittest.mock import MagicMock
+    return MagicMock()
+
+
+def _fake_start_service(monkeypatch, *, enqueued, withheld):
+    from app.domain.services.campaign_service import CampaignService, StartCampaignResult
+    from app.infrastructure.assistant.tools import campaigns as tool
+
+    class _Service:
+        async def get_campaign(self, campaign_id, tenant_id=None):
+            return {"id": campaign_id, "name": "Roofing Leads", "status": "draft", "direction": "outbound"}
+
+        async def start_campaign(self, campaign_id, tenant_id=None):
+            return StartCampaignResult(
+                success=True, message="x", jobs_enqueued=enqueued,
+                campaign_id=campaign_id, jobs_withheld=withheld,
+            )
+
+    monkeypatch.setattr(tool, "_get_campaign_service", lambda _db: _Service())
+    return CampaignService._withheld_note
+
+
+@pytest.mark.asyncio
+async def test_start_with_every_contact_held_back_does_not_say_calling_started(monkeypatch):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    note = _fake_start_service(monkeypatch, enqueued=0, withheld=3)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+
+    assert result["jobs_withheld"] == 3 and result["jobs_enqueued"] == 0
+    assert note(3).strip() in result["message"]
+    assert result["success"] is False and result["status"] == "failed"
+    assert "has been started" not in result["message"]
+    assert "started" not in result["error"].lower()
+
+
+@pytest.mark.asyncio
+async def test_start_with_some_contacts_held_back_reports_count_and_explanation(monkeypatch):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    note = _fake_start_service(monkeypatch, enqueued=2, withheld=1)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+
+    assert result["success"] is True
+    assert result["jobs_enqueued"] == 2 and result["jobs_withheld"] == 1
+    assert result["message"] == "Campaign 'Roofing Leads' has been started" + note(1)
+
+
+@pytest.mark.asyncio
+async def test_start_with_the_check_off_answers_exactly_as_before(monkeypatch):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    _fake_start_service(monkeypatch, enqueued=5, withheld=0)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+
+    assert result == {
+        "success": True,
+        "message": "Campaign 'Roofing Leads' has been started",
+        "campaign_id": CAMPAIGN_A,
+        "jobs_enqueued": 5,
+    }
