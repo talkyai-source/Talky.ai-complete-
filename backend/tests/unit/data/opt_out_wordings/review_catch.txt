@@ -1,0 +1,326 @@
+# Requests to stop calling (every line SHOULD be caught). One per line; '#' lines are headings.
+# plain, angry, polite
+Stop calling me.
+Stop calling me!
+Please stop calling me.
+Can you please stop calling me.
+Can you stop calling me please.
+Will you stop calling me.
+Would you stop calling me.
+Just stop calling me.
+Stop calling this number.
+Stop calling my number.
+Stop calling my phone.
+Stop calling my mobile.
+Stop ringing me.
+Stop ringing this number.
+Stop phoning me.
+Stop phoning here.
+Stop texting me.
+Stop contacting me.
+Quit calling me.
+Quit calling.
+Stop calling.
+Stop calling us.
+Stop calling here.
+Stop calling my house.
+Stop calling my landline.
+Stop calling my work number.
+Stop calling my mum's number.
+Stop calling me every day.
+Stop calling me every single day.
+Stop calling me three times a day.
+Stop calling me at all hours.
+Stop bloody calling me.
+Stop fucking calling me.
+Stop calling me, I'm not interested.
+Stop calling me, I've told you before.
+Stop calling me, I'm on the do not call list.
+Stop calling me, my name is on the do not call list.
+Stop calling me, my name is Sarah Jones and I want this to stop.
+Stop calling me, my name's Dave and I've had enough.
+Stop calling me, you call me every day.
+Stop calling me, you call me five times a day.
+Stop calling me, you lot call me every single day.
+Stop calling me, call me again and I'll report you.
+Stop calling me, if you call me again I'll go to the police.
+Stop calling me that's all I want.
+Stop calling me that's it.
+Stop calling this is harassment.
+Stop calling that's it.
+Stop calling that is enough.
+Stop calling it's ridiculous.
+Stop calling it really annoys me.
+Stop calling me today I mean it.
+Stop calling me right now.
+Stop calling me now.
+Stop calling me again.
+Stop calling me ever again.
+Stop calling me at work and at home.
+Stop calling me by the way I'm on the TPS.
+Stop calling that number, it's mine and I'm sick of it.
+Stop contacting me, my name is Peter and I've had enough.
+Seriously, quit ringing me.
+Cease calling this number.
+Stop harassing me.
+Stop calling me, it's Mrs Khan and I've had enough.
+# don't call
+Don't call me again.
+Don't call me.
+Don't call me ever again.
+Don't ever call me again.
+Do not call me again.
+Do not call this number again.
+Don't call this number.
+Don't call here again.
+Don't call us again.
+Don't call back.
+Don't call me back.
+Don't call me back ever.
+Don't you dare call me again.
+Don't ring me again.
+Don't phone me again.
+Don't contact me again.
+Don't contact me ever again.
+Do not contact me again.
+Don't call me again, this time I mean it.
+Don't call me again. When I want something I'll call you.
+Don't call me, when I need something I'll call you.
+Don't call me. When I need insurance I'll ring you myself.
+Don't call me, I'll call you.
+Don't call me again, my name is Peter Hall and I've had enough.
+Don't call me again, you call me every day.
+Don't call me now or ever.
+Don't call me now and don't call me later.
+Don't call me ever again while I'm alive.
+Don't call me again while I'm alive.
+Don't call me again, I don't care when.
+Don't call me again tonight or ever.
+Don't ever call me again at any time.
+Do not call me again for any reason.
+Don't call me again, not today, not tomorrow, not ever.
+Don't call me again, not now, not ever.
+Don't call this number again. While I've got you, how did you get it?
+Don't call me again, between you and me this is harassment.
+Don't call me again, during the day or at night.
+Don't call me again, next week, next month, never.
+Don't call me again. After the last call I'm done with you.
+Don't call me again till hell freezes over.
+Don't call me again, so early or so late, just never.
+Don't call me again, when I say no I mean no.
+Do not call me again. Between this and the texts I've had it.
+Don't call me back, when I want a quote I'll ask for one.
+Don't contact me again, this time I'm serious.
+Do not contact me again, while I'm still polite.
+# never
+Never call me again.
+Never call this number again.
+Never ring me again.
+Never phone here again.
+Please never call me back.
+Never call me back. Ever.
+Never contact me again.
+Never ever call me again.
+Never call me back again, I mean it.
+# remove / take off / delete
+Take me off your list.
+Take me off your calling list.
+Take me off your call list please.
+Take my number off your list.
+Take this number off your list.
+Take my number off your database.
+Remove me from your list.
+Remove me from your calling list.
+Remove my number.
+Remove my number from your list.
+Remove my number from your system.
+Remove my details.
+Remove my details from your database.
+Delete my number.
+Delete my number from your system.
+Delete my details.
+Lose my number.
+Get me off your list.
+Get my number off your list.
+Put me on the do not call list.
+Put me on your do not call list.
+Add me to your do not call list.
+I want to be on the do not call list.
+I want to be removed from your list.
+I want my number removed.
+I'd like my number removed from your list.
+I need you to remove my number.
+Can I be removed from your list?
+Can you remove me from your list?
+Can you take me off your list please?
+Could you take my number off your list?
+Unsubscribe me.
+Unsubscribe.
+Opt me out.
+I want to opt out of these calls.
+# no more / don't want
+No more calls.
+No more calls please.
+No more calls, I mean it.
+No more phone calls.
+No more of these calls.
+I don't want any more calls.
+I don't want any more calls from you.
+I don't want these calls.
+I don't want your calls.
+I don't want to be called again.
+I don't want to be called.
+I don't want you calling me.
+I don't want you to call me again.
+I don't want to hear from you again.
+I never want to hear from you again.
+I don't want to receive any more calls.
+# you people / guys / lot / y'all / your company
+You people stop calling me.
+You people need to stop calling me.
+You guys need to stop calling me.
+You guys stop calling me.
+You lot stop calling me.
+Y'all need to stop calling me.
+Y'all stop calling me.
+Your company needs to stop calling me.
+Your company keeps calling me, stop calling me.
+Tell your company to stop calling me.
+Tell your people to stop calling me.
+Tell your boss to stop calling me.
+Tell them to stop calling me.
+Can your people stop calling me.
+Your people stop calling me.
+Your lot stop calling me.
+Make it stop calling me.
+Can you make it stop calling me.
+Just make them stop calling me.
+Whoever this is, stop calling me.
+All of you people stop calling me.
+You and your company stop calling me.
+Hey you people, stop calling me.
+Y'all people stop calling me.
+# told / asked / I said
+I told you to stop calling me.
+I told you people to stop calling me.
+I told you guys to stop calling.
+I've told you to stop calling me.
+I've told you three times to stop calling me.
+I've asked you three times to remove my number.
+I've asked twice to take me off your list.
+I've asked twice for you to stop calling me.
+I asked nicely for you to stop calling me.
+I'm asking politely to stop calling me.
+I'm asking for you to stop calling me.
+I'm asking you to stop calling me.
+I'm telling you to stop calling me.
+I'm telling you for the last time, stop calling me.
+I'm telling ya, stop calling me.
+I'm telling ya to stop calling me.
+I said to stop calling me.
+I said stop calling me.
+I've said before to stop calling me.
+I've said it before, stop calling me.
+I've said many times to take me off your list.
+My wife told you to stop calling.
+My wife told you lot to stop calling.
+My husband asked you to remove our number.
+We've told you to stop calling us.
+We have asked you to take us off your list.
+I'm asking once again to stop calling me.
+I'm saying it nicely to stop calling me.
+I said it already, stop calling me.
+I keep telling y'all to stop calling me.
+How many times do I have to ask for you to stop calling me.
+# run-on, no punctuation
+why do you keep calling me stop calling me
+you keep calling me stop calling me
+I told you people stop calling me
+how many times do I have to tell you stop calling me
+what part of stop calling me don't you understand
+stop calling me stop calling me stop calling me
+this is the fifth time today stop calling me
+I'm at work stop ringing me
+not interested take me off your list
+not interested remove my number
+I'm not interested please don't call again
+no thank you don't call me again
+listen don't call this number again
+look mate stop calling
+seriously stop calling me
+oh my god stop calling me
+for god's sake stop calling me
+it's ten o'clock at night stop calling me
+who is this stop calling me
+is this a sales call stop calling me
+I don't know who you are stop calling me
+you called me yesterday stop calling me
+stop calling me you call me every day
+don't call me again my name is Peter
+stop calling me I'm on the TPS
+# hyphens
+Put me on your do-not-call list.
+Add me to your do-not-call list.
+Take me off your call-list.
+I'm on the do-not-call list, stop calling.
+# with reasons attached
+Stop calling me, I'm on the Telephone Preference Service.
+Please don't call again, my husband just passed away.
+Don't call me again, I'm not interested in solar panels.
+Take me off your list, I've already got insurance.
+Remove my number, I never gave you permission.
+Stop calling, I'm a pensioner and this is scaring me.
+Stop calling me, I'm at work.
+Don't call this number again, it's my business line.
+Stop calling me, my mother is ill and I can't keep answering.
+# British
+Stop ringing me, you've rung me four times today.
+Stop ringing me up.
+Don't ring this number again.
+Please stop phoning, it's getting ridiculous.
+Can you stop ringing me please, love.
+Right, stop ringing me now.
+Take us off your list, ta.
+You lot need to stop ringing me.
+Sod off and don't ring again.
+Stop ringing this house.
+# filler, STT style
+Um, yeah, can you, uh, stop calling me?
+Uh, please don't call me again.
+Yeah no, take me off your list.
+So, um, I'd like to be removed from your list.
+Okay, um, just stop calling, okay?
+Hello? Stop calling me.
+Uh huh, yeah, remove me from your calling list.
+Yeah, I'm going to need you to stop calling me.
+Uh no. No. Stop calling me.
+Mm, look, I, I just, stop calling me.
+I, I just want, stop calling me please.
+Erm, yeah, could you not call me again.
+# polite
+Please could you take my number off your system.
+Kindly remove my number from your database.
+I'd like you to stop calling me, please.
+I'd like to be taken off your list.
+I'd like you to remove my number.
+# curly apostrophes (as some recognisers write them)
+Don’t call me again.
+Don’t call me again, this time I mean it.
+I’ve said before to stop calling me.
+Stop calling it’s ridiculous.
+Y’all need to stop calling me.
+I’m asking politely to stop calling me.
+# more American / angry
+Quit calling my cell.
+Stop calling my cell phone.
+Do not call my cell again.
+Lose my number, seriously.
+Take me off your list, I'm sick of this.
+You guys gotta stop calling me.
+Stop calling me, this is the third time this week.
+I want off your list.
+Put me on the no call list.
+Don't call me no more.
+Never call this house again.
+Remove us from your list.
+

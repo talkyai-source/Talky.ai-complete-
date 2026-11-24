@@ -1,0 +1,235 @@
+# Round-4 ordinary turns: label|kind|turn|context. label = my judgement IF caught: W wrong, A arguable, R real request.
+# kind: full (whole turn), partial (first final of a longer utterance), slip (recogniser error), aside (said to someone
+# else in the room), relay (message dictated for a third party), report (what they said to someone else), third
+# (asks the agent to act on a third party), echo, child, vm (voicemail greeting / screener), bound (boundary probe).
+# --- C5 remove / delete my|this number; take this number off your list/records
+W|full|No. Remove my number.|Agent: "Shall I print your phone number on the delivery label?"
+W|full|Yeah, delete this number.|Agent: "I've got 07700 900318 down as your partner's number, is that still in use?"
+W|full|Okay. Remove my number.|Agent: "Your number will show next to your name on the public review. Is that alright?"
+W|full|Just remove my number.|Agent: "Do you want me to keep your number on the gate entry list for next visit?"
+W|full|Could you remove my number.|Agent (mobile network, inbound): "I can see you on the shared family plan. What would you like changed?"
+W|full|Can you remove this number.|Agent read two contact numbers on a booking; caller means the second one
+W|full|I need you to remove my number.|Agent (letting agent, inbound): "What can I change on your advert?" (number off the public advert)
+W|full|Please remove my number.|Agent: "Your mobile is on the parish volunteer sheet, is that alright?"
+W|full|No, remove this number please.|Agent: "I'll send the confirmation text to 07700 900911, is that right?"
+W|full|Remove this number.|Agent: "The engineer has two numbers for you, 07700 900120 and 07700 900121."
+W|full|Yes. Remove my number.|Agent: "Do you want me to take you off as your brother's emergency contact?"
+W|full|Okay, delete this number.|Agent: "Your account still has 01632 960002 as a backup number from your old house."
+W|full|Remove my number thanks.|Agent (vet): "Shall I keep you as the second contact on Bella's record?"
+W|full|Um, remove my number.|Agent: "You're in the class WhatsApp group the school set up, is that okay?"
+A|full|Remove my number from your system.|Agent (GP surgery, inbound): "We still have your old mobile on file."
+R|full|Take this number off your records please.|Agent: "I'm sorry for your loss. What can I update?" (caller on her late mother's phone)
+A|full|Could you take this number off your system.|Agent: "This line is registered to the shop. What do you need?"
+W|full|Yeah remove my number.|Agent: "Shall I take your number off the ticket so the driver can't see it?"
+W|full|So remove my number.|Agent: "Buyers will ring the number on the listing." (seller wants it off the listing)
+W|full|No. Remove my number. Thanks.|Agent: "Shall I leave your number on the referral to the plumber?"
+W|full|No, delete this number. Thanks.|Agent: "And the tenant's number is 07700 900777?"
+W|full|Yes. Remove this number.|Agent: "Shall I take the old landline off your profile?"
+W|full|Remove my number please. That's all.|Agent: "Anything else to change on the booking?" (number off the booking)
+W|full|Right. Remove my number.|Agent: "Your number is visible to other members of the car share."
+W|full|Erm, remove this number.|Agent: "I have three numbers for the household. Which is out of date?"
+W|full|Uh, delete this number.|Agent: "We have 01632 960118 down as your fax."
+W|full|Well, remove my number.|Agent: "Your number is on the community noticeboard post."
+W|full|Honestly, remove my number.|Agent: "Your number is on the club minibus emergency sheet."
+W|full|You need to remove this number.|Agent: "Which number on the order is wrong?"
+W|full|You have to delete this number.|Agent: "The courier keeps ringing the old number on the order."
+W|full|I want you to remove my number.|Agent: "What would you like changed on the noticeboard post?"
+W|full|I'd like you to delete this number.|Agent: "I've got 07700 900404 here as your daughter's."
+W|full|Would you remove my number.|Agent: "You're listed as key holder for the alarm at number 12." (neighbour no longer key holder)
+W|full|Will you remove this number.|Agent: "We've got your work line as the main contact."
+A|full|I told you, remove my number.|Agent: "Sorry, what should I do with the number on the review?"
+A|full|I've told you, remove this number.|Agent: "Shall I keep the landline as a backup?"
+W|full|Remove my number again.|Agent: "Oh, your number seems to be back on the public profile."
+W|full|Delete this number again.|Agent: "I've re-added your old landline by mistake, sorry."
+W|full|Remove this number ok.|Agent: "There's a second number on the form, 07700 900222."
+W|full|Remove my number, I told you already.|Agent: "Shall I keep your number on the flyer?"
+A|full|Hi. Remove my number.|Inbound caller to the vet about a lost-dog poster with her number on it
+A|full|That's it. Remove my number.|Agent: "Anything else to update on the account?"
+W|full|Seriously, remove my number.|Agent: "Your number is printed in the parish magazine."
+W|full|Could you remove my number please.|Agent: "The residents' meeting minutes list everyone's phone number."
+W|aside|Can you delete this number.|said to a partner holding the caller's other phone
+W|full|Okay remove my number.|Agent: "Your number will be shared with the removal company. Okay?"
+A|full|Remove my number from your database.|Inbound caller to a charity: "How can I help today?"
+W|full|Remove my number. Bye.|Agent (parish): "Your number's on the coffee rota."
+# --- C1 stop / quit / cease + calling|ringing|phoning|contacting (+ object) (+ now)
+W|aside|Oi, stop ringing!|to a child ringing a bike bell in the hallway
+W|aside|Stop ringing!|to the house phone ringing in the room during the call
+W|aside|Hey, stop ringing.|to a teenager ringing the doorbell for a joke
+W|aside|For god's sake, stop ringing!|to the landline that keeps going during the call
+W|aside|Stop bloody ringing!|to the landline
+W|aside|Seriously, stop ringing.|to a child with a toy phone
+W|aside|Will you stop ringing.|to a child ringing the shop counter bell
+W|aside|Stop ringing this phone.|said while picking up the second handset
+A|full|Yeah, stop contacting me.|Agent: "So you'd like us to stop the email newsletters?"
+A|full|Yeah. Stop phoning.|Agent: "Would you rather get texts instead of calls before each delivery?"
+W|report|I said stop phoning.|Agent: "What did you say to the other company when they rang?"
+W|report|I said stop ringing.|Agent: "And what did you say to the lad at the door?"
+W|relay|Stop phoning me.|Agent (receptionist): "What message should I give Mr Patel?"
+W|relay|Stop contacting me. That's all.|Agent (phone provider, inbound): "What do you want us to tell the number that keeps calling you?"
+W|relay|Just stop phoning.|Agent: "Is there a message for the plumber?"
+W|relay|Stop ringing here.|Agent: "What shall I tell your ex if she rings the office?"
+W|partial|Stop contacting.|first final of "Stop contacting... my daughter, she isn't on the account."
+W|relay|Stop phoning me now.|Agent: "What would you like me to tell the recruiter?"
+W|slip|Stop ringing now.|"Stopped ringing now." Agent: "Is the alarm still going off?"
+W|slip|Stop ringing, thanks.|"Stopped ringing, thanks." Agent: "Is the phone still ringing at your end?"
+W|slip|Stop contacting me.|"Stopped contacting me." Agent: "Has your old supplier been in touch since you switched?"
+W|slip|Stop phoning.|"Stopped phoning." Agent (support): "Is your ex-partner still phoning you?"
+W|partial|Quit phoning me.|first final of "Quit phoning me at the office, use my mobile."
+W|aside|Quit ringing.|to a child ringing a bicycle bell
+A|full|No, stop ringing here.|Agent: "Shall we keep trying your husband on this number?"
+W|aside|Stop ringing my phone.|to a partner in the next room who keeps ringing during the call
+W|relay|Okay, stop phoning.|Agent (school office): "What would you like me to say to the coach?"
+W|partial|Please stop ringing.|first final of "Please stop ringing, pick up!" while hearing ringback on a transfer
+W|relay|Stop contacting us.|Agent (answering service for a firm): "What should I tell the recruitment agency?"
+W|relay|Stop phoning here.|Agent (GP receptionist): "Any message for the pharmacy?"
+W|aside|Stop effing ringing!|to the house phone
+W|aside|Stop flipping ringing.|to the doorbell kid
+W|third|No, stop phoning.|Agent: "Shall I keep phoning your mum to remind her about the appointment?" (daughter on the line)
+W|bound|Yeah, stop ringing her.|Agent: "Shall we keep ringing your mum?"
+A|full|Stop phoning my phone.|Agent: "We'll call your phone and the landline."
+W|aside|You need to stop ringing.|to a child with the doorbell
+W|relay|You have to stop phoning.|Agent: "What do you want me to tell your brother?"
+W|relay|I need you to stop phoning.|Agent: "What shall I tell the builder?"
+W|aside|I told you to stop phoning.|parent to a teenager phoning friends on the landline
+W|aside|I'm telling you, stop ringing.|to the doorbell kid
+W|aside|Right, stop ringing.|to the doorbell kid
+W|relay|Stop phoning ok.|Agent: "Shall I pass anything on to Darren?"
+# --- C2 don't (ever|you ever|you dare) + call|ring|phone|contact + object + again-word
+W|relay|Don't ring here again.|Agent: "What should I tell your landlord?"
+W|relay|Don't phone us again.|Agent (family answering service): "Any message for the double-glazing firm?"
+A|full|No. Don't ring this number again.|Agent: "Shall I try your work number 01632 960771 again tomorrow?"
+A|partial|Don't contact this number again.|first final of "Don't contact this number again, it's my work phone, use my mobile."
+W|partial|Don't ring this number again.|first final of "Don't ring this number again... until after the funeral."
+W|relay|Don't phone here again.|Agent: "Is there a message for the school about the trip?"
+W|aside|Don't ring my phone again.|to a partner in the next room who rang during the call
+R|vm|Do not phone this number again.|voicemail greeting of a business that has moved, finalised sentence by sentence
+W|relay|Don't contact here again.|Agent: "Anything for the agency?"
+W|relay|Don't ring here again, ever.|Agent: "What shall I say to the man from the gym?"
+W|relay|Don't phone my number again.|Agent: "What should I tell the surveyor?"
+W|relay|Don't ever ring here again.|Agent: "Any message for your cousin?"
+# --- C3 never (ever) + verb + object (+ again)
+W|slip|Never phone me.|"Never phoned me." Agent: "Did the installer phone you to confirm the date?"
+W|slip|Never phone here.|"Never phoned here." Agent: "Did the surgery phone about your results?"
+W|slip|Never call here.|"Never called here." Agent: "Has the courier called about the parcel?"
+W|slip|Never ring here.|"Never rang here." Agent: "Did the driver ring when he arrived?"
+W|slip|Never call my phone.|"Never called my phone." Agent: "Did the bank's fraud team call your phone?"
+W|slip|No, never phone me.|"No, never phoned me." Agent: "Did my colleague phone you yesterday?"
+W|slip|Never phone us.|"Never phoned us." Agent: "Did the council phone you about the bins?"
+W|slip|Never call this number.|"Never called this number." Agent: "Have you called this number before?"
+W|slip|Never ring my number.|"Never rang my number." Agent: "Did the plumber ring your number?"
+A|full|No, never call this number.|Agent: "Shall we try your landline 01632 960112 if we can't reach you?"
+W|relay|Never phone me again.|Agent: "What shall I tell the dating agency?"
+W|relay|Never ever call here.|Agent: "Anything you'd like me to pass on to the landlord?"
+# --- C4 no more (of these|of your) (phone) calls (from you)
+W|full|No more calls, thanks.|Agent (receptionist, inbound): "Are you expecting any more calls I should put through today?"
+W|full|No more calls. Thank you.|Agent: "Would you like to book any more calls with the mortgage adviser?"
+W|full|No more phone calls thanks.|Agent (mobile upsell): "Shall I add the extra phone calls bundle to your plan?"
+W|full|Just no more calls. Thanks.|Agent (owner's own answering service): "Any instructions for this afternoon?"
+W|full|No more calls okay.|Agent: "So that's all the calls for the adviser today, is that right?"
+W|full|I said no more calls.|Agent (owner's answering service): "Should I keep putting the supplier's calls through?"
+W|full|No more calls at all.|Agent (telecom): "The data-only SIM has no calls, is that what you want?"
+A|full|No more calls please.|Agent: "Do you want me to keep the reminder calls on for your mum?"
+W|slip|No more calls, cheers.|"No more cars, cheers." Agent (parking permits): "Any more cars to register?"
+W|slip|No more calls thank you.|"No more cards thank you." Agent (bank): "Shall I order more cards?"
+W|full|No more calls. Bye.|Agent (event organiser): "Are there any more calls on your agenda today?"
+W|relay|Look, no more calls.|Agent (owner's receptionist): "The press keep phoning, what shall I do?"
+W|bound|Listen, no more calls today.|Agent (owner's receptionist)
+W|relay|Please, no more calls.|Agent (ward receptionist): "Shall I put calls through to your father's room?"
+A|child|No more calls bye bye.|a child playing on the extension
+W|full|Just no more phone calls.|Agent (coach): "Shall we do the sessions by phone or video?"
+# --- C6 remove|take me|us off|from your (kind) list
+W|full|Take us off your list.|Agent (restaurant, inbound): "You're on the waiting list for a table for four on Saturday."
+W|full|Please remove us from your list.|Agent (school): "You're on the reserve list for the coach trip."
+W|full|Yeah take us off your list.|Agent (church): "You're down for the flower rota in March."
+W|full|Remove me off your list.|Agent (dentist): "You're still on our waiting list for an NHS place."
+A|full|Remove us from your contact list.|Agent (school): "You're both emergency contacts for Jamie."
+W|full|Take us off your phone list.|Agent (club): "You're on the phone tree for snow closures."
+W|bound|Okay, take us off your list then.|Agent (restaurant)
+W|full|No, remove us from your list.|Agent (allotments): "You're on the waiting list for a plot; still interested?"
+W|full|Take us off your list, thanks.|Agent (holiday cottage): "You're on our cancellation list for August."
+W|full|Remove us off your list please.|Agent (pub quiz): "You're down as a team for Thursday."
+W|full|Just remove me off your list.|Agent (salon): "You're on the standby list for a Saturday slot."
+R|full|Remove us from your marketing list.|Agent (sales call)
+# --- C7 put me on the do-not-call list
+R|full|Put us on your no call list.|Agent (sales call)
+W|third|Put this number on the DNC list.|a business user on the platform's support line reading out a lead's number
+# --- C8 / C8b I don't want any more | anymore | your | these calls; calls from you
+W|full|I don't want any more calls. Thanks.|Agent (mobile network): "Shall I add 300 more call minutes to your bundle?"
+W|full|No. I don't want any more calls.|Agent (coaching): "Would you like to book more coaching calls after this one?"
+W|full|We don't want these calls.|Agent (phone provider, inbound): "So it's the calls from the withheld number at night?"
+W|full|I don't want these calls.|Agent (nuisance-call blocking service, inbound): "Which calls are bothering you?"
+A|full|I don't want any more calls please.|Agent (hospital transport): "Would you like reminder calls before each appointment?"
+W|full|We don't want any more calls thanks.|Agent (owner's answering service): "Shall I keep forwarding calls to your mobile tonight?"
+W|full|I don't want anymore calls.|Agent (telecom): "Moving to data-only means no calls, are you sure?"
+W|slip|I don't want these calls, thanks.|"I don't want these cards, thanks." Agent (bank)
+W|partial|I don't want any more calls.|first final of "I don't want any more calls about the boiler, just about solar."
+W|relay|I don't want your calls.|Agent: "What shall I tell your sister?"
+W|full|We don't want any more of these calls.|Agent (council, inbound, about a scam caller): "Is it the same number each time?"
+W|relay|I don't want any more calls, okay.|Agent (owner's receptionist)
+A|full|I don't want any calls from you.|Agent: "Would you like calls from your local branch or from head office?"
+# --- C9 I don't want you to call|ring|phone + object + again-word
+A|full|No, I don't want you to call me again.|Agent: "Shall I call you again on Friday to confirm the appointment?"
+W|partial|I don't want you to ring me again.|first final of "I don't want you to ring me again on a Sunday."
+W|relay|I don't want you to phone here anymore.|Agent: "What shall I tell the agency?"
+# --- N1 to N8
+W|full|Get me off your list.|Agent (gym): "You're on the waiting list for the spin class."
+W|full|Just get us off your list.|Agent (nursery): "You're on our waiting list for September."
+W|partial|Get us off your list. Thanks.|first final of "Get us off your list for the Saturday tasting, keep us for Sunday."
+A|full|Okay, get me off your calling list.|Agent (blood donation): "You're on the list for reminder calls."
+W|full|Delete me from your list.|Agent (volunteer rota): "You're down for Tuesday's soup kitchen shift."
+W|full|Please delete us from your list.|Agent (school disco): "You're on the parent helpers list."
+W|full|Take my name off your list please.|Agent (allotments): "You're third on the waiting list."
+W|full|Can you take my name off your list.|Agent (council): "You're on the housing register."
+W|full|Just take my name off your list.|Agent (driving school): "You're on the cancellation list."
+W|full|Remove my name from your list thanks.|Agent (wedding venue): "You're down as attending with a plus one."
+A|full|Please remove my name from your contact list.|Agent (PTA): "You're on the class contacts sheet."
+W|partial|Remove my name from your list.|first final of "Remove my name from your list for ten o'clock, put me at two."
+W|full|I'd like to be taken off your list.|Agent (surgery): "You're on the cancellation list for minor ops."
+W|full|I want to be removed from your list.|Agent (theatre): "You're on the returns list for Friday."
+W|full|We'd like to be removed from your list.|Agent (school transport): "You're on the waiting list for the bus."
+W|partial|I would like to be removed from your list please.|first final of "...from your list for pharmacy deliveries, I'll collect."
+A|full|No. I do not wish to be contacted.|Agent: "Can our partner insurers contact you with quotes?"
+A|full|I don't wish to be contacted.|Agent (hospital research): "Would you be happy for the research team to contact you?"
+A|full|I do not wish to be contacted, thank you.|Agent (estate agent): "Can I pass your details to the buyer's solicitor?"
+A|full|I don't want to be contacted again.|Agent (survey): "Can we contact you again for future surveys?"
+A|full|No, I don't want to be called again.|Agent: "Would you like a follow-up call after the repair?"
+W|partial|I don't want to be called again.|first final of "I don't want to be called again before the quote is ready."
+R|full|Cease all calls to this number.|Agent (sales call)
+W|relay|Cease all calls.|Agent (owner's answering service): "Shall I keep the lines open over lunch?"
+W|partial|Cease all calls to this number please.|first final of "...please, after eight pm."
+# --- courtesy, third party, child, voicemail, echo, report, slips
+A|full|Hello. Stop ringing.|the doorbell keeps going as the caller picks up
+W|third|Yes. Stop phoning.|Agent (advice line): "Do you want me to tell the gas company to stop phoning you?"
+W|third|Yeah, stop phoning.|Agent (debt advice): "Shall I ask your creditors to stop phoning you?"
+W|third|Yeah, remove my number. Thank you.|Agent (debt advice): "Shall I ask the lender to take your number off their dialler?"
+W|bound|Yes please. Stop phoning.|Agent (debt advice)
+W|relay|No. Stop contacting me.|Agent: "What should I tell the private parking firm?"
+W|full|Right. Take us off your list.|Agent (B and B): "You're on the waiting list for New Year."
+A|full|Okay. Get me off your list.|Agent (garage): "You're on the MOT reminder list."
+W|full|Thank you. Remove my number. Bye.|Agent (lost property): "Your number's on the label of the bag we found."
+W|aside|Delete this number.|caller on speaker telling a partner to delete a contact from the partner's phone
+W|third|Remove this number please.|caller asking the agent how to block a scam number they read out
+A|child|Stop phoning!|a child answers and shouts
+A|child|No more calls!|a child answers and shouts
+W|child|Stop ringing! Stop ringing!|a child playing with a toy phone, picked up by the microphone
+A|child|Never phone us! Bye bye!|a child on the extension, playing
+R|vm|Please remove this number from your call list. Thank you.|a call-screening assistant
+R|vm|Remove this number from your list.|a call-screening assistant
+R|vm|Please stop phoning.|a personal voicemail greeting
+W|bound|No more calls after nine please.|a voicemail greeting
+A|echo|Remove my number from your list.|Agent: "Would you like me to remove your number from our list?" (echoed as a question, "?" lost)
+A|echo|No more calls.|Agent: "...so there'll be no more calls about the old policy." (caller echoes, puzzled)
+A|echo|Stop contacting me.|Agent: "Would you like us to stop contacting you?" (echoed as a question, "?" lost)
+W|report|I said no more calls.|Agent: "What did you tell your old broker?"
+W|report|I said remove my number.|Agent: "What did you say to the bank?"
+W|aside|I told you to remove my number.|to a partner who was meant to take it off the school form
+W|aside|I've told you, stop ringing.|to a child with the doorbell
+W|slip|Stop ringing.|"Stopped ringing." Agent: "Has the noise on the line stopped?"
+W|slip|Stop phoning now.|"Stopped phoning now." Agent: "Is the recruiter still phoning you?"
+W|slip|Yeah, remove my number.|"Yeah, remember my number." Agent: "Shall I save this number for next time?"
+# --- scheduling and attached-sentence probes (expected not caught)
+W|bound|Stop phoning me. Tomorrow.|scheduling after
+W|bound|No more calls. Today.|scheduling after
+W|bound|Don't ring this number again. Until Monday.|scheduling after
+W|bound|Stop phoning. Tonight I'm out.|attached sentence
+W|bound|Remove my number. After the sale.|attached sentence

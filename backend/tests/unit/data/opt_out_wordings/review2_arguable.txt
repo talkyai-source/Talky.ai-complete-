@@ -1,0 +1,57 @@
+# Rows of ordinary.txt that a compliance reader could treat as a request to stop calls (a redirect to another
+# number or channel, a partial or marketing-only opt-out, a conditional). The commit's own CONTINUATION rule
+# says a channel change is NOT a do-not-call request; they are counted separately so the headline number
+# does not depend on that policy.
+Stop phoning, start emailing, that's all I ask.
+Stop contacting me on this number, I've got a new one, it's 07700 900123.
+Stop phoning this number, my new number is 07700 900456.
+Stop phoning here, phone my mobile.
+Stop ringing here, ring the shop.
+Stop ringing my house phone, ring my mobile.
+Can you ask the courier to stop phoning me and just leave it with next door?
+Don't ring here, ring my mobile.
+Don't ring this number, ring 07700 900123.
+Don't phone this number, phone my wife's.
+Don't ring my mobile again, ring the house phone.
+Don't call my mobile again, call my work number.
+Don't ring my work phone again, ring my mobile.
+Don't phone my mobile again, it's broken, ring the landline.
+Don't call my landline again, the line's dead, try my mobile.
+Don't contact here, contact head office.
+Don't phone, it's easier if you come in person.
+dont ring my mobile again ring the house phone
+Take my name off, it's my ex-husband's account now.
+No more phone calls, let's do it on Zoom.
+No more calls, just texts from now on.
+No more calls, emails only.
+No more calls, e-mails only.
+No more calls to my mobile, ring the landline.
+No more calls, WhatsApp is easier.
+No more calls please, letters are better for me.
+No more calls, video calls are easier.
+No more calls, Teams is better for me.
+I don't want these calls, I want a proper visit.
+I don't want your calls, I want the email you promised.
+I don't want to get more calls, just put the next appointment in writing.
+I don't want you calling here, call my mobile.
+I don't want you to ring me, I want you to text me.
+i don't want you to ring me i want you to text me
+I don't want you to call me, I want my husband to deal with it, call him.
+I don't want you to contact me, I'd rather my solicitor dealt with it, contact him.
+I don't want you to phone here, phone my work.
+I don't want you contacting me, I want you contacting my daughter, she has power of attorney.
+I don't want anyone ringing here, ring the office.
+I don't want you to call me, I want the engineer to call me.
+I don't want you to phone me, my wife deals with the bills.
+I don't want to be contacted by your sales team, just the engineer.
+I don't want to be called, I want to be emailed.
+I don't want to be rung on this number, it's my work.
+I don't want to be phoned here, phone my mobile.
+I never want to hear from you again unless it's good news about my claim.
+Can I opt out of the calls from the survey team but keep the appointment reminders?
+Is there a way to opt out of the calls, but keep the texts?
+I'd like to opt out of all calls except the engineer's.
+Could you not phone here, phone my mobile.
+Would you not call me, but call my husband, he deals with it.
+Could you not call this number, it's my mum's, call mine.
+Could you not ring here, it wakes the baby, ring my mobile.

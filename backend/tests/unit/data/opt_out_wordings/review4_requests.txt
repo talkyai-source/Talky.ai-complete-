@@ -1,0 +1,183 @@
+# Round-4 requests: kind|turn. P = plain whole turn; Q = polite request as a question; X = reason, question or more attached.
+P|Stop ringing.
+P|Stop ringing please.
+P|Please stop phoning me.
+P|Stop phoning me.
+P|Quit ringing me.
+P|Stop contacting me.
+P|Stop contacting me please.
+P|Stop bothering me.
+P|Stop pestering me with calls.
+P|Leave me alone.
+P|Leave me alone, please.
+P|Don't bother calling again.
+P|Don't bother ringing again.
+P|I don't want to hear from you again.
+P|I never want to hear from you again.
+P|Wipe my number.
+P|Scrap my number.
+P|Forget my number.
+P|Erase my number.
+P|Cross me off your list.
+P|Strike me off your list.
+P|Opt out.
+P|I want to opt out.
+P|I'm opting out.
+P|Add my number to your do not call list.
+P|Add me to your DNC list.
+P|Put me on the DNC list.
+P|Mark me as do not call.
+P|No more calls.
+P|No more calls please.
+P|Enough with the calls.
+P|That's enough calls.
+P|I've had enough of these calls.
+P|Please cease contact.
+P|Cease contact.
+P|Don't ever ring here again.
+P|Do not phone this number again.
+P|Never phone again.
+P|Don't phone again.
+P|Please don't call.
+P|Don't ring anymore.
+P|Don't phone anymore.
+P|Stop the calls.
+P|Stop the calls please.
+P|Stop with the calls.
+P|I don't want any calls.
+P|I don't want to be called.
+P|I don't want to be called anymore.
+P|I don't want to be contacted.
+P|I don't want to be contacted anymore.
+P|Please remove me.
+P|Remove me.
+P|Take us off.
+P|Delete my details.
+P|Delete all my details.
+P|Remove my details from your system.
+P|I want my number removed.
+P|I'd like my number removed from your list.
+P|Please remove my number from your list.
+P|Take this number off your list.
+P|Get me off your calling list now.
+P|Stop phoning me every day.
+P|Quit phoning.
+P|Stop phoning, thank you very much.
+P|Stop phoning me. Thank you very much.
+P|Remove my number. Take care.
+P|No thanks, stop phoning.
+P|No thank you, remove my number.
+P|Mate, stop phoning me.
+P|Stop phoning me mate.
+P|Sorry, but stop phoning me.
+P|Ok, no more calls.
+P|Okay. No more calls.
+P|Stop phoning. No more calls.
+P|No more calls. Remove my number.
+P|Do not phone us.
+P|Don't phone us.
+P|Don't ring here.
+P|Don't contact this number.
+P|Never phone me again.
+P|Never ever phone us.
+P|Stop texting and calling me.
+P|I don't want you ringing me.
+P|I don't want you phoning me anymore.
+P|I don't want you calling here.
+P|I'd rather you didn't call again.
+P|I do not consent to these calls.
+P|I withdraw my consent.
+P|I don't consent to being called.
+P|Stop ringing my mobile.
+P|Stop ringing this house.
+P|Stop ringing the house.
+P|Stop phoning my landline.
+P|Never ring this house again.
+P|Remove my number for good.
+P|Stop phoning me for good.
+P|Stop ringing once and for all.
+P|Stop phoning, for the love of god.
+P|Stop phoning me, please and thank you.
+P|Stop. Phoning. Me.
+P|STOP PHONING ME.
+P|stop phoning me
+P|Stop phoning me!!!
+P|Stop phoning me…
+P|Stop phoning me...
+P|Stop phoning me — thanks.
+P|Stop phoning me - thanks.
+P|Remove my number: thanks.
+P|Put me on your D.N.C. list.
+P|Put me on your DNC list.
+P|Please put us on your do-not-call list.
+P|Put us on the do-not-call register.
+P|Remove my number now please.
+P|Remove my number right now.
+P|Stop contacting me right now.
+P|Delete this number right now.
+P|Kindly remove my number.
+P|Kindly stop phoning.
+P|Please do the needful and remove my number.
+P|Stop disturbing me.
+P|Don't disturb me again.
+P|Stop phoning me. I'm not interested. Goodbye.
+P|Remove this number. Thank you. Bye-bye.
+P|Not interested, stop phoning.
+P|Look, just stop phoning me.
+P|I've told you before, stop phoning.
+P|Please, please stop ringing.
+P|Stop phoning me. Stop phoning me.
+P|For the last time, quit phoning.
+Q|Can you stop phoning me?
+Q|Could you stop ringing?
+Q|Would you stop contacting me?
+Q|Will you remove my number?
+Q|Can you take us off your list?
+Q|Could you remove my number please?
+Q|Can you take this number off your system?
+Q|Will you stop phoning?
+Q|Stop phoning me, okay?
+Q|Remove my number, alright?
+Q|No more calls, yeah?
+Q|Stop ringing, yeah?
+Q|Stop ringing, alright?
+X|Stop phoning me, I'm at work.
+X|Stop ringing, he died last year.
+X|Stop ringing. He passed away in March.
+X|Please remove my number, I've had three calls today.
+X|Don't ring here again, my mum has dementia and it confuses her.
+X|I don't want any more calls, I'm registered with the TPS.
+X|Take us off your list, we're not the homeowners.
+X|This is a business line. Stop phoning it.
+X|Stop contacting me. I've reported you to the ICO.
+X|Why do you keep ringing me? Stop it.
+X|How did you get this number? Remove it.
+X|Stop phoning me. Who gave you my number?
+X|I'm on the do not call register, stop phoning.
+X|Remove my number, I'm not interested in solar panels.
+X|Quit ringing, I've told you three times.
+X|You lot need to stop phoning me every day.
+X|Every week you ring. Stop it.
+X|Stop ringing my mum, she's ninety.
+X|Remove this number, it belongs to my late husband.
+X|I don't want these calls. Please stop.
+X|No more calls. I'm not buying anything.
+X|I'm not interested and I don't want any more calls.
+X|Look, I'm busy, stop ringing.
+X|I don't want to talk to a robot. Stop phoning me.
+X|Please remove my number from all your lists.
+X|Remove my number from every list you have.
+X|Take this number off all your lists.
+X|Stop phoning. I'll ring you if I need you.
+X|No more calls, I'll email if I'm interested.
+X|Stop contacting me, I've already switched supplier.
+X|Stop ringing, I've already got a boiler.
+X|Stop phoning, we've moved.
+X|Remove my number, we've sold the house.
+X|Don't ring here again, he doesn't live here anymore.
+X|Wrong number. Stop phoning.
+X|You've got the wrong person. Remove this number.
+X|I'm not him. Stop ringing.
+X|Stop phoning me at all hours.
+X|I'm seventy-eight and I don't want these calls.
+X|Stop phoning me please, it's harassment.

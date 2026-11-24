@@ -1,0 +1,290 @@
+# Fresh requests to stop being called (round-2 reviewer, 24 Nov 2026). Every row is a person asking not to be
+# called again. Not tuned on.
+# --- plain, polite
+Please don't ring this number again.
+Could you take this number off your list please?
+I'd rather you didn't call again, thank you.
+Kindly remove my number from your database.
+Please can you stop phoning me.
+I'd appreciate it if you didn't phone again.
+I would like my number removed from your calling list please.
+Please make a note not to call this number again.
+Can you make sure I'm not called again?
+Could you please stop contacting me.
+Please put me on your do not call list.
+Please add me to your do not call list.
+Add my number to your no call list please.
+I'd like to be added to your do not call list.
+Please mark me as do not call.
+Can you flag my number as do not call?
+Please could you not phone this number again.
+I'd prefer not to receive any further calls.
+I don't wish to receive any further calls from you.
+I do not wish to be contacted again.
+Please cease all calls to this number.
+I'm asking you to cease contact.
+Please stop all contact with me.
+I'd like to opt out of all future calls.
+Please unsubscribe this number.
+Can I be removed from your calling list?
+Could you remove this number from your records please.
+I want my number taken off your system.
+Please erase my number.
+Please don't phone us again, thank you.
+Thank you, but please don't call again.
+No thank you, and please don't ring again.
+Not interested, please remove my number.
+I'm not interested, please take my number off your list.
+No thanks, and I'd like you to delete my number.
+# --- angry, blunt
+Stop ringing me!
+Quit phoning me!
+Stop bloody phoning me.
+Stop effing ringing me every day.
+Pack it in, stop phoning me.
+Stop pestering me with calls.
+Stop hassling me, don't ring again.
+Leave me alone and stop phoning.
+Leave me alone, never ring again.
+Don't you ever ring this number again.
+Never ever phone me again.
+Never contact this house again.
+Do not ring this number ever again.
+Stop it, stop phoning me, I've had enough.
+Enough is enough, stop phoning me.
+I've had it with you lot, don't ring again.
+For the last time, stop ringing me.
+How many times do I have to tell you, stop phoning me.
+What part of don't ring me do you not understand?
+I've told you a hundred times, take me off your list.
+I'm sick of these calls, take me off your list.
+I'm fed up with your calls, remove my number.
+This is the fifth time today, stop phoning me.
+You've rung me six times this week, stop it, remove my number.
+Stop wasting my time and stop phoning me.
+Get off my phone and stop ringing.
+Lose this number.
+Lose my number, mate.
+Bin my number.
+Scrub my number off your list.
+Wipe my number off your system.
+Do not call me ever again.
+Never call here again.
+Don't ever phone here again.
+I never want you phoning me again.
+I never want to be called by you again.
+Don't call, don't text, don't email, just leave me alone.
+Never phone me again or I'll report you.
+# --- profanity
+Stop fucking phoning me.
+Stop fucking ringing me you idiots.
+Fuck off and stop ringing me.
+Piss off and don't ring again.
+Bugger off and lose my number.
+Sod off, take me off your list.
+Stop bloody ringing me you muppets.
+Will you fucking stop phoning me.
+Don't fucking ring here again.
+Get fucked and take my number off your list.
+For fuck's sake stop phoning me.
+Christ alive, stop phoning me.
+Stop phoning me for fuck's sake.
+Stop f***ing ringing me.
+Stop effing phoning this number.
+Jesus Christ, don't ring me again.
+Fuck sake, remove my number.
+# --- British
+Stop ringing me, it's doing my head in.
+Stop phoning me, you're doing my head in.
+Please take me off your books, I don't want calls.
+Ta, but take me off your list please.
+Can you not ring me again, love, I'm not interested.
+Don't ring again, there's a good lad.
+Stop mithering me, don't ring again.
+Stop phoning, I'm not interested, cheers.
+Take us off your list, we're not interested.
+Please remove us from your list, we're registered with the TPS.
+I'm on the TPS, stop phoning me.
+I'm registered with the Telephone Preference Service, remove my number.
+You're breaking the law, I'm on the TPS, take my number off.
+Right, that's it, take me off your list.
+Do us a favour and lose my number.
+Do me a favour, stop ringing.
+Please stop phoning, my mum is ninety and it frightens her.
+Stop phoning my mum, she's got dementia, take this number off.
+This is my late husband's number, please stop phoning.
+He passed away, please stop calling this number.
+# --- American
+Stop calling me, I'm on the national do not call registry.
+I'm on the do not call registry, stop calling.
+Put me on your do not call list, I'm serious.
+Take me off your call list, please.
+Remove me from your call list.
+Quit calling my cell.
+Stop calling my cell phone.
+Don't call my cell again.
+Quit calling here.
+Y'all need to stop calling me.
+You guys need to stop calling here.
+Lose my number, buddy.
+Don't call this number again, it's a cell phone.
+I need you to stop calling me.
+I need you to take me off your list.
+I need y'all to quit calling me.
+Please quit calling.
+I want you to quit calling me.
+Can y'all quit calling?
+Stop calling, I'm reporting you to the FCC.
+# --- Scottish / Irish
+Stop phoning me, I'm no interested.
+Stop phoning, I'm no wanting any calls.
+Will ye stop phoning me.
+Would yous stop ringing me.
+Yous need to stop ringing this number.
+Stop ringing, I'm not wanting it.
+Ah would you ever stop ringing me.
+Would you ever stop phoning me, I'm sick of it.
+Stop ringing me will ye.
+Don't be ringing me again.
+Don't be phoning here again.
+Quit phoning, I'm no wanting tae hear.
+Will yous stop phoning this house.
+Away and stop phoning me.
+Don't phone this house again.
+I don't want ye phoning me again.
+# --- run-on, as a recogniser writes it
+yeah no stop phoning me please
+no no no stop ringing me
+look just stop phoning me ok
+i dont want any more calls from you thanks
+dont ring this number again thanks bye
+please remove my number from your list thanks
+just take my number off your list please
+yeah can you just stop ringing me
+um yeah no i dont want these calls anymore
+i said stop phoning me
+okay stop phoning me now
+hello yeah please stop ringing me bye
+i dont want calls anymore please
+no more calls please
+i want my number removed
+remove my number from your list
+take this number off your list
+please stop contacting me thanks
+i dont want to be called anymore
+dont want any calls thanks
+stop calling me i am not interested
+stop ringing me i dont want it
+can you stop calling me please
+why do you keep phoning me stop phoning me
+who is this stop phoning me
+what do you want stop ringing me
+erm hi yeah could you not phone me again
+is this a sales call please take me off your list
+i dont know who you are but stop phoning me
+right im busy stop ringing
+# --- with fillers
+Erm, yeah, I don't want any more calls, thanks.
+Uh, no, please don't phone me again.
+Um, can you, like, take my number off?
+Hmm, yeah, no, I'd like my number removed please.
+Er, sorry, but please stop ringing me.
+Look, no offence, but stop phoning me.
+Listen, mate, I don't want any more calls.
+Honestly, just stop phoning me.
+I mean, seriously, stop ringing me.
+Yeah, so, basically, I don't want calls from you anymore.
+Right, okay, so please just remove my number.
+# --- with a reason attached
+Please stop phoning, I work nights and you keep waking me up.
+Stop ringing me, I'm not the homeowner.
+Remove my number, I've already got solar panels.
+Take my number off, I'm a tenant, I can't make decisions.
+Stop phoning me, I've just had a bereavement.
+Please remove my number, I'm disabled and can't get to the phone quickly.
+Don't ring again, I've moved and I'm not interested.
+Stop phoning me, I've been ill and the calls are stressing me out.
+Remove me from your list, I've already switched supplier.
+Please stop calling, I'm too old for this.
+Stop phoning, I'm a carer and I haven't got time.
+Take my number off your list, I never gave you permission.
+Remove my number, I never consented to calls.
+Please delete my number, I didn't give it to you.
+Stop phoning me, I never signed up for anything.
+# --- with a threat attached
+Stop phoning me or I'll report you to Ofcom.
+Remove my number or I'm going to the ICO.
+Stop ringing me or I'm calling the police.
+Never call again or I'll take legal action.
+Stop phoning, this is harassment and I'm recording this call.
+Take me off your list or I'll get my solicitor involved.
+Stop phoning me or I'll come down to your office.
+Quit calling or I'll do something about it.
+Remove my number or I'll get the regulator involved.
+Stop phoning me, or I'll email your CEO.
+Stop ringing me or I'll ring Citizens Advice.
+Stop phoning or I'll post this on Facebook.
+Remove my number or I'll send this to the newspapers.
+Stop phoning me or I'll be in touch with the Information Commissioner.
+Stop phoning or I'll make a complaint.
+Stop phoning or I'll get Watchdog onto you.
+# --- in the middle of a longer utterance
+I've been getting these calls for weeks now and honestly I'm at the end of my tether, please just stop phoning me, I've got enough on.
+Look, I don't know how you got my number, but I want it removed, and I don't want any more calls.
+I appreciate you're just doing your job, but please take my number off your list, I'm not interested in any offers.
+My wife answered yesterday and told you we're not interested, so please stop ringing this number.
+We've had about ten calls from you this month, it has to stop, please remove our number.
+It's half eight in the evening, the kids are in bed, and you're ringing again, stop phoning us.
+I don't want to be rude, but I'm going to ask you not to call me again.
+I'm going to ask you once nicely, please don't ring this number again.
+I'm asking you nicely, stop ringing me.
+I'm asking you politely to remove my number.
+I'm telling you now, don't ring again.
+I'm telling you for the last time, remove my number.
+I've asked you before, please stop phoning me.
+I've asked before to be removed, please remove me this time.
+# --- continuation-guard probes: a request plus words the guard reads as another channel or a correction
+Take me off your list and send me nothing else.
+Remove my number, I'll be reporting this.
+Stop phoning me, use your brain.
+Never phone me again, I mean it.
+Remove my number. Instead of calling people you should get a real job.
+Remove my number and send me written confirmation.
+Delete my details and email me to confirm it's done.
+Remove my number please. Can you send me an email to confirm?
+Stop phoning me, go and bother someone else instead.
+Quit calling me and get a proper job instead.
+Remove my number, go pester someone else instead.
+Stop phoning me and knock it off.
+Stop phoning me, knock it off!
+Quit phoning me, you phone at eight in the morning every day.
+Remove my number, you lot ring on Sundays even.
+Never phone me again, you ring at all hours.
+Remove my details, email, post, everything.
+Delete my details, email, phone, the lot.
+Remove my number. Email too.
+Remove my number. Text messages too.
+Stop phoning me, I don't use the landline for this.
+Remove my number, I never use my landline anyway.
+Stop phoning me, I mean the whole lot of you.
+Remove my number, it's wrong to cold call pensioners.
+Quit calling me, that's wrong, it's nine at night.
+Stop phoning me and use the brains you were born with.
+Stop phoning me, I'll be in touch with my MP.
+Remove my number and send nothing else.
+Stop ringing me. Just stop. Send a letter if you must but stop ringing.
+I'll tell you once, stop phoning me.
+I'll say it again, remove my number.
+Stop phoning, I'll call you if I ever need you.
+Remove my number, I'll ring you if I'm interested.
+# --- rescue pass probes (request addressed to us inside reported speech)
+I've asked you to stop phoning me.
+I have asked you lot to stop ringing me twice now.
+I told you last week to stop phoning me.
+I asked your colleague to remove my number.
+I've told your colleague to take me off your list.
+My husband asked you to stop phoning us.
+I already asked you to stop phoning me, so stop.
+I keep asking you to stop ringing me.
+I'm begging you to stop phoning me.
+How many times have I asked you to stop ringing me?

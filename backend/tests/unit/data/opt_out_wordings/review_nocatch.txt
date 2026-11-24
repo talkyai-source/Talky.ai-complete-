@@ -1,0 +1,134 @@
+# Ordinary sentences (every line should NOT be caught). '#' lines are headings.
+# no more calls in statements and questions
+I got no more calls from them after I complained.
+There were no more calls after that.
+My phone can make no more calls until I top up.
+So once I pay, no more calls?
+Does that mean no more calls?
+After the update, no more calls were dropped.
+The scammers stopped, no more calls since June.
+We had no more calls about the leak.
+I'll have no more calls to make once this is done.
+Great, no more calls from the debt people then.
+So the system's fixed, no more calls going to voicemail?
+# data correction
+Remove my name, it's spelt wrong.
+Remove my details, they're out of date.
+Delete my details and put the new ones in.
+My old number's wrong, delete my number and use this one.
+Can you remove me? I mean from the email thread.
+Remove my old address please.
+Delete my email address, I don't use it.
+Can you remove my name from the joint account?
+Remove my info from the old booking please.
+Remove my number from the website listing, use the email.
+Please delete my data from the old account, but keep the new one.
+Erase my name from the waitlist, I already got a table.
+Wipe my details from the old order.
+That's my old mobile, remove my number, the new one is 07700 900123.
+Remove my name. Put my wife's name on it instead.
+Delete my information, it's all wrong, I'll give you the new details.
+# want / need ... removed
+I need my name removed from the account.
+I want my number removed from my profile, use email instead.
+I want to be removed from the mailing list but you can still call me.
+I'd like to be taken off the email list.
+Can I be removed from the newsletter?
+Can I be taken off the group chat?
+I need my name taken off the lease.
+I want my details removed from the old policy.
+I want to be removed from the joint account.
+Can we be removed from the shared calendar?
+I want my number removed from the emergency contacts, my brother's number is better.
+# don't want ... calls / you / to be called / to hear from
+I don't want your calls going to my work phone, use my mobile.
+I don't want these calls recorded.
+I don't want your calls recorded.
+I don't want more calls than necessary, one a week is fine.
+I don't want you calling me on my mobile, use the landline.
+I don't want you to call me on Sunday.
+I don't want to be called Mr, call me Dave.
+I don't want to be called at work.
+I don't want to be called by my first name.
+I don't want to hear from you, put your manager on.
+I don't want to hear from your sales team, I want support.
+I don't want you to call me back, just email me.
+I don't want anyone calling me after six.
+I don't want these calls to go to my voicemail.
+I don't want you to call my wife, call me.
+# stop / don't + verb
+Don't call me sweetheart.
+Don't call me that.
+Stop calling me mate.
+Stop calling it a discount.
+Stop texting me the codes, I've got them.
+Can you stop texting me reminders, just call instead.
+Stop messaging me on WhatsApp, call me instead.
+Don't call my mobile, call the landline.
+Don't call my work number, call my mobile.
+Don't ring. Just knock.
+Don't call, just text me when you're outside.
+No, don't call, email me.
+Don't phone, email me instead.
+Don't contact the landlord, contact me.
+You never call me back.
+They never call us back.
+Don't ring the bell, the baby's asleep.
+Don't call before ten, I work nights.
+Don't call me at the office.
+Don't call me on Saturdays.
+Don't call me during work hours.
+Don't call me this early.
+Don't call me so late.
+Don't call me after six.
+Don't text, ring me.
+# take / get off
+Take me off hold please.
+Take me off speaker.
+Get me off this call, I need to talk to a human.
+Take my name off the booking.
+Take my details off the old account.
+Take my card off the account.
+Take this off my bill.
+# opt out
+I want to opt out of the recording.
+Can I opt out of being recorded?
+I'd like to opt out of the marketing emails.
+Opt out of the call recording please.
+# questions about the list
+How do I get on the do not call list?
+# answering the agent's question
+No, don't call back later, email me.
+No, don't ring tomorrow, ring Friday.
+No, don't call next week, I'm away.
+No, don't text, email it.
+No, no more calls today, I'm in meetings.
+No need, don't ring back, I'll sort it online.
+No, don't call my mobile, call the house phone.
+No, don't call me now, I'm driving, call me in an hour.
+No, don't phone, just send the form.
+No, don't call, I'll pop into the branch.
+# habits of other people
+My kids don't call me anymore.
+My son never calls me.
+I quit calling them after a while.
+I'll remove this number from my contacts.
+I stopped calling them years ago.
+The bank stopped calling me after I paid.
+My ex won't stop calling me.
+I asked my bank to stop calling me.
+I told the gas company to stop calling me.
+My neighbour keeps calling, I wish he'd stop calling me.
+# sales, support and scheduling
+I need you to remove the charge from my account.
+Can you remove me as the account holder?
+Delete my account.
+Delete my card details.
+Remove me as a contact on my mum's account.
+Can you take me off the direct debit?
+Get me off the night shift rota.
+Remove my son from the policy.
+No more paper statements please.
+No more letters, email is fine.
+I don't want any more letters.
+I don't want any more emails, but calls are fine.
