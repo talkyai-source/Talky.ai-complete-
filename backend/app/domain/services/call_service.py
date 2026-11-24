@@ -1374,6 +1374,17 @@ class CallService:
                         retry_job_data["agent_name"] = name
             except Exception as exc:  # identity is cosmetic; never block the retry
                 logger.warning("retry opening-mode lookup failed call=%s: %s", call_id, exc)
+        # A contact whose number was corrected while this call was live: the
+        # retry carries the saved number, never the job row's old copy.
+        if lead_id:
+            from app.domain.services.dialer.contact_number_drift import (
+                carry_contact_number_into_retry,
+            )
+
+            await carry_contact_number_into_retry(
+                conn, retry_job_data,
+                tenant_id=scope_tenant_id, job_id=job_id, lead_id=lead_id,
+            )
         return False, (
             job_id, retry_job_data, outcome, campaign_id, lead_id,
             str(tenant_id), attempt_number, decision.delay_seconds,

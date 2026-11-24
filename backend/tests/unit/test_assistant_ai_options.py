@@ -57,6 +57,9 @@ class _FakeQuery:
     def neq(self, field, value):
         return self
 
+    def in_(self, field, values):
+        return self
+
     def order(self, *args, **kwargs):
         return self
 
@@ -180,7 +183,11 @@ async def test_manage_lead_remove_soft_delete_preview():
 
 @pytest.mark.asyncio
 async def test_manage_lead_remove_soft_delete_confirm():
-    """confirm=True for remove must call update with status='deleted', NOT hard delete."""
+    """confirm=True for remove must call update with status='deleted', NOT hard delete.
+
+    Since 24 November 2026 a remove also cancels the contact's queued calls, as the
+    website's remove does, so the soft-delete is no longer the only write.
+    """
     db = _campaign_db()
     db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
     db.configure_response("leads", "update", data=[{"id": "lead-1"}])
@@ -198,9 +205,14 @@ async def test_manage_lead_remove_soft_delete_confirm():
 
     # Must use update (soft-delete), never hard delete
     assert db._delete_calls == [], "Hard delete was called — should be soft delete"
-    assert len(db._update_calls) == 1
+    lead_writes = [c for c in db._update_calls if c["table"] == "leads"]
+    job_writes = [c for c in db._update_calls if c["table"] == "dialer_jobs"]
+    assert len(lead_writes) == 1 and len(job_writes) == 1
+    assert len(db._update_calls) == 2
+    assert job_writes[0]["payload"]["status"] == "cancelled"
+    assert ("tenant_id", "t1") in job_writes[0]["eq"] and ("lead_id", "lead-1") in job_writes[0]["eq"]
 
-    update_call = db._update_calls[0]
+    update_call = lead_writes[0]
     assert update_call["table"] == "leads"
     assert update_call["payload"] == {"status": "deleted"}, (
         f"Expected soft-delete payload {{status: deleted}}, got: {update_call['payload']}"
@@ -255,7 +267,12 @@ async def test_manage_lead_update_preview_no_write():
 
 @pytest.mark.asyncio
 async def test_manage_lead_update_confirm_applies_changed_fields():
-    """action=update, confirm=True → calls update once with only changed fields."""
+    """action=update, confirm=True → saves once, with only the changed fields.
+
+    Since 24 November 2026 a phone change also cancels the contact's not-yet-dialled
+    calls first (a queued call holds the OLD number), so the save is no longer the
+    only write: this asserts the save itself and that the cancel comes before it.
+    """
     db = _campaign_db()
     db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
     db.configure_response("leads", "update", data=[{"id": "lead-1"}])
@@ -272,9 +289,26 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     )
 
     assert result.get("applied") is True
-    assert len(db._update_calls) == 1
+    saves = [c for c in db._update_calls if c["table"] == "leads" and "phone_number" in c["payload"]]
+    assert len(saves) == 1
+    cancels = [c for c in db._update_calls if c["table"] == "dialer_jobs"]
+    assert len(cancels) == 1
+    assert cancels[0]["payload"]["status"] == "cancelled"
+    assert ("tenant_id", "t1") in cancels[0]["eq"] and ("lead_id", "lead-1") in cancels[0]["eq"]
+    assert db._update_calls.index(cancels[0]) < db._update_calls.index(saves[0])
+    # Nothing else is written: besides the save, the only `leads` writes are the
+    # status hand-backs, which come after it and are scoped to this tenant's lead.
+    lead_writes = [c for c in db._update_calls if c["table"] == "leads"]
+    hand_backs = [c for c in lead_writes if c is not saves[0]]
+    assert len(hand_backs) == 1  # nothing was cancelled here: only the invalid-number reset
+    assert all(c["payload"] == {"status": "pending"} for c in hand_backs)
+    assert all(
+        ("tenant_id", "t1") in c["eq"] and ("id", "lead-1") in c["eq"] for c in hand_backs
+    )
+    assert all(db._update_calls.index(c) > db._update_calls.index(saves[0]) for c in hand_backs)
+    assert len(db._update_calls) == len(cancels) + len(lead_writes)
 
-    payload = db._update_calls[0]["payload"]
+    payload = saves[0]["payload"]
     assert payload["phone_number"] == "+14155550101"
     assert payload["first_name"] == "Robert"
     # last_name and email not supplied → must NOT be in payload
@@ -282,7 +316,7 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     assert "email" not in payload
 
     # Tenant + lead ID scoping
-    eq_fields = {f: v for (f, v) in db._update_calls[0]["eq"]}
+    eq_fields = {f: v for (f, v) in saves[0]["eq"]}
     assert eq_fields.get("tenant_id") == "t1"
     assert eq_fields.get("id") == "lead-1"
 

@@ -113,3 +113,40 @@ def cancel_active_jobs_for_lead(
     if n:
         logger.info("job_lifecycle: cancelled %d active job(s) for lead %s (%s)", n, lead_id, reason)
     return n
+
+
+def cancel_not_originated_jobs_for_lead(
+    db_client,
+    lead_id: str,
+    *,
+    tenant_id: str,
+    last_error: str,
+) -> int:
+    """Cancel a lead's not-yet-originated jobs (a queued job carries its own phone number).
+
+    Used when the contact's number changes: in-flight (``processing``/``calling``)
+    jobs keep their ownership. Raises on a returned database error, so a caller
+    never reports success while the old number is still queued. ``tenant_id`` is
+    mandatory: the production role bypasses RLS.
+    """
+    if not tenant_id:
+        raise RuntimeError("job_lifecycle: tenant_id is required")
+    result = (
+        db_client.table("dialer_jobs")
+        .update({
+            "status": "cancelled",
+            "failure_reason": REASON_LEAD_REMOVED,
+            "last_error": last_error,
+        })
+        .eq("lead_id", str(lead_id))
+        .eq("tenant_id", str(tenant_id))
+        .in_("status", list(NOT_ORIGINATED_JOB_STATUSES))
+        .execute()
+    )
+    n = _rowcount(result)
+    if n:
+        logger.info(
+            "job_lifecycle: cancelled %d not-originated job(s) for lead %s (%s)",
+            n, lead_id, last_error,
+        )
+    return n

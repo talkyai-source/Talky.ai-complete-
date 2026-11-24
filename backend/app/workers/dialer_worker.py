@@ -613,6 +613,12 @@ class DialerWorker:
                 await self._skip_invalid_number(job)
                 return
 
+            # 0.46 Corrected-number gate: a payload queued before the contact's
+            # number was edited must not be dialled under the old number.
+            if await self._contact_number_changed(job):
+                await self._drop_stale_payload(job, "lead_number_changed")
+                return
+
             # 0.5 Minutes quota gate. Stop originating once the tenant has burned
             # its plan minutes for the month. Minute tracking was previously
             # display-only, so tenants could overrun the plan with no cap.
@@ -2422,6 +2428,18 @@ class DialerWorker:
             return "contact_permission_missing"
         return None
 
+    async def _contact_number_changed(self, job: DialerJob) -> bool:
+        """True when the contact's saved number differs from the job's.
+
+        A separate, tenant-scoped read (``_stale_payload_reason`` stays one
+        statement). Any doubt or read failure is False: dial as before.
+        """
+        from app.domain.services.dialer.contact_number_drift import (
+            contact_number_changed,
+        )
+
+        return await contact_number_changed(self._acquire_db, job)
+
     async def _drop_stale_payload(self, job: DialerJob, reason: str) -> None:
         """Terminal-skip a payload Postgres no longer wants dialled.
 
@@ -2436,6 +2454,9 @@ class DialerWorker:
         the attempt number is untouched; a lead left at 'called' by an earlier
         attempt goes back to 'pending' (no other status moves), and once a
         person confirms the list the contact gets a fresh job. The user is shown the reason (campaign block state).
+        ``lead_number_changed`` (the contact's number was corrected after the job
+        was queued) ends the job and releases the lead the same way, without a
+        campaign notice.
         """
         logger.warning(
             "dialer_stale_payload_dropped job=%s lead=%s campaign=%s reason=%s",
@@ -2444,15 +2465,21 @@ class DialerWorker:
         await self.queue_service.mark_skipped(job.job_id, reason=reason)
         if reason == "contact_permission_missing":
             await self._publish_block(job, reason)
-        if reason in ("lead_not_dialable", "contact_permission_missing"):
+        if reason in ("lead_not_dialable", "contact_permission_missing", "lead_number_changed"):
             try:
-                await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
+                # A dropped retry still carries the reason of the attempt before it
+                # (for example no_answer), and the Call Issues card reads that first:
+                # for a changed number, record the real reason there too.
+                await self._update_job_status(
+                    job, JobStatus.SKIPPED, error=reason,
+                    reason=reason if reason == "lead_number_changed" else None,
+                )
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "dialer_stale_payload_job_write_failed job=%s reason=%s err=%s",
                     job.job_id, reason, exc,
                 )
-        if reason == "contact_permission_missing":
+        if reason in ("contact_permission_missing", "lead_number_changed"):
             # A retry queued before the check was switched on leaves its contact at
             # 'called', which no Start, no count and no confirmation selects: it
             # would never be called again. Give it back to 'pending' (only that
@@ -3140,6 +3167,8 @@ class DialerWorker:
             # throttle, trunk not ready). The gates were applied when the hold
             # began, possibly minutes ago.
             stale_reason = await self._stale_payload_reason(job)
+            if stale_reason is None and await self._contact_number_changed(job):
+                stale_reason = "lead_number_changed"
             if stale_reason is not None:
                 # The contact was removed / flagged during the hold: terminalise
                 # the unclaimed intent and drop the payload, never dial.
