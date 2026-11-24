@@ -9106,7 +9106,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "2ce9e3af4cf37a2011360d2dc2ab8bb0e228dc7eb943262c62e6b1ee75a1e491",
+      "id": "3a5f88e2fe7d78687c932ad74a130838f305ae1bff9b10a5ccb519579ddbd259",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1333,
@@ -9272,7 +9272,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "e4352da32233669afff12471ea8058f08216c32da9ba254cc1fda7419be7cae3",
+      "id": "a3cb4af992d277f0c242cdc85124513ecaf56d28b51de7600eb43a5d5ccdedea",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 883,
@@ -9840,7 +9840,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "5d5af22aa88a3752d1d1aec0f4a441284cb29cbab8287e510cf958ec9a64ac91",
+      "id": "8bdf97a873a50251fa76a768de917a8c2843c7a5c364329c279e1d5503a05282",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1709,
@@ -10150,10 +10150,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "a6bdebefc087f46d29c508ad0c10b22c10d270055d122b39582667182de538a9",
+      "id": "f6193944e5762a30c6f64fc8f7d54d9cc106a6cc9eb05e50740b20efbc730730",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2459,
+      "line": 2463,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10321,7 +10321,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "d22b7b08d6746d3166f101b1ca328d7be0293695d8606a090d8e999705b8650a",
+      "id": "a6e49f72463f83f0a9a1c09896a8feda486a5e22d55eb1bec3ed96e215d35e3e",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1160,
@@ -10419,10 +10419,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "e7fbc856ec5fd71b566aa69c48455aa92cd57fdcb0306977c06add59042e7a59",
+      "id": "f78f0008f205132558b28451acfec421004b23942dcbfd8161310e3767bbdbe6",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2296,
+      "line": 2298,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
