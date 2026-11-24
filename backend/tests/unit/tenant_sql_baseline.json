@@ -319,7 +319,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "08942a6a97fc3fe994b0a549a437f3dcb1c8a90388342562312d5378406e10cd",
+      "id": "f535ebf0acf3f3cbd67ff4f74aebf8ae4fae55da4283c72d01438f7004f8db06",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
       "line": 612,
@@ -1032,7 +1032,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "15aaf97ecf88d73ace8d146d6c07c1fd4303def061e80fde8bafa49aec3dd898",
+      "id": "420a71370469a919783d49d1a0fd32e9da0c0a251f16c83434f45ca30480c5cf",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
       "line": 549,
@@ -2514,7 +2514,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4d94749b5c55e42949927bce539c7c0ec50b05a1dab38817674491da66c9f731",
+      "id": "d54d06c68f9e646780b12cc0c728c2a4e2ee9f35211f01e686dfe0ce49b46c18",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_insert",
       "line": 716,
@@ -3067,7 +3067,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "63e43c26b76aff972b627e1478b4b9449edc8dcd90f367116d7224d010e52c7e",
+      "id": "fc825f15e66889bcefa01288f70d00389d5684ab31001fe407f77eb0617f5100",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
       "line": 938,
@@ -4153,7 +4153,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8289f24da9a102e0884a590ae2cce596bb7910decd50e1b73451f9b22990e350",
+      "id": "898de508c7167f073c07395faa4b41e3d92ac79231c3e26bd7ee02723bb8a73a",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_async",
       "line": 262,
@@ -4263,7 +4263,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "87d9d512f72851be75e6778f9cdb0ae349e7b603c726411b63272a020c16cf6e",
+      "id": "50ef6f87e8148b6df561da7b6cacb3133c151527813cf4ca2ff85aa79805e76b",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_update",
       "line": 743,
@@ -4584,7 +4584,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "93c91caf014b1ae8efbdfa02af779627fc1919d3382f26ad8f2e2030643cbfbe",
+      "id": "38b8982e0952aec57b6b91bab82a07be6c2de2ddf41aef727853aba6578944a1",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
       "line": 681,
@@ -5063,7 +5063,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a3ced2865a0b13e3abac6b77875b3ec5b10d223dc8bb864194a1efb93908e846",
+      "id": "e361ebefe4e8632e4c221bb8808946e1a5bf1d578cd7b0c28acfe7135549b3b9",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
       "line": 940,
@@ -5266,7 +5266,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "aa54aedd38914f7fbf3a6f7bf3745ef708eedc8f27c1a3e3a2040fda84279830",
+      "id": "d34fedae9701164912ee5dc5c038d61a5a934f17d4eacb8202ec1e92b36d4743",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
       "line": 678,
@@ -5518,7 +5518,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b1d98fda2d5b03b7d0ce9b595b1a1122fe4388d5a8752cd1e38449949240ecec",
+      "id": "381d282d11cade8552142b94f5b63c7fac259c6fe70b7396c0a456fafe7af9c5",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._execute_async",
       "line": 868,
@@ -6248,7 +6248,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c8f427468caa9eff5ad9ee2ae83cd4cc33c8e01928f45268be9ed3d510ea29fa",
+      "id": "8a49b8a6d0623742b9f26d29de2e8c39a8e82f916cfd3f095663c9824beea8f5",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_upsert",
       "line": 787,
@@ -7103,7 +7103,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ebeeab29fe564fff5f1279ce2fd2fc745926d77b6efd893440d0eb14f72cb6a9",
+      "id": "a50cc71e39e0db89e054789f8aee8b0911cd790634d0a0a8e4881ba041bc8a09",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_campaign_counter",
       "line": 919,
@@ -7543,7 +7543,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f973b7c0c938b3c14292853fefe1b1a5392add84307df38bbca10cc88602fdd7",
+      "id": "d1ed13b1ed732e7b54544af13066e50bfec75394dab3712e7eab85608340e318",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_delete",
       "line": 800,
