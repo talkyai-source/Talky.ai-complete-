@@ -181,3 +181,39 @@ def test_t7_add_contact_fails_when_the_existing_row_lookup_failed():
     assert caught.value.detail == "Failed to add contact"
     assert len(db.tables["leads"]) == 1
     assert db.tables["leads"][0]["status"] == "deleted"
+
+
+# --- review of 24 November: the phone edit's two reads before its cancel -----------
+def _phone_edit_db_whose_leads_read_fails(nth):
+    seen = {"n": 0}
+
+    class _Q(_JobsQ):
+        def execute(self):
+            if self._table == "leads" and self._op == "select":
+                seen["n"] += 1
+                if seen["n"] == nth:
+                    return SimpleNamespace(data=None, count=0, error=MARKER)
+            return super().execute()
+
+    class _DBx(_JobsDB):
+        def table(self, name):
+            return _Q(self, name)
+
+    return _DBx()
+
+
+@pytest.mark.parametrize("nth, which", [(1, "the contact itself"), (2, "the duplicate check")])
+def test_a_phone_edit_fails_when_a_read_before_the_cancel_failed(nth, which):
+    # A failed read of the contact answered "not found"; a failed duplicate check let the
+    # edit go on, cancel the queued calls and then fail on the save.
+    db = _phone_edit_db_whose_leads_read_fails(nth)
+    before = {j["id"]: j["status"] for j in db.tables["dialer_jobs"]}
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(campaigns_ep.update_contact_in_campaign(
+            campaign_id="c1", contact_id="l1",
+            contact=ContactUpdate(phone_number="+14155550999"),
+            current_user=_w._User(), supabase=db))
+    assert caught.value.status_code == 500, which
+    assert caught.value.detail == "Failed to update contact"
+    assert db.tables["leads"][0]["phone_number"] == "+14155550124"
+    assert {j["id"]: j["status"] for j in db.tables["dialer_jobs"]} == before      # nothing cancelled

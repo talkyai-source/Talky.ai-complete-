@@ -1225,7 +1225,7 @@
       "id": "1d5ab2815c22adf520f8e4ce4e73f408efeb048d9172e1f096d48b08f019777d",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 949,
+      "line": 957,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1463,10 +1463,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b0baffef1d2dd8ea08b87a3931ec2b76670bbffc790a08e7758f185cddbf0c6f",
+      "id": "0812248ad0fc98ca4770670dde67516ea7f7dcc0e524036c73802fa4b9c3d6c1",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_campaign_counters_pooled",
-      "line": 1134,
+      "line": 1142,
       "method": "execute",
       "tables": [
         "campaigns"
@@ -1546,7 +1546,7 @@
       "id": "2bf1b11b64a94081c66d0219ef23b3cd6132f287c41670b479ef609fb687e36e",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._mark_retry_enqueued",
-      "line": 892,
+      "line": 900,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -1660,7 +1660,7 @@
       "id": "31ac452775c17ab9d48d7403188a959d2999b93a220081a0f0b7a1b740700fe9",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_job_completion_pooled",
-      "line": 1348,
+      "line": 1356,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -2501,7 +2501,7 @@
       "id": "4d4343a00aee017677b942dff0380f14f671175a0716ed26e740ef89f05e23d8",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_call_row_pooled",
-      "line": 966,
+      "line": 974,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -4330,7 +4330,7 @@
       "id": "89e4e442bd5ec0dacc64ccb79c8e6633e64dd7170d62d62b91659a310e38027b",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._active_caller_opt_out_pooled",
-      "line": 1045,
+      "line": 1053,
       "method": "fetchval",
       "tables": [
         "dnc_entries"
@@ -4780,7 +4780,7 @@
       "id": "9ba21c7910549b9e4ce262c3b509f554eddb275cb7f5de1413a9ce300e594116",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 556,
+      "line": 564,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -6343,7 +6343,7 @@
       "id": "cb71667fbab5e32bb9c82878417f97d0ab09d18c62e3492ec194cd08f093a628",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 621,
+      "line": 629,
       "method": "execute",
       "tables": [
         "calls"
@@ -7484,7 +7484,7 @@
       "id": "f7ef4cb0578e0b49273e327599ff47fd3fc8bae2d01b8db2beedd217cdb20409",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._handle_call_status_pooled",
-      "line": 810,
+      "line": 818,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -9106,7 +9106,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "3a5f88e2fe7d78687c932ad74a130838f305ae1bff9b10a5ccb519579ddbd259",
+      "id": "5a888efd861e359c0f4f9336fe0d82c3a0f6d31c32f92e621753dcaaec11cb5d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1333,
@@ -9272,7 +9272,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "a3cb4af992d277f0c242cdc85124513ecaf56d28b51de7600eb43a5d5ccdedea",
+      "id": "6e28cc4f0d7933f808c5f0181cb68e66f894b8ebabf84da7f4b7a7f5dd051862",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 883,
@@ -9840,7 +9840,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "8bdf97a873a50251fa76a768de917a8c2843c7a5c364329c279e1d5503a05282",
+      "id": "654b7112a635ac18bdaa5ef55b21ca745ac2f2d42de86c583b32b74941592f36",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1709,
@@ -10150,10 +10150,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "f6193944e5762a30c6f64fc8f7d54d9cc106a6cc9eb05e50740b20efbc730730",
+      "id": "4d8e95899f2fd9c62426438fa22293efcbcaf22de398027ea87db044fabe0864",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2463,
+      "line": 2467,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10321,7 +10321,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "a6e49f72463f83f0a9a1c09896a8feda486a5e22d55eb1bec3ed96e215d35e3e",
+      "id": "a4a7911836e5b965c564a06dcc4ff27200c8aa6c52cba4d0ce2cf2602878c4ce",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1160,
@@ -10419,7 +10419,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "f78f0008f205132558b28451acfec421004b23942dcbfd8161310e3767bbdbe6",
+      "id": "58c24d4b87d209e6f7210501a4aae6420ae7d5526884525de2b6e688bb4fec6d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 2298,

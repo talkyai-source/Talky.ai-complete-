@@ -2347,6 +2347,8 @@ async def update_contact_in_campaign(
             .eq("tenant_id", current_user.tenant_id)
             .execute()
         )
+        if getattr(existing, "error", None) is not None:
+            raise HTTPException(status_code=500, detail="Failed to update contact")
         if not existing.data:
             raise HTTPException(status_code=404, detail="Contact not found in this campaign")
         contact = contact.model_copy(update=_normalized_optional_numbers(contact, default_country))
@@ -2369,6 +2371,8 @@ async def update_contact_in_campaign(
                 .neq("id", contact_id)
                 .execute()
             )
+            if getattr(dupe, "error", None) is not None:
+                raise HTTPException(status_code=500, detail="Failed to update contact")
             if dupe.data:
                 raise HTTPException(
                     status_code=409,
