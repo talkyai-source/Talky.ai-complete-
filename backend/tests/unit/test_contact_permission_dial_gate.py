@@ -247,11 +247,17 @@ async def test_switch_on_single_list_dial_also_requires_a_confirmed_list(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_switch_on_an_unreadable_confirmation_lookup_fails_closed(monkeypatch):
+async def test_switch_on_an_unreadable_confirmation_lookup_at_start_is_a_retryable_error(monkeypatch):
+    # At Start a failed lookup is an error the customer can retry (503), not a
+    # mass hold-back that reads as "no permission". The dial-time check is separate.
+    from app.domain.services.campaign_service import CampaignError
+
     _gate_on(monkeypatch)
     db = _FakeDB(fail_tables={"contact_lists"})
     _seed(db)
-    assert await _pending_ids(db) == set()
+    with pytest.raises(CampaignError) as raised:
+        await _pending_ids(db)
+    assert raised.value.status_code == 503
 
 
 @pytest.mark.asyncio
