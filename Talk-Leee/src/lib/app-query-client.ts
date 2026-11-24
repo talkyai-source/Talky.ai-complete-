@@ -5,7 +5,7 @@ import { captureException } from "@/lib/monitoring";
 import { captureMutationNotificationOrigin, mutationNotificationOrigin } from "@/lib/notification-mutations";
 
 // 403 for a signed-in user who has not accepted the current terms: the re-acceptance dialog handles it.
-function isLegalAcceptanceRequired(error: unknown) {
+export function isLegalAcceptanceRequired(error: unknown) {
     return isApiClientError(error) && error.code === "legal_acceptance_required";
 }
 

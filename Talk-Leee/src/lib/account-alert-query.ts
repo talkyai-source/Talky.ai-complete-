@@ -9,13 +9,16 @@
  * answer stops the poll instead of repeating its toast every interval.
  */
 import { useQuery } from "@tanstack/react-query";
+import { isLegalAcceptanceRequired } from "@/lib/app-query-client";
 import { isApiClientError } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
 
 export const ALERT_POLL_MS = 10_000;
 
+// A refused read stops the poll: "forbidden", or the terms dialog is up (legal_acceptance_required;
+// the page is loaded again after acceptance).
 function forbidden(error: unknown): boolean {
-    return isApiClientError(error) && error.code === "forbidden";
+    return (isApiClientError(error) && error.code === "forbidden") || isLegalAcceptanceRequired(error);
 }
 
 export function useAccountAlertQuery<T>(
@@ -43,6 +46,6 @@ export function useAccountAlertQuery<T>(
         refetchOnWindowFocus: (query) => !forbidden(query.state.error),
         refetchOnReconnect: true,
         staleTime: 5_000,
-        retry: (failureCount, error) => error.name !== "AbortError" && failureCount < 1,
+        retry: (failureCount, error) => error.name !== "AbortError" && !forbidden(error) && failureCount < 1,
     });
 }
