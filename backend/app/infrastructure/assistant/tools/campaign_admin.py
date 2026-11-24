@@ -760,6 +760,7 @@ async def manage_lead(
                 .eq("id", lead_id)
                 .eq("tenant_id", tenant_id)
                 .eq("campaign_id", campaign_id)
+                .neq("status", "deleted")
                 .execute()
             )
             if getattr(resp, "error", None) is not None:
@@ -829,6 +830,7 @@ async def manage_lead(
             .eq("id", lead_id)
             .eq("tenant_id", tenant_id)
             .eq("campaign_id", campaign_id)
+            .neq("status", "deleted")
             .execute()
         )
         if getattr(resp, "error", None) is not None:
