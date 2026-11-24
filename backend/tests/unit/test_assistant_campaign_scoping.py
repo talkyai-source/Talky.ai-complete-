@@ -347,3 +347,44 @@ async def test_start_with_the_check_off_answers_exactly_as_before(monkeypatch):
         "campaign_id": CAMPAIGN_A,
         "jobs_enqueued": 5,
     }
+
+
+# --- start_campaign: the question does not promise calls the check will hold back ---
+
+def _expected_preview(message):
+    return {
+        "success": True, "status": "preview", "confirmation_allowed": False,
+        "message": message,
+        "preview": True,
+        "changes": [
+            {"field": "Campaign", "before": None, "after": "Roofing Leads"},
+            {"field": "Status", "before": "draft", "after": "running"},
+        ],
+        "_apply_args": {"campaign_id": CAMPAIGN_A},
+    }
+
+
+@pytest.mark.asyncio
+async def test_start_preview_with_the_check_on_does_not_promise_every_contact(monkeypatch):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    monkeypatch.setenv("CONTACT_PERMISSION_DIAL_GATE", "on")
+    _fake_start_service(monkeypatch, enqueued=0, withheld=0)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A)
+
+    assert result == _expected_preview(
+        "Start campaign 'Roofing Leads'? It will begin calling its contacts whose list has a "
+        "recorded permission to call; the others are held back until permission is confirmed.")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["off", "warn"])
+async def test_start_preview_with_the_check_off_or_warn_is_exactly_as_before(monkeypatch, mode):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+
+    monkeypatch.setenv("CONTACT_PERMISSION_DIAL_GATE", mode)
+    _fake_start_service(monkeypatch, enqueued=0, withheld=0)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A)
+
+    assert result == _expected_preview(
+        "Start campaign 'Roofing Leads'? It will begin calling its contacts.")
