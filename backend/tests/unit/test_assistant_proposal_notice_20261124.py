@@ -58,3 +58,44 @@ def test_notice_survives_saved_receipt_merge(monkeypatch):
 def test_provider_accepted_note_keeps_its_sentence_and_appends_notice():
     outcome = {"applied": True, "receipt": {"provider_status": "accepted"}, "notice": NOTICE}
     assert proposal_outcome_note(outcome) == f"The provider accepted the request. Delivery is not confirmed. {NOTICE}"
+
+
+# ---- the real start tool through the real channel (both halves together) ----
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enqueued, withheld, selected, starts_with", [
+    (0, 3, 0, "No contact was queued. 3 contacts were not queued"),   # every contact held back
+    (2, 1, 2, "1 contact was not queued"),                            # some held back
+])
+async def test_a_start_with_held_back_contacts_reaches_the_customer(
+        monkeypatch, enqueued, withheld, selected, starts_with):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+    from tests.unit.test_assistant_campaign_scoping import (
+        CAMPAIGN_A, TENANT, _fake_start_service, _start_tool_client,
+    )
+
+    _fake_start_service(monkeypatch, enqueued=enqueued, withheld=withheld, selected=selected)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+    outcome = proposal_apply_result("p1", PROPOSAL, result)
+
+    assert outcome["applied"] is True and outcome["error"] is None
+    assert outcome["notice"].startswith(starts_with)
+    assert proposal_outcome_note(outcome) == "Applied the proposed changes. " + outcome["notice"]
+
+
+@pytest.mark.asyncio
+async def test_a_start_with_the_check_off_carries_no_notice(monkeypatch):
+    from app.infrastructure.assistant.tools.campaigns import start_campaign
+    from tests.unit.test_assistant_campaign_scoping import (
+        CAMPAIGN_A, TENANT, _fake_start_service, _start_tool_client,
+    )
+
+    _fake_start_service(monkeypatch, enqueued=5, withheld=0)
+    result = await start_campaign(TENANT, _start_tool_client(), CAMPAIGN_A, confirm=True)
+    outcome = proposal_apply_result("p1", PROPOSAL, result)
+
+    assert outcome["applied"] is True and "notice" not in outcome
+    assert proposal_outcome_note(outcome) == "Applied the proposed changes."
