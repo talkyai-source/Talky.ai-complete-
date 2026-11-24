@@ -7,7 +7,12 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
-from app.services.connector_resolver import reviewed_authorization_label
+from app.services.connector_resolver import (
+    ConnectorLookupError,
+    ReviewedConnectorChanged,
+    reviewed_authorization_label,
+)
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +119,9 @@ async def check_availability(
     except CalendarNotConnectedError as e:
         return {"success": False, "error": e.message, "calendar_required": True}
     except Exception as e:
-        logger.error(f"Error checking availability: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "Could not check calendar availability for that date and timezone.",
+            tool="check_availability", public=(ValueError, ConnectorLookupError))}
 
 
 async def book_meeting(
@@ -180,8 +186,9 @@ async def book_meeting(
     except CalendarNotConnectedError as e:
         return {"success": False, "error": e.message, "calendar_required": True}
     except Exception as e:
-        logger.error(f"Error booking meeting: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The meeting was not booked.", tool="book_meeting",
+            public=(ValueError, ReviewedConnectorChanged, ConnectorLookupError))}
 
 
 async def update_meeting_tool(
@@ -235,8 +242,9 @@ async def update_meeting_tool(
     except CalendarNotConnectedError as e:
         return {"success": False, "error": e.message, "calendar_required": True}
     except Exception as e:
-        logger.error(f"Error updating meeting: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The meeting was not changed.", tool="update_meeting",
+            public=(ValueError, ReviewedConnectorChanged, ConnectorLookupError))}
 
 
 async def cancel_meeting_tool(
@@ -253,7 +261,7 @@ async def cancel_meeting_tool(
     Cancel a scheduled meeting.
     """
     try:
-        from app.services.meeting_service import get_meeting_service
+        from app.services.meeting_service import get_meeting_service, CalendarNotConnectedError
 
         service = get_meeting_service(db_client)
         current = _meeting(tenant_id, db_client, meeting_id)
@@ -278,5 +286,6 @@ async def cancel_meeting_tool(
         return result
 
     except Exception as e:
-        logger.error(f"Error cancelling meeting: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The meeting was not cancelled.", tool="cancel_meeting",
+            public=(ValueError, ReviewedConnectorChanged, ConnectorLookupError, CalendarNotConnectedError))}

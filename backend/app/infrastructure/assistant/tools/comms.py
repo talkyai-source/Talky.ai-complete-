@@ -8,7 +8,8 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
-from app.services.connector_resolver import reviewed_authorization_label
+from app.services.connector_resolver import ConnectorLookupError, reviewed_authorization_label
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +309,12 @@ async def send_email(
                 "error": "No tenant email provider connected. Connect Gmail from Settings > Integrations."}
 
     except Exception as e:
-        logger.error(f"Error sending email: {e}")
+        from app.domain.services.email_template_manager import EmailContentValidationError
+        from app.services.email_service import EmailNotConnectedError
         return {"success": False, "status": "unknown" if confirm else "failed",
-                "confirmation_allowed": False, "error": str(e)}
+                "confirmation_allowed": False, "error": tool_error_text(
+                    e, "The email request could not be completed.", tool="send_email",
+                    public=(EmailNotConnectedError, ConnectorLookupError, EmailContentValidationError))}
 
 
 async def _sms_suppression(db_client: Any, tenant_id: str, number: str) -> str:

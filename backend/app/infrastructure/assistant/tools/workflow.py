@@ -6,6 +6,7 @@ import logging
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +110,8 @@ async def schedule_reminder(
         )
 
     except Exception as e:
-        logger.error(f"Error scheduling reminder: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The reminder was not scheduled.", tool="schedule_reminder", public=(ValueError,))}
 
 
 async def execute_action_plan(
@@ -195,11 +196,15 @@ async def execute_action_plan(
         }
 
     except ValueError as e:
-        logger.warning(f"Action plan validation error: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(
+            e, "The action plan's steps are not valid. Check each step's details.",
+            tool="execute_action_plan", public=(ValueError,))}
     except Exception as e:
-        logger.error(f"Error executing action plan: {e}")
-        return {"success": False, "error": str(e)}
+        from app.services.assistant_agent_service import ActionPlanNotSavedError
+
+        return {"success": False, "error": tool_error_text(
+            e, "The action plan could not be completed. Check its status before running it again.",
+            tool="execute_action_plan", public=(ActionPlanNotSavedError,))}
 
 
 async def _preview_plan(tenant_id, db_client, intent, actions, context, conversation_id, actor):

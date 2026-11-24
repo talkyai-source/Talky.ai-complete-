@@ -246,7 +246,7 @@ async def schedule_reminder(
 
     except Exception as e:
         logger.error(f"Error scheduling reminder: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": "The reminder could not be confirmed."}
 
 
 async def execute_action(
