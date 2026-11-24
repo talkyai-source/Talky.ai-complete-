@@ -111,7 +111,12 @@ async def change_password(
             # re-check the session before anything is written, and refuse if the
             # password changed since the typed one was verified.
             locked = await lock_authenticated_credential_change(conn, request, current_user)
-            if locked["password_hash"] != row["password_hash"]:
+            # A different stored hash is not always a different password: a
+            # sign-in elsewhere may have re-hashed the same one. Refuse only
+            # when the typed password no longer matches what is stored now.
+            if locked["password_hash"] != row["password_hash"] and not verify_password(
+                old_password, locked["password_hash"]
+            ):
                 raise HTTPException(401, "Credentials changed. Please sign in again.")
 
             await conn.execute(

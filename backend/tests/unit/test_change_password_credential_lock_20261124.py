@@ -95,7 +95,8 @@ def conn(monkeypatch):
         return {"password_hash": "h"}
 
     monkeypatch.setattr(password_ep, "acquire_with_tenant", factory)
-    monkeypatch.setattr(password_ep, "verify_password", lambda *a: True)
+    # the typed password matches the stored hash "h" and its re-hash, nothing else
+    monkeypatch.setattr(password_ep, "verify_password", lambda typed, stored: stored in ("h", "h-rehashed"))
     monkeypatch.setattr(password_ep, "hash_password", lambda p: "new-hash")
     monkeypatch.setattr(password_ep, "lock_authenticated_credential_change", lock, raising=False)
     audit.log.reset_mock()
@@ -132,6 +133,16 @@ async def test_a_changed_hash_under_the_lock_refuses_and_writes_nothing(conn, mo
     assert "update_password" not in conn.events
     assert "revoke_session" not in conn.events and "revoke_refresh" not in conn.events
     audit.log.assert_not_called()
+
+
+async def test_a_rehash_of_the_same_password_under_the_lock_is_not_a_refusal(conn, monkeypatch):
+    # A sign-in elsewhere upgraded the stored hash of the SAME password between the read and
+    # the lock. The typed password still matches what is stored now, so the change goes through.
+    set_lock(monkeypatch, conn, returns={"password_hash": "h-rehashed"})
+    await change()
+    assert conn.events.count("lock") == 1
+    assert conn.events.count("update_password") == 1
+    assert conn.events.index("lock") < conn.events.index("update_password")
 
 
 async def test_an_ended_session_under_the_lock_is_401_and_writes_nothing(conn, monkeypatch):

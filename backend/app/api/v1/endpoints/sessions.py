@@ -272,8 +272,8 @@ async def revoke_specific_session(
     """
     # Session ids are UUIDs: any other address is an unknown session, and must
     # not reach the database (which would raise and answer 500). A valid id is
-    # passed on in its canonical spelling, the one form the database always
-    # accepts (braces or a urn prefix parse here but not there).
+    # passed on in its canonical spelling, the one form the database driver
+    # always accepts (braces or a urn prefix parse here but are refused there).
     try:
         session_id = str(UUID(session_id))
     except (ValueError, AttributeError, TypeError):
