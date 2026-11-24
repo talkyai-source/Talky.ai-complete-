@@ -415,3 +415,56 @@ async def test_a_stale_payload_reason_is_decided_before_the_number_read():
 
     w._contact_number_changed.assert_not_awaited()
     assert w.queue_service.mark_skipped.call_args.kwargs["reason"] == "lead_not_dialable"
+
+
+# ═══ 10. from the review: a guess never drops, and only strict E.164 is written ═══
+
+IN_MOBILE = _example("IN", phonenumbers.PhoneNumberType.MOBILE)
+IN_NATIONAL = _national_digits(IN_MOBILE).lstrip("0")
+# The trap this guards: without a country code the key function reads the digits
+# as a US number, so the two keys are both valid and DIFFERENT for one subscriber.
+assert normalize_suppression_key(IN_MOBILE) == IN_MOBILE
+assert normalize_suppression_key(IN_NATIONAL) not in ("", IN_MOBILE)
+
+
+def test_a_contact_number_without_a_country_code_is_cannot_tell():
+    from app.domain.services.dialer.contact_number_drift import number_changed
+
+    assert number_changed(IN_MOBILE, IN_NATIONAL) is None
+    assert number_changed(IN_MOBILE, " " + IN_MOBILE) is False
+    assert number_changed(OLD, NEW) is True
+
+
+@pytest.mark.asyncio
+async def test_a_contact_number_without_a_country_code_never_drops_the_job(caplog):
+    caplog.set_level(logging.DEBUG, logger=DRIFT_LOGGER)
+    w = _worker()
+    _conn_pool(w, fetchrow={"phone_number": IN_NATIONAL})
+
+    await w.process_job(_job_with(IN_MOBILE))
+
+    assert _dialled_number(w) == IN_MOBILE
+    w.queue_service.mark_skipped.assert_not_awaited()
+    lines = _number_lines(caplog)
+    assert len(lines) == 1 and lines[0].startswith("dialer_contact_number_unknown")
+
+
+@pytest.mark.asyncio
+async def test_a_contact_number_that_is_not_strict_is_never_written_onto_the_retry(monkeypatch, caplog):
+    """It would be skipped as invalid with its contact left at 'called'. The retry
+    keeps its copy; the dial gate then drops it and hands the contact back."""
+    caplog.set_level(logging.DEBUG, logger=DRIFT_LOGGER)
+    spaced = _international(NEW)
+    assert spaced != NEW and normalize_suppression_key(spaced) == NEW
+
+    conn = _RetryConn(contact={"phone_number": spaced})
+    _, retry_args = await _settle(monkeypatch, conn)
+    assert conn.repoints == []
+    assert retry_args[1]["phone_number"] == OLD
+    assert any(r.getMessage().startswith("dialer_retry_number_not_moved") for r in caplog.records)
+
+    w = _worker()
+    _conn_pool(w, fetchrow={"phone_number": spaced})
+    await w.process_job(_job_with(OLD))
+    w._make_call.assert_not_awaited()
+    assert w.queue_service.mark_skipped.call_args.kwargs["reason"] == "lead_number_changed"

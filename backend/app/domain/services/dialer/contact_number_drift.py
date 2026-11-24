@@ -39,6 +39,10 @@ def number_changed(job_number, contact_number) -> Optional[bool]:
         return False
     if not job or not contact or not is_strict_e164(job):
         return None
+    if not contact.lstrip().startswith("+"):
+        # No country code on the contact's side: the key function would read it as
+        # a US number. That is a guess, and a guess never drops a call.
+        return None
     job_key = normalize_suppression_key(job)
     contact_key = normalize_suppression_key(contact)
     if not job_key or not contact_key:
@@ -99,7 +103,10 @@ async def carry_contact_number_into_retry(
                 conn, tenant_id=tenant_id, lead_id=lead_id
             )
             verdict = number_changed(old, current)
-            if verdict is True:
+            # Only a strict E.164 value is written onto a job: anything else would
+            # be skipped as an invalid number with its contact left at 'called'.
+            # Such a retry keeps its copy and the dial gate drops it.
+            if verdict is True and is_strict_e164(str(current)):
                 moved = await conn.fetchval(
                     "UPDATE dialer_jobs SET phone_number = $3, updated_at = NOW() "
                     "WHERE id = $1::uuid AND tenant_id = $2::uuid "
