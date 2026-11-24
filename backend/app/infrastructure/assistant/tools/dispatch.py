@@ -21,6 +21,7 @@ from app.core.security.rbac import (
 from app.infrastructure.assistant.proposals import PROPOSAL_TOOLS
 from app.infrastructure.assistant.tools import ACTION_TOOLS, ALL_TOOLS
 from app.infrastructure.assistant.tools.coercion import coerce_bool
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
 
@@ -412,7 +413,6 @@ async def dispatch_tool(
         # Bad / extra kwargs from the model — surface as a tool error rather
         # than crashing the turn.
         logger.warning("dispatch_tool %s bad args %s: %s", func_name, call_args, exc)
-        return {"error": f"Invalid arguments for {func_name}: {exc}"}
+        return {"error": f"Invalid arguments for {func_name}. Check the parameter names and values."}
     except Exception as exc:  # tool internals already guard, but be safe
-        logger.error("dispatch_tool %s failed: %s", func_name, exc, exc_info=True)
-        return {"error": str(exc)}
+        return {"error": tool_error_text(exc, "The request could not be completed.", tool=func_name)}

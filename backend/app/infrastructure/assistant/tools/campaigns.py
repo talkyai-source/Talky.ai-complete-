@@ -10,14 +10,19 @@ from app.core.postgres_adapter import Client
 from app.domain.services.campaign_service import (
     CampaignError,
     CampaignNotFoundError,
+    CampaignPermissionCheckUnavailable,
+    CampaignReadinessError,
     CampaignService,
     CampaignStateError,
 )
 from app.infrastructure.assistant.tools.campaign_direction import (
     outbound_campaign_refusal,
 )
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 
 logger = logging.getLogger(__name__)
+
+_START_FAILED = "The campaign could not be started. Check its status before trying again."
 
 
 class StartCampaignInput(BaseModel):
@@ -75,8 +80,7 @@ async def get_campaigns(
             "campaigns": response.data
         }
     except Exception as e:
-        logger.error(f"Error getting campaigns: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the campaigns.", tool="get_campaigns")}
 
 
 async def start_campaign(
@@ -181,7 +185,8 @@ async def start_campaign(
                 return refusal
         return {"success": False, "error": exc.message}
     except CampaignError as exc:
-        return {"success": False, "error": exc.message}
+        return {"success": False, "error": tool_error_text(
+            exc, _START_FAILED, tool="start_campaign",
+            public=(CampaignReadinessError, CampaignPermissionCheckUnavailable))}
     except Exception as e:
-        logger.error(f"Error starting campaign: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": tool_error_text(e, _START_FAILED, tool="start_campaign")}

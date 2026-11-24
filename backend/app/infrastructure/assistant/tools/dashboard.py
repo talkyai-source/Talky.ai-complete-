@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any
 from datetime import date, datetime
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.tool_errors import tool_error_text
 from app.infrastructure.assistant.tools.campaigns import campaign_names
 from app.infrastructure.assistant.tools.date_ranges import (
     SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, local_day_range,
@@ -103,8 +104,7 @@ async def get_dashboard_stats(
             stats["campaign_name"] = campaign_name
         return stats
     except Exception as e:
-        logger.error(f"Error getting dashboard stats: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the dashboard figures.", tool="get_dashboard_stats", public=(ValueError,))}
 
 
 async def get_usage_info(
@@ -164,8 +164,7 @@ async def get_usage_info(
             "subscription_status": tenant.get("subscription_status", "inactive")
         }
     except Exception as e:
-        logger.error(f"Error getting usage info: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read the plan usage.", tool="get_usage_info")}
 
 
 async def get_actions_today(
@@ -197,5 +196,4 @@ async def get_actions_today(
             "recent_actions": response.data[:5]
         }
     except Exception as e:
-        logger.error(f"Error getting actions: {e}")
-        return {"error": str(e)}
+        return {"error": tool_error_text(e, "Could not read today's assistant actions.", tool="get_actions_today")}
