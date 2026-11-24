@@ -16,8 +16,8 @@ afterEach(() => {
 });
 
 for (const operation of ["change-password", "disable-mfa"] as const) {
-    for (const status of [400, 401]) {
-        test(`${operation} confirmation rejection ${status} stays inline and retains the session`, async () => {
+    for (const status of [400]) {
+        test(`${operation} wrong current password (${status}) stays inline, retains the session and does not renew`, async () => {
             let token: string | null = "synthetic-session";
             let expired = 0;
             const paths: string[] = [];
@@ -40,9 +40,75 @@ for (const operation of ["change-password", "disable-mfa"] as const) {
             });
             assert.equal(expired, 0);
             assert.equal(token, "synthetic-session");
-            assert.equal(paths.length, 1, "confirmation rejection must not refresh the login");
+            assert.equal(paths.length, 1, "a wrong current password must not refresh the login");
         });
     }
+
+    // The server answers a wrong current password with 400, so a 401 here can only be an expired token:
+    // renew once, retry once.
+    test(`${operation} 401 for an expired token renews once, retries once and the change goes through`, async () => {
+        let token: string | null = "synthetic-session";
+        let expired = 0;
+        const paths: string[] = [];
+        setTokenProvider(() => token, value => { token = value; });
+        setRequestIdentity({ userId: "user-a", tenantId: "tenant-a" });
+        setSessionExpiredHandler(() => { expired++; });
+        resetSessionExpiredLatch();
+        clearFreshLoginGrace();
+        globalThis.fetch = (async url => {
+            const path = new URL(String(url)).pathname;
+            paths.push(path);
+            if (path.endsWith("/auth/refresh")) {
+                return Response.json({ access_token: "renewed-token", user_id: "user-a", tenant_id: "tenant-a" });
+            }
+            if (paths.filter(p => !p.endsWith("/auth/refresh")).length === 1) {
+                return Response.json({ error: { code: "unauthorized", message: "Token has expired",
+                    request_id: "synthetic-request" } }, { status: 401 });
+            }
+            return Response.json({ detail: "ok" });
+        }) as typeof fetch;
+        if (operation === "change-password") {
+            await api.changePassword("current-pass", "orchid lantern cobalt 2026!");
+        } else {
+            await api.disableMfa("current-pass");
+        }
+        assert.equal(paths.filter(p => p.endsWith("/auth/refresh")).length, 1, "exactly one renewal");
+        assert.equal(paths.filter(p => !p.endsWith("/auth/refresh")).length, 2, "the request is retried once");
+        assert.equal(expired, 0);
+        assert.equal(token, "renewed-token");
+    });
+
+    test(`${operation} 401 whose renewal is refused stays inline and does not redirect or sign out`, async () => {
+        let token: string | null = "synthetic-session";
+        let expired = 0;
+        const paths: string[] = [];
+        setTokenProvider(() => token, value => { token = value; });
+        setRequestIdentity({ userId: "user-a", tenantId: "tenant-a" });
+        setSessionExpiredHandler(() => { expired++; });
+        resetSessionExpiredLatch();
+        clearFreshLoginGrace();
+        globalThis.fetch = (async url => {
+            const path = new URL(String(url)).pathname;
+            paths.push(path);
+            if (path.endsWith("/auth/refresh")) {
+                return Response.json({ error: { code: "unauthorized", message: "Refresh refused",
+                    request_id: "synthetic-request" } }, { status: 401 });
+            }
+            return Response.json({ error: { code: "unauthorized", message: "Token has expired",
+                request_id: "synthetic-request" } }, { status: 401 });
+        }) as typeof fetch;
+        await assert.rejects(() => operation === "change-password"
+            ? api.changePassword("current-pass", "orchid lantern cobalt 2026!")
+            : api.disableMfa("current-pass"), (error: unknown) => {
+            assert.ok(error instanceof ApiClientError);
+            assert.equal(error.message, "Token has expired");
+            return true;
+        });
+        assert.equal(paths.filter(p => p.endsWith("/auth/refresh")).length, 1, "one renewal attempt");
+        assert.equal(paths.filter(p => !p.endsWith("/auth/refresh")).length, 1, "no second try after a refused renewal");
+        assert.equal(expired, 0, "the customer is not redirected");
+        assert.equal(token, "synthetic-session", "the customer is not signed out");
+    });
 }
 
 function setupRecoveryRegeneration(respond: (path: string) => Response) {
