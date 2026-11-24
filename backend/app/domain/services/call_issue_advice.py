@@ -108,6 +108,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Confirm permission on the contact list. While the campaign runs, its contacts are then queued straight away.",
         "warning", "contact",
     )),
+    ("removed_from_campaign", IssueAdvice(
+        "Queued call cancelled",
+        "This queued call was cancelled because its contact was removed from the campaign or the contact's number was changed. No action needed.",
+        "info", "campaign",
+    )),
     ("lead_number_changed", IssueAdvice(
         "Number changed after the call was queued",
         "This contact's phone number was changed after this call was queued, so the call to the old number was not placed. To call the new number, pause and resume the campaign, or start it again if it has finished.",

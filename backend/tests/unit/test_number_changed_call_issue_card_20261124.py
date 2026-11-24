@@ -64,3 +64,19 @@ async def test_the_other_drops_write_what_they_wrote_before(reason):
     call = w._update_job_status.call_args
     assert call.kwargs["error"] == reason
     assert call.kwargs.get("reason") is None
+
+
+# --- a call CANCELLED by a contact removal or number change --------------------------
+def test_a_call_cancelled_by_a_removal_or_number_change_is_not_an_alarm():
+    """Both edit routes cancel a contact's queued calls with this reason. The card
+    used to be the generic "Call could not be placed ... check the campaign's
+    settings", a warning, for something the customer did on purpose."""
+    from app.domain.services.dialer.job_lifecycle import REASON_LEAD_REMOVED
+
+    advice = advise(REASON_LEAD_REMOVED)
+    assert advice.title == "Queued call cancelled"
+    assert advice.severity == "info"
+    assert "No action needed" in advice.suggestion
+    assert advice != advise("some_reason_nobody_wrote_advice_for")
+    # the card reads failure_reason first; the cancel's last_error never decides
+    assert advise("lead_number_changed").title != advice.title
