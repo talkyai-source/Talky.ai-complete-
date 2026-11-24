@@ -42,6 +42,8 @@ NOT_ORIGINATED_JOB_STATUSES: tuple[str, ...] = (
 
 
 def _rowcount(result) -> int:
+    if getattr(result, "error", None) is not None:
+        raise RuntimeError("job_lifecycle: dialer job cancel failed")
     return len(getattr(result, "data", None) or [])
 
 
