@@ -265,6 +265,20 @@ async def admit_opening(bridge, event, utterance) -> bool:
         settle_unconfirmed(gate, "opt_out", event.text)
         return True
     if words_match(event.text, gate.required_text):
+        if (gate.outbound and gate.notice_owed
+                and not getattr(gate.voice_session, "_recording_refused_by_policy", False)):
+            # The call is ending (voicemail hang-up proven or pending, teardown begun,
+            # session no longer served): the reset below would empty the whole call and
+            # the notice cannot be heard. Keep the audio and settle the notice as NOT
+            # confirmed, so no later receipt can mark it delivered over earlier speech.
+            from app.domain.services.telephony.modes.agent_first import _notice_skip_reason
+            skip = await _notice_skip_reason(gate.voice_session, gate.call_id)
+            if skip:
+                gate.voice_session._recording_policy_decided = True
+                settle_unconfirmed(gate, f"call_ending_{skip}", event.text)
+                logger.info("recording_notice_skipped_call_ending call_id=%s reason=%s path=realtime",
+                            _cid(gate), skip)
+                return False
         gate.state = "playing"
         utterance["opening_gate"] = True
         if gate.outbound and gate.notice_owed:

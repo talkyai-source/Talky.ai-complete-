@@ -181,6 +181,45 @@ def _disclosure_tenant_id(voice_session):
     return None
 
 
+# How long the notice waits for a hang-up that is still being confirmed. The
+# phone system's proof takes at most 5 s (asterisk_adapter caps
+# ASTERISK_HANGUP_CONFIRM_TIMEOUT_S at 5.0); a shorter wait let the notice
+# start, and wipe the call, while a slow hang-up was still on its way.
+_HANGUP_PROOF_WAIT_S = 6.0
+
+
+async def _notice_skip_reason(voice_session, call_id) -> str | None:
+    """Why the notice must be skipped because the call is ending, or None."""
+    _gw = getattr(voice_session, "media_gateway", None)
+    _skip_reason = None
+    _hup_probe = getattr(_gw, "is_hangup_requested", None)
+    _pending_probe = getattr(_gw, "is_hangup_pending", None)
+    if getattr(voice_session, "_call_ending", False) is True:
+        # Teardown has begun (the other side hung up).
+        _skip_reason = "call_ended"
+    else:
+        # A hang-up still being confirmed: wait for its proof before deciding;
+        # a hang-up that failed leaves the person on the line, so the normal
+        # notice follows.
+        _wait_probe = getattr(_gw, "wait_hangup_resolved", None)
+        if callable(_pending_probe) and _pending_probe(call_id) is True and callable(_wait_probe):
+            await _wait_probe(call_id, _HANGUP_PROOF_WAIT_S)  # polls every 10 ms
+        if callable(_hup_probe) and _hup_probe(call_id) is True:
+            _skip_reason = "hangup_requested"
+        elif getattr(voice_session, "_call_ending", False) is True:
+            _skip_reason = "call_ended"  # teardown began during the wait
+    if _skip_reason is None:
+        # Only a session the gateway still holds and has stopped serving.
+        # A session it does not know at all (another gateway type, another
+        # key) is not "ending": the notice runs as before.
+        _reg_probe = getattr(_gw, "is_session_registered", None)
+        _act_probe = getattr(_gw, "is_session_active", None)
+        if (callable(_reg_probe) and _reg_probe(call_id) is True
+                and callable(_act_probe) and _act_probe(call_id) is False):
+            _skip_reason = "session_inactive"
+    return _skip_reason
+
+
 async def _speak_recording_disclosure(
     voice_session, *, opener_with_notice=None, carrier: str = "opening",
 ) -> None:
@@ -318,33 +357,7 @@ async def _speak_recording_disclosure(
         # gate reset below would empty everything recorded so far. Keep the
         # audio, do not speak, and mark the notice as not confirmed, exactly as
         # for a call where the notice never ran.
-        _gw = getattr(voice_session, "media_gateway", None)
-        _skip_reason = None
-        _hup_probe = getattr(_gw, "is_hangup_requested", None)
-        _pending_probe = getattr(_gw, "is_hangup_pending", None)
-        if getattr(voice_session, "_call_ending", False) is True:
-            # Teardown has begun (the other side hung up).
-            _skip_reason = "call_ended"
-        else:
-            # A hang-up still being confirmed: wait (at most 2 s) for its proof
-            # before deciding; a hang-up that failed leaves the person on the
-            # line, so the normal notice follows.
-            _wait_probe = getattr(_gw, "wait_hangup_resolved", None)
-            if callable(_pending_probe) and _pending_probe(call_id) is True and callable(_wait_probe):
-                await _wait_probe(call_id, 2.0)  # polls every 10 ms
-            if callable(_hup_probe) and _hup_probe(call_id) is True:
-                _skip_reason = "hangup_requested"
-            elif getattr(voice_session, "_call_ending", False) is True:
-                _skip_reason = "call_ended"  # teardown began during the wait
-        if _skip_reason is None:
-            # Only a session the gateway still holds and has stopped serving.
-            # A session it does not know at all (another gateway type, another
-            # key) is not "ending": the notice runs as before.
-            _reg_probe = getattr(_gw, "is_session_registered", None)
-            _act_probe = getattr(_gw, "is_session_active", None)
-            if (callable(_reg_probe) and _reg_probe(call_id) is True
-                    and callable(_act_probe) and _act_probe(call_id) is False):
-                _skip_reason = "session_inactive"
+        _skip_reason = await _notice_skip_reason(voice_session, call_id)
         if _skip_reason:
             voice_session._recording_policy_decided = True
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)

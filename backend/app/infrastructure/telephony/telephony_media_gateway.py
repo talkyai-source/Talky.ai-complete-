@@ -998,9 +998,10 @@ class TelephonyMediaGateway(MediaGateway):
 
     async def wait_hangup_resolved(self, call_id: str, timeout: float) -> None:
         """Wait (poll every 10 ms, at most ``timeout`` s) until no hang-up is pending."""
-        for _ in range(int(timeout / 0.01)):
-            if not self.is_hangup_pending(call_id):
-                return
+        # By the clock, not by counting sleeps: a 10 ms sleep takes about 15 ms
+        # on some systems, which made the same limit last half as long again.
+        deadline = time.monotonic() + timeout
+        while self.is_hangup_pending(call_id) and time.monotonic() < deadline:
             await asyncio.sleep(0.01)
 
     def deactivate_session(self, call_id: str) -> None:
