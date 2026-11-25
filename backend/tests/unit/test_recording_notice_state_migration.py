@@ -25,7 +25,7 @@ def _run(monkeypatch, operation):
 
 
 def test_0103_sits_on_top_of_0102_and_under_0104():
-    assert SCRIPTS.get_heads() == ["0107_staff_suspension"]
+    assert SCRIPTS.get_heads() == ["0108_telephony_number_requests"]
     assert SCRIPTS.get_revision("0104_paypal_review_dismissed").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0102_paypal_subscriptions"
     assert len(REVISION) <= 32 and _module().revision == REVISION
