@@ -260,6 +260,33 @@ async def _recover_key(key: str) -> bool:
     return False
 
 
+async def recover_session_checkpoint(session_call_id) -> str:
+    """Move one session's checkpoint copy (if any) to the pending folder.
+
+    Returns ``"recovered"`` (copy now pending, or already pending), ``"none"``
+    (nothing there, or too short to keep) or ``"failed"`` (copy left on disk).
+    Never raises.
+    """
+    try:
+        sid = str(session_call_id or "")
+        if not _KEY_RE.match(sid):
+            return "none"
+        if not os.path.isdir(_folder(sid)):
+            return "none"
+        status, _seconds = await asyncio.to_thread(_recover_sync, sid)
+    except Exception as exc:
+        logger.error(
+            "recording_checkpoint_error call=%s err=%s",
+            str(session_call_id)[:12], type(exc).__name__,
+        )
+        return "failed"
+    if status in ("recovered", "already_pending"):
+        return "recovered"
+    if status == "short":
+        return "none"
+    return "failed"
+
+
 async def recover_orphans() -> int:
     """Recover folders that do not belong to a live session of this process."""
     try:
@@ -326,6 +353,12 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
         st = None
 
     enabled_fn = getattr(gateway, "is_recording_enabled", None)
+    buffer_fn = getattr(gateway, "get_recording_buffer", None)
+    session_exists = not callable(buffer_fn) or buffer_fn(vs.call_id) is not None
+    if callable(enabled_fn) and not enabled_fn(vs.call_id) and not session_exists:
+        # The gateway session is gone (not "recording disabled"): leave the
+        # folder alone; it is recovered when the voice session disappears.
+        return False
     if callable(enabled_fn) and not enabled_fn(vs.call_id):
         # Audio that must not be kept is not kept on disk either.
         gone = _STATE.pop(id(vs), None)

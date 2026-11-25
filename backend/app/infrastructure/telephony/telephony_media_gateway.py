@@ -113,6 +113,12 @@ class TelephonySession:
     # are suppressed.
     recording_enabled: bool = True
     is_active: bool = True
+    # Set once a hang-up request succeeded; never reset. Read by the recording
+    # notice so it does not wipe the recording of a call that is already ending.
+    hangup_requested: bool = False
+    # True only while hangup_call is still awaiting its proof; the recording
+    # notice waits for it to resolve before deciding.
+    hangup_pending: bool = False
 
     # Monotonic start time (seconds) — set in on_call_started()
     recording_start_time: float = 0.0
@@ -337,35 +343,42 @@ class TelephonyMediaGateway(MediaGateway):
         if not session or not session.is_active:
             return False
 
-        # AsteriskAdapter.hangup() is fail-soft and drops the proof bool, so
-        # prefer hangup_confirmed(): False must reach the caller when ARI could
-        # not prove the channel gone. Other adapters keep the legacy contract.
-        confirmed = getattr(session.adapter, "hangup_confirmed", None)
-        if callable(confirmed):
-            if not await confirmed(session.pbx_call_id):
-                logger.error(
-                    "TelephonyMediaGateway: hangup NOT confirmed call_id=%s pbx=%s reason=%s",
-                    call_id[:12],
-                    session.pbx_call_id[:12],
-                    reason,
-                )
-                return False
-        else:
-            hangup = getattr(session.adapter, "hangup", None)
-            if not callable(hangup):
-                logger.debug(
-                    "TelephonyMediaGateway: adapter has no hangup method for call_id=%s",
-                    call_id[:12],
-                )
-                return False
-            await hangup(session.pbx_call_id)
-        logger.info(
-            "TelephonyMediaGateway: hangup requested call_id=%s pbx=%s reason=%s",
-            call_id[:12],
-            session.pbx_call_id[:12],
-            reason,
-        )
-        return True
+        session.hangup_pending = True
+        try:
+            # AsteriskAdapter.hangup() is fail-soft and drops the proof bool, so
+            # prefer hangup_confirmed(): False must reach the caller when ARI could
+            # not prove the channel gone. Other adapters keep the legacy contract.
+            confirmed = getattr(session.adapter, "hangup_confirmed", None)
+            if callable(confirmed):
+                if not await confirmed(session.pbx_call_id):
+                    logger.error(
+                        "TelephonyMediaGateway: hangup NOT confirmed call_id=%s pbx=%s reason=%s",
+                        call_id[:12],
+                        session.pbx_call_id[:12],
+                        reason,
+                    )
+                    return False
+                # PROVEN only here: the notice skips on this flag.
+                session.hangup_requested = True
+            else:
+                hangup = getattr(session.adapter, "hangup", None)
+                if not callable(hangup):
+                    logger.debug(
+                        "TelephonyMediaGateway: adapter has no hangup method for call_id=%s",
+                        call_id[:12],
+                    )
+                    return False
+                # Fail-soft: proves nothing, so hangup_requested stays False.
+                await hangup(session.pbx_call_id)
+            logger.info(
+                "TelephonyMediaGateway: hangup requested call_id=%s pbx=%s reason=%s",
+                call_id[:12],
+                session.pbx_call_id[:12],
+                reason,
+            )
+            return True
+        finally:
+            session.hangup_pending = False
 
     def _on_force_hangup_done(
         self, task: "asyncio.Task", session: TelephonySession, call_id: str
@@ -968,6 +981,27 @@ class TelephonyMediaGateway(MediaGateway):
         """True if the session exists and is still active."""
         session = self._sessions.get(call_id)
         return bool(session and session.is_active)
+
+    def is_session_registered(self, call_id: str) -> bool:
+        """True if the session is still in the session table, active or not."""
+        return call_id in self._sessions
+
+    def is_hangup_requested(self, call_id: str) -> bool:
+        """True once a hang-up request succeeded for this session."""
+        session = self._sessions.get(call_id)
+        return bool(session and session.hangup_requested)
+
+    def is_hangup_pending(self, call_id: str) -> bool:
+        """True while a hang-up request is still awaiting its proof."""
+        session = self._sessions.get(call_id)
+        return bool(session and session.hangup_pending)
+
+    async def wait_hangup_resolved(self, call_id: str, timeout: float) -> None:
+        """Wait (poll every 10 ms, at most ``timeout`` s) until no hang-up is pending."""
+        for _ in range(int(timeout / 0.01)):
+            if not self.is_hangup_pending(call_id):
+                return
+            await asyncio.sleep(0.01)
 
     def deactivate_session(self, call_id: str) -> None:
         """Stop serving the call but keep it registered.

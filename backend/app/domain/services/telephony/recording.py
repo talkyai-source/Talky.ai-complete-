@@ -187,11 +187,15 @@ async def _save_call_recording(
     *,
     awaiting_transfer: bool = False,
     transfer_recording_name: Optional[str] = None,
-) -> None:
-    """Share the recording acquisition budget through lookup, stub and save."""
+) -> str:
+    """Share the recording acquisition budget through lookup, stub and save.
+
+    Returns a short status: ``captured``, ``recovered_checkpoint``, ``refused``
+    or ``none:<reason>``.
+    """
     from app.domain.services.recording_service import _with_recording_pool_budget
 
-    await _with_recording_pool_budget(_save_call_recording_with_budget)(
+    return await _with_recording_pool_budget(_save_call_recording_with_budget)(
         voice_session,
         call_id,
         awaiting_transfer=awaiting_transfer,
@@ -205,7 +209,7 @@ async def _save_call_recording_with_budget(
     *,
     awaiting_transfer: bool = False,
     transfer_recording_name: Optional[str] = None,
-) -> None:
+) -> str:
     """
     Capture: mix the gateway buffers and write them to the durable spool.
     Process: ``process_spool_entry`` saves from the spool (or memory).
@@ -219,9 +223,7 @@ async def _save_call_recording_with_budget(
     from app.domain.services.recording_spool import write_entry
     from app.core.container import get_container
 
-    gateway = voice_session.media_gateway
-    if not gateway:
-        return
+    gateway = getattr(voice_session, "media_gateway", None)
 
     container = get_container()
     db_pool = (
@@ -239,6 +241,40 @@ async def _save_call_recording_with_budget(
         except Exception:
             pass
 
+    async def _not_captured(reason: str) -> str:
+        # Nothing could be mixed from memory. Keep any on-disk checkpoint copy
+        # (move it to the pending folder) and say so; delete it only when it
+        # is safely pending or there was none.
+        from app.domain.services.recording_checkpoint import (
+            recover_session_checkpoint,
+        )
+
+        cp = await recover_session_checkpoint(voice_session.call_id)
+        if cp == "failed":
+            log = logger.error
+        elif reason in ("empty", "too_short") and cp == "none":
+            # ~70 ordinary calls a day end like this (unanswered legs with a
+            # session and no audio): not an alarm.
+            log = logger.info
+        else:
+            log = logger.warning
+        log(
+            "recording_not_captured call=%s session=%s reason=%s checkpoint=%s",
+            str(call_id)[:12], str(voice_session.call_id)[:12], reason, cp,
+        )
+        if cp != "failed":
+            _checkpoint_done()
+        return "recovered_checkpoint" if cp == "recovered" else f"none:{reason}"
+
+    if getattr(voice_session, "_recording_refused_by_policy", False) is True:
+        # The account chose not to record this call: its buffers were closed at
+        # the notice step. Nothing is kept, and that is a decision, not a fault.
+        _checkpoint_done()
+        return "refused"
+
+    if not gateway:
+        return await _not_captured("no_gateway")
+
     if (await _inbound_recording_persist_allowed(voice_session, db_pool)) is False:
         _discard_recording(voice_session)
         _checkpoint_done()
@@ -247,15 +283,16 @@ async def _save_call_recording_with_budget(
             "permission is absent call=%s",
             call_id[:12],
         )
-        return
+        return "refused"
 
     caller_chunks = gateway.get_recording_buffer(voice_session.call_id)
     agent_chunks = getattr(gateway, "get_tts_recording_buffer", lambda _: None)(voice_session.call_id)
 
     if not caller_chunks and not agent_chunks:
-        _checkpoint_done()
-        logger.debug(f"No recording data for {call_id[:12]}")
-        return
+        return await _not_captured(
+            "gateway_session_gone"
+            if caller_chunks is None else "empty"
+        )
 
     # Snapshot the gateway's live buffers into new list objects now, in the
     # same synchronous stretch (no `await` yet) as the calls above. The mix
@@ -304,9 +341,7 @@ async def _save_call_recording_with_budget(
     duration = caller_bytes / bytes_per_sec if bytes_per_sec else 0.0
 
     if duration < 0.5:
-        _checkpoint_done()
-        logger.debug(f"Recording too short ({duration:.1f}s) for {call_id[:12]}, skipping")
-        return
+        return await _not_captured("too_short")
 
     logger.info(
         f"Saving stereo recording for {call_id[:12]}: {duration:.1f}s, "
@@ -334,7 +369,7 @@ async def _save_call_recording_with_budget(
         gateway.clear_recording_buffer(voice_session.call_id)
         if awaiting_transfer:
             logger.info("recording_spool_written call=%s awaiting=transfer_part", call_id[:12])
-            return
+            return "captured"
     elif awaiting_transfer:
         # Nothing on disk to join the transfer part onto later, and the buffers
         # are about to be cleared: save the AI part now and say what is missing.
@@ -346,6 +381,13 @@ async def _save_call_recording_with_budget(
         _checkpoint_done()
         # Free memory (today's timing when the spool write failed).
         gateway.clear_recording_buffer(voice_session.call_id)
+    if outcome == "refused":
+        return "refused"
+    if spooled or outcome == "saved":
+        return "captured"
+    # Not on disk and not saved: the audio is only in memory, and the caller is
+    # about to end the session. Say so; never report it as captured.
+    return "none:spool_write_failed"
 
 
 async def _mark_retry(entry, reason: str) -> str:

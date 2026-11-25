@@ -1948,7 +1948,7 @@
       "id": "3e6ef6e35bb3ddaff479f5981bd4d5314b0d5453883bcce13727f73e3aeaddd8",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_on_call_ended",
-      "line": 6290,
+      "line": 6325,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -3021,7 +3021,7 @@
       "id": "d20a8fbbd1d8afcf1667f7e6e042e8c9832f0636f8eb1c0609b1cc62bcda6c8c",
       "file": "app/domain/services/telephony/recording.py",
       "function": "_process_locked",
-      "line": 493,
+      "line": 538,
       "method": "execute",
       "tables": [
         "calls"

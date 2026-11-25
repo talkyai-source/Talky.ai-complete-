@@ -313,6 +313,47 @@ async def _speak_recording_disclosure(
             )
             return
 
+        # The call is already ending (hang-up requested, e.g. voicemail, or the
+        # media session already inactive): the notice cannot be heard and the
+        # gate reset below would empty everything recorded so far. Keep the
+        # audio, do not speak, and mark the notice as not confirmed, exactly as
+        # for a call where the notice never ran.
+        _gw = getattr(voice_session, "media_gateway", None)
+        _skip_reason = None
+        _hup_probe = getattr(_gw, "is_hangup_requested", None)
+        _pending_probe = getattr(_gw, "is_hangup_pending", None)
+        if getattr(voice_session, "_call_ending", False) is True:
+            # Teardown has begun (the other side hung up).
+            _skip_reason = "call_ended"
+        else:
+            # A hang-up still being confirmed: wait (at most 2 s) for its proof
+            # before deciding; a hang-up that failed leaves the person on the
+            # line, so the normal notice follows.
+            _wait_probe = getattr(_gw, "wait_hangup_resolved", None)
+            if callable(_pending_probe) and _pending_probe(call_id) is True and callable(_wait_probe):
+                await _wait_probe(call_id, 2.0)  # polls every 10 ms
+            if callable(_hup_probe) and _hup_probe(call_id) is True:
+                _skip_reason = "hangup_requested"
+            elif getattr(voice_session, "_call_ending", False) is True:
+                _skip_reason = "call_ended"  # teardown began during the wait
+        if _skip_reason is None:
+            # Only a session the gateway still holds and has stopped serving.
+            # A session it does not know at all (another gateway type, another
+            # key) is not "ending": the notice runs as before.
+            _reg_probe = getattr(_gw, "is_session_registered", None)
+            _act_probe = getattr(_gw, "is_session_active", None)
+            if (callable(_reg_probe) and _reg_probe(call_id) is True
+                    and callable(_act_probe) and _act_probe(call_id) is False):
+                _skip_reason = "session_inactive"
+        if _skip_reason:
+            voice_session._recording_policy_decided = True
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            logger.info(
+                "recording_notice_skipped_call_ending call_id=%s reason=%s",
+                call_id[:12], _skip_reason,
+            )
+            return
+
         # OUTBOUND RETENTION WINDOW (2026-09-24, call 6e0e221b): a telephony
         # session's recording gate defaults OPEN at media start (only a
         # TRUE-inbound session starts closed — see prepare_inbound_recording
