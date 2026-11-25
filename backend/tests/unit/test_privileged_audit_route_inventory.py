@@ -168,6 +168,8 @@ for path, function in (("/admin/usage/statements", "import_statement"),
 
 AUDITED["POST", "/admin/billing/payment-reviews/close"] = record(
     "admin.payment_reviews", "close_review", "unit/test_payment_reviews.py")
+AUDITED["POST", "/admin/telephony/number-requests/{tenant_id}/{request_id}/decision"] = record(
+    "admin.telephony_number_requests", "decide_number_request", "unit/test_number_request_staff_routes.py")
 
 for path, function, service_method in (
     ("/admin/dsar/preview", "preview_dsar", "preview"),

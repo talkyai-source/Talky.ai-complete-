@@ -80,6 +80,18 @@ def resolve_client_ip(request: Request) -> str:
 
 # Configuration
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024  # 10MB
+NUMBER_REQUEST_SUBMIT_PATH = "/api/v1/telephony/number-requests"
+
+
+def _max_body_size(scope) -> int:
+    """Only the number-request submit path (two documents) gets a larger cap."""
+    if scope.get("method") == "POST" and (scope.get("path") or "").rstrip("/") == NUMBER_REQUEST_SUBMIT_PATH:
+        from app.domain.services.number_requests import config as number_request_config
+
+        return number_request_config.submit_body_limit_bytes()
+    return MAX_REQUEST_BODY_SIZE
+
+
 ALLOWED_CONTENT_TYPES = {
     "application/json",
     "application/x-www-form-urlencoded",
@@ -269,6 +281,7 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # auth and other paths exempt from the unrelated checks in dispatch.
         # Content-Length is only an early rejection hint: count actual ASGI
         # body bytes as well, so chunking or a false length cannot bypass it.
+        max_body = _max_body_size(scope)
         if len(request.headers.getlist("content-length")) > 1:
             response = JSONResponse(status_code=400, content={"detail": "Ambiguous Content-Length"})
             return await response(scope, receive, send)
@@ -281,8 +294,8 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             except ValueError:
                 response = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
                 return await response(scope, receive, send)
-            if size > MAX_REQUEST_BODY_SIZE:
-                return await self._body_too_large()(scope, receive, send)
+            if size > max_body:
+                return await self._body_too_large(max_body)(scope, receive, send)
 
         body = bytearray()
         while True:
@@ -290,8 +303,8 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             if message["type"] == "http.disconnect":
                 return
             chunk = message.get("body", b"")
-            if len(body) + len(chunk) > MAX_REQUEST_BODY_SIZE:
-                return await self._body_too_large()(scope, receive, send)
+            if len(body) + len(chunk) > max_body:
+                return await self._body_too_large(max_body)(scope, receive, send)
             body.extend(chunk)
             if not message.get("more_body", False):
                 break
@@ -312,10 +325,11 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         await super().__call__(scope, bounded_receive, send)
 
     @staticmethod
-    def _body_too_large():
+    def _body_too_large(max_body: int | None = None):
+        limit = MAX_REQUEST_BODY_SIZE if max_body is None else max_body
         return JSONResponse(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content={"detail": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)"},
+            content={"detail": f"Request body too large (max {limit} bytes)"},
         )
 
     async def dispatch(self, request: Request, call_next):

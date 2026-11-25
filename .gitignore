@@ -134,3 +134,4 @@ testsprite_tests/
 # Local agent worktrees are machine state, never repository submodules.
 .claude/worktrees/
 .codex-worktrees/
+number_request_documents/

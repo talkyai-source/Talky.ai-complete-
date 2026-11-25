@@ -290,6 +290,8 @@ _RLS_TABLES = (
     "support_ticket_reads",
     "support_tickets",
     "suspension_propagation_queue",
+    "telephony_number_request_documents",
+    "telephony_number_requests",
     "tenant_ai_configs",
     "tenant_ai_credentials",
     "tenant_alert_state",

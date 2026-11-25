@@ -34,7 +34,7 @@ if id talky >/dev/null 2>&1; then
         esac
     done
 fi
-for name in recordings audio_files feedback_audio support_attachments; do
+for name in recordings audio_files feedback_audio support_attachments number_request_documents; do
     [[ ! -L "/opt/talky/backend/$name" ]] || { echo "Refusing symlink state directory: $name" >&2; exit 1; }
 done
 [[ ! -L /etc/asterisk/pjsip.d ]] || { echo 'Refusing symlink pjsip.d.' >&2; exit 1; }
@@ -59,7 +59,7 @@ chmod 0640 /opt/talky/backend/.env
 
 # Do not chown the checkout to the application: root-run ops scripts and
 # symlinked systemd definitions must remain outside its write permissions.
-for name in recordings audio_files feedback_audio support_attachments; do
+for name in recordings audio_files feedback_audio support_attachments number_request_documents; do
     path="/opt/talky/backend/$name"
     install -d -o talky -g talky -m 0700 "$path"
     find "$path" -xdev -type d -exec chown talky:talky {} + -exec chmod 0700 {} +
