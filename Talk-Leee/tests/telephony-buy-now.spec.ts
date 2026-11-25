@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect as baseExpect, test, type Page } from "@playwright/test";
 import { E2E_AUTH_TOKEN, E2E_USER, mockApi, mockDashboardApi, mockPageApis, signInAsE2eUser } from "./support/session";
 import { PRIVACY_POLICY_DATES } from "../src/lib/privacy-policy-dates";
 
@@ -19,6 +19,10 @@ import { PRIVACY_POLICY_DATES } from "../src/lib/privacy-policy-dates";
 
 const ORIGIN = "http://localhost:3100";
 test.use({ baseURL: ORIGIN });
+// Playwright's own 5 s default stands. A very slow machine running the dev server (a closing window was seen taking
+// 9 s on a 1 GB laptop) may set PW_EXPECT_TIMEOUT, in milliseconds; no assertion changes.
+const SLOW_MACHINE_TIMEOUT = Number(process.env.PW_EXPECT_TIMEOUT);
+const expect = SLOW_MACHINE_TIMEOUT > 0 ? baseExpect.configure({ timeout: SLOW_MACHINE_TIMEOUT }) : baseExpect;
 test.setTimeout(180_000);
 
 const SIZES: Array<[number, number]> = [
@@ -93,6 +97,8 @@ const SETTINGS_MOCKS = [
             },
         },
     },
+    // NumberRequestConfigOut (backend telephony_number_requests.py): the limits the window reads when it opens.
+    { path: "/telephony/number-requests/config", body: { accepted_types: ["application/pdf", "image/jpeg", "image/png"], accepted_extensions: [".pdf", ".jpg", ".jpeg", ".png"], max_file_bytes: 10485760 } },
     { path: "/telephony/sip/trunks", body: [TRUNK] },
     { path: "/telephony/sip/trunks/outbound-route", body: { ready: true, reason_code: "ready", reason: null, caller_id: "+15551230000", trunk_id: "trunk-e2e", trunk_name: "Main line" } },
     // Pool accounts, so the "Shared trunk account" select exists; one long label.
@@ -113,7 +119,7 @@ type DialogResult = { missing: boolean; rect: number[]; inside: boolean; scrolls
 type WindowLayout = {
     title: string | null; titleAtTop: boolean; cardTitles: string[]; arrangement: string; businessFirst: boolean; equalWidth: boolean; equalHeight: boolean;
     items: Array<{ text: string | null; boxDirectlyUnder: boolean; boxInsideCard: boolean }>;
-    names: Array<{ insideBox: boolean; oneLine: boolean; fullNameInTitle: boolean; shortened: boolean }>;
+    names: Array<{ insideBox: boolean; oneLine: boolean; nameOnlyAsText: boolean; shortened: boolean }>;
     submits: Array<{ insideCard: boolean; belowItems: boolean; disabled: boolean }>;
     cancelInsideWindow: boolean; cancelBelowCards: boolean;
 };
@@ -274,7 +280,7 @@ function installProbe() {
             const n = name as HTMLElement;
             const r = n.getBoundingClientRect();
             const box = (n.closest("[data-upload-box]") as HTMLElement).getBoundingClientRect();
-            return { insideBox: r.left >= box.left && r.right <= box.right + 0.5, oneLine: r.height < 30, fullNameInTitle: n.title === n.textContent, shortened: n.scrollWidth > n.clientWidth };
+            return { insideBox: r.left >= box.left && r.right <= box.right + 0.5, oneLine: r.height < 30, nameOnlyAsText: !n.hasAttribute("title") && n.getAttribute("data-sentry-element") === "number-request-file", shortened: n.scrollWidth > n.clientWidth };
         });
         const submits = cards.map((card) => {
             const button = Array.from(card.querySelectorAll("button")).find((x) => x.textContent === "Submit") as HTMLButtonElement;
@@ -363,10 +369,22 @@ function expectClean(result: StaticResult, what: string, allowShortened: RegExp 
 
 // ───────────────────────── page setup ─────────────────────────
 
-type Tracker = { unanswered: string[]; writes: string[]; all: string[]; recording: boolean };
+type Posted = { headers: Record<string, string>; body: string };
+type Tracker = {
+    unanswered: string[]; writes: string[]; all: string[]; recording: boolean;
+    /** The number-request POSTs the mock answered, with their headers and raw multipart body. */
+    posts: Posted[];
+    /** How the next POST is answered: 201, a server refusal (413), or held until `release()` and then refused. */
+    answer: "created" | "refused" | "hold";
+    release: () => void;
+};
+const REFUSAL = "Business registration is larger than 10 MB.";
+const CREATED = { id: "11111111-1111-1111-1111-111111111111", use_type: "business", status: "submitted", submitted_at: T, documents: [] };
 
 async function openApp(page: Page, options: { theme: Theme; sidebar: Sidebar; role: Role }): Promise<Tracker> {
-    const tracker: Tracker = { unanswered: [], writes: [], all: [], recording: false };
+    let open: () => void = () => {};
+    const tracker: Tracker = { unanswered: [], writes: [], all: [], recording: false, posts: [], answer: "created", release: () => open() };
+    let gate = new Promise<void>((resolve) => { open = resolve; });
     // Registered first, so it runs last: whatever no mock answered. One write is expected and answered: the line test.
     await page.route((url) => /\/api\/v1(?:\/|$)/.test(url.pathname), async (route) => {
         const request = route.request();
@@ -374,6 +392,17 @@ async function openApp(page: Page, options: { theme: Theme; sidebar: Sidebar; ro
         const path = new URL(request.url()).pathname.replace(/^.*?\/api\/v1/, "");
         if (request.method() === "POST" && /^\/telephony\/sip\/trunks\/trunk-e2e\/test\/?$/.test(path)) {
             return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(TEST_RESULT) });
+        }
+        if (request.method() === "POST" && /^\/telephony\/number-requests\/?$/.test(path)) {
+            tracker.posts.push({ headers: request.headers(), body: request.postDataBuffer()?.toString("latin1") ?? "" });
+            if (tracker.answer === "hold") {
+                await gate;
+                gate = new Promise<void>((resolve) => { open = resolve; });
+            }
+            if (tracker.answer !== "created") {
+                return route.fulfill({ status: 413, contentType: "application/json", body: JSON.stringify({ error: { code: "file_too_large", message: REFUSAL, details: { field: "business_registration" }, request_id: "r-e2e" } }) });
+            }
+            return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify(CREATED) });
         }
         (request.method() === "GET" ? tracker.unanswered : tracker.writes).push(`${request.method()} ${path}`);
         return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ detail: "Not Found" }) });
@@ -442,7 +471,7 @@ async function expectWindowFits(page: Page, width: number, state: "empty" | "fil
     expect(layout.cancelInsideWindow, "Cancel visible without scrolling").toBe(true);
     expect(layout.cancelBelowCards, "Cancel below both cards").toBe(true);
     expect(layout.names.length).toBe(state === "filled" ? 4 : 0);
-    for (const name of layout.names) expect(name, "file name inside its box, one line, full name in the title").toMatchObject({ insideBox: true, oneLine: true, fullNameInTitle: true, shortened: true });
+    for (const name of layout.names) expect(name, "file name inside its box, one line, the name only as text (no title: Sentry records it), with the error-report label").toMatchObject({ insideBox: true, oneLine: true, nameOnlyAsText: true, shortened: true });
 
     const dialog = await probe(page, "dialogChecks");
     expect(dialog.missing).toBe(false);
@@ -527,7 +556,7 @@ for (const role of ["tenant_admin", "user"] as const) {
                     await page.getByRole("dialog").locator("[data-upload-box]").nth(3).dispatchEvent("drop", { dataTransfer: transfer });
                     await expect(page.getByRole("dialog").locator("[data-file-name]").nth(3)).toHaveText("dropped.pdf");
 
-                    // ── Submit: the window closes, the message is shown, nothing is sent ──
+                    // ── Submit: one POST is sent, the window closes only after the server answered 201, the message is shown ──
                     await page.getByRole("region", { name: "1. Business Use" }).getByRole("button", { name: "Submit" }).click();
                     await expect(page.getByRole("dialog", { name: TITLE })).toHaveCount(0);
                     await expect(page.getByRole("status", { name: "Success notification" })).toBeVisible();
@@ -548,9 +577,17 @@ for (const role of ["tenant_admin", "user"] as const) {
                     expect(await probe(page, "horizontalScroll"), "horizontal scroll with the message").toBe(false);
                     console.log(`[message] ${role} ${width}x${height} ${theme} ${sidebar}: ${toast.lines} line(s), sentence ${toast.needs}px, room ${toast.room}px; controls under the message: ${toast.controlsUnder.join(" | ") || "none"}`);
                     expect(await buy.evaluate((el) => document.activeElement === el), "focus back on Buy Now").toBe(true);
-                    // Nothing but the page's own background reads (GET) went out while files were chosen, changed, removed, dropped and submitted.
-                    expect(tracker.all.filter((entry) => !entry.startsWith("GET /api/v1/")), "requests from the card and window").toEqual([]);
-                    expect(tracker.writes, "write requests").toEqual([]);
+                    // The only write while files were chosen, changed, removed, dropped and submitted: exactly one POST of the two Business documents.
+                    expect(tracker.all.filter((entry) => !entry.startsWith("GET /api/v1/")), "requests from the card and window").toEqual(["POST /api/v1/telephony/number-requests"]);
+                    expect(tracker.writes, "write requests no mock answered").toEqual([]);
+                    expect(tracker.posts.length, "one POST").toBe(1);
+                    const posted = tracker.posts[0];
+                    expect(posted.body, "use_type field").toContain('name="use_type"');
+                    expect(posted.body.indexOf('name="use_type"'), "use_type first").toBeLessThan(posted.body.indexOf('name="business_registration"'));
+                    expect(posted.body, "business_registration field").toContain('name="business_registration"');
+                    expect(posted.body, "business_photo_id field").toContain('name="business_photo_id"');
+                    expect(posted.body, "no Personal field").not.toContain('name="utility_bill"');
+                    expect(posted.headers["idempotency-key"], "Idempotency-Key").toMatch(/^[A-Za-z0-9_-]{8,128}$/);
 
                     // ── closes like the app's other windows ──
                     for (const close of ["Cancel", "Escape", "outside"] as const) {
@@ -628,6 +665,90 @@ for (const role of ["tenant_admin", "user"] as const) {
             }
         }
     }
+}
+
+// ───────────────────────── sending, a server refusal and a refusal in the browser, every width ─────────────────────────
+
+for (const [width, height] of SIZES) {
+    test(`admin ${width}x${height}: the window while sending, after a server refusal and after a refusal in the browser`, async ({ page }) => {
+        await page.setViewportSize({ width, height });
+        const sidebar = sidebarsFor(width)[0];
+        const tracker = await openApp(page, { theme: "light", sidebar, role: "tenant_admin" });
+        await openTelephony(page, "tenant_admin");
+        await page.locator(CARD).evaluate((el) => el.scrollIntoView({ block: "center" }));
+        await page.getByRole("button", { name: "Buy Now" }).click();
+        const dialog = page.getByRole("dialog", { name: TITLE });
+        await expect(dialog).toBeVisible();
+        await page.waitForTimeout(500);
+        const inputs = dialog.locator('input[type="file"]');
+        const submits = dialog.getByRole("button", { name: "Submit" });
+        const cancel = dialog.getByRole("button", { name: "Cancel" });
+        const measure = async (what: string) => {
+            const fit = await probe(page, "dialogChecks");
+            expect(fit.missing, `${what}: window present`).toBe(false);
+            expect(fit.inside, `${what}: window inside the device window ${JSON.stringify(fit.rect)}`).toBe(true);
+            expect(fit.unreachable, `${what}: every control reachable`).toEqual([]);
+            expect(fit.noHorizontalScroll, `${what}: no horizontal scroll`).toBe(true);
+            expectClean(await probe(page, "staticChecks", DIALOG), what, /^p:/);
+            expect(await probe(page, "horizontalScroll"), `${what}: horizontal scroll`).toBe(false);
+        };
+
+        // ── a refusal in the browser: not taken, the server's sentence under the box, nothing sent ──
+        await inputs.nth(0).setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("x") });
+        const fileError = dialog.locator("[data-file-error]");
+        await expect(fileError).toHaveText("Business registration must be a PDF, JPG or PNG file.");
+        await expect(dialog.getByText(EMPTY)).toHaveCount(4);
+        await measure("browser refusal");
+        expect(tracker.posts.length, "nothing sent for a refused file").toBe(0);
+
+        // ── the two Business files, then Submit with the answer held: the sending state ──
+        await inputs.nth(0).setInputFiles(pdf("registration.pdf"));
+        await inputs.nth(1).setInputFiles(pdf("photo-id.pdf"));
+        await expect(fileError).toHaveCount(0);
+        tracker.answer = "hold";
+        await submits.first().click();
+        await expect.poll(() => tracker.posts.length).toBe(1);
+        await expect(submits.first()).toBeDisabled();
+        await expect(submits.nth(1)).toBeDisabled();
+        await expect(cancel).toBeDisabled();
+        // The lock covers the upload boxes of both cards too: the hidden inputs and every Choose another / Remove / upload button.
+        await expect(inputs.first()).toBeDisabled();
+        await expect(dialog.getByRole("button", { name: "Remove" }).first()).toBeDisabled();
+        await expect(dialog.getByRole("button", { name: "Choose another" }).first()).toBeDisabled();
+        await expect(dialog.getByRole("button", { name: EMPTY }).first()).toBeDisabled();
+        await expect(dialog.locator("[data-document-grid]")).toHaveAttribute("aria-busy", "true");
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(350);
+        await expect(dialog, "Escape does not close the window while sending").toBeVisible();
+        await expect(page.getByRole("status", { name: "Success notification" })).toHaveCount(0);
+        await measure("sending");
+
+        // ── the server refuses: its message in that card, both files still there ──
+        tracker.release();
+        const submitError = dialog.locator("[data-submit-error]");
+        await expect(submitError).toHaveText(REFUSAL);
+        await expect(submitError, "keyboard focus moves to the card's message").toBeFocused();
+        await expect(dialog.locator("[data-file-name]")).toHaveCount(2);
+        await expect(submits.first()).toBeEnabled();
+        await expect(page.getByRole("status", { name: "Success notification" })).toHaveCount(0);
+        await measure("server refusal");
+
+        // ── a retry with the same files re-uses the key and is answered 201 ──
+        tracker.answer = "created";
+        await submits.first().click();
+        await expect.poll(() => tracker.posts.length, { message: "the retry POST was sent", timeout: 30_000 }).toBe(2);
+        await expect(page.getByRole("dialog", { name: TITLE })).toHaveCount(0, { timeout: 30_000 });
+        await expect(page.getByRole("status", { name: "Success notification" })).toBeVisible();
+        expect(tracker.posts.length, "two POSTs in all").toBe(2);
+        expect(tracker.posts[1].headers["idempotency-key"], "same key on the retry").toBe(tracker.posts[0].headers["idempotency-key"]);
+        for (const posted of tracker.posts) {
+            expect(posted.body.indexOf('name="use_type"'), "use_type first").toBeGreaterThanOrEqual(0);
+            expect(posted.body.indexOf('name="use_type"')).toBeLessThan(posted.body.indexOf('name="business_registration"'));
+            expect(posted.body).toContain('name="business_photo_id"');
+        }
+        expect(tracker.writes, "write requests no mock answered").toEqual([]);
+        expect(tracker.unanswered, "requests no mock answered").toEqual([]);
+    });
 }
 
 // ───────────────────────── the card hover lift does not flicker ─────────────────────────
