@@ -22,6 +22,7 @@ from .campaigns import router as campaigns_router
 from .sip_trunks import router as sip_trunks_router
 from .client_errors import router as client_errors_router
 from .payment_reviews import router as payment_reviews_router
+from .telephony_number_requests import router as telephony_number_requests_router
 from app.api.v1.endpoints.contact_enquiries import admin_router as contact_enquiries_router
 
 # Create main admin router
@@ -46,4 +47,5 @@ router.include_router(campaigns_router)
 router.include_router(sip_trunks_router)
 router.include_router(client_errors_router)
 router.include_router(payment_reviews_router)
+router.include_router(telephony_number_requests_router)
 router.include_router(contact_enquiries_router)
