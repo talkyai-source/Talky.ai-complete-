@@ -72,6 +72,7 @@ from app.api.v1.endpoints.telephony_concurrency import (
 from app.api.v1.endpoints.telephony_runtime import router as telephony_runtime_router
 from app.api.v1.endpoints.telephony_sip import router as telephony_sip_router
 from app.api.v1.endpoints.telephony_providers import router as telephony_providers_router
+from app.api.v1.endpoints.telephony_number_requests import router as telephony_number_requests_router
 from app.api.v1.endpoints.dnc import router as dnc_router
 from app.api.v1.endpoints.tenant_ai_credentials import (
     router as tenant_ai_credentials_router,
@@ -148,6 +149,7 @@ api_router.include_router(vonage_bridge_router)
 api_router.include_router(twilio_bridge_router)
 api_router.include_router(telephony_sip_router)
 api_router.include_router(telephony_providers_router)
+api_router.include_router(telephony_number_requests_router)
 api_router.include_router(telephony_runtime_router)
 api_router.include_router(telephony_concurrency_router)
 api_router.include_router(tenant_phone_numbers_router)

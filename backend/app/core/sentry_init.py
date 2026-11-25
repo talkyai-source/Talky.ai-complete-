@@ -100,6 +100,7 @@ def init_sentry() -> bool:
         traces_sample_rate=traces_rate,
         profiles_sample_rate=profiles_rate,
         send_default_pii=False,
+        max_request_body_size="never",
         # Stack-frame variables are not sent: speech held in an ordinary local
         # variable carries no marker a pattern could recognise.
         include_local_variables=False,
