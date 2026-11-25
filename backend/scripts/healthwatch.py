@@ -270,6 +270,20 @@ _RECORDINGS_OLD_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - i
     FROM recordings_s3 r JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
     WHERE r.tenant_id = $1::uuid AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours'"""
 
+# Incoming calls: recording is governed by ONE platform-wide switch (the table has no
+# tenant column, so there is no tenant policy). One statement per tenant returns both counts.
+_INBOUND_SWITCH_SQL = "SELECT inbound_recording_enabled FROM platform_runtime_controls WHERE id = 1"
+# Counted: answered incoming calls whose notice was spoken and recording allowed
+# (consent_status = 'granted'). Knowingly NOT counted: an incoming call recorded
+# with an unconfirmed notice ('unknown' also means "never reached the gate").
+_INBOUND_SQL = """SELECT count(*) AS answered_inbound,
+    count(*) FILTER (WHERE EXISTS (SELECT 1 FROM recordings_s3 r WHERE r.tenant_id = c.tenant_id
+      AND r.call_id = c.id AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours')) AS matched_inbound
+    FROM calls c
+    WHERE c.tenant_id = $1::uuid AND c.direction = 'inbound' AND c.is_test = false AND c.answered_at <= now()
+      AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
+      AND c.duration_seconds >= 5 AND c.consent_status = 'granted'"""
+
 
 def _pending_stuck(now):
     now = now or datetime.now(timezone.utc)
@@ -313,6 +327,12 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                     "SELECT count(*) FROM information_schema.columns WHERE table_schema = 'public' "
                     "AND table_name = 'recordings_s3' AND column_name IN ('notice_state', 'transfer_part')")
                 tenants = await conn.fetch("SELECT id FROM tenants ORDER BY id LIMIT $1", max_tenants+1)
+                # Read ONCE per run. None = unreadable (never guessed as on or off).
+                try:
+                    async with conn.transaction():
+                        inbound_switch = (await conn.fetchval(_INBOUND_SWITCH_SQL)) is True
+                except Exception:
+                    inbound_switch = None
             result["payments"] = {"status": "alert" if count or stuck else "ok", "needs_review": count,
                                 "paypal_needs_review": paypal_count or 0, "stuck": stuck or 0}
             if len(tenants) > max_tenants:
@@ -321,6 +341,7 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
             rows = []
             missing = unconfirmed = transfer_missing = recorded = 0
             recordings_read = True
+            missing_inbound = 0 if inbound_switch is not None else None
             recordings_sql = _RECORDINGS_SQL if notice_columns == 2 else _RECORDINGS_OLD_SQL
             for tenant in tenants:
                 tenant_id = str(UUID(str(tenant["id"])))
@@ -344,6 +365,14 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                                 unconfirmed += stats["unconfirmed"]
                                 transfer_missing += stats["transfer_missing"]
                                 recorded += stats["recorded"]
+                                if inbound_switch and missing_inbound is not None:
+                                    # Own savepoint: a fault here makes only the incoming part unreadable.
+                                    try:
+                                        async with conn.transaction():
+                                            inbound = await conn.fetchrow(_INBOUND_SQL, tenant_id)
+                                        missing_inbound += max(0, inbound["answered_inbound"] - inbound["matched_inbound"])
+                                    except Exception:
+                                        missing_inbound = None
                     except Exception:
                         recordings_read = False
                 if any(str(row["tenant_id"]) != tenant_id for row in owned):
@@ -357,17 +386,19 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                 pending = await asyncio.to_thread(_pending_stuck, now)
             except Exception:
                 pending = None
-            alert = (missing > 0 or (pending or 0) > 0 or transfer_missing > 0
+            alert = (missing > 0 or (missing_inbound or 0) > 0 or (pending or 0) > 0 or transfer_missing > 0
                      or (unconfirmed >= 3 and unconfirmed * 2 >= recorded))
             if recordings_read and pending is None and not alert:
                 # The counts are fine but the pending folder could not be read:
                 # that is not "ok".
                 result["recordings"] = {"status": "unavailable", "reason": "pending_folder_unreadable",
-                                        "missing": missing, "pending_stuck": None,
+                                        "missing": missing, "missing_inbound": missing_inbound,
+                                        "pending_stuck": None,
                                         "transfer_missing": transfer_missing,
                                         "unconfirmed": unconfirmed, "recorded": recorded}
             elif recordings_read:
                 result["recordings"] = {"status": "alert" if alert else "ok", "missing": missing,
+                                        "missing_inbound": missing_inbound,
                                         "pending_stuck": pending, "transfer_missing": transfer_missing,
                                         "unconfirmed": unconfirmed, "recorded": recorded}
     except Exception:
@@ -431,8 +462,13 @@ def fingerprint(name, value):
             if failed and all(_UNIT_NAME.match(unit) and ":" not in unit for unit in failed):
                 return f"{base}:{'+'.join(failed)}"
         if name == "recordings":
-            return (f"{base}:{_count(value['missing'])}+{_count(value['pending_stuck'])}"
+            text = (f"{base}:{_count(value['missing'])}+{_count(value['pending_stuck'])}"
                     f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed'])}")
+            # Added only when an incoming recording is missing, so the text of
+            # every other state stays what it was (no repeat notice on release).
+            if _count(value.get("missing_inbound")) != "0":
+                text += f"+in{_count(value['missing_inbound'])}"
+            return text
     except (KeyError, TypeError):
         pass
     return base

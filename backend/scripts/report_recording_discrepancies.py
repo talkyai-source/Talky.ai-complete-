@@ -106,12 +106,14 @@ async def report_discrepancies(conn, root, *, page_size=500, max_rows=100000, ma
     scanned_rows = 0
     # A read-only repeatable DB snapshot, with explicit tenant predicates on
     # every recording read. Only the operator system-directory discovery is
-    # global. row_security=off refuses a deceptively filtered orphan report.
+    # global. No `row_security = off`: PostgreSQL then RAISES for any policy-covered
+    # query unless the role is superuser/BYPASSRLS, and the production role is neither.
+    # The bypass GUC below is what the row policies accept ('on' casts to boolean true).
+    # A database that hides every row is caught after the reads (recording_rows_not_visible).
     async with conn.transaction(readonly=True, isolation="repeatable_read"):
         await conn.execute("SET LOCAL statement_timeout = '30s'")
         await conn.execute("SET LOCAL lock_timeout = '5s'")
         await conn.execute("SET LOCAL app.bypass_rls = 'on'")
-        await conn.execute("SET LOCAL row_security = off")
         legacy_present = bool(await conn.fetchval("SELECT to_regclass($1)", "public.recordings"))
         tenant_cursor = None
         tenant_count = 0
@@ -225,7 +227,12 @@ async def report_discrepancies(conn, root, *, page_size=500, max_rows=100000, ma
         result["issues"].append("invalid_recording_paths")
     # A partial DB read cannot establish that a file has no row. A partial
     # directory scan cannot establish that an uploaded row has no file.
-    if inventory_complete and orphan_inventory_safe:
+    # Files on disk but no recording row at all, for any tenant: the database hid the
+    # rows (row security), it did not prove the files are orphans.
+    rows_not_visible = scanned_rows == 0 and bool(files)
+    if rows_not_visible:
+        result["issues"].append("recording_rows_not_visible")
+    if inventory_complete and orphan_inventory_safe and not rows_not_visible:
         orphans = sorted(files - owned)
         result["counts"]["files_without_rows"] = len(orphans)
         result["files_without_rows"] = orphans[:sample_limit]

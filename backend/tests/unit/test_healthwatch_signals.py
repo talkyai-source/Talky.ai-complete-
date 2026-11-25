@@ -290,8 +290,9 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
     assert report["recordings"]["status"] == "ok"
     assert report["payments"]["stuck"] == 0
     # payments, the PayPal table probe, the stuck-receipt count, the recording-columns probe, tenants,
-    # one tenant's trunks, and that tenant's two recording statements
-    assert len(reads) == 8
+    # the platform's incoming-recording switch (once per run), one tenant's trunks, and that tenant's
+    # two recording statements
+    assert len(reads) == 9
 
 
 @pytest.mark.parametrize("legacy,paypal,status", [(0, 3, "alert"), (2, 3, "alert"), (0, 0, "ok")])

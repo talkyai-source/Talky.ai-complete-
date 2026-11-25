@@ -1948,7 +1948,7 @@
       "id": "3e6ef6e35bb3ddaff479f5981bd4d5314b0d5453883bcce13727f73e3aeaddd8",
       "file": "app/domain/services/telephony/lifecycle.py",
       "function": "_on_call_ended",
-      "line": 6290,
+      "line": 6325,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -3021,7 +3021,7 @@
       "id": "d20a8fbbd1d8afcf1667f7e6e042e8c9832f0636f8eb1c0609b1cc62bcda6c8c",
       "file": "app/domain/services/telephony/recording.py",
       "function": "_process_locked",
-      "line": 493,
+      "line": 538,
       "method": "execute",
       "tables": [
         "calls"
@@ -3180,7 +3180,7 @@
       "id": "66613a7831cf0d84f0ce7b8535c12d393cdf2c2ea8c1ca7e7d1edd0ea59283fb",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_route",
-      "line": 1260,
+      "line": 1267,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -4235,7 +4235,7 @@
       "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_record_outbound_from_number",
-      "line": 1221,
+      "line": 1228,
       "method": "execute",
       "tables": [
         "call_legs",
@@ -4842,7 +4842,7 @@
       "id": "9d8756c8ea455b72f9246403c2bcbf89b8e192efd88c89fe669c50cfe2e5d61c",
       "file": "app/services/crm_sync_service.py",
       "function": "CRMSyncService._write_admission_stamp",
-      "line": 459,
+      "line": 465,
       "method": "fetchrow",
       "tables": [
         "call_lead_details",
@@ -8114,10 +8114,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "fa69dc7b8760c07a1b12b35573f09ee9ab1594fe9009f28041ac5768dcb4859a",
+      "id": "d3e43e7c6178b7407ec5f1e97eb670a3f81c2960dede9fa9e9eb3e989a91ca44",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4392,
+      "line": 4400,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8129,10 +8129,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "84b709d3556caa8b095059d5cf66b5d4cd7e58f9d9b790a44b75ab8729a0950b",
+      "id": "e029866f99be119185d88a83eadec065182def9258c3c9db9d269bd9522f3708",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5315,
+      "line": 5323,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8144,10 +8144,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "88d98d074a0776134bbac047481c05ced7fdc9edc660f0682c52239bbe145849",
+      "id": "b601408161a379d6082e9b92d9e90012b1c39ff146e6f6d03a9948b593f1e42c",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
-      "line": 3400,
+      "line": 3408,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8159,10 +8159,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1554c468a8c29c741df99a1f8298b855f33d1f9fd7ca8b2b8468dc460c006fd7",
+      "id": "c8f3ab462b1cd55d00e5194f74d689832c7f29cb06c6dbbe3100940546f7b0f2",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5489,
+      "line": 5497,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8174,10 +8174,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "fd08daa71a8ae6a951d6cf751df7dc5aea55fdf20178dff92f4aeecbf95e6d0b",
+      "id": "bbb650b12ca084b6800c7ddd6204ff868fcb6be966f2f9c690595d1b9194f440",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
-      "line": 3750,
+      "line": 3758,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8189,10 +8189,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "b3bfd174758a12505629f88e7455723d0cbd55210bd123b67d56586123794076",
+      "id": "a4682d4cb97ee9b1af72e2cf1b0a878ad9bc36fa98260ecf0ee150cb0485b697",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 6200,
+      "line": 6208,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8329,7 +8329,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3212,
+      "line": 3225,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8339,14 +8339,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3212.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3225.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3559,
+      "line": 3572,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8356,14 +8356,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3559.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3572.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3639,
+      "line": 3652,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8374,7 +8374,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3639.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3652.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -10653,7 +10653,7 @@
       "id": "8ce078bb27ddd6b7dd8fed1ced91bb8dad4926c91c39ce894dd96b4334b893d3",
       "file": "app/services/crm_sync_service.py",
       "function": "_lookup_tenant_for_call",
-      "line": 835,
+      "line": 847,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -10663,7 +10663,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Internal teardown CRM sync discovers the tenant of a durable internal call UUID when the hook lacks tenant context; run_crm_sync installs the returned tenant and calls sync_call with both tenant and call IDs. It is not an HTTP endpoint accepting arbitrary call IDs. Exact reviewed operation: fetchval; app/services/crm_sync_service.py:835.",
+      "reason": "Internal teardown CRM sync discovers the tenant of a durable internal call UUID when the hook lacks tenant context; run_crm_sync installs the returned tenant and calls sync_call with both tenant and call IDs. It is not an HTTP endpoint accepting arbitrary call IDs. Exact reviewed operation: fetchval; app/services/crm_sync_service.py:847.",
       "category": "system_discovery"
     },
     {
@@ -13007,10 +13007,10 @@
       "category": "system_discovery"
     },
     {
-      "id": "144a8fc439436eee04e2f3de7cbe8651161ddea5b805dab75331592d3935a24e",
+      "id": "a76a1251724905953c7ca95b926bb2766e53b84e381156e6138a6efb9ac7e2ae",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter.delete_stored_recording",
-      "line": 2706,
+      "line": 2714,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -13018,7 +13018,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2706.",
+      "reason": "DELETE is an Asterisk ARI HTTP method passed to the HTTP client, not a SQL statement. Exact reviewed operation: _ari; app/infrastructure/telephony/asterisk_adapter.py:2714.",
       "category": "not_database_sql"
     },
     {

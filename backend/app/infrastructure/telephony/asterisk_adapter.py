@@ -40,6 +40,7 @@ from urllib.parse import quote
 
 import aiohttp
 
+from app.core.security.tenant_scope import context_without_account
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.domain.services.telephony.config import AUDIO_CALLBACK_BATCH_FRAMES
 from app.domain.services.telephony.transfer_recording import (
@@ -879,10 +880,17 @@ class AsteriskAdapter(CallControlAdapter):
         self._stop_event.clear()
 
         # Start ARI WebSocket event listener
-        self._ws_task = asyncio.create_task(self._ari_event_listener())
+        self._start_listener_task()
         logger.info(
             f"AsteriskAdapter connected to ARI at {self._ari_host}:{self._ari_port} "
             f"app={self._app_name}"
+        )
+
+    def _start_listener_task(self) -> None:
+        # Every call's task is created from the listener: start it with no
+        # account, no bypass and no user, even when a request calls this.
+        self._ws_task = asyncio.create_task(
+            self._ari_event_listener(), context=context_without_account()
         )
 
     @property
@@ -1139,7 +1147,7 @@ class AsteriskAdapter(CallControlAdapter):
             self._stop_event.clear()
             self._connected_flag = True
             if self._session is not None and (self._ws_task is None or self._ws_task.done()):
-                self._ws_task = asyncio.create_task(self._ari_event_listener())
+                self._start_listener_task()
             pending = ",".join(sorted(value[:12] for value in deferred_ids))
             raise RuntimeError(
                 "AsteriskAdapter: refusing to disconnect with unconfirmed "

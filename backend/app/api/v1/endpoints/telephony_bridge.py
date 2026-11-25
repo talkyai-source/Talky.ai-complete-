@@ -89,6 +89,7 @@ from app.domain.services.telephony.adapter_registry import (  # noqa: E402
     register_transfer_executor,
 )
 from app.domain.services.event_emitter import emit_event_via_pool  # noqa: E402
+from app.core.security.tenant_scope import context_without_account  # noqa: E402
 from app.core.security.internal_auth import (  # noqa: E402
     CallerContext,
     is_internal_service_request,
@@ -339,13 +340,19 @@ def ensure_session_management_started() -> None:
     # GAP 5 — session inactivity watchdog (also does zombie reconcile,
     # ringing-warmup GC, global-concurrency lease refresh, dead-pod recovery).
     if _watchdog_task is None or _watchdog_task.done():
-        _watchdog_task = asyncio.create_task(_session_watchdog())
+        _watchdog_task = asyncio.create_task(
+            _session_watchdog(), context=context_without_account()
+        )
         logger.info("telephony_watchdog: started (inactivity=%ds)", _SESSION_INACTIVITY_TIMEOUT_S)
     if _media_watchdog_task is None or _media_watchdog_task.done():
-        _media_watchdog_task = asyncio.create_task(_media_session_watchdog())
+        _media_watchdog_task = asyncio.create_task(
+            _media_session_watchdog(), context=context_without_account()
+        )
         logger.info("telephony_media_watchdog: started")
     if _account_authority_watchdog_task is None or _account_authority_watchdog_task.done():
-        _account_authority_watchdog_task = asyncio.create_task(_account_call_authority_watchdog())
+        _account_authority_watchdog_task = asyncio.create_task(
+            _account_call_authority_watchdog(), context=context_without_account()
+        )
     # Phase 1.4 — wire pod capacity into the readiness probe so the k8s/LB
     # readiness gate can drain a saturated pod without touching internals.
     from app.core import readiness as _readiness

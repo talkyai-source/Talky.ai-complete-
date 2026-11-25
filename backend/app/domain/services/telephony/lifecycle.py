@@ -5733,6 +5733,25 @@ def _inbound_processing_terminal_status(
     )
 
 
+def _log_recording_missing_after_answer(call_id, voice_session, status, duration_s) -> None:
+    """ERROR when a call of 2 s or more ended with no recording captured. Never raises."""
+    try:
+        if isinstance(status, str) and status.startswith("none:") and int(duration_s) >= 2:
+            _reason = status[len("none:"):]
+            # Empty / too short can be the deliberate privacy rule (a person who
+            # hangs up as the notice begins leaves nothing): WARNING, not ERROR.
+            _log = logger.error if _reason in (
+                "gateway_session_gone", "no_gateway", "spool_write_failed"
+            ) else logger.warning
+            _log(
+                "recording_missing_after_answer call=%s session=%s duration_s=%d reason=%s",
+                str(call_id)[:12], str(getattr(voice_session, "call_id", ""))[:12],
+                int(duration_s), status[len("none:"):],
+            )
+    except Exception:
+        pass
+
+
 async def _on_call_ended(
     call_id: str,
     *,
@@ -5790,6 +5809,16 @@ async def _on_call_ended(
     _release_ended_marker_later(call_id)
 
     logger.info(f"Telephony bridge: call ended {call_id[:12]}")
+
+    # Teardown has begun: from here a recording notice must not start (it would
+    # reset the recording gate and wipe the whole call). Synchronous, before the
+    # first await; never raises, never removes the session.
+    try:
+        _ending_vs = _state().get_voice_session(call_id)
+        if _ending_vs is not None:
+            _ending_vs._call_ending = True
+    except Exception:
+        pass
 
     # Capture admission ownership before the adapter clears its hand-off
     # cache. The service finalizer below owns inbound terminal persistence,
@@ -6248,7 +6277,11 @@ async def _on_call_ended(
         # --- Save recording BEFORE session teardown ---
         if not getattr(voice_session, "_recording_saved_at_transfer", False):
             try:
-                await _save_call_recording(voice_session, call_id)
+                _rec_status = await _save_call_recording(voice_session, call_id)
+                _log_recording_missing_after_answer(
+                    call_id, voice_session, _rec_status,
+                    max(outbound_duration_s, inbound_duration_s),
+                )
             except Exception as rec_err:
                 logger.warning(f"Recording save failed for {call_id[:12]}: {rec_err}")
         elif getattr(voice_session, "_recording_awaiting_transfer_part", False):

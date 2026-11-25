@@ -382,12 +382,24 @@ class VoicePipelineService:
         # PBX save path then sees an empty buffer and silently skips the save.
         # For sessions with no PBX hangup (browser / ask_ai), hangup_requested is
         # False, so we still tear the gateway session down locally as before.
-        # An UNCONFIRMED PBX hangup on a live session is different: the channel
-        # may still be up, and its ChannelDestroyed teardown (or orphan
-        # recovery) must still find the recording buffer, so stop the agent but
-        # keep the session registered.
+        # A session that is still REGISTERED but not confirmed hung up is
+        # different, whether it is active (hangup unconfirmed, channel may
+        # still be up) or inactive (the carrier hung up a moment ago and a
+        # speech packet failed): the call teardown is already on its way and
+        # saves the recording before it ends the session. Stop the agent but
+        # keep the session registered. Only a session that is not registered at
+        # all, or a gateway without deactivate_session, is torn down here.
         deactivate = getattr(self.media_gateway, "deactivate_session", None)
-        if not hangup_requested and pbx_session_live and callable(deactivate):
+        registered = False
+        reg_probe = getattr(self.media_gateway, "is_session_registered", None)
+        if callable(reg_probe):
+            registered = reg_probe(call_id)
+            if inspect.isawaitable(registered):
+                if hasattr(registered, "close"):
+                    registered.close()
+                registered = False
+            registered = registered is True
+        if not hangup_requested and (pbx_session_live or registered) and callable(deactivate):
             deactivate(call_id)
         elif not hangup_requested:
             try:
