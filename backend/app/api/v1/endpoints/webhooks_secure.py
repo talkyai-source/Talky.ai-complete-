@@ -114,9 +114,13 @@ async def dispatch_goal_achieved(tenant_id: str, call_id: Optional[str]) -> dict
         raise HTTPException(status_code=400, detail="call_id required")
 
     from app.core.container import get_container
-    result = await get_container().call_service.mark_goal_achieved(
-        tenant_id=tenant_id, call_id=call_id,
-    )
+    from app.core.security.tenant_scope import tenant_scope_if_account
+    # The middleware skips /api/v1/webhooks*, so no account is set: name it,
+    # or row security hides the call and the sender gets a false 404.
+    with tenant_scope_if_account(tenant_id):
+        result = await get_container().call_service.mark_goal_achieved(
+            tenant_id=tenant_id, call_id=call_id,
+        )
     if result is None:
         raise HTTPException(status_code=404, detail="Call not found")
     return result
@@ -134,13 +138,16 @@ async def dispatch_mark_spam(
     400 when the body ``lead_id`` does not belong to the scoped call.
     """
     from app.core.container import get_container
+    from app.core.security.tenant_scope import tenant_scope_if_account
     try:
-        result = await get_container().call_service.mark_as_spam(
-            tenant_id=tenant_id,
-            call_id=call_id,
-            lead_id=lead_id,
-            reason=reason,
-        )
+        # Name the account (see dispatch_goal_achieved): no middleware ran.
+        with tenant_scope_if_account(tenant_id):
+            result = await get_container().call_service.mark_as_spam(
+                tenant_id=tenant_id,
+                call_id=call_id,
+                lead_id=lead_id,
+                reason=reason,
+            )
     except WebhookTargetMismatch:
         raise HTTPException(
             status_code=400, detail="lead_id does not belong to the specified call"

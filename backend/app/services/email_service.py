@@ -5,6 +5,7 @@ Orchestrates email connectors with template rendering and audit logging.
 Day 26: AI Email System
 """
 
+import functools
 import logging
 import asyncio
 import json
@@ -12,6 +13,7 @@ from typing import Optional, List, Dict, Any
 import asyncpg  # migrated from db_client
 
 from app.core.db_utils import acquire_with_tenant
+from app.core.security.tenant_scope import tenant_scope_if_account
 from app.infrastructure.connectors.base import ConnectorProviderError
 from app.core.postgres_adapter import PostgresClient
 from app.services.connector_resolver import (
@@ -25,6 +27,28 @@ from app.domain.services.email_template_manager import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _in_tenant_scope(method):
+    """Run an async method with the old database client naming its tenant.
+
+    send_email runs in a live call's task and in the reminder worker, where no
+    tenant is set; without it row security hides the connected mailbox. The
+    tenant is the method's ``tenant_id`` argument (keyword or first positional).
+    """
+    @functools.wraps(method)
+    async def wrapper(self, *args, **kwargs):
+        if "tenant_id" in kwargs:
+            tenant_id = kwargs["tenant_id"]
+        elif args:
+            tenant_id = args[0]
+        else:
+            return await method(self, *args, **kwargs)  # the method raises its own TypeError
+        # A value that is not an account id names nothing: the method then
+        # fails or answers exactly as before.
+        with tenant_scope_if_account(tenant_id):
+            return await method(self, *args, **kwargs)
+    return wrapper
 
 
 class EmailNotConnectedError(Exception):
@@ -80,6 +104,7 @@ class EmailService:
         except ConnectorNotConnectedError as exc:
             raise EmailNotConnectedError(str(exc)) from exc
 
+    @_in_tenant_scope
     async def send_email(
         self,
         tenant_id: str,
@@ -195,6 +220,7 @@ class EmailService:
                     "error": "Email outcome is unconfirmed; do not resend automatically" if state == "unknown" else str(exc),
                     "action_id": action_id, **receipt}
 
+    @_in_tenant_scope
     async def review_connector(self, tenant_id, connector_id=None):
         connector, cid, provider = await self._get_active_email_connector(
             tenant_id, **({"connector_id": connector_id} if connector_id else {}))
