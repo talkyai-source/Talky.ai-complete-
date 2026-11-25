@@ -20,14 +20,15 @@ PBX = "pbx-chan-1"
 
 
 class Conn:
-    def __init__(self, owner):
+    def __init__(self, owner, row_visible=True):
         self.owner = owner
+        self.row_visible = row_visible
 
     async def fetchrow(self, sql, *args):
         if sql.startswith("SELECT id, tenant_id, campaign_id FROM calls"):
             if self.owner.lookup_error:
                 raise self.owner.lookup_error
-            if self.owner.row:
+            if self.owner.row and self.row_visible:
                 return {"id": UUID(INTERNAL), "tenant_id": UUID(TENANT), "campaign_id": None}
             return None
         return {"id": args[0]}
@@ -51,6 +52,9 @@ class Harness:
         self.save_delay = 0.0
         self.clears = []
         self.initialized = True
+        # Opt-in: mimic production row security. The calls row is visible only
+        # on the tenant-scoped connection (called WITHOUT acquire_context).
+        self.row_scoped_only = False
 
     def service(self, _pool):
         harness = self
@@ -94,8 +98,13 @@ def h(tmp_path, monkeypatch):
     ))
 
     @asynccontextmanager
-    async def acquire(*args, **kwargs):
-        yield Conn(harness)
+    async def acquire(pool, call_id, tenant, **kwargs):
+        # With the switch on, behave like the database's row security: the call's
+        # row is visible only on a connection that names the recording's OWN account.
+        visible = not harness.row_scoped_only or (
+            kwargs.get("acquire_context") is None and str(tenant) == TENANT
+        )
+        yield Conn(harness, row_visible=visible)
 
     monkeypatch.setattr(rs, "_acquire_recording_connection", acquire)
     monkeypatch.setattr(rs, "RecordingService", harness.service)
@@ -363,3 +372,77 @@ async def test_loop_survives_an_exception_and_stops_on_event(h, monkeypatch):
     assert len(calls) >= 2
     stop.set()
     await asyncio.wait_for(task, 1)
+
+
+# ------------------------------------------- lookup connection / inbound rows
+
+def _open_inbound_gate(monkeypatch):
+    async def opened(pool):
+        return True
+
+    monkeypatch.setattr(
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_state", opened,
+    )
+
+
+async def test_inbound_row_found_on_tenant_scoped_connection_no_stub(h, monkeypatch):
+    # T1: row security hides the row from get_db(); the lookup must use the
+    # tenant-scoped connection (no acquire_context).
+    h.row_scoped_only = True
+    _open_inbound_gate(monkeypatch)
+    assert await tr.process_spool_entry(_write(_entry(inbound=True))) == "saved"
+    assert h.stubs == []
+    assert h.saves[0]["call_id"] == INTERNAL
+    assert spool.list_entries() == []
+
+
+async def test_outbound_retry_finds_row_on_tenant_scoped_connection_no_stub(h):
+    # T2: outgoing entry on the retry path (no bypass flag set).
+    h.row_scoped_only = True
+    assert await tr.process_spool_entry(_write(_entry(inbound=False))) == "saved"
+    assert h.stubs == []
+    assert h.saves[0]["call_id"] == INTERNAL
+
+
+async def test_inbound_without_row_is_retried_not_stubbed(h, monkeypatch):
+    # T3: an admitted incoming call always has its row; a stub would be a
+    # second, wrong row.
+    h.row = False
+    _open_inbound_gate(monkeypatch)
+    assert await tr.process_spool_entry(_write(_entry(inbound=True))) == "retry"
+    assert h.stubs == [] and h.saves == []
+    [entry] = spool.list_entries()
+    assert entry.last_error == "inbound_call_row_missing" and entry.attempts == 1
+    assert spool.read_wav(entry.key)
+
+
+async def test_outbound_without_row_still_takes_stub_path(h):
+    # T4 (guard): the standalone-test-call stub path is unchanged.
+    h.row = False
+    assert await tr.process_spool_entry(_write(_entry(inbound=False))) == "saved"
+    assert len(h.stubs) == 1 and h.stubs[0][0] == UUID(SESSION)
+    assert h.saves[0]["call_id"] == SESSION
+
+
+async def test_stub_failure_logs_exception_type_only(h, caplog):
+    # T5: the exception's text can hold database values and must not be logged.
+    class CheckViolationError(Exception):
+        pass
+
+    h.row = False
+    h.stub_error = CheckViolationError("row-values-must-not-be-logged")
+    with caplog.at_level("WARNING"):
+        assert await tr.process_spool_entry(_write(_entry(inbound=False))) == "retry"
+    assert "err=CheckViolationError" in caplog.text
+    assert "row-values-must-not-be-logged" not in caplog.text
+    assert spool.read_entry(SESSION).last_error == "stub_insert_failed"
+
+
+async def test_lookup_exception_still_retries_and_deletes_nothing(h):
+    # T6 (guard)
+    h.lookup_error = RuntimeError("db down")
+    assert await tr.process_spool_entry(_write(_entry())) == "retry"
+    entry = spool.read_entry(SESSION)
+    assert entry.last_error == "call_lookup_failed"
+    assert spool.read_wav(SESSION)
+    assert h.stubs == [] and h.saves == []

@@ -482,12 +482,17 @@ async def test_recording_lookup_cannot_resolve_other_tenant_call(tmp_path, monke
     container.is_initialized = True
 
     @asynccontextmanager
-    async def fake_get_db():
+    async def fake_get_db(pool, call_id, tenant, **kwargs):
+        # The lookup uses the tenant-scoped recording connection, not get_db():
+        # it must be opened for THIS session's tenant, with no context override.
+        assert str(tenant) == str(OWNER) and not kwargs
         yield conn
 
     with patch("app.core.container.get_container", return_value=container), patch(
         "app.domain.services.recording_service.RecordingService", _FakeRecordingSvc
-    ), patch("app.core.db.get_db", fake_get_db):
+    ), patch(
+        "app.domain.services.recording_service._acquire_recording_connection", fake_get_db
+    ):
         await rec._save_call_recording(vs, "pbx-channel-shared")
 
     # The query is tenant-scoped + ordered, and bound to THIS session's tenant.
@@ -531,12 +536,17 @@ async def test_recording_lookup_same_tenant_resolves_its_own_call(tmp_path, monk
     container.is_initialized = True
 
     @asynccontextmanager
-    async def fake_get_db():
+    async def fake_get_db(pool, call_id, tenant, **kwargs):
+        # The lookup uses the tenant-scoped recording connection, not get_db():
+        # it must be opened for THIS session's tenant, with no context override.
+        assert str(tenant) == str(OWNER) and not kwargs
         yield conn
 
     with patch("app.core.container.get_container", return_value=container), patch(
         "app.domain.services.recording_service.RecordingService", _FakeRecordingSvc
-    ), patch("app.core.db.get_db", fake_get_db):
+    ), patch(
+        "app.domain.services.recording_service._acquire_recording_connection", fake_get_db
+    ):
         await rec._save_call_recording(vs, "pbx-channel")
 
     assert captured_save["call_id"] == str(call["id"])

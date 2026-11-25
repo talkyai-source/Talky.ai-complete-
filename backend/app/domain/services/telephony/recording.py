@@ -431,13 +431,11 @@ async def _process_locked(entry, wav_bytes, voice_session) -> str:
     tenant_id = "default"
     campaign_id = "unknown"
     try:
-        from app.core.db import get_db
-
         # Object-level authz: external_call_uuid is NOT unique across tenants
         # (channel ids get reused), so the lookup is scoped to the tenant the
         # session belonged to.
         async with _rs._acquire_recording_connection(
-            pool, pbx_id, str(expected_tenant), acquire_context=get_db,
+            pool, pbx_id, str(expected_tenant),
         ) as conn:
             row = await conn.fetchrow(
                 "SELECT id, tenant_id, campaign_id FROM calls "
@@ -462,6 +460,11 @@ async def _process_locked(entry, wav_bytes, voice_session) -> str:
     # No calls row: a dev / standalone call that bypassed the dialer worker.
     # Insert a stub row keyed on the voice-session UUID so the recording can be
     # FK-linked and listed.
+    if not internal_call_id and entry.inbound:
+        # An admitted incoming call always has its calls row from admission.
+        # A stub here could only be a second, wrong row (and the database
+        # refuses it), so keep the recording pending and retry instead.
+        return await _mark_retry(entry, "inbound_call_row_missing")
     if not internal_call_id:
         try:
             session_tenant = str(expected_tenant)
@@ -515,10 +518,10 @@ async def _process_locked(entry, wav_bytes, voice_session) -> str:
                 str(tenant_id)[:8],
                 str(campaign_id)[:8] if campaign_id else "none",
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
-                "stub_calls_row_insert_failed call=%s — recording kept pending",
-                pbx_id[:12],
+                "stub_calls_row_insert_failed call=%s err=%s — recording kept pending",
+                pbx_id[:12], type(exc).__name__,
             )
             return await _mark_retry(entry, "stub_insert_failed")
 

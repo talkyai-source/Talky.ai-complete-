@@ -55,14 +55,7 @@ def fixture(service_fixture, monkeypatch):
             return "INSERT 0 1"
         return await original_execute(sql, *args)
 
-    @asynccontextmanager
-    async def scoped_lookup():
-        fx.pool.attempt_timeout = 10.0
-        async with acquire_with_tenant(fx.pool, TENANT) as conn:
-            yield conn
-
     fx.conn.fetchrow, fx.conn.execute = fetchrow, execute
-    monkeypatch.setattr("app.core.db.get_db", scoped_lookup)
     monkeypatch.setattr("app.core.container.get_container", lambda: SimpleNamespace(
         is_initialized=True, db_pool=fx.pool, db_client=SimpleNamespace(pool=fx.pool),
     ))
