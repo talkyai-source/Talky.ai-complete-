@@ -276,7 +276,8 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
             assert self.tenant == TENANT and "tenant_id = $1::uuid" in query
             if "FROM calls" in query:
                 return {"answered": 0, "mode": None}
-            return {"recorded": 0, "unconfirmed": 0, "transfer_missing": 0, "matched": 0}
+            return {"recorded": 0, "unconfirmed": 0, "recorded_answered": 0,
+                    "unconfirmed_answered": 0, "transfer_missing": 0, "matched": 0}
 
     @asynccontextmanager
     async def acquire(pool, tenant_id, **kwargs):

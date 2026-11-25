@@ -67,7 +67,7 @@ _SENTENCES = {
         + f"{_n(ev, 1)} {_plural(_n(ev, 1), 'recording is', 'recordings are')} waiting too long to be saved. "
         f"{_n(ev, 2)} {_plural(_n(ev, 2), 'transferred call is', 'transferred calls are')} missing "
         f"the part after the transfer. "
-        f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording was', 'recordings were')} saved without a confirmed notice."
+        f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording of an answered call was', 'recordings of answered calls were')} saved without a confirmed notice."
         if status == "alert" and ev else "The call recordings could not be checked."),
     "email": lambda status, ev: (
         "No email has been confirmed sent for more than 3 days." if status == "stale"

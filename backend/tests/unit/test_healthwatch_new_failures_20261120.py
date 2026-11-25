@@ -91,7 +91,7 @@ async def test_every_check_has_its_fingerprint(watch, redis):
         "payments": {"status": "alert", "needs_review": 6, "stuck": 0},
         "units": {"status": "alert", "failed": ["talky-inbound-synthetic.service", "talky-db-backup.service"]},
         "recordings": {"status": "alert", "missing": 2, "pending_stuck": None, "transfer_missing": 1,
-                       "unconfirmed": 0},
+                       "unconfirmed": 0, "unconfirmed_answered": 0},
         "email": {"status": "stale"},
         "disk": {"status": "alert", "used_percent": 90.0},
         "memory": {"status": "unavailable", "reason": "observation_unavailable"},

@@ -253,8 +253,20 @@ _CALLS_ANSWERED_SQL = """SELECT count(*) AS answered,
     WHERE tenant_id = $1::uuid AND direction = 'outbound' AND is_test = false AND answered_at <= now()
       AND ended_at >= now() - interval '24 hours' AND ended_at <= now() - interval '15 minutes'
       AND duration_seconds >= 5"""
+# "Answered by a person" for the notice alarm = PICKED UP (calls.answered_at, the same column
+# `matched` uses) AND NOT A MACHINE (outcome voicemail / no_answer). It is deliberately NOT
+# the dashboard's answered set: a call a person picked up but our own agent then failed
+# (outcome 'failed') or whose outcome was never saved (NULL) must count, because exactly the
+# outage that stops the notice being spoken would otherwise remove those calls from both
+# counts and silence the alarm. A call that ends before the agent speaks is recorded with
+# notice_state 'unconfirmed' by design, so voicemails stay out.
 _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.notice_state = 'unconfirmed') AS unconfirmed,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')) AS recorded_answered,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND r.notice_state = 'unconfirmed') AS unconfirmed_answered,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.transfer_part = 'missing') AS transfer_missing,
     count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
@@ -263,7 +275,7 @@ _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - inter
     WHERE r.tenant_id = $1::uuid AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours'"""
 # Before migration 0103 the notice/transfer columns do not exist: same shape, zero counts.
 _RECORDINGS_OLD_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
-    0 AS unconfirmed, 0 AS transfer_missing,
+    0 AS unconfirmed, 0 AS recorded_answered, 0 AS unconfirmed_answered, 0 AS transfer_missing,
     count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
       AND c.duration_seconds >= 5) AS matched
@@ -339,7 +351,7 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                 result["trunks"] = {"status": "unavailable", "reason": "tenant_limit_exceeded"}
                 return result
             rows = []
-            missing = unconfirmed = transfer_missing = recorded = 0
+            missing = unconfirmed = transfer_missing = recorded = recorded_answered = unconfirmed_answered = 0
             recordings_read = True
             missing_inbound = 0 if inbound_switch is not None else None
             recordings_sql = _RECORDINGS_SQL if notice_columns == 2 else _RECORDINGS_OLD_SQL
@@ -365,6 +377,8 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                                 unconfirmed += stats["unconfirmed"]
                                 transfer_missing += stats["transfer_missing"]
                                 recorded += stats["recorded"]
+                                recorded_answered += stats["recorded_answered"]
+                                unconfirmed_answered += stats["unconfirmed_answered"]
                                 if inbound_switch and missing_inbound is not None:
                                     # Own savepoint: a fault here makes only the incoming part unreadable.
                                     try:
@@ -387,7 +401,7 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
             except Exception:
                 pending = None
             alert = (missing > 0 or (missing_inbound or 0) > 0 or (pending or 0) > 0 or transfer_missing > 0
-                     or (unconfirmed >= 3 and unconfirmed * 2 >= recorded))
+                     or (unconfirmed_answered >= 3 and unconfirmed_answered * 2 >= recorded_answered))
             if recordings_read and pending is None and not alert:
                 # The counts are fine but the pending folder could not be read:
                 # that is not "ok".
@@ -395,12 +409,16 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                                         "missing": missing, "missing_inbound": missing_inbound,
                                         "pending_stuck": None,
                                         "transfer_missing": transfer_missing,
-                                        "unconfirmed": unconfirmed, "recorded": recorded}
+                                        "unconfirmed": unconfirmed, "recorded": recorded,
+                                        "recorded_answered": recorded_answered,
+                                        "unconfirmed_answered": unconfirmed_answered}
             elif recordings_read:
                 result["recordings"] = {"status": "alert" if alert else "ok", "missing": missing,
                                         "missing_inbound": missing_inbound,
                                         "pending_stuck": pending, "transfer_missing": transfer_missing,
-                                        "unconfirmed": unconfirmed, "recorded": recorded}
+                                        "unconfirmed": unconfirmed, "recorded": recorded,
+                                        "recorded_answered": recorded_answered,
+                                        "unconfirmed_answered": unconfirmed_answered}
     except Exception:
         pass
     return result
@@ -463,7 +481,7 @@ def fingerprint(name, value):
                 return f"{base}:{'+'.join(failed)}"
         if name == "recordings":
             text = (f"{base}:{_count(value['missing'])}+{_count(value['pending_stuck'])}"
-                    f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed'])}")
+                    f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed_answered'])}")
             # Added only when an incoming recording is missing, so the text of
             # every other state stays what it was (no repeat notice on release).
             if _count(value.get("missing_inbound")) != "0":
