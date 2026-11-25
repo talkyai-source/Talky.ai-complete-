@@ -270,6 +270,8 @@ class QueryBuilder:
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
                 else:
+                    from app.core.security.rls_context_guard import note_missing_context
+                    note_missing_context("old_client", self.table_name)
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
 
@@ -883,6 +885,8 @@ class RpcBuilder:
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
                 else:
+                    from app.core.security.rls_context_guard import note_missing_context
+                    note_missing_context("old_client_rpc", self.name)
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
 

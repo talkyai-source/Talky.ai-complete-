@@ -64,6 +64,8 @@ async def _apply_rls_context(conn: asyncpg.Connection, tenant_id, bypass_rls: bo
         )
         await conn.execute("SELECT set_config('app.bypass_rls', 'false', true)")
     else:
+        from app.core.security.rls_context_guard import note_missing_context
+        note_missing_context("get_db")
         await conn.execute(
             "SELECT set_config('app.current_tenant_id', $1, true)", _NIL_TENANT_UUID
         )
