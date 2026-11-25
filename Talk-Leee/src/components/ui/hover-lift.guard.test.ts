@@ -24,8 +24,13 @@ const STRIP_PARTS = ["hover:after:absolute", "hover:after:inset-x-0", "hover:aft
 const HEIGHT_PLAIN = "hover:after:h-0.5";
 /** A box that also grows by 1% on hover moves its bottom edge down by 0.5% of its height, so its strip is that much shorter. */
 const HEIGHT_GROWS = "hover:after:h-[calc((2px-0.5%)/1.01)]";
-/** The analytics figure grows by 2% on hover (whileHover={{ scale: 1.02 }} on the same element, not a class): 1% of its height. */
-const HEIGHT_GROWS_2 = "hover:after:h-[calc((2px-1%)/1.02)]";
+/**
+ * The analytics figure lifts 2px and grows by 2% in one animation (whileHover on the same element), not by classes, so
+ * the two are undone together. Its strip is (2px - 1% of its height) / 1.02 when fully hovered, times the animation's
+ * progress ("--analytics-lift", 0 to 1), so the strip ends at the figure's at-rest edge all the way through.
+ */
+const HEIGHT_GROWS_2 = "hover:after:h-[calc(var(--analytics-lift)*(2px-1%)/1.02)]";
+const GROWS_2_ANIMATION = 'whileHover={{ scale: 1.02, y: -2, "--analytics-lift": 1 }}';
 const GROWS_2_FILE = "src/app/analytics/page.tsx";
 /** Classes that clip a box's content: on the box itself they would clip its strip. "home-services-card" clips through globals.css. */
 const CLIPS = /(^|[\s"'`])(overflow-hidden|overflow-clip|overflow-auto|overflow-scroll|overflow-[xy]-(hidden|clip|auto|scroll)|home-services-card|home-packages-card)([\s"'`!]|$)/;
@@ -49,7 +54,8 @@ for (const file of sourceFiles(SRC)) {
     const rel = path.relative(process.cwd(), file).replace(/\\/g, "/");
     lines.forEach((line, i) => {
         // card.tsx keeps the strip in its own string a few lines under the lift, below a comment.
-        if (line.includes(LIFT)) lifts.push({ where: `${rel}:${i + 1}`, file: rel, line, classes: rel === CARD ? lines.slice(i, i + 10).join("\n") : line });
+        // The analytics figure has no lift class (its lift is in its animation): it is found by its strip.
+        if (line.includes(LIFT) || (rel === GROWS_2_FILE && line.includes("hover:after:top-full"))) lifts.push({ where: `${rel}:${i + 1}`, file: rel, line, classes: rel === CARD ? lines.slice(i, i + 10).join("\n") : line });
         const card = /<Card\b[^>]*className="([^"]*)"/.exec(line);
         if (card && CLIPS.test(card[1])) clippingCards.push(`${rel}:${i + 1}`);
     });
@@ -72,7 +78,13 @@ test("the strip is 2px high, and shorter by the growth on a box that also grows 
         const grows = /hover:scale-\[/.test(lift.line);
         if (grows && !lift.line.includes("hover:scale-[1.01]")) wrong.push(`${lift.where}: grows by something other than 1%; its strip height must be worked out again`);
         const grows2 = lift.file === GROWS_2_FILE;
-        if (grows2 && !fs.readFileSync(path.join(process.cwd(), lift.file), "utf8").includes("whileHover={{ scale: 1.02 }}")) wrong.push(`${lift.where}: no longer grows by 2%; its strip height must be worked out again`);
+        if (grows2) {
+            const source = fs.readFileSync(path.join(process.cwd(), lift.file), "utf8");
+            if (!source.includes(GROWS_2_ANIMATION)) wrong.push(`${lift.where}: no longer lifts 2px and grows by 2% in one animation; its strip height must be worked out again`);
+            // A lift class as well would lift it twice, and be undone at once while the growth shrinks back.
+            if (source.includes(LIFT)) wrong.push(`${lift.where}: lifts by a class as well as by its animation`);
+            for (const rest of ['initial={{ opacity: 0, y: 20, "--analytics-lift": 0 }}', 'animate={{ opacity: 1, y: 0, "--analytics-lift": 0 }}']) if (!source.includes(rest)) wrong.push(`${lift.where}: the strip's share is not 0 at rest (${rest})`);
+        }
         const want = grows2 ? HEIGHT_GROWS_2 : grows ? HEIGHT_GROWS : HEIGHT_PLAIN;
         const heights = [HEIGHT_PLAIN, HEIGHT_GROWS, HEIGHT_GROWS_2].filter((height) => lift.classes.includes(height));
         if (heights.length !== 1 || heights[0] !== want) wrong.push(`${lift.where}: expected ${want}`);

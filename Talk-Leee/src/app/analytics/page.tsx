@@ -36,13 +36,18 @@ function GlassStatCard({
     const isLight = theme === "light";
 
     return (
+        // The 2px lift is part of the same animation as the 2% growth (whileHover), so the two start together and are
+        // undone together: a lift undone at once while the growth was still shrinking back left the figure's bottom edge
+        // briefly below its place, and a pointer resting there took it again. "--analytics-lift" runs 0 -> 1 with them,
+        // and the invisible strip under the figure (see components/ui/card.tsx) is that share of its full height, so it
+        // always ends at the figure's at-rest bottom edge.
         <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
+            initial={{ opacity: 0, y: 20, "--analytics-lift": 0 }}
+            animate={{ opacity: 1, y: 0, "--analytics-lift": 0 }}
             transition={{ delay, duration: 0.4 }}
-            whileHover={{ scale: 1.02 }}
+            whileHover={{ scale: 1.02, y: -2, "--analytics-lift": 1 }}
             whileTap={{ scale: 0.99 }}
-            className="group rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc((2px-1%)/1.02)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background hover:shadow-md"
+            className="group relative rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-[calc(var(--analytics-lift)*(2px-1%)/1.02)] hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:bg-background hover:shadow-md"
         >
             <div className="flex items-center gap-3">
                 <div
