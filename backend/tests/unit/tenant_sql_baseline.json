@@ -10963,10 +10963,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current sole app caller endpoint:140\u2013153 first loads the request and requires requestor_id equal authenticated user ID. Service fetches that platform request, checks approved/unexpired/not-created state. Identity ownership, not tenant ownership, governs issuance."
     },
     {
-      "id": "9d65d3ce773f369fc343cd8bd7e35b2bc3e26ccf57b23eef12fabe6fca2babe2",
+      "id": "77b6c526191a18c4c06b066b2461ccc379e47f1d11246437e5ca4fe3b2866fd2",
       "file": "app/workers/cleanup_worker.py",
       "function": "_count_expired",
-      "line": 184,
+      "line": 185,
       "method": "fetchval",
       "tables": [],
       "sql": "SELECT count(*) FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked}",
@@ -10974,7 +10974,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "Fixed six-table _target_sql registry supplies tenant=$1 ownership, using parent calls for tenantless children and rejecting conflicting non-NULL transcript tenants. Cutoff=$2 is bound; compliance hold is checked in the same tenant transaction. Module AST pins the builder. Exact reviewed operation: fetchval; app/workers/cleanup_worker.py:184. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
+      "reason": "Fixed six-table _target_sql registry supplies tenant=$1 ownership, using parent calls for tenantless children and rejecting conflicting non-NULL transcript tenants. Cutoff=$2 is bound; compliance hold is checked in the same tenant transaction. Module AST pins the builder. Exact reviewed operation: fetchval; app/workers/cleanup_worker.py:185. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -11599,10 +11599,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "c4f6cc2c0db766d5d7be33cc5ef351c56d242d4edcc8c51c7b0a6073e07db78d",
+      "id": "cd1166f6521ec3e9c59ba6cc5d069c01fb2d1a2f247eb400220b0c5999e06768",
       "file": "app/workers/cleanup_worker.py",
       "function": "_delete_batch",
-      "line": 205,
+      "line": 206,
       "method": "execute",
       "tables": [],
       "sql": "DELETE FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} AND r.id IN ( SELECT r.id FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} ORDER BY r.created_at, r.id LIMIT $3 )",
@@ -11610,7 +11610,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "Fixed six-table builder repeats tenant=$1 ownership in both outer DELETE and limited-ID subquery, including owned-parent proofs for tenantless/nullable children. Cutoff and batch limit are parameters; hold serialization remains in the same tenant transaction. This exception does not certify other retention policy decisions. Exact reviewed operation: execute; app/workers/cleanup_worker.py:205. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
+      "reason": "Fixed six-table builder repeats tenant=$1 ownership in both outer DELETE and limited-ID subquery, including owned-parent proofs for tenantless/nullable children. Cutoff and batch limit are parameters; hold serialization remains in the same tenant transaction. This exception does not certify other retention policy decisions. Exact reviewed operation: execute; app/workers/cleanup_worker.py:206. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
       "category": "reviewed_tenant_scoped"
     },
     {

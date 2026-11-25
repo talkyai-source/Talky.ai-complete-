@@ -59,6 +59,7 @@ import asyncpg
 from app.core import db
 from app.core.db_utils import acquire_connection
 from app.domain.models.retention_config import PROPOSED_CLEANUP_RETENTION_DAYS
+from app.workers.number_request_retention import purge_number_request_documents
 from app.workers.recording_retention_purge import (
     purge_actor_id,
     purge_batch_size,
@@ -370,6 +371,7 @@ async def main() -> int:
             limit=purge_batch_size(),
         )
         summary["recordings_retention"] = recording_summary
+        summary["number_request_documents"] = await purge_number_request_documents(pool, dry_run=dry_run)
     except Exception as exc:
         logger.error("cleanup_failed: %s", exc, exc_info=True)
         return 1
