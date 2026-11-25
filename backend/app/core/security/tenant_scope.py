@@ -21,11 +21,16 @@ context variable is touched, because the old client writes the value into a
 """
 from __future__ import annotations
 
+import contextvars
 import uuid
 from contextlib import contextmanager, nullcontext
 from typing import ContextManager, Iterator
 
-from app.core.security.tenant_isolation import _bypass_rls, _tenant_context
+from app.core.security.tenant_isolation import (
+    _bypass_rls,
+    _tenant_context,
+    clear_tenant_context,
+)
 
 
 @contextmanager
@@ -48,6 +53,22 @@ def tenant_scope(tenant_id: object) -> Iterator[str]:
             # waiting, at shutdown). That context never had these values, so
             # there is nothing to put back.
             pass
+
+
+def context_without_account() -> contextvars.Context:
+    """A copy of the current context with no account, no bypass and no user.
+
+    For a long-lived task started from inside a signed-in request (a listener
+    or a watchdog). ``asyncio.create_task`` copies the creator's context, so a
+    task started by a platform admin's request would keep that admin's bypass
+    and account until the process restarts. Start it like this instead:
+    ``asyncio.create_task(coro, context=context_without_account())``
+    (Python 3.11 and later). Every other context variable (logging, tracing)
+    is kept; the caller's own context is not changed.
+    """
+    ctx = contextvars.copy_context()
+    ctx.run(clear_tenant_context)
+    return ctx
 
 
 def tenant_scope_if_account(tenant_id: object) -> ContextManager:
