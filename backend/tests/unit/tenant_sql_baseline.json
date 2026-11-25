@@ -3504,7 +3504,7 @@
       "id": "6d1799b6714bfd3b21c175a76ea9d1a04e44d5ca87ceb0effcf07f513f427c14",
       "file": "app/services/email_service.py",
       "function": "EmailService._create_action_record",
-      "line": 290,
+      "line": 316,
       "method": "execute",
       "tables": [
         "assistant_actions"
@@ -7149,10 +7149,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ed51ea4a73b29be0c57496f276149b2d48d7ec0c9dda2af9068f5a0ef02fa4fd",
+      "id": "8b5834030a3876f3ce304dceaea079887574a64991572cb97ff29c9d978e8409",
       "file": "app/services/email_service.py",
       "function": "EmailService._update_action_status",
-      "line": 361,
+      "line": 387,
       "method": "execute",
       "tables": [],
       "sql": "{branch} WHERE id = ${branch} AND tenant_id = ${branch}{Constant(value=1)} AND status = ${branch}{Constant(value=2)}",
