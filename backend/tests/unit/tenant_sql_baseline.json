@@ -4842,7 +4842,7 @@
       "id": "9d8756c8ea455b72f9246403c2bcbf89b8e192efd88c89fe669c50cfe2e5d61c",
       "file": "app/services/crm_sync_service.py",
       "function": "CRMSyncService._write_admission_stamp",
-      "line": 459,
+      "line": 465,
       "method": "fetchrow",
       "tables": [
         "call_lead_details",
@@ -10653,7 +10653,7 @@
       "id": "8ce078bb27ddd6b7dd8fed1ced91bb8dad4926c91c39ce894dd96b4334b893d3",
       "file": "app/services/crm_sync_service.py",
       "function": "_lookup_tenant_for_call",
-      "line": 835,
+      "line": 847,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -10663,7 +10663,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Internal teardown CRM sync discovers the tenant of a durable internal call UUID when the hook lacks tenant context; run_crm_sync installs the returned tenant and calls sync_call with both tenant and call IDs. It is not an HTTP endpoint accepting arbitrary call IDs. Exact reviewed operation: fetchval; app/services/crm_sync_service.py:835.",
+      "reason": "Internal teardown CRM sync discovers the tenant of a durable internal call UUID when the hook lacks tenant context; run_crm_sync installs the returned tenant and calls sync_call with both tenant and call IDs. It is not an HTTP endpoint accepting arbitrary call IDs. Exact reviewed operation: fetchval; app/services/crm_sync_service.py:847.",
       "category": "system_discovery"
     },
     {

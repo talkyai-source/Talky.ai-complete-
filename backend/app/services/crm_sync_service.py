@@ -858,7 +858,7 @@ async def run_crm_sync(call_id: str, *, tenant_id: Optional[str] = None, reason:
     Never raises."""
     try:
         from app.core.container import get_container
-        from app.core.security.tenant_isolation import set_current_tenant_id
+        from app.core.security.tenant_scope import tenant_scope
 
         container = get_container()
         if not container.is_initialized:
@@ -869,9 +869,9 @@ async def run_crm_sync(call_id: str, *, tenant_id: Optional[str] = None, reason:
             return None
         # The task inherits a copy of the caller's context; scope every
         # adapter query in this task to the call's tenant.
-        set_current_tenant_id(str(tenant))
-        service = CRMSyncService(container.db_client, db_pool=pool)
-        result = await service.sync_call(str(tenant), str(call_id), reason=reason)
+        with tenant_scope(str(tenant)):
+            service = CRMSyncService(container.db_client, db_pool=pool)
+            result = await service.sync_call(str(tenant), str(call_id), reason=reason)
         if result.success:
             logger.info(
                 "crm_sync call=%s reason=%s providers=%s crm_call_id=%s",
