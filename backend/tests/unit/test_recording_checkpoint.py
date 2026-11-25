@@ -189,13 +189,21 @@ async def test_checkpoint_done_removes_folder_and_is_not_recreated(env):
     assert list(spool.list_entries()) == []
 
 
-async def test_vanished_session_is_recovered_to_pending(env):
+async def test_vanished_session_is_recovered_to_pending(env, monkeypatch):
+    # Contract changed 2026-11-25: a session gone from the registry belongs to
+    # its teardown for cp._VANISHED_GRACE_S; it is recovered only when that
+    # grace passes without checkpoint_done (was: recovered on the very next pass).
+    clock = [5000.0]
+    monkeypatch.setattr(cp, "_now", lambda: clock[0])
     gw = FakeGw()
     env.live["pbx1"] = make_session("sess-1", gw)
     gw.caller += [chunk(6000, 1), chunk(6000, 2)]
     gw.agent += [(0, chunk(400, 3)), (3000, chunk(400, 4))]
     await cp.checkpoint_pass()
     env.live.clear()  # process-internal teardown without checkpoint_done
+    await cp.checkpoint_pass()  # first seen gone: left to its teardown
+    assert spool.list_entries() == []
+    clock[0] += cp._VANISHED_GRACE_S + 1
     await cp.checkpoint_pass()
     [entry] = spool.list_entries()
     assert entry.tenant_id == TENANT
@@ -264,9 +272,12 @@ async def test_existing_pending_entry_is_not_overwritten(env):
         make_session("dup"), "pbx", sample_rate=RATE, duration=5.0,
         awaiting_transfer=False, transfer_recording_name=None,
     )
-    spool.write_entry(entry, b"RIFFkeep")
+    # 2026-11-26: "has audio" means a wav larger than a bare 44-byte header, so the
+    # pending copy here is made realistic (was the 8-byte b"RIFFkeep", a fake that now counts as empty).
+    KEEP = b"RIFFkeep" + bytes(200)
+    spool.write_entry(entry, KEEP)
     assert await cp.recover_orphans() == 0
-    assert spool.read_wav("dup") == b"RIFFkeep"
+    assert spool.read_wav("dup") == KEEP
     assert not folder(env, "dup").exists()
 
 

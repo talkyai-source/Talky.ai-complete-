@@ -23,6 +23,7 @@ import logging
 import os
 import shutil
 import struct
+import time
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
@@ -30,10 +31,10 @@ from app.domain.services.recording_spool import (
     _KEY_RE,
     SpoolEntry,
     _from_dict,
-    has_audio,
-    read_entry,
+    pending_has_audio,
     spool_dir,
-    write_entry,
+    utc_now_iso,
+    write_entry_if_absent,
 )
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,16 @@ _DEFAULT_INTERVAL_S = 10.0
 _MIN_INTERVAL_S = 5.0
 _DONE_MAX = 5000
 _O_BINARY = getattr(os, "O_BINARY", 0)
+# A session gone from the registry belongs to its own teardown for this long.
+# 120 s: the pending loop re-processes entries after 120 s, and a teardown's
+# save (mix + spool write) takes seconds, so a session still not marked done
+# after this long really ended without the normal path.
+_VANISHED_GRACE_S = 120.0
+
+
+def _now() -> float:
+    """Monotonic seconds; tests replace this to move the clock."""
+    return time.monotonic()
 
 
 @dataclass
@@ -57,6 +68,7 @@ class _CallState:
     first_agent: Any = None
     caller_bytes: int = 0
     need_reset: bool = False
+    vanished_at: Optional[float] = None
 
 
 # id(voice_session) -> state. Calls marked finished (dict used as ordered set).
@@ -99,6 +111,8 @@ def checkpoint_done(session_call_id) -> None:
         while len(_DONE) > _DONE_MAX:
             _DONE.pop(next(iter(_DONE)), None)
         keys = {st.key for st in list(_STATE.values()) if st.session_call_id == sid}
+        for sk in [k for k, st in list(_STATE.items()) if st.session_call_id == sid]:
+            _STATE.pop(sk, None)
         if _KEY_RE.match(sid):
             keys.add(sid)
         try:
@@ -216,8 +230,19 @@ def _read_folder(key: str):
     return entry, ([caller] if caller else []), agent_chunks
 
 
-def _recover_sync(key: str) -> tuple[str, float]:
-    """Turn one folder into a pending recording. ``(status, seconds)``."""
+def _recover_sync(key: str, source: str = "startup") -> tuple[str, float]:
+    """Turn one folder into a pending recording. ``(status, seconds)``.
+
+    Status: ``recovered`` (written to pending, folder removed), ``already_pending``
+    (a pending entry holds the audio, folder removed), ``kept`` (a pending entry
+    exists with an empty wav: nothing written, folder KEPT), plus ``short`` and
+    ``unreadable``.
+
+    The ``created_at`` stamp for ``source=pass`` is so that the pending loop (an
+    entry with no attempts waits ``_ORPHAN_AGE_S`` from ``created_at``) leaves
+    it long enough for a late teardown's ``write_entry`` to replace it; for
+    ``id_reuse`` it is kept for uniformity (harmless: the old session object is gone).
+    """
     from app.domain.services.recording_service import mix_stereo_recording
 
     parsed = _read_folder(key)
@@ -230,22 +255,28 @@ def _recover_sync(key: str) -> tuple[str, float]:
     if duration < _MIN_SECONDS:
         shutil.rmtree(_folder(key), ignore_errors=True)
         return "short", duration
-    if has_audio(key) and read_entry(key) is not None:
-        # A pending entry with this key already holds the call's audio.
-        shutil.rmtree(_folder(key), ignore_errors=True)
-        return "already_pending", duration
     wav = mix_stereo_recording(
         caller_chunks=caller_chunks, agent_chunks=agent_chunks, sample_rate=rate,
     )
     entry.duration_seconds = float(duration)
-    write_entry(entry, wav)
+    if source in ("pass", "id_reuse"):
+        entry.created_at = utc_now_iso()
+    if not write_entry_if_absent(entry, wav):
+        # A pending entry with this key exists and was not replaced (checked
+        # under the spool lock, after the mix).
+        if not pending_has_audio(key):
+            # Its wav is empty (the transfer hand-over's awaiting entry): the
+            # checkpointed audio is the only copy, so the folder stays.
+            return "kept", duration
+        shutil.rmtree(_folder(key), ignore_errors=True)
+        return "already_pending", duration
     shutil.rmtree(_folder(key), ignore_errors=True)
     return "recovered", duration
 
 
-async def _recover_key(key: str) -> bool:
+async def _recover_key(key: str, source: str = "pass") -> bool:
     try:
-        status, seconds = await asyncio.to_thread(_recover_sync, key)
+        status, seconds = await asyncio.to_thread(_recover_sync, key, source)
     except Exception as exc:
         logger.error(
             "recording_checkpoint_error call=%s err=%s", str(key)[:12], type(exc).__name__,
@@ -254,8 +285,17 @@ async def _recover_key(key: str) -> bool:
     if status == "unreadable":
         logger.warning("recording_checkpoint_unreadable call=%s", str(key)[:12])
         return False
+    if status == "kept":
+        logger.warning(
+            "recording_checkpoint_kept call=%s source=%s reason=pending_entry_has_no_audio",
+            str(key)[:12], source,
+        )
+        return False
     if status == "recovered":
-        logger.info("recording_checkpoint_recovered call=%s seconds=%.1f", str(key)[:12], seconds)
+        # source=pass means audio is really being rescued: WARNING.
+        (logger.warning if source in ("pass", "id_reuse") else logger.info)(
+            "recording_checkpoint_recovered call=%s source=%s seconds=%.1f", str(key)[:12], source, seconds,
+        )
         return True
     return False
 
@@ -302,7 +342,7 @@ async def recover_orphans() -> int:
                 continue
             if not os.path.isdir(os.path.join(live_dir, name)):
                 continue
-            if await _recover_key(name):
+            if await _recover_key(name, "startup"):
                 recovered += 1
         return recovered
     except Exception as exc:
@@ -325,12 +365,21 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
 
     if sid in _DONE:
         return False
+    st = _STATE.get(id(vs))
+    if st is not None and st.session_call_id != sid:
+        # The id of a finished session was reused: finish the old one first
+        # (before any branch below can delete its folder).
+        _STATE.pop(id(vs), None)
+        if st.session_call_id not in _DONE:
+            await _recover_key(st.key, "id_reuse")
+        st = None
     inbound = _is_true_inbound_session(vs)
     if inbound and getattr(vs, "_recording_allowed", False) is not True:
         # An inbound gate opens only after the notice attempt; until then nothing goes to disk.
-        # A gate closed mid-call (emergency stop) also destroys the copy already written.
+        # A gate closed mid-call (emergency stop) also destroys the copy already written
+        # (this session's own; another call's stale state was handled above).
         gone = _STATE.pop(id(vs), None)
-        if gone is not None:
+        if gone is not None and gone.session_call_id == sid:
             await asyncio.to_thread(_rmtree, gone.key)
         return False
     if getattr(vs, "_transfer_connected", False) or getattr(vs, "_recording_saved_at_transfer", False):
@@ -343,14 +392,6 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
     gateway = getattr(vs, "media_gateway", None)
     if gateway is None:
         return False
-
-    st = _STATE.get(id(vs))
-    if st is not None and st.session_call_id != sid:
-        # The id of a finished session was reused: finish the old one first.
-        _STATE.pop(id(vs), None)
-        if st.session_call_id not in _DONE:
-            await _recover_key(st.key)
-        st = None
 
     enabled_fn = getattr(gateway, "is_recording_enabled", None)
     buffer_fn = getattr(gateway, "get_recording_buffer", None)
@@ -439,11 +480,23 @@ async def checkpoint_pass() -> int:
             )
     for sk in list(_STATE):
         st = _STATE.get(sk)
-        if st is None or seen.get(sk) == st.session_call_id:
+        if st is None:
+            continue
+        if seen.get(sk) == st.session_call_id:
+            st.vanished_at = None  # back in the registry: no stale clock
+            continue
+        if st.session_call_id in _DONE:
+            _STATE.pop(sk, None)
+            continue
+        # Gone from the registry and not done: its teardown may be saving right
+        # now. Leave it alone until the grace has passed without checkpoint_done.
+        now = _now()
+        if st.vanished_at is None:
+            st.vanished_at = now
+            continue
+        if now - st.vanished_at < _VANISHED_GRACE_S:
             continue
         _STATE.pop(sk, None)
-        if st.session_call_id in _DONE:
-            continue
         # The call ended without the normal path finishing it: keep the audio.
         if os.path.isdir(_folder(st.key)):
             await _recover_key(st.key)

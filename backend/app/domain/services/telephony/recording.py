@@ -362,7 +362,7 @@ async def _save_call_recording_with_budget(
         _checkpoint_done()
     except Exception as exc:
         logger.error(
-            "recording_spool_write_failed call=%s err=%s", call_id[:12], type(exc).__name__,
+            "recording_spool_write_failed call=%s step=%s err=%s", call_id[:12], getattr(exc, "spool_step", "other"), type(exc).__name__,
         )
     if spooled:
         # The audio is on disk now; free the in-memory copy.
@@ -400,7 +400,7 @@ async def _mark_retry(entry, reason: str) -> str:
         entry.last_attempt_at = utc_now_iso()
         await asyncio.to_thread(update_entry, entry)
     except Exception as exc:
-        logger.error("recording_spool_write_failed call=%s err=%s",
+        logger.error("recording_spool_write_failed call=%s op=update err=%s",
                      str(entry.pbx_call_id)[:12], type(exc).__name__)
     logger.warning(
         "recording_spool_retry call=%s reason=%s attempts=%d",
@@ -416,7 +416,7 @@ async def _finish(entry, status: str) -> str:
     try:
         await asyncio.to_thread(remove_entry, entry.key)
     except Exception as exc:
-        logger.error("recording_spool_write_failed call=%s err=%s",
+        logger.error("recording_spool_write_failed call=%s op=remove err=%s",
                      str(entry.pbx_call_id)[:12], type(exc).__name__)
     return status
 
@@ -745,6 +745,12 @@ async def recording_spool_loop(stop_event: asyncio.Event) -> None:
                 )
 
                 await purge_old_transfer_parts()
+            except Exception as exc:
+                logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
+            try:
+                from app.domain.services.recording_spool import sweep_leftovers
+
+                await asyncio.to_thread(sweep_leftovers)  # old stray .json / .tmp files
             except Exception as exc:
                 logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
     finally:
