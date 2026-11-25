@@ -1514,7 +1514,7 @@
       "id": "2adc7f251d37f4dff12088536b3c712a1ea106363421411b7e5066f0b970a785",
       "file": "app/api/v1/endpoints/webhooks_secure.py",
       "function": "configure_webhook",
-      "line": 400,
+      "line": 406,
       "method": "execute",
       "tables": [
         "webhook_configs"
