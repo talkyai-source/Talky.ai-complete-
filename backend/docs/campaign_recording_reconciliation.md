@@ -45,7 +45,7 @@ cd /opt/talky/backend
 venv/bin/python scripts/report_recording_discrepancies.py
 ```
 
-Exit 0 means a complete report with no differences; 1 means differences were found; 2 means a scan/configuration/database failure or incomplete inventory. Logs omit raw driver error text and outside-root paths. In-root filenames/UUIDs remain operator metadata; restrict journal access appropriately.
+Exit 0 means a complete report with no differences; 4 means the only differences are files without a record (stray files); 3 means at least one recording record has no file (a lost recording, whatever else was found); 2 means a scan/configuration/database failure or incomplete inventory with no lost recording found. The script never returns 1 (Python uses it for a crash). Logs omit raw driver error text and outside-root paths. In-root filenames/UUIDs remain operator metadata; restrict journal access appropriately.
 
 The installer links the new service/timer and enables **and starts** `talky-recording-discrepancy.timer`. It triggers the read-only service nightly at 03:30 server-local time with `Persistent=true`. The service runs as `talky` with a read-only filesystem sandbox and a ten-minute deadline. A custom recording directory must already be readable by that runtime identity. The owner verifies installation and a local rehearsal after deployment:
 
@@ -55,7 +55,7 @@ systemctl start talky-recording-discrepancy.service
 journalctl -u talky-recording-discrepancy.service --since today --no-pager
 ```
 
-A nonzero service exit is intentional when differences or incomplete evidence exist. Alert delivery is the separate item-16 configuration. No real Linux/systemd, PostgreSQL or production filesystem run is claimed by the fixture tests.
+The unit treats exit 4 (only stray files) as success; any other nonzero exit (a lost recording, incomplete evidence, or a crash) marks it failed on purpose. Alert delivery is the separate item-16 configuration. No real Linux/systemd, PostgreSQL or production filesystem run is claimed by the fixture tests.
 
 ## Remaining owner verification
 

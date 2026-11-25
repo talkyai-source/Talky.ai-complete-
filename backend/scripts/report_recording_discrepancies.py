@@ -5,6 +5,18 @@ The operator supplies DATABASE_URL; LOCAL_RECORDINGS_DIR defaults to recordings
 under the backend working directory. Object storage is outside this report.
 The database and filesystem cannot share a snapshot: differences need owner
 review, especially while a recording is being written/registered or purged.
+
+The folder where recordings wait to be saved (RECORDING_SPOOL_DIR, else
+<root>/.pending) is not part of the comparison: its files have no record yet by
+design. They are only counted (counts.waiting_files_skipped).
+
+Exit codes (1 is never returned: Python itself exits 1 when the script crashes
+before main(), so 1 must not be read as a result):
+  0  complete, no difference.
+  4  complete; the only differences are files without a record (stray files).
+  2  could not complete (and no lost recording was found).
+  3  at least one record has no file (a lost recording; JSON "lost_recordings"
+     is true), whatever else was found, even if the run could not complete.
 """
 from __future__ import annotations
 
@@ -58,8 +70,26 @@ def _relative_path(root, raw):
     return relative.as_posix()
 
 
-def _scan_files(root, max_files):
+def _waiting_folder(root):
+    """The spool (recordings waiting to be saved), by the application's rule
+    (recording_spool.spool_dir): RECORDING_SPOOL_DIR if set, else <root>/.pending.
+    Returns it only when it lies inside the root; otherwise None."""
+    configured = os.environ.get("RECORDING_SPOOL_DIR")
+    candidate = Path(os.path.abspath(configured)) if configured else root / ".pending"
+    try:
+        candidate = candidate.resolve()
+        if candidate == root or root not in candidate.parents:
+            return None
+    except (OSError, ValueError):
+        return None
+    return candidate
+
+
+def _scan_files(root, max_files, skip_dir=None):
+    """Returns (files, issues, waiting_files, waiting_unreadable). Files under skip_dir go
+    into waiting_files (relative paths), never into files; a read error there is not an issue."""
     files, issues, pending = set(), [], [root]
+    waiting, waiting_unreadable = set(), False
     while pending:
         directory = pending.pop()
         try:
@@ -73,23 +103,30 @@ def _scan_files(root, max_files):
                     if entry.is_dir(follow_symlinks=False):
                         pending.append(path)
                     elif entry.is_file(follow_symlinks=False):
+                        if skip_dir is not None and skip_dir in path.parents:
+                            waiting.add(path.relative_to(root).as_posix())
+                            continue
                         if len(files) >= max_files:
-                            return files, list(dict.fromkeys([*issues, "file_limit_reached"]))
+                            return files, list(dict.fromkeys([*issues, "file_limit_reached"])), waiting, waiting_unreadable
                         files.add(path.relative_to(root).as_posix())
         except OSError as exc:
-            issues.append(f"directory_scan_failed:{type(exc).__name__}")
-    return files, list(dict.fromkeys(issues))
+            if skip_dir is not None and (directory == skip_dir or skip_dir in directory.parents):
+                waiting_unreadable = True
+            else:
+                issues.append(f"directory_scan_failed:{type(exc).__name__}")
+    return files, list(dict.fromkeys(issues)), waiting, waiting_unreadable
 
 
 async def report_discrepancies(conn, root, *, page_size=500, max_rows=100000, max_files=100000, sample_limit=1000):
     if not 1 <= page_size <= 1000 or not 1 <= max_rows <= 1000000 or not 1 <= max_files <= 1000000 or not 1 <= sample_limit <= 10000:
         raise ValueError("Report limits are outside the supported range")
     result = {"scope": "local_recordings_s3_and_legacy", "read_only": True, "complete": True,
+              "lost_recordings": False, "waiting_folder_skipped": False, "waiting_folder_unreadable": False,
               "snapshot_consistent": False, "issues": [], "files_without_rows": [],
               "rows_without_files": [], "invalid_paths": [], "samples_truncated": False,
               "counts": {"files": 0, "local_rows": 0, "files_without_rows": 0,
                          "rows_without_files": 0, "invalid_paths": 0, "nonuploaded_rows": 0,
-                         "legacy_local_rows": 0, "legacy_remote_rows": 0,
+                         "legacy_local_rows": 0, "legacy_remote_rows": 0, "waiting_files_skipped": 0,
                          "legacy_ownership_conflicts": 0}}
     try:
         root = Path(root).resolve(strict=True)
@@ -220,9 +257,14 @@ async def report_discrepancies(conn, root, *, page_size=500, max_rows=100000, ma
                     break
             tenant_cursor = tenants[-1]["id"]
 
-    files, scan_issues = await asyncio.to_thread(_scan_files, root, max_files)
+    waiting_dir = _waiting_folder(root)
+    files, scan_issues, waiting_files, waiting_unreadable = await asyncio.to_thread(
+        _scan_files, root, max_files, waiting_dir)
     result["issues"].extend(scan_issues)
     result["counts"]["files"] = len(files)
+    result["waiting_folder_skipped"] = bool(waiting_dir and waiting_dir.is_dir())
+    result["counts"]["waiting_files_skipped"] = len(waiting_files)
+    result["waiting_folder_unreadable"] = waiting_unreadable
     if result["counts"]["invalid_paths"]:
         result["issues"].append("invalid_recording_paths")
     # A partial DB read cannot establish that a file has no row. A partial
@@ -237,20 +279,35 @@ async def report_discrepancies(conn, root, *, page_size=500, max_rows=100000, ma
         result["counts"]["files_without_rows"] = len(orphans)
         result["files_without_rows"] = orphans[:sample_limit]
     if not scan_issues:
-        missing = [{**identity, "path": relative} for relative, identity in uploaded if relative not in files]
+        missing = [{**identity, "path": relative} for relative, identity in uploaded if relative not in files and relative not in waiting_files]
         result["counts"]["rows_without_files"] = len(missing)
         result["rows_without_files"] = missing[:sample_limit]
     result["issues"] = list(dict.fromkeys(result["issues"]))
     result["complete"] = not result["issues"]
+    result["lost_recordings"] = result["counts"]["rows_without_files"] > 0
     result["samples_truncated"] = any(result["counts"][key] > len(result[key])
                                       for key in ("files_without_rows", "rows_without_files", "invalid_paths"))
     return result
 
 
 def build_parser():
-    parser = argparse.ArgumentParser(description="Report local recording discrepancies without changing rows or files.")
+    parser = argparse.ArgumentParser(
+        description="Report local recording discrepancies without changing rows or files. "
+                    "Exit 0: no difference. 4: only files without a record. "
+                    "2: could not complete. 3: a record has no file (lost recording; wins over 2 and 4). "
+                    "1 is never returned.")
     parser.add_argument("--root", type=Path, help="Override LOCAL_RECORDINGS_DIR for an operator-selected recording root.")
     return parser
+
+
+def exit_code(result):
+    # rows_without_files is computed only after a scan with no issue, so it is
+    # trustworthy even when another issue makes the run incomplete.
+    if result["lost_recordings"]:
+        return 3
+    if not result["complete"]:
+        return 2
+    return 4 if result["counts"]["files_without_rows"] else 0
 
 
 async def run(args):
@@ -261,9 +318,7 @@ async def run(args):
     try:
         result = await report_discrepancies(conn, args.root or os.environ.get("LOCAL_RECORDINGS_DIR", "./recordings"))
         print(json.dumps(result, sort_keys=True), flush=True)
-        if not result["complete"]:
-            return 2
-        return 1 if result["counts"]["files_without_rows"] or result["counts"]["rows_without_files"] else 0
+        return exit_code(result)
     finally:
         await conn.close(timeout=5)
 

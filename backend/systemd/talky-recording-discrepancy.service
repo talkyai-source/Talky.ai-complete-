@@ -12,6 +12,9 @@ EnvironmentFile=/opt/talky/backend/.env
 Environment=PYTHONDONTWRITEBYTECODE=1
 ExecStart=/opt/talky/backend/venv/bin/python scripts/report_recording_discrepancies.py
 TimeoutStartSec=10min
+# A night that finds only stray files (exit 4) must not mark the unit failed; a lost recording (3) and a run that could not complete (2) do.
+# 4, not 1: Python exits 1 when the script crashes before main() (bad import, syntax error), which must stay a failure.
+SuccessExitStatus=4
 NoNewPrivileges=yes
 CapabilityBoundingSet=
 ProtectSystem=strict
