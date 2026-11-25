@@ -63,7 +63,8 @@ def _install(watch, monkeypatch, *, switch=True, answered=0, matched=0, mode=Non
                 return {"answered_inbound": in_answered, "matched_inbound": in_matched}
             if "FROM calls" in sql:
                 return {"answered": answered, "mode": mode}
-            return {"recorded": answered, "unconfirmed": 0, "transfer_missing": 0, "matched": matched}
+            return {"recorded": answered, "unconfirmed": 0, "recorded_answered": 0,
+                    "unconfirmed_answered": 0, "transfer_missing": 0, "matched": matched}
 
     @asynccontextmanager
     async def acquire(pool, tenant_id, **kw):
@@ -160,7 +161,7 @@ def test_the_failure_notice_names_a_missing_incoming_recording(watch):
     # The notice is sent again only when this text changes. An alert caused by
     # incoming recordings alone used to read "recordings:alert:0+0+0+0".
     state = {"status": "alert", "missing": 0, "pending_stuck": 0, "transfer_missing": 0,
-             "unconfirmed": 0, "recorded": 3}
+             "unconfirmed": 0, "unconfirmed_answered": 0, "recorded": 3}
     assert watch.fingerprint("recordings", {**state, "missing_inbound": 2}) == "recordings:alert:0+0+0+0+in2"
     assert watch.fingerprint("recordings", {**state, "missing_inbound": 3}) == "recordings:alert:0+0+0+0+in3"
 
@@ -169,7 +170,7 @@ def test_the_failure_notice_names_a_missing_incoming_recording(watch):
 def test_the_failure_notice_is_unchanged_when_no_incoming_recording_is_missing(watch, inbound):
     # So the release itself sends no repeat notice for a state that did not change.
     state = {"status": "alert", "missing": 2, "pending_stuck": 0, "transfer_missing": 1,
-             "unconfirmed": 0, "recorded": 9}
+             "unconfirmed": 0, "unconfirmed_answered": 0, "recorded": 9}
     if inbound != "absent":
         state["missing_inbound"] = inbound
     assert watch.fingerprint("recordings", state) == "recordings:alert:2+0+1+0"

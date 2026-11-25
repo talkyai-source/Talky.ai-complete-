@@ -25,7 +25,7 @@ def watch(monkeypatch):
 
 
 def _install(watch, monkeypatch, *, answered=0, matched=0, mode=None, recorded=0, unconfirmed=0,
-             transfer_missing=0, columns=2, fail=False, rows_fail=False):
+             recorded_answered=0, unconfirmed_answered=0, transfer_missing=0, columns=2, fail=False, rows_fail=False):
     seen = []
 
     class Conn:
@@ -56,6 +56,7 @@ def _install(watch, monkeypatch, *, answered=0, matched=0, mode=None, recorded=0
             if "FROM calls" in sql:
                 return {"answered": answered, "mode": mode}
             return {"recorded": recorded, "unconfirmed": unconfirmed,
+                    "recorded_answered": recorded_answered, "unconfirmed_answered": unconfirmed_answered,
                     "transfer_missing": transfer_missing, "matched": matched}
 
     @asynccontextmanager
@@ -79,7 +80,8 @@ def _entry(age_seconds, awaiting=None):
 async def test_nothing_missing_is_ok(watch, monkeypatch):
     _install(watch, monkeypatch, answered=4, matched=4, recorded=4)
     assert await _report(watch) == {"status": "ok", "missing": 0, "missing_inbound": 0, "pending_stuck": 0,
-                                    "transfer_missing": 0, "unconfirmed": 0, "recorded": 4}
+                                    "transfer_missing": 0, "unconfirmed": 0, "recorded": 4,
+                                    "recorded_answered": 0, "unconfirmed_answered": 0}
 
 
 async def test_an_answered_call_without_a_recording_alerts(watch, monkeypatch):
@@ -140,7 +142,9 @@ async def test_an_unreadable_pending_folder_is_reported_as_unavailable(watch, mo
 @pytest.mark.parametrize("unconfirmed,recorded,status", [
     (3, 6, "alert"), (3, 5, "alert"), (3, 7, "ok"), (2, 2, "ok"), (0, 0, "ok")])
 async def test_unconfirmed_ratio_rule(watch, monkeypatch, unconfirmed, recorded, status):
-    _install(watch, monkeypatch, unconfirmed=unconfirmed, recorded=recorded)
+    # The rule now reads the calls a person answered (here: all recordings were answered calls).
+    _install(watch, monkeypatch, unconfirmed=unconfirmed, recorded=recorded,
+             unconfirmed_answered=unconfirmed, recorded_answered=recorded)
     report = await _report(watch)
     assert report["status"] == status and report["unconfirmed"] == unconfirmed
 
