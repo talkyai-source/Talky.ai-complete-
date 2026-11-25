@@ -276,3 +276,26 @@ async def test_an_unchanged_set_repeats_daily_and_a_changed_set_at_once(alerts, 
     await client.set(alerts.HEALTHWATCH_FAILING_KEY, "trunks:alert:17")
     assert (await alerts.claim_alert_slot(unit))[0] is True
     await client.aclose()
+
+
+async def test_an_incoming_only_recordings_alert_names_the_incoming_calls(alerts, monkeypatch):
+    text = await _text(alerts, monkeypatch, "recordings:alert:0+0+0+0+in2")
+    assert "0 answered calls have no recording. 2 answered incoming calls have no recording. " in text
+
+
+async def test_one_incoming_recording_is_singular(alerts, monkeypatch):
+    text = await _text(alerts, monkeypatch, "recordings:alert:2+0+1+0+in1")
+    assert "2 answered calls have no recording. 1 answered incoming call has no recording. " in text
+
+
+async def test_recordings_evidence_without_an_incoming_part_is_unchanged(alerts, monkeypatch):
+    text = await _text(alerts, monkeypatch, "recordings:alert:2+0+1+0")
+    assert "2 answered calls have no recording. 0 recordings are waiting too long to be saved. " in text
+    assert "incoming" not in text
+
+
+@pytest.mark.parametrize("evidence", ["2+0+1+0+inx", "2+0+1+0+in", "2+0+1+0+x3", "2+0+1+0+in0", "2+0+1+0+in-1"])
+async def test_a_malformed_or_zero_incoming_part_is_ignored(alerts, monkeypatch, evidence):
+    text = await _text(alerts, monkeypatch, f"recordings:alert:{evidence}")
+    assert "2 answered calls have no recording. 0 recordings are waiting" in text
+    assert "incoming" not in text

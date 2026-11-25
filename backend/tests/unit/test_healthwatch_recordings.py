@@ -78,7 +78,7 @@ def _entry(age_seconds, awaiting=None):
 
 async def test_nothing_missing_is_ok(watch, monkeypatch):
     _install(watch, monkeypatch, answered=4, matched=4, recorded=4)
-    assert await _report(watch) == {"status": "ok", "missing": 0, "pending_stuck": 0,
+    assert await _report(watch) == {"status": "ok", "missing": 0, "missing_inbound": 0, "pending_stuck": 0,
                                     "transfer_missing": 0, "unconfirmed": 0, "recorded": 4}
 
 

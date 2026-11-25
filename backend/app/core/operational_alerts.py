@@ -40,6 +40,13 @@ def _plural(count, one, many):
     return one if count == "1" else many
 
 
+def _incoming_missing(evidence):
+    """The N of a fifth evidence part "in<N>" (incoming recordings missing), else "0"."""
+    parts = (evidence or "").split("+")
+    last = parts[4] if len(parts) > 4 else ""
+    return last[2:] if last.startswith("in") and last[2:].isdecimal() else "0"
+
+
 # Fixed sentences per check, filled only from the fingerprint's numbers.
 _SENTENCES = {
     "trunks": lambda status, ev: (
@@ -54,7 +61,10 @@ _SENTENCES = {
         if status == "alert" and ev else "Some scheduled jobs have failed."),
     "recordings": lambda status, ev: (
         f"{_n(ev, 0)} answered {_plural(_n(ev, 0), 'call has', 'calls have')} no recording. "
-        f"{_n(ev, 1)} {_plural(_n(ev, 1), 'recording is', 'recordings are')} waiting too long to be saved. "
+        + (f"{_incoming_missing(ev)} answered incoming "
+           f"{_plural(_incoming_missing(ev), 'call has', 'calls have')} no recording. "
+           if int(_incoming_missing(ev)) > 0 else "")
+        + f"{_n(ev, 1)} {_plural(_n(ev, 1), 'recording is', 'recordings are')} waiting too long to be saved. "
         f"{_n(ev, 2)} {_plural(_n(ev, 2), 'transferred call is', 'transferred calls are')} missing "
         f"the part after the transfer. "
         f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording was', 'recordings were')} saved without a confirmed notice."
