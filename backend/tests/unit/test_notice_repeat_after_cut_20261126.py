@@ -692,3 +692,27 @@ async def test_real_path_a_cancel_inside_the_first_send_is_spent(monkeypatch, ca
     assert h.voice._notice_repeat_done is True
     assert not _messages(caplog, "recording_notice_repeat_deferred")
     assert len(_messages(caplog, "not tried again")) == 1
+
+
+@pytest.mark.asyncio
+async def test_cancelled_while_waiting_in_the_skip_check_is_logged_and_spent(monkeypatch, caplog):
+    from app.domain.services.telephony.modes import agent_first
+
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def cancelled_wait(voice, call_id):
+        raise asyncio.CancelledError
+
+    async def never(sess, text, websocket=None, **kw):
+        calls.append(text)
+
+    monkeypatch.setattr(agent_first, "_notice_skip_reason", cancelled_wait)
+    h.pipe.synthesize_and_send_audio = never
+    caplog.set_level(logging.INFO)
+    with pytest.raises(asyncio.CancelledError):
+        await _turn(h)
+    skipped = _messages(caplog, "recording_notice_repeat_skipped")
+    assert len(skipped) == 1 and "reason=cancelled_before_try" in skipped[0]
+    assert h.voice._notice_repeat_done is True  # stays spent
+    assert calls == []
