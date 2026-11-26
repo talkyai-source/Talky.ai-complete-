@@ -115,3 +115,33 @@ async def test_outside_a_transaction_still_raises_runtime_error(world):
     async with pool.acquire() as conn:
         with pytest.raises(RuntimeError):
             await AuditLogger.lock_transaction(conn)
+
+
+@pytest.mark.asyncio
+async def test_flush_path_keeps_the_callers_lock_limit(world, monkeypatch):
+    """Drive the real flush inside a transaction that set its own 777ms limit."""
+    from contextlib import asynccontextmanager
+
+    from app.domain.services.audit_logger import AuditEvent
+
+    pool, _ = world
+    async with pool.acquire() as conn:
+        tx = conn.transaction()
+        await tx.start()
+        try:
+            await conn.execute("SET LOCAL lock_timeout = '777ms'")
+
+            @asynccontextmanager
+            async def _same_conn(_pool, _tenant, **_kw):
+                yield conn
+
+            monkeypatch.setattr(audit_logger, "acquire_with_tenant", _same_conn)
+            audit = AuditLogger(pool, signing_key="dummy", flush_interval_seconds=3600)
+            try:
+                await audit.log(AuditEvent.RECORD_VIEWED, action="lock-limit-probe")
+                await audit.flush()
+            finally:
+                await audit.aclose()
+            assert await conn.fetchval("SHOW lock_timeout") == "777ms"
+        finally:
+            await tx.rollback()

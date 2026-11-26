@@ -576,6 +576,13 @@ class TtsPlayback:
                         except Exception:  # noqa: BLE001
                             pass
                         break
+                # Counted BEFORE the send: a cancel that lands inside the send must still
+                # read as "audio may have left" (notice_repeat.py never restarts a sentence
+                # that may have been partly heard).
+                try:
+                    session._tts_send_attempts = int(getattr(session, "_tts_send_attempts", 0) or 0) + 1
+                except Exception:
+                    pass
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
                 # WHEN DID AUDIO LAST LEAVE FOR THE CALLER?
@@ -718,7 +725,11 @@ class TtsPlayback:
             session._tts_delivery_failed = True
             session._tts_failure_reason = silent_reason
             session._tts_delivery_status = "partial" if first_chunk_sent else "failed"
-            logger.error("tts_delivery_failed call_id=%s reason=%s submitted_audio=%s", call_id, silent_reason, first_chunk_sent)
+            # A hang-up while speaking (session_gone) is normal: INFO, so real errors stand out.
+            logger.log(
+                logging.INFO if silent_reason == "session_gone" else logging.ERROR,
+                "tts_delivery_failed call_id=%s reason=%s submitted_audio=%s", call_id, silent_reason, first_chunk_sent,
+            )
             if not first_chunk_sent and not _is_recovery_attempt:
                 self._p._record_silent_turn(call_id, silent_reason)
             if websocket:

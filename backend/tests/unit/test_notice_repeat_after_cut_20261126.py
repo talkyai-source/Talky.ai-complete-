@@ -175,6 +175,7 @@ async def test_the_repeat_is_tried_once_never_a_third_time(monkeypatch):
 
     async def cut_again(sess, text, websocket=None, **kw):
         calls.append(text)
+        sess._last_tts_chunk_at = (getattr(sess, "_last_tts_chunk_at", None) or 0.0) + 1.0  # part of the sentence reached the line
         return True
 
     h.pipe.synthesize_and_send_audio = cut_again
@@ -229,6 +230,7 @@ async def test_a_bare_hello_does_not_cut_the_repeat_and_the_flag_is_restored_on_
     async def watched(sess, text, websocket=None, **kw):
         seen.append((getattr(sess, "_disclosure_in_flight", False),
                      is_first_line_greeting_repeat(sess, "Hello?")))
+        sess._last_tts_chunk_at = (getattr(sess, "_last_tts_chunk_at", None) or 0.0) + 1.0  # part of the sentence reached the line
         raise asyncio.CancelledError
 
     h.pipe.synthesize_and_send_audio = watched
@@ -471,3 +473,222 @@ async def test_a_bare_no_to_another_question_is_an_answer_and_the_notice_is_repe
         Message(role=MessageRole.ASSISTANT, content="Am I speaking with John?"))
     await _turn(h, "No.")
     assert h.provider.texts == [OPENER, PLATFORM]
+
+
+# --- a repeat that put NO audio on the line does not use up the one attempt ---------
+
+async def _owed(monkeypatch):
+    h = await _call(monkeypatch)
+    policy.record_disclosure_state("failed", CALL)
+    h.voice._notice_repeat_text = PLATFORM
+    return h
+
+
+def _messages(caplog, needle):
+    return [r.getMessage() for r in caplog.records if needle in r.getMessage()]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_with_no_audio_handed_over_is_tried_again(monkeypatch, caplog):
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def cancelled_early(sess, text, websocket=None, **kw):
+        calls.append(text)
+        raise asyncio.CancelledError
+
+    h.pipe.synthesize_and_send_audio = cancelled_early
+    caplog.set_level(logging.INFO)
+    with pytest.raises(asyncio.CancelledError):
+        await _turn(h)
+    assert h.voice._notice_repeat_done is False
+    assert h.voice._notice_repeat_tries == 1
+    assert getattr(h.session, "_disclosure_in_flight", False) is False  # restored on this path too
+    deferred = _messages(caplog, "recording_notice_repeat_deferred")
+    assert len(deferred) == 1 and "reason=no_audio_sent" in deferred[0] and "tries=1" in deferred[0]
+    assert not _messages(caplog, "not tried again")
+    with pytest.raises(asyncio.CancelledError):
+        await _turn(h, "Hello?")
+    assert calls == [PLATFORM, PLATFORM]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_after_audio_was_handed_over_is_spent(monkeypatch, caplog):
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def cancelled_late(sess, text, websocket=None, **kw):
+        calls.append(text)
+        sess._last_tts_chunk_at = (getattr(sess, "_last_tts_chunk_at", None) or 0.0) + 1.0  # tts_playback stamps this after each chunk
+        raise asyncio.CancelledError
+
+    h.pipe.synthesize_and_send_audio = cancelled_late
+    caplog.set_level(logging.INFO)
+    with pytest.raises(asyncio.CancelledError):
+        await _turn(h)
+    assert h.voice._notice_repeat_done is True
+    assert not _messages(caplog, "recording_notice_repeat_deferred")
+    assert len(_messages(caplog, "not tried again")) == 1
+    await _turn(h, "Hello?")
+    assert calls == [PLATFORM]
+
+
+@pytest.mark.asyncio
+async def test_returning_unproven_with_no_audio_is_tried_again(monkeypatch, caplog):
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def failed_before_audio(sess, text, websocket=None, **kw):
+        calls.append(text)
+        sess._tts_delivery_status = "failed"  # tts_playback: provider failed before the first chunk
+        return True
+
+    h.pipe.synthesize_and_send_audio = failed_before_audio
+    caplog.set_level(logging.INFO)
+    await _turn(h)
+    assert h.voice._notice_repeat_done is False
+    assert len(_messages(caplog, "recording_notice_repeat_deferred")) == 1
+    assert not _messages(caplog, "not tried again")
+    await _turn(h, "Hello?")
+    assert calls == [PLATFORM, PLATFORM]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["submitted", "partial", "weird", None])
+async def test_an_unknown_or_audio_signal_means_spent(monkeypatch, caplog, status):
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def unproven(sess, text, websocket=None, **kw):
+        calls.append(text)
+        sess._tts_delivery_status = status
+        return False
+
+    h.pipe.synthesize_and_send_audio = unproven
+    caplog.set_level(logging.INFO)
+    await _turn(h)
+    assert h.voice._notice_repeat_done is True
+    assert not _messages(caplog, "recording_notice_repeat_deferred")
+    assert len(_messages(caplog, "not tried again")) == 1
+    await _turn(h, "Hello?")
+    assert calls == [PLATFORM]
+
+
+@pytest.mark.asyncio
+async def test_three_no_audio_tries_are_all_there_are(monkeypatch, caplog):
+    h = await _owed(monkeypatch)
+    calls = []
+
+    async def failed_before_audio(sess, text, websocket=None, **kw):
+        calls.append(text)
+        sess._tts_delivery_status = "failed"
+        return True
+
+    h.pipe.synthesize_and_send_audio = failed_before_audio
+    caplog.set_level(logging.INFO)
+    for i in range(4):
+        await _turn(h, f"Hello {i}?")
+    assert calls == [PLATFORM] * 3
+    assert h.voice._notice_repeat_tries == 3
+    assert len(_messages(caplog, "recording_notice_repeat_deferred")) == 2
+    assert len(_messages(caplog, "not tried again")) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_retry_that_is_then_delivered_returns_the_sentence_and_ends_it(monkeypatch):
+    h = await _owed(monkeypatch)
+    real = h.pipe.synthesize_and_send_audio
+
+    async def failed_before_audio(sess, text, websocket=None, **kw):
+        sess._tts_delivery_status = "failed"
+        return True
+
+    h.pipe.synthesize_and_send_audio = failed_before_audio
+    await _turn(h)
+    assert h.voice._notice_repeat_done is False
+    h.pipe.synthesize_and_send_audio = real
+    await _turn(h, "Hello?")
+    assert h.provider.texts == [PLATFORM]
+    assert policy.get_disclosure_state(CALL) == "transmitted"
+    assert _roles(h)[-2] == (MessageRole.ASSISTANT, PLATFORM)
+    await _turn(h, "Tell me more.")
+    assert h.provider.texts == [PLATFORM]
+
+
+@pytest.mark.asyncio
+async def test_a_fake_voice_without_the_counter_works():
+    from app.domain.services.voice_pipeline.notice_repeat import repeat_cut_notice_once
+
+    voice = SimpleNamespace(call_id="c1", _notice_repeat_text=PLATFORM)
+    session = SimpleNamespace(call_id="c1", _voice_session_ref=voice, conversation_history=[])
+
+    async def never(*a, **k):
+        raise AssertionError("must not be reached")
+
+    # skipped before the sentence is tried: the counter is never needed
+    session._caller_opted_out = True
+    assert await repeat_cut_notice_once(SimpleNamespace(synthesize_and_send_audio=never), session, None) is None
+    assert not hasattr(voice, "_notice_repeat_tries")
+
+
+# --- the REAL playback path: where exactly the cancel lands decides it ---------------
+
+@pytest.mark.asyncio
+async def test_real_path_a_cancel_before_the_voice_answers_is_tried_again_and_then_proven(monkeypatch, caplog):
+    """Production 26 Nov 2026: the person was still talking. The voice provider had
+    answered the request (its HTTP reply) but its first audio chunk had not arrived when
+    the repeat was cancelled 5 ms later: the per-sentence ``TTS_FMT_DEBUG`` line, written
+    when a first chunk arrives, is absent for that repeat, and the gateway dropped 0
+    frames. No send was started, so the attempt is not spent."""
+    h = await _owed(monkeypatch)
+    waiting, release = asyncio.Event(), asyncio.Event()
+    real_stream = h.provider.stream_synthesize
+
+    async def late_voice(text, **kwargs):
+        if not release.is_set():
+            waiting.set()
+            await release.wait()
+        async for chunk in real_stream(text, **kwargs):
+            yield chunk
+
+    h.provider.stream_synthesize = late_voice
+    frames_before = h.deployed.accepted
+    caplog.set_level(logging.INFO)
+    task = asyncio.create_task(_turn(h))
+    await asyncio.wait_for(waiting.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert h.deployed.accepted == frames_before  # nothing reached the line
+    assert h.voice._notice_repeat_done is False
+    assert len(_messages(caplog, "recording_notice_repeat_deferred")) == 1
+    assert not _messages(caplog, "not tried again")
+    release.set()
+    await _turn(h, "Hello?")
+    assert h.provider.texts == [PLATFORM]
+    assert policy.get_disclosure_state(CALL) == "transmitted"
+    assert h.voice._notice_repeat_done is True
+
+
+@pytest.mark.asyncio
+async def test_real_path_a_cancel_inside_the_first_send_is_spent(monkeypatch, caplog):
+    """A cancel that lands inside the very first send may already have put sound on the
+    line (the gateway paces what it was given): the sentence is never started again."""
+    h = await _owed(monkeypatch)
+    entered = asyncio.Event()
+
+    async def stuck_send(call_id, raw):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(h.pipe.media_gateway, "send_audio", stuck_send)
+    caplog.set_level(logging.INFO)
+    task = asyncio.create_task(_turn(h))
+    await asyncio.wait_for(entered.wait(), 5)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert h.session._tts_send_attempts >= 1
+    assert h.voice._notice_repeat_done is True
+    assert not _messages(caplog, "recording_notice_repeat_deferred")
+    assert len(_messages(caplog, "not tried again")) == 1

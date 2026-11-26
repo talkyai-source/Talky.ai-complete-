@@ -68,7 +68,8 @@ def _shell_path(path: Path) -> str:
     return resolved
 
 
-def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bool):
+def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bool,
+               endpoint_mode: str = "", outgoing_channel: bool = False):
     bash = _find_bash()
     if not bash:
         pytest.skip("Bash is required for the inbound probe script")
@@ -76,9 +77,16 @@ def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bo
     fake.mkdir()
     scripts = {
         "asterisk": '#!/bin/bash\necho "$*" >> "$STUB_LOG"\ncase "$*" in\n'
+                    '  *"pjsip show endpoint"*) case "$STUB_ENDPOINT_MODE" in\n'
+                    '    missing) echo "Unable to find object $4."; exit 0 ;;\n'
+                    '    error) exit 1 ;;\n'
+                    '    *) exit 0 ;;\n'
+                    '  esac ;;\n'
                     '  *"channel originate"*) touch "$STUB_LOG.originated"; exit "$STUB_ORIGINATE_STATUS" ;;\n'
                     '  *"core show channels concise"*) [ -n "$STUB_INBOUND_ARRIVES" ] && [ -e "$STUB_LOG.originated" ] && '
-                    'echo "PJSIP/trunk-x-00000001!from-talky-inbound!150001!3!Up!Stasis!talky_ai,inbound"; exit 0 ;;\n'
+                    'echo "PJSIP/trunk-x-00000001!from-talky-inbound!150001!3!Up!Stasis!talky_ai,inbound"; '
+                    '[ -n "$STUB_OUTGOING" ] && [ -e "$STUB_LOG.originated" ] && '
+                    'echo "PJSIP/blazedigitel-endpoint-00000002!default!s!1!Ring!Wait!20"; exit 0 ;;\n'
                     'esac\n',
         "timeout": '#!/bin/bash\nshift\nexec "$@"\n',
         "sleep": "#!/bin/bash\nexit 0\n",
@@ -93,6 +101,8 @@ def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bo
         "STUB_LOG": str(log),
         "STUB_ORIGINATE_STATUS": str(originate_status),
         "STUB_INBOUND_ARRIVES": "1" if inbound_arrives else "",
+        "STUB_ENDPOINT_MODE": endpoint_mode,
+        "STUB_OUTGOING": "1" if outgoing_channel else "",
         "INBOUND_SYNTHETIC_DID": "+442046132300",
         "INBOUND_SYNTHETIC_TRUNK_ENDPOINT": "blazedigitel-endpoint",
         "INBOUND_SYNTHETIC_WAIT_SECONDS": "8",
@@ -111,12 +121,13 @@ def test_the_probe_succeeds_only_when_the_call_reaches_the_inbound_call_plan(tmp
     assert "reached the inbound call plan" in result.stdout
     # asterisk_calls[0] is the pre-originate baseline snapshot (ops-8): only a
     # channel NOT present before the probe may count as the probe's own leg.
+    asterisk_calls = [c for c in asterisk_calls if "pjsip show endpoint" not in c]
     assert "core show channels concise" in asterisk_calls[0]
     assert asterisk_calls[1].startswith("-rx channel originate PJSIP/+442046132300@blazedigitel-endpoint")
 
 
 def test_an_accepted_originate_that_never_comes_back_in_fails_the_unit(tmp_path):
-    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=False)
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=False, outgoing_channel=True)
     assert result.returncode == 1
     assert "never came back in on the inbound call plan within 18s" in result.stderr
     assert sum("core show channels concise" in call for call in asterisk_calls) == 19  # 1 baseline + 18 polls
@@ -127,3 +138,42 @@ def test_a_rejected_originate_still_fails_before_waiting(tmp_path):
     assert result.returncode == 1 and "rejected or timed out originating" in result.stderr
     originate_at = next(i for i, c in enumerate(asterisk_calls) if "channel originate" in c)
     assert not any("core show channels" in c for c in asterisk_calls[originate_at + 1 :])
+
+
+# --- the failure says WHY (2026-11-26) ---------------------------------------
+# The Asterisk output forms used here ("Unable to find object" for an unknown
+# endpoint; the outgoing channel named PJSIP/<endpoint>-<id> in `core show
+# channels concise`) are from memory, not run on the server.
+
+
+def test_a_missing_trunk_endpoint_fails_at_once_and_sends_no_originate(tmp_path):
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, endpoint_mode="missing")
+    assert result.returncode == 1
+    assert (
+        "INBOUND_SYNTHETIC CRITICAL: trunk endpoint 'blazedigitel-endpoint' does not exist in Asterisk "
+        "(check INBOUND_SYNTHETIC_TRUNK_ENDPOINT)"
+    ) in result.stderr
+    assert not any("channel originate" in c for c in asterisk_calls)
+
+
+def test_an_endpoint_check_that_errors_carries_on_as_before(tmp_path):
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, endpoint_mode="error")
+    assert result.returncode == 0, result.stderr
+    assert any("channel originate" in c for c in asterisk_calls)
+
+
+def test_no_outgoing_channel_and_no_arrival_names_the_missing_outgoing_channel(tmp_path):
+    result, _ = _run_probe(tmp_path, inbound_arrives=False)
+    assert result.returncode == 1
+    assert (
+        "no outgoing channel on 'blazedigitel-endpoint' was seen while waiting "
+        "(Asterisk accepted the command, but either placed no call or the call was refused at once)"
+    ) in result.stderr
+    assert "never came back in" not in result.stderr
+
+
+def test_an_outgoing_channel_without_arrival_keeps_the_generic_message(tmp_path):
+    result, _ = _run_probe(tmp_path, inbound_arrives=False, outgoing_channel=True)
+    assert result.returncode == 1
+    assert "never came back in on the inbound call plan within 18s" in result.stderr
+    assert "no outgoing channel on" not in result.stderr
