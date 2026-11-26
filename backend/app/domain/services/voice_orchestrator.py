@@ -543,17 +543,34 @@ class VoiceOrchestrator:
             # documented bypass path for sessions with no tenant.
             tenant = tenant_id or getattr(config, "tenant_id", None)
             async with acquire_with_tenant(pool, str(tenant) if tenant else None) as conn:
-                updated = await conn.execute(
-                    """UPDATE calls
+                if tenant:
+                    # The account is named in the statement itself, never left
+                    # to row security alone.
+                    updated = await conn.execute(
+                        """UPDATE calls
+                              SET prompt_template = $2,
+                                  prompt_version  = $3,
+                                  prompt_hash     = $4
+                            WHERE id = $1::uuid
+                              AND tenant_id = $5::uuid""",
+                        str(call_row_id),
+                        config.prompt_template,
+                        config.prompt_version,
+                        config.prompt_hash,
+                        str(tenant),
+                    )
+                else:
+                    updated = await conn.execute(
+                        """UPDATE calls
                           SET prompt_template = $2,
                               prompt_version  = $3,
                               prompt_hash     = $4
                         WHERE id = $1::uuid""",
-                    str(call_row_id),
-                    config.prompt_template,
-                    config.prompt_version,
-                    config.prompt_hash,
-                )
+                        str(call_row_id),
+                        config.prompt_template,
+                        config.prompt_version,
+                        config.prompt_hash,
+                    )
             # "UPDATE 0" means the join key was wrong — which is invisible
             # otherwise, and would leave every review unattributable. Now that
             # the key is a bound calls.id, this signal actually varies: it is
