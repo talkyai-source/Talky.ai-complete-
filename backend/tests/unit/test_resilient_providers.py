@@ -466,3 +466,18 @@ async def test_cleanup_runs_on_both_providers():
     wrapper = ResilientTTSProvider(p, s)
     await wrapper.cleanup()
     assert called == {"p": 1, "s": 1}
+
+
+@pytest.mark.asyncio
+async def test_tts_a_provider_closed_by_its_ending_call_is_not_failed_over():
+    """The call ended and closed the provider: nobody is listening, so the
+    secondary voice must not be asked to speak (26 Nov 2026)."""
+    from app.infrastructure.tts.elevenlabs_tts import ProviderClosedError
+
+    primary = _FakeTTS("primary", raise_on_enter=ProviderClosedError("closed"))
+    secondary = _FakeTTS("secondary", chunk_count=2)
+    wrapper = ResilientTTSProvider(primary, secondary)
+
+    with pytest.raises(ProviderClosedError):
+        await _drain(wrapper.stream_synthesize("hi", "voice-A"))
+    assert secondary.calls == []

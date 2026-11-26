@@ -86,6 +86,9 @@ class ElevenLabsTTSProvider(TTSProvider):
         # sentence.  TCPConnector limit=10 is generous for a voice pipeline that
         # makes one request at a time.
         self._session: Optional[aiohttp.ClientSession] = None
+        # Responses currently open: cleanup() closes them so a request that is
+        # streaming audio is woken (closing only the session does not wake it).
+        self._inflight_responses: set = set()
         self._pool: Optional[KeyPool] = None
         self._guard = get_provider_guard("elevenlabs")
 
@@ -205,12 +208,14 @@ class ElevenLabsTTSProvider(TTSProvider):
                         self._observation_context if lease.key == self._api_key or
                         (self._observation_context or {}).get("source") != "tenant" else None)
                     _t_post = asyncio.get_event_loop().time()
+                    response = None
                     try:
                         if self._session is None:  # closed while the key lease was awaited
                             raise ProviderClosedError("ElevenLabs provider closed during synthesis")
                         async with self._session.post(
                             url, headers=headers, params=params, json=payload,
                         ) as response:
+                            self._inflight_responses.add(response)
                             # Fail-soft observability: response headers + POST->
                             # first-byte timing. ElevenLabs surfaces per-request
                             # concurrency state in headers, which is the only way
@@ -348,6 +353,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                         observation.finish(exc)
                         raise
                     finally:
+                        self._inflight_responses.discard(response)
                         observation.finish()
 
             if last_err:
@@ -365,6 +371,7 @@ class ElevenLabsTTSProvider(TTSProvider):
             logger.debug("elevenlabs connect_for_call: not ready, skipping warmup")
             return
         observation = ProviderAttempt("tts", "elevenlabs", self._api_key, self._observation_context)
+        resp = None
         try:
             output_format = self._output_format_for_rate(self._sample_rate)
             url = f"{self.API_BASE_URL}/v1/text-to-speech/{self._voice_id}/stream"
@@ -376,6 +383,7 @@ class ElevenLabsTTSProvider(TTSProvider):
                 params={"output_format": output_format},
                 json=payload,
             ) as resp:
+                self._inflight_responses.add(resp)
                 audio = await resp.read()  # drain so the connection returns to the pool
                 if resp.status in (200, 206):
                     observation.accepted()
@@ -389,12 +397,17 @@ class ElevenLabsTTSProvider(TTSProvider):
             label = call_id[:12] if call_id and call_id != "prewarm" else "prewarm"
             logger.debug("elevenlabs warmup complete for call_id=%s", label)
         except Exception as exc:
+            if self._session is None:  # we closed it: not a provider failure, no warning
+                observation.finish(outcome="cancelled")
+                logger.debug("elevenlabs warmup stopped: provider closed")
+                return
             observation.finish(exc)
             logger.warning("elevenlabs connect_for_call failed (non-fatal): %s", exc)
         except BaseException as exc:
             observation.finish(exc)
             raise
         finally:
+            self._inflight_responses.discard(resp)
             observation.finish()
 
     async def get_available_voices(self) -> List[Dict]:
@@ -405,8 +418,15 @@ class ElevenLabsTTSProvider(TTSProvider):
         # Take the session out FIRST: closing it wakes in-flight requests with a
         # disconnect error, and they must already see the provider as closed.
         session, self._session = self._session, None
-        if session is not None:
-            await session.close()
+        try:
+            for response in list(self._inflight_responses):
+                try:
+                    response.close()
+                except Exception as exc:  # one reply must not keep the rest open
+                    logger.debug("elevenlabs cleanup: closing a reply failed: %s", type(exc).__name__)
+        finally:
+            if session is not None:
+                await session.close()
 
     @property
     def name(self) -> str:
