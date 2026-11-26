@@ -30,6 +30,7 @@ from app.domain.services.end_session_action import (
 )
 from app.services.scripts.call_state_tracker import CallState as CapturedSlotsState
 from app.domain.services.voice_pipeline.contact_recording import bind_contact_turn
+from app.domain.services.voice_pipeline.notice_repeat import repeat_cut_notice_once
 from app.domain.services.voice_pipeline.identity_disposition import (
     contains_dnc,
 )
@@ -160,6 +161,8 @@ class TurnRunner:
         session.conversation_history.append(
             Message(role=MessageRole.USER, content=full_transcript)
         )
+        # A recording notice cut off earlier on an outgoing call is said once more here.
+        notice_said = await repeat_cut_notice_once(self._p, session, websocket, full_transcript)
 
         # This user turn is the one we may have relaxed STT for (e.g. they just
         # spelled an email). It has arrived, so revert to normal turn-detection.
@@ -362,5 +365,11 @@ class TurnRunner:
         except Exception as e:
             logger.error(f"Turn error for call {call_id}: {e}", exc_info=True)
             session.conversation_history = session.conversation_history[:history_snapshot]
+        finally:
+            if notice_said:
+                # Said before the reply: right after this turn's USER message (or last, after a rollback).
+                session.conversation_history.insert(
+                    history_snapshot + 1, Message(role=MessageRole.ASSISTANT, content=notice_said)
+                )
 
         return response_text, llm_latency_ms, tts_latency_ms
