@@ -2595,10 +2595,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bf57c935a99b3f481e4b0b49fcd8f1abb7a58985281a957e64159f6b2bb532a3",
+      "id": "5c16194f5c962eae62740fb9a0819b7d626e7a42bd4bddf4f8d3fb29d326e4e5",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.query",
-      "line": 1074,
+      "line": 1084,
       "method": "fetch",
       "tables": [
         "audit_logs"
@@ -6886,7 +6886,7 @@
       "id": "df6c2f89e03b828f0409798baea9080d49e886b2ea57b7b773a0cba12cb68cd0",
       "file": "app/domain/services/voice_orchestrator.py",
       "function": "VoiceOrchestrator._persist_prompt_identity",
-      "line": 546,
+      "line": 563,
       "method": "execute",
       "tables": [
         "calls"
@@ -8315,7 +8315,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3229,
+      "line": 3233,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8325,14 +8325,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3229.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3233.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3576,
+      "line": 3580,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8342,14 +8342,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3576.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3580.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3656,
+      "line": 3660,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8360,7 +8360,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3656.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3660.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -9092,7 +9092,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "7eab492c6142ae18314a9991d5006e3da86b0b12e4e95a9bad215279b7ebeaa4",
+      "id": "f8c6145a40176cdd8e2c44efa6a4dcffcf88b7919123edb0bc714cf42619f3cf",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1338,
@@ -9110,7 +9110,7 @@
       "id": "4200a977699ac044001d6fb4bd1a312705036a437b95414e31c8aac1e8ce7511",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger._flush_locked",
-      "line": 895,
+      "line": 899,
       "method": "fetchrow",
       "tables": [
         "audit_logs"
@@ -9120,7 +9120,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:895.",
+      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:899.",
       "category": "system_audit_chain"
     },
     {
@@ -9258,7 +9258,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "8cb42c879838c2628e4cd7e189b1c765d4c8c7b36cac507038fcd978004f3472",
+      "id": "a2607fff626ef1a0914166472bd8df172ac59ebeec58212a3a1f9d2f12b3c713",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 888,
@@ -9826,7 +9826,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "a961a3204fc4fd82b98ff44050304dfbaafd89bb9ca3ba820af91fc471ef80e0",
+      "id": "a11685a7b2f01597456a6cb25aa5fb1b59f16d47f2575585a0bb27912f1c49ec",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1714,
@@ -10136,10 +10136,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "164fdce4c433d2de040d54c40bc366462c0e15cf96205f25698178926706e12d",
+      "id": "85402a2eda63b3fc99f95643d4e2d0e22f1214389a4207cf9bafcdb13113fa79",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2467,
+      "line": 2474,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10205,7 +10205,7 @@
       "id": "775d52c63c40da23b8c35135ef8f3cd887550e6a5cf4283fe7ad775fd649d4da",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.verify_chain_integrity",
-      "line": 1121,
+      "line": 1131,
       "method": "fetch",
       "tables": [
         "audit_logs"
@@ -10215,7 +10215,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Verifying the global audit hash chain requires every predecessor across tenants, in event order. This is integrity verification, not a tenant-facing audit-history query. Exact reviewed operation: fetch; app/domain/services/audit_logger.py:1121.",
+      "reason": "Verifying the global audit hash chain requires every predecessor across tenants, in event order. This is integrity verification, not a tenant-facing audit-history query. Exact reviewed operation: fetch; app/domain/services/audit_logger.py:1131.",
       "category": "system_audit_chain"
     },
     {
@@ -10307,7 +10307,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "a9966ce4ec94ab0863ee7f80d352c5530ff895fcffeb359a45edf80a93538634",
+      "id": "214c45339056bd9c98b9b107ad35f357d259d255c2a6522450b5e85f83b453f3",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 1165,
@@ -10405,10 +10405,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "3cfef4bf3d516eb8bfe4c1e1a19783e21768ffd7a59fbaf09a9960e6d82c02be",
+      "id": "1e7b6554b9534ba43751116772325d67fcfcb724f7c530a196b3c4f08d6e7528",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 2303,
+      "line": 2308,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -11519,22 +11519,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "fe281bc620b8dec5f57b6c38e9b37711dec7b15f0ffc3bcf4c1f4a959bf2b1a5",
-      "file": "app/domain/services/audit_logger.py",
-      "function": "AuditLogger._flush_locked",
-      "line": 887,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL lock_timeout = {Constant(value=5000)}; SELECT pg_advisory_xact_lock({Constant(value=7022629598040908648)}); SET LOCAL lock_timeout TO DEFAULT",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: execute; app/domain/services/audit_logger.py:887.",
-      "category": "system_audit_chain"
-    },
-    {
-      "id": "e5242a96e33389f52b475fbe39d762d0dfc487211e5cd90d1373869a41b52b63",
+      "id": "a3d9193f35016fd468507d6307f9666d8d463b5fd93c72e842835839a1bbb258",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.log_in_transaction",
       "line": 603,
