@@ -462,6 +462,9 @@ class _FakeConn:
     async def fetchrow(self, *args, **kwargs):
         return {"id": CALL_UUID}
 
+    async def fetchval(self, *args, **kwargs):
+        return None  # the "already saved?" check: not saved yet
+
     async def execute(self, *args, **kwargs):
         return None
 

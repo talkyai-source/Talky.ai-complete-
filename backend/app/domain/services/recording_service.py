@@ -38,6 +38,8 @@ import io
 import logging
 import math
 import os
+import secrets
+import stat
 import struct
 import time
 import wave
@@ -563,14 +565,57 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
             if not os.path.isdir(directory):
                 raise
 
-    # mode applies only to newly created files; existing regular-file modes
-    # remain unchanged. Trusted, non-writable storage parents are still needed:
+    # The temporary file is created with mode 0600 and renamed over the
+    # destination. An EXISTING destination keeps the mode and owner its operator
+    # set (they are carried over to the new file before the rename); only a
+    # newly created recording gets 0600. Trusted, non-writable storage parents are still needed:
     # this is not a descriptor-relative traversal against hostile directory swaps.
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    # Write a temporary file of its own in the SAME (checked) directory, flush it
+    # to disk, then replace the destination: at every moment the destination is
+    # whole-old or whole-new, never empty or half-written.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags, 0o600)
-    with os.fdopen(descriptor, "wb") as fh:
-        fh.write(wav_data)
+    try:
+        existing = os.stat(path, follow_symlinks=False)
+    except OSError:
+        existing = None
+    tmp_path = f"{path}.{secrets.token_hex(6)}.tmp"
+    descriptor = os.open(tmp_path, flags, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as fh:
+            fh.write(wav_data)
+            fh.flush()
+            if existing is not None and stat.S_ISREG(existing.st_mode):
+                if hasattr(os, "fchown"):
+                    try:
+                        os.fchown(fh.fileno(), existing.st_uid, existing.st_gid)
+                    except OSError:
+                        pass  # not permitted: the file stays ours
+                kept_mode = stat.S_IMODE(existing.st_mode)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fh.fileno(), kept_mode)
+                else:  # Windows: by name
+                    os.chmod(tmp_path, kept_mode)
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    # Make the rename itself durable. Opening a directory fails on Windows: skip
+    # it there (production is Linux).
+    try:
+        dir_fd = os.open(os.path.dirname(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dir_fd)
+    except OSError:
+        pass
+    finally:
+        os.close(dir_fd)
 
 
 SAVE_SAVED = "saved"      # stored and registered; the pending copy may go
@@ -756,21 +801,22 @@ class RecordingService:
     async def _already_saved_id(self, call_id: str, tenant_id: str) -> Optional[str]:
         """The id of an ``uploaded`` recording already stored for this call, if any.
 
-        Makes a retried save idempotent. Skipped for a non-UUID call id; any
-        error means "not known", and the save proceeds.
+        Makes a retried save idempotent. Skipped (None) for a non-UUID call or
+        account id. An error of the query itself is RAISED: "could not check"
+        is not "not saved yet", and the caller must not write anything then.
         """
         try:
             call_uuid = UUID(str(call_id))
             tenant_uuid = UUID(str(tenant_id))
-            async with _acquire_recording_connection(self._db, call_id, str(tenant_uuid)) as conn:
-                found = await conn.fetchval(
-                    "SELECT id FROM recordings_s3 WHERE tenant_id = $1 AND call_id = $2 "
-                    "AND status = 'uploaded' ORDER BY created_at DESC LIMIT 1",
-                    tenant_uuid,
-                    call_uuid,
-                )
-        except Exception:
+        except (ValueError, AttributeError, TypeError):
             return None
+        async with _acquire_recording_connection(self._db, call_id, str(tenant_uuid)) as conn:
+            found = await conn.fetchval(
+                "SELECT id FROM recordings_s3 WHERE tenant_id = $1 AND call_id = $2 "
+                "AND status = 'uploaded' ORDER BY created_at DESC LIMIT 1",
+                tenant_uuid,
+                call_uuid,
+            )
         return str(found) if isinstance(found, UUID) else None
 
     @_with_recording_pool_budget
@@ -814,8 +860,14 @@ class RecordingService:
         strict_notice: bool = False,
         transfer_part: Optional[str] = None,
         mark_failure: bool = True,
+        proceed_if_check_unavailable: bool = False,
     ) -> SaveOutcome:
         """Save a recording and say whether the pending copy may be dropped.
+
+        ``proceed_if_check_unavailable`` is set only by the teardown's direct
+        save when no pending copy could be written: the capture in memory is
+        then the only copy, so an unavailable "already saved" check must not
+        stop the save.
 
         Owner decision, 18 November 2026: a captured outbound recording is kept
         even when the notice receipt is missing, and marked ``unconfirmed``.
@@ -830,7 +882,19 @@ class RecordingService:
             logger.warning(f"No audio to save for call {call_id}")
             return SaveOutcome(SAVE_REFUSED, None, "no_audio")
 
-        existing = await self._already_saved_id(call_id, tenant_id)
+        try:
+            existing = await self._already_saved_id(call_id, tenant_id)
+        except Exception as exc:  # noqa: BLE001 - CancelledError is not an Exception: it propagates
+            # Not knowing is not "not saved": writing now could replace the stored
+            # file with a shorter copy. Write nothing; the pending copy stays.
+            logger.warning(
+                "recording_saved_check_unavailable call_id=%s error_type=%s%s",
+                call_id, type(exc).__name__,
+                " proceeding=no_durable_copy" if proceed_if_check_unavailable else "",
+            )
+            if not proceed_if_check_unavailable:
+                return SaveOutcome(SAVE_RETRY, None, "saved_check_unavailable")
+            existing = None
         if existing:
             return SaveOutcome(SAVE_SAVED, existing, "already_saved")
 

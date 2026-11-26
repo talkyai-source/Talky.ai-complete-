@@ -31,6 +31,7 @@ import logging
 from typing import Any, Optional
 
 from app.domain.services.dnc_service import DNCService
+from app.domain.services.dnc_system_mark_audit import audit_system_mark_soon
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.dialer.job_lifecycle import NOT_ORIGINATED_JOB_STATUSES
 
@@ -62,14 +63,24 @@ async def purge_lead_on_opt_out(
     # 1. DNC the number (blocks all future origination via CallGuard).
     if phone_number and tenant_id and db_pool is not None:
         try:
-            await DNCService(db_pool).add_caller_opt_out(
+            entry = await DNCService(db_pool).add_caller_opt_out(
                 tenant_id=str(tenant_id), e164=str(phone_number), call_id=call_id,
             )
             result["dnc_added"] = True
+            # The mark is written; its audit row (system / caller_opt_out) follows
+            # in its own transaction and can never delay or undo the mark.
+            try:
+                audit_system_mark_soon(
+                    db_pool, tenant_id=tenant_id, entry_id=getattr(entry, "id", None),
+                    actor_role="caller_opt_out",
+                )
+            except Exception:
+                logger.debug("opt_out_purge: audit scheduling failed", exc_info=True)
         except Exception as exc:
-            logger.warning(
-                "opt_out_purge: DNC add failed tenant=%s number=%s err=%s",
-                tenant_id, phone_number, exc,
+            # The caller is NOT on the list: an error, with the last four digits only.
+            logger.error(
+                "opt_out_purge: DNC add failed tenant=%s call=%s number=%s error_type=%s",
+                tenant_id, call_id, _mask_phone(phone_number), type(exc).__name__,
             )
 
     # 2. Cancel future work, retaining live attempt ownership. An empty UPDATE
@@ -112,7 +123,7 @@ async def purge_lead_on_opt_out(
         result["jobs_cleanup_complete"] and (not lead_id or result["lead_marked"]))
     logger.info(
         "opt_out_purge done lead=%s number=%s dnc=%s jobs_cancelled=%d lead_marked=%s",
-        lead_id, phone_number, result["dnc_added"],
+        lead_id, _mask_phone(phone_number), result["dnc_added"],
         result["jobs_cancelled"], result["lead_marked"],
     )
     return result

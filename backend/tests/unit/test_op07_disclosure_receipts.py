@@ -173,7 +173,10 @@ async def test_actual_asterisk_gateway_transmission_is_supported_without_hearing
     @asynccontextmanager
     async def owned_call(pool, tenant):
         assert tenant == TENANT
-        yield SimpleNamespace(fetchrow=AsyncMock(return_value={"id": CALL}))
+        yield SimpleNamespace(
+            fetchrow=AsyncMock(return_value={"id": CALL}),
+            fetchval=AsyncMock(return_value=None),  # the "already saved?" check
+        )
 
     monkeypatch.setattr(recording, "acquire_with_tenant", owned_call)
     monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))

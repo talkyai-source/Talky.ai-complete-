@@ -338,6 +338,7 @@ def test_interval_env(monkeypatch, raw, expected):
 
 async def test_loop_disabled_recovers_once_then_returns(env, monkeypatch):
     monkeypatch.setenv("RECORDING_CHECKPOINT_INTERVAL_S", "0")
+    monkeypatch.setattr(cp, "_ORPHAN_RECOVERY_DELAY_S", 0.01)  # recovery now waits for the ownership answer
     make_orphan(env, "old-call", chunk(9000, 1))
     passes = []
     monkeypatch.setattr(cp, "checkpoint_pass", lambda: passes.append(1))
@@ -382,7 +383,7 @@ def hooks(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "checkpoint_done", lambda sid: calls.append(sid))
     state = SimpleNamespace(calls=calls, outcome="saved")
 
-    async def fake_process(entry, *, wav_bytes=None, voice_session=None):
+    async def fake_process(entry, *, wav_bytes=None, voice_session=None, **kw):
         return state.outcome
 
     monkeypatch.setattr(tr, "process_spool_entry", fake_process)

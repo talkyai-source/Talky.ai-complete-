@@ -111,7 +111,10 @@ class _FakeClient:
 
 
 @pytest.mark.asyncio
-async def test_purge_runs_all_three_steps():
+async def test_purge_runs_all_three_steps(monkeypatch):
+    scheduled = []
+    monkeypatch.setattr("app.domain.services.dialer.opt_out.audit_system_mark_soon",
+                        lambda pool, **kw: scheduled.append(kw))
     pool = _FakeDNCPool()
     client = _FakeClient(rows=[{"id": "j1"}, {"id": "j2"}])
     res = await purge_lead_on_opt_out(
@@ -123,6 +126,8 @@ async def test_purge_runs_all_three_steps():
     assert res["jobs_cancelled"] == 2
     assert res["lead_marked"] is True
     assert res["purge_complete"] and res["jobs_cleanup_complete"]
+    assert pool.acquired == 3  # DNC mark, job cancel, lead mark: still 3 account transactions
+    assert len(scheduled) == 1 and scheduled[0]["actor_role"] == "caller_opt_out"
     # Synchronous adapter is no longer used by the in-call async operation.
     assert not client.cap
     jobs = next((sql, args) for sql, args in pool.conn.executed if "UPDATE dialer_jobs" in sql)

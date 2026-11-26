@@ -18,7 +18,10 @@ RECORDING = "40000000-0000-4000-8000-000000000007"
 
 @pytest.fixture
 def fixture(monkeypatch, tmp_path):
-    conn = SimpleNamespace(fetchrow=AsyncMock(return_value={"id": UUID(CALL)}))
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(return_value={"id": UUID(CALL)}),
+        fetchval=AsyncMock(return_value=None),  # the "already saved?" check
+    )
 
     @asynccontextmanager
     async def scoped(pool, tenant):
@@ -278,7 +281,10 @@ async def test_teardown_stub_preserves_authoritative_tenant(fixture, monkeypatch
     from app.domain.services.telephony.recording import _save_call_recording
 
     other_tenant = "20000000-0000-4000-8000-000000000008"
-    conn = SimpleNamespace(fetchrow=AsyncMock(), execute=AsyncMock(return_value="INSERT 0 1"))
+    conn = SimpleNamespace(
+        fetchrow=AsyncMock(), fetchval=AsyncMock(return_value=None),
+        execute=AsyncMock(return_value="INSERT 0 1"),
+    )
 
     async def fetch(query, *args):
         if "FROM campaigns" in query:

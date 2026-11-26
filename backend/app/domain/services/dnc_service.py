@@ -418,7 +418,9 @@ class DNCService:
         return row is not None
 
 
-async def _audit_dnc_change(audit, conn, action, row, *, tenant_id, actor_id, actor_role, after):
+async def _audit_dnc_change(
+    audit, conn, action, row, *, tenant_id, actor_id, actor_role, after, actor_type="user",
+):
     """One audit row for a DNC entry change, in the caller's transaction."""
     from app.domain.services.audit_logger import AuditEvent
 
@@ -432,6 +434,7 @@ async def _audit_dnc_change(audit, conn, action, row, *, tenant_id, actor_id, ac
         action=action,
         actor_id=actor_id,
         actor_role=actor_role,
+        actor_type=actor_type,
         tenant_id=tenant_id,
         resource_type="dnc_entry",
         resource_id=row["id"],

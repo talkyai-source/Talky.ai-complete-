@@ -134,7 +134,9 @@ async def test_denied_file_open_does_not_register_success_or_fallback_elsewhere(
     attempted = []
 
     def deny_recording(path, flags, mode=0o777, **kwargs):
-        if str(path).endswith("call.wav"):
+        # The write goes to a temporary file of its own beside the destination
+        # (call.wav.<random>.tmp, 20261126): deny the create of either name.
+        if Path(path).name.startswith("call.wav"):
             attempted.append(Path(path))
             raise PermissionError("synthetic storage denial")
         return original_open(path, flags, mode, **kwargs)
@@ -145,8 +147,11 @@ async def test_denied_file_open_does_not_register_success_or_fallback_elsewhere(
     result = await svc._save_local("call", buffer, "tenant", "campaign")
 
     assert result is None
-    assert attempted == [tmp_path / "tenant" / "campaign" / "call.wav"]
+    assert len(attempted) == 1
+    assert attempted[0].parent == tmp_path / "tenant" / "campaign"
+    assert attempted[0].name.startswith("call.wav")
     assert list(tmp_path.rglob("*.wav")) == []
+    assert list(tmp_path.rglob("*.tmp")) == []
     inserted.assert_not_awaited()
     linked.assert_not_awaited()
 

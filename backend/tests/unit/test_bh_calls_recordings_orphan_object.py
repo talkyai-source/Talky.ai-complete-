@@ -95,7 +95,15 @@ async def test_object_kept_when_an_existing_row_references_the_same_key(fx):
 
 @pytest.mark.asyncio
 async def test_object_kept_and_logged_when_reference_cannot_be_verified(fx, caplog):
-    fx.conn.fetchval = AsyncMock(side_effect=RuntimeError("db down"))
+    # Only the "is this key referenced by a row?" query is down. The earlier
+    # "already saved?" check now stops the save when IT fails (20261126), so it
+    # must answer ("not saved") for this test to reach the orphan step.
+    async def _fetchval(sql, *args):
+        if "SELECT EXISTS" in sql:
+            raise RuntimeError("db down")
+        return None
+
+    fx.conn.fetchval = AsyncMock(side_effect=_fetchval)
     with caplog.at_level(logging.ERROR):
         await fx.service.save_and_link(CALL, fx.buffer, TENANT, CAMPAIGN)
     fx.s3.delete_permanently.assert_not_called()

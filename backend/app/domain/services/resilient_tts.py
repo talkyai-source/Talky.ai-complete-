@@ -172,7 +172,11 @@ class ResilientTTSProvider(TTSProvider):
                         yield chunk
             return
         except Exception as exc:
-            if started or self._secondary is None:
+            from app.infrastructure.tts.elevenlabs_tts import ProviderClosedError
+
+            # A provider closed by its ending call is not a start-up failure:
+            # nobody is listening, so the secondary voice is not asked to speak.
+            if started or self._secondary is None or isinstance(exc, ProviderClosedError):
                 raise
             logger.warning(
                 "resilient_tts_startup_failed_failover_to=%s err=%s",

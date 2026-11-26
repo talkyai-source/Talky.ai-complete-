@@ -1463,7 +1463,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4263221ed4197d455735816fe0bb327069e02f3c406cf5bf07ed9fa23c50ee01",
+      "id": "782b313350e073f6ba83ce2f29593ef8c650e01200a5c6bc4bd9103348eefbc3",
       "file": "app/domain/services/call_service.py",
       "function": "CallService._update_campaign_counters_pooled",
       "line": 1144,
@@ -9792,7 +9792,7 @@
       "id": "60286b5cbe327c226f6e8b681b047515d220525536b487fb59da22e9251bde3d",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.is_on_dnc",
-      "line": 377,
+      "line": 407,
       "method": "fetchrow",
       "tables": [
         "dnc_entries"
@@ -9802,7 +9802,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "The DNC match explicitly binds tenant_id=$1 OR tenant_id IS NULL and the normalized number. Global suppressions must affect every tenant; other tenants non-null suppressions are excluded. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:377.",
+      "reason": "The DNC match explicitly binds tenant_id=$1 OR tenant_id IS NULL and the normalized number. Global suppressions must affect every tenant; other tenants non-null suppressions are excluded. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:407.",
       "category": "reviewed_tenant_plus_global"
     },
     {
@@ -10336,10 +10336,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "7c46e6d40a4c70c24a1812600811c893447c085b8a7d42410972f48b8df8ec79",
+      "id": "27d4f72b45af1e545ad1ed3f8074aeb08a9c3fde74adde153bddd3ba58bee2d7",
       "file": "app/domain/services/dialer/opt_out.py",
       "function": "purge_lead_on_opt_out",
-      "line": 88,
+      "line": 99,
       "method": "startswith",
       "tables": [],
       "sql": "UPDATE",
@@ -10347,7 +10347,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "This literal compares an already-returned asyncpg command tag; no SQL is executed by startswith. Exact reviewed operation: startswith; app/domain/services/dialer/opt_out.py:88.",
+      "reason": "This literal compares an already-returned asyncpg command tag; no SQL is executed by startswith. Exact reviewed operation: startswith; app/domain/services/dialer/opt_out.py:99.",
       "category": "not_database_sql"
     },
     {
@@ -12339,7 +12339,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "475acd063ecea22ef6edcabc8836f099b4ffd4f625e0e05654c8d04c104290a2",
+      "id": "de471fa87bf5d2b3d19d40cde147f49acd6f5820d6639a4adf7dbf498abc9dfc",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.list_for_tenant",
       "line": 390,

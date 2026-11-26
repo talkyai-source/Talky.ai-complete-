@@ -253,11 +253,16 @@ def read_entry(key: str) -> Optional[SpoolEntry]:
 
 
 def read_wav(key: str) -> Optional[bytes]:
+    """The pending audio, or None when the file does not exist.
+
+    Any other error (permission, I/O, too many open files) is raised: it is
+    not "the audio is missing", and the callers keep the copy and try again.
+    """
     wav_path, _ = _paths(key)
     try:
         with open(wav_path, "rb") as handle:
             return handle.read()
-    except OSError:
+    except FileNotFoundError:
         return None
 
 

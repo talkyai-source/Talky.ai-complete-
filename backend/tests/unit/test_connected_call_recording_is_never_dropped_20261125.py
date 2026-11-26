@@ -393,7 +393,7 @@ def _spool_write_fails(monkeypatch):
 
 
 def _process_returns(monkeypatch, outcome):
-    async def fake_process(entry, *, wav_bytes=None, voice_session=None):
+    async def fake_process(entry, *, wav_bytes=None, voice_session=None, **kw):
         return outcome
 
     monkeypatch.setattr(tr, "process_spool_entry", fake_process)
