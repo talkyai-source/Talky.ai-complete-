@@ -197,8 +197,9 @@ async def test_c_lost_at_boot_won_later_recovers_once_after_that(env, monkeypatc
     await _stop(task, stop)
     assert calls == [1] and spool.has_audio("live-1") and not folder.exists()
     text = [r.getMessage() for r in caplog.records]
-    assert text.count("recording_loops_idle reason=not_call_owner loop=recording_checkpoint_loop") == 1
-    assert text.count("recording_loops_active loop=recording_checkpoint_loop") == 1
+    assert text.count("recording_orphan_recovery_waiting reason=not_call_owner") == 1
+    assert text.count("recording_orphan_recovery_allowed") == 1
+    assert not [t for t in text if "loop=recording_checkpoint_loop" in t]   # the old, misleading lines
 
 
 class _Gw:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional
 from uuid import UUID
 
@@ -681,6 +682,20 @@ def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
         return default
 
 
+_TEMP_SWEEP_EVERY_S = 600.0
+_TEMP_SWEEP_LAST: Optional[float] = None
+
+
+def _monotonic() -> float:
+    """Monotonic seconds; tests replace this to move the clock."""
+    return time.monotonic()
+
+
+def _set_temp_sweep_last(value: float) -> None:
+    global _TEMP_SWEEP_LAST
+    _TEMP_SWEEP_LAST = value
+
+
 def _loop_may_run(loop_name: str) -> bool:
     from app.domain.services.recording_checkpoint import loop_may_run
 
@@ -794,6 +809,15 @@ async def recording_spool_loop(stop_event: asyncio.Event) -> None:
                 from app.domain.services.recording_spool import sweep_leftovers
 
                 await asyncio.to_thread(sweep_leftovers)  # old stray .json / .tmp files
+            except Exception as exc:
+                logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
+            try:
+                # Stored-recording temp files a crash left (at most every 10 min).
+                if _TEMP_SWEEP_LAST is None or _monotonic() - _TEMP_SWEEP_LAST >= _TEMP_SWEEP_EVERY_S:
+                    _set_temp_sweep_last(_monotonic())
+                    from app.domain.services.recording_service import sweep_stale_temp_recordings
+
+                    await asyncio.to_thread(sweep_stale_temp_recordings)
             except Exception as exc:
                 logger.error("recording_spool_loop_error err=%s", type(exc).__name__)
     finally:

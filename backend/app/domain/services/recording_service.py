@@ -38,6 +38,7 @@ import io
 import logging
 import math
 import os
+import re
 import secrets
 import stat
 import struct
@@ -616,6 +617,89 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
         pass
     finally:
         os.close(dir_fd)
+
+
+# The temporary name ``_write_wav_file`` gives a file before the rename.
+_TEMP_NAME_RE = re.compile(r"^.+\.[0-9a-f]{12}\.tmp$")
+_TEMP_SWEEP_MIN_AGE_S = 3600.0
+_TEMP_SWEEP_MAX_FILES = 200
+
+
+def sweep_stale_temp_recordings(
+    recordings_dir: Optional[str] = None, now: Optional[float] = None
+) -> int:
+    """Remove ``<name>.<12 hex>.tmp`` files a crash left beside recordings.
+
+    Only regular files (never a symlink), inside the real recordings root,
+    named exactly like ``_write_wav_file``'s temporary files and older than an
+    hour by modification time (a live write is seconds old). At most
+    ``_TEMP_SWEEP_MAX_FILES`` per run; never raises; returns the count removed.
+    No local root on disk (S3-only) means nothing to do.
+    Dot-directories and the pending folder (``recording_spool.spool_dir()``,
+    wherever configured) are never entered: it has its own deliberate clean-up
+    and its ``.tmp`` files hold call audio.
+    """
+    try:
+        from app.domain.services.recording_spool import spool_dir
+
+        pending = os.path.realpath(spool_dir())
+
+        def _in_pending(real_path: str) -> bool:
+            try:
+                return os.path.commonpath((pending, real_path)) == pending
+            except ValueError:
+                return False
+
+        if recordings_dir is None:
+            recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
+        # A blank setting resolves to the working directory, which is the
+        # application's own folder: never a recordings root. The same for the
+        # working directory itself and for a file-system root.
+        if not str(recordings_dir or "").strip():
+            return 0
+        root = os.path.realpath(os.path.abspath(recordings_dir))
+        if root == os.path.realpath(os.getcwd()) or os.path.dirname(root) == root:
+            return 0
+        if not os.path.isdir(root):
+            return 0
+        now_ts = time.time() if now is None else now
+        removed = 0
+        for current, dirnames, filenames in os.walk(root, followlinks=False):
+            # never descend into a symlinked directory
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith(".")
+                and not os.path.islink(os.path.join(current, d))
+                and os.path.realpath(os.path.join(current, d)) != pending
+            ]
+            for name in filenames:
+                if removed >= _TEMP_SWEEP_MAX_FILES:
+                    break
+                if not _TEMP_NAME_RE.match(name):
+                    continue
+                path = os.path.join(current, name)
+                try:
+                    info = os.lstat(path)
+                    if not stat.S_ISREG(info.st_mode):
+                        continue
+                    if now_ts - info.st_mtime <= _TEMP_SWEEP_MIN_AGE_S:
+                        continue
+                    real = os.path.realpath(path)
+                    if os.path.commonpath((root, real)) != root or real == root:
+                        continue
+                    if _in_pending(real):
+                        continue
+                    os.unlink(path)
+                    removed += 1
+                except (OSError, ValueError):
+                    continue
+            if removed >= _TEMP_SWEEP_MAX_FILES:
+                break
+        if removed:
+            logger.info("recording_temp_sweep removed=%d", removed)
+        return removed
+    except Exception:
+        return 0
 
 
 SAVE_SAVED = "saved"      # stored and registered; the pending copy may go
