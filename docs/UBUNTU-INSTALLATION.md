@@ -1531,6 +1531,11 @@ days (`TALKY_BACKUP_DIR`, `TALKY_BACKUP_KEEP_DAYS`). It needs a root-owned file
 TALKY_BACKUP_PRINCIPAL_ID=<existing-platform-admin-UUID>
 ```
 
+On a brand-new server whose `calls` table is still empty, also add
+`TALKY_BACKUP_MIN_CALL_ROWS=0` to that file: the backup counts the rows of
+`public.calls` inside each dump and refuses a dump with fewer rows than this
+minimum (default 1). Remove the line once the first call exists.
+
 (`docs/RUNBOOK.md`, "Backups"). A plain `pg_dump` is **not** acceptable: under
 row level security it silently dumps schema only. The script verifies that
 table data entries exist and publishes `talky-<UTC>.dump` plus `.sha256`. A
@@ -2269,6 +2274,7 @@ commented out in the file.
 | `MIGRATION_DATABASE_URL`, `READ_DATABASE_URL` | `Alembic/env.py`; installer rules |
 | `APP_VERSION` | written by `set_release_version.py` at deploy |
 | `TALKY_BACKUP_DIR`, `TALKY_BACKUP_KEEP_DAYS`, `TALKY_BACKUP_PRINCIPAL_ID`, `TALKY_PG_CONTAINER`, `TALKY_PG_USER`, `TALKY_PG_DB`, `TALKY_BACKUP_MIN_TABLE_DATA` | `db-backup.sh` and its unit |
+| `TALKY_BACKUP_MIN_CALL_ROWS` (default 1; set 0 on a brand-new server whose `calls` table is still empty, otherwise the nightly backup is refused), `TALKY_BACKUP_ROW_CHECK_TIMEOUT_S` (default 1800; after it the row check is given up with a warning and the dump is published) | `db-backup.sh` |
 | `INBOUND_SYNTHETIC_DID`, `INBOUND_SYNTHETIC_TRUNK_ENDPOINT`, `INBOUND_SYNTHETIC_WAIT_SECONDS` | `/etc/talky/inbound-synthetic.env` |
 | `TALKY_HEALTHWATCH_URL`, `TALKY_HEALTHWATCH_RETRIES`, `TALKY_HEALTHWATCH_RETRY_DELAY` | `healthwatch.sh` |
 | `TALKY_BACKEND_DIR`, `TALKY_BACKEND_ENV_FILE`, `TALKY_BACKEND_PYTHON`, `TALKY_RECONCILER`, `TALKY_RECONCILE_APPLY` | `asterisk-reconcile-on-drift.sh` |

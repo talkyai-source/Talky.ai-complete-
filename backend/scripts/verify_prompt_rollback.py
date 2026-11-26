@@ -99,4 +99,12 @@ async def main():
     await c.close()
     print(f"\n===== {sum(ok)}/{len(ok)} checks passed =====")
 
-asyncio.run(main())
+
+def exit_status() -> int:
+    """0 only when at least one check ran and every check passed."""
+    return 0 if ok and all(ok) else 1
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+    sys.exit(exit_status())

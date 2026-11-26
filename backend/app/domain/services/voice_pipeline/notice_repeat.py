@@ -107,7 +107,15 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
         ):
             reason = "caller_ending"
         else:
-            reason = await _notice_skip_reason(voice, voice.call_id)
+            try:
+                reason = await _notice_skip_reason(voice, voice.call_id)
+            except asyncio.CancelledError:
+                # The repeat is spent; say why it never reached the sentence.
+                logger.info(
+                    "recording_notice_repeat_skipped call_id=%s reason=cancelled_before_try",
+                    call_id[:12],
+                )
+                raise
         if reason is None and disclosure_delivered(*call_ids):
             reason = "already_delivered"
         if reason is not None:

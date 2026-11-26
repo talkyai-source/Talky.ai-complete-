@@ -126,6 +126,8 @@ async def test_campaign_realtime_roundtrip_preserves_separate_settings(monkeypat
     from app.api.v1.schemas.campaigns import CampaignCreateRequest, CampaignUpdateRequest
     from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
     from app.api.v1.endpoints import campaigns
+    from app.domain.services import credential_resolver as _cr
+    monkeypatch.setattr(_cr, "get_credential_resolver", lambda: SimpleNamespace(resolve=AsyncMock(return_value="dummy")))
     body = dict(name="Sample", company_name="Acme", agent_names=["Alex"], persona_type="lead_gen")
     data = CampaignCreateRequest(**body, pipeline_mode="realtime", realtime_voice="ash", realtime_prompt={"instructions": "RT custom"})
     source = AIProviderConfig()

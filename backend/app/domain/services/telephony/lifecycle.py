@@ -1878,10 +1878,7 @@ async def _settle_recovered_outbound_call(
         return
 
     from app.core.container import get_container
-    from app.core.security.tenant_isolation import (
-        set_bypass_rls,
-        set_current_tenant_id,
-    )
+    from app.core.security.tenant_scope import bypass_scope
     from app.domain.models.dialer_job import CallOutcome
 
     container = get_container()
@@ -1902,20 +1899,18 @@ async def _settle_recovered_outbound_call(
         else resolve_call_outcome(None, hangup_reason=hangup_reason)
     )
 
-    set_bypass_rls(True)
     tenant_id = recovery_context.get("tenant_id")
-    if tenant_id:
-        set_current_tenant_id(str(tenant_id))
     call_service = CallService(
         db_client=container.db_client,
         queue_service=getattr(container, "_queue_service", None),
         db_pool=container.db_pool,
     )
-    result = await call_service.handle_call_status(
-        call_uuid=str(durable_call_id),
-        outcome=outcome,
-        duration=max(0, int(recovery_context.get("duration_seconds") or 0)),
-    )
+    with bypass_scope(tenant_id):
+        result = await call_service.handle_call_status(
+            call_uuid=str(durable_call_id),
+            outcome=outcome,
+            duration=max(0, int(recovery_context.get("duration_seconds") or 0)),
+        )
     if not result.durable:
         raise RuntimeError(
             "outbound orphan settlement was not durably committed: "
@@ -6170,22 +6165,17 @@ async def _on_call_ended(
                     # campaign_counter, dialer_jobs UPDATE) would be
                     # filtered to zero rows by the RLS policies. Set
                     # bypass_rls for the duration of this teardown so
-                    # the writes actually land. The contextvar is
-                    # process-scoped to this asyncio task so we don't
-                    # leak the bypass to anyone else.
-                    from app.core.security.tenant_isolation import (
-                        set_bypass_rls,
-                        set_current_tenant_id,
-                    )
+                    # the writes actually land. The bypass and the call's
+                    # account are set only around the settlement call and
+                    # put back afterwards (bypass_scope), so a long-lived
+                    # task (a watchdog) does not keep them for later work.
+                    from app.core.security.tenant_scope import bypass_scope
 
-                    set_bypass_rls(True)
                     tenant_for_call = getattr(
                         voice_session,
                         "_dialer_tenant_id",
                         None,
                     )
-                    if tenant_for_call:
-                        set_current_tenant_id(tenant_for_call)
 
                     call_service = CallService(
                         db_client=_c2.db_client,
@@ -6194,11 +6184,12 @@ async def _on_call_ended(
                         # see CallService._handle_call_status_pooled.
                         db_pool=_c2.db_pool,
                     )
-                    settlement_result = await call_service.handle_call_status(
-                        call_uuid=dialer_call_id,
-                        outcome=outcome,
-                        duration=duration,
-                    )
+                    with bypass_scope(tenant_for_call):
+                        settlement_result = await call_service.handle_call_status(
+                            call_uuid=dialer_call_id,
+                            outcome=outcome,
+                            duration=duration,
+                        )
                     if not settlement_result.durable:
                         raise RuntimeError(
                             "call terminal settlement unverified: "
@@ -6363,13 +6354,8 @@ async def _on_call_ended(
                         if answer_was_confirmed
                         else resolve_call_outcome(None, hangup_reason=_cause)
                     )
-                    from app.core.security.tenant_isolation import (
-                        set_bypass_rls,
-                        set_current_tenant_id,
-                    )
+                    from app.core.security.tenant_scope import bypass_scope
 
-                    set_bypass_rls(True)
-                    set_current_tenant_id(str(_row["tenant_id"]))
                     call_service = CallService(
                         db_client=_c4.db_client,
                         queue_service=getattr(_c4, "_queue_service", None),
@@ -6383,11 +6369,12 @@ async def _on_call_ended(
                         outbound_duration_s = _durable_outbound_duration_seconds(
                             _row["answered_at"], _row["db_now"]
                         )
-                    settlement_result = await call_service.handle_call_status(
-                        call_uuid=str(_row["id"]),
-                        outcome=outcome,
-                        duration=outbound_duration_s,
-                    )
+                    with bypass_scope(str(_row["tenant_id"])):
+                        settlement_result = await call_service.handle_call_status(
+                            call_uuid=str(_row["id"]),
+                            outcome=outcome,
+                            duration=outbound_duration_s,
+                        )
                     if not settlement_result.durable:
                         raise RuntimeError(
                             "preanswer terminal settlement unverified: "

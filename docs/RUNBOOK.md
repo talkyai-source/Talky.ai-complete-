@@ -180,6 +180,13 @@ UUID:
 TALKY_BACKUP_PRINCIPAL_ID=<existing-platform-admin-UUID>
 ```
 
+Before a dump is published the script counts the rows of `public.calls` inside
+it. A dump that provably holds fewer rows than `TALKY_BACKUP_MIN_CALL_ROWS`
+(default 1) is refused with `DB-BACKUP CRITICAL` and not published. If the
+count cannot be read, the script prints `DB-BACKUP WARNING` and publishes the
+dump; the final line then says `call_rows=unknown` instead of a number. A
+server with no calls yet needs `TALKY_BACKUP_MIN_CALL_ROWS=0` in this file.
+
 Use `sudoedit` to configure that file, then verify its ownership and permissions.
 It is backup process context, not an account-creation step or a database role
 promotion. Do not place a password, token or MFA secret in it. The service's
