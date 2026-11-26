@@ -712,6 +712,13 @@ class OpenAIRealtimeSession:
                 await self._ws.send(json.dumps({"type": "conversation.item.delete", "item_id": item["id"]}))
         if required_text is not None and epoch != self._response_epoch:
             return  # Caller interrupted while the withheld history was removed.
+        # The flag is deliberately NOT claimed here (compare _create_response).
+        # The bridge hands a parked tool result over right after this send. Unclaimed,
+        # that request is rejected by the provider and waits for the caller's next turn.
+        # Claimed, it would be deferred and fired at this response.done, and its reply
+        # would cut the repaired sentence (do-not-call acknowledgement, AI identity
+        # line, recording notice) in mid-playback.
+        # See tests/unit/test_realtime_exact_repair_not_cut_by_tool_answer_20261127.py
         await self._ws.send(json.dumps({"type": "response.create", "response": config}))
 
     async def truncate_response(self, raw: dict, played_ms: int = 0) -> None:
