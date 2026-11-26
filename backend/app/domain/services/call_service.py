@@ -1826,7 +1826,7 @@ class CallService:
             )
             return
         try:
-            await DNCService(pool).add(
+            entry = await DNCService(pool).add(
                 tenant_id=str(tenant_id), e164=normalized,
                 source=SOURCE_MANUAL_ADMIN, reason=f"mark_as_{reason}",
             )
@@ -1837,6 +1837,14 @@ class CallService:
                 tenant_id, str(phone_number or "")[-4:], type(exc).__name__,
             )
             raise RuntimeError("mark_as_spam: do-not-call list write failed") from exc
+        try:  # the audit row follows in its own transaction; the answer never depends on it
+            from app.domain.services.dnc_system_mark_audit import audit_system_mark_soon
+            audit_system_mark_soon(
+                pool, tenant_id=tenant_id, entry_id=getattr(entry, "id", None),
+                actor_role="webhook",
+            )
+        except Exception:
+            logger.debug("mark_as_spam: audit scheduling failed", exc_info=True)
 
     async def mark_as_spam(
         self,
