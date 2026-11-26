@@ -1941,9 +1941,11 @@ async def make_call(request: Request, body: MakeCallRequest):
     _sb = get_state_backend()
     if not _sb.is_telephony_owner():
         owner = await _sb.telephony_owner_id()
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
         logger.warning(
             "make_call_not_owner dest=%s owner=%s — refusing on non-owner process",
-            destination,
+            mask_phone(destination),
             owner or "?",
         )
         raise HTTPException(
@@ -2254,10 +2256,12 @@ async def make_call(request: Request, body: MakeCallRequest):
         # event, and the dialer holds the same attempt (see dialer_worker).
         _provider_full = _provider_capacity_refusal(prewarm.failure_reason)
         if _provider_full is not None:
+            from app.domain.services.dialer.bulk_ingest import mask_phone
+
             logger.warning(
                 "make_call_provider_at_capacity provider=%s in_flight=%s max=%s dest=%s",
                 _provider_full["provider"], _provider_full["in_flight"],
-                _provider_full["max_concurrent"], destination,
+                _provider_full["max_concurrent"], mask_phone(destination),
             )
             raise HTTPException(
                 status_code=503,

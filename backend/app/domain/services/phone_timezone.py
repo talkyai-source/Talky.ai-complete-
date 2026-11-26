@@ -52,13 +52,21 @@ def lookup_timezone_sync(e164: str) -> Optional[str]:
     try:
         parsed = phonenumbers.parse(e164, None)
     except Exception as exc:
-        logger.debug("phonenumbers_parse_failed e164=%s err=%s", e164, exc)
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.debug(
+            "phonenumbers_parse_failed e164=%s err=%s", mask_phone(e164), type(exc).__name__
+        )
         return None
 
     try:
         tzs = pn_timezone.time_zones_for_number(parsed)
     except Exception as exc:
-        logger.debug("phonenumbers_tz_lookup_failed e164=%s err=%s", e164, exc)
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.debug(
+            "phonenumbers_tz_lookup_failed e164=%s err=%s", mask_phone(e164), type(exc).__name__
+        )
         return None
 
     if not tzs:
