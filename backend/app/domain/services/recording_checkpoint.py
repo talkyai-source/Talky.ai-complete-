@@ -61,6 +61,11 @@ _VANISHED_GRACE_S = 120.0
 _TEARDOWN: dict[str, float] = {}
 # A teardown that never finishes must not hide the safety copy for ever.
 _TEARDOWN_MAX_S = 1800.0
+# Start-up recovery of orphaned folders waits this long after the loop starts
+# (so the ownership acquire has answered) and needs the owner flag.
+_ORPHAN_RECOVERY_DELAY_S = 10.0
+# With the checkpoint interval disabled: how long to wait for ownership.
+_ORPHAN_RECOVERY_WINDOW_S = 360.0
 
 
 def _now() -> float:
@@ -591,21 +596,42 @@ async def checkpoint_pass() -> int:
     return wrote
 
 
+async def _recover_once_when_owner(stop_event: asyncio.Event, start: float) -> None:
+    """Interval disabled: one start-up recovery, only as the call owner.
+
+    Waits in steps of the delay, for up to ``_ORPHAN_RECOVERY_WINDOW_S``, for
+    this process to be the owner (a process that lost the lock at boot can win
+    it by the stale-lock retry). Never recovers as a non-owner.
+    """
+    while not stop_event.is_set():
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=_ORPHAN_RECOVERY_DELAY_S)
+            return
+        except asyncio.TimeoutError:
+            pass
+        if loop_may_run("recording_checkpoint_loop"):
+            try:
+                await recover_orphans()
+            except Exception as exc:
+                logger.error("recording_checkpoint_error err=%s", type(exc).__name__)
+            return
+        if _now() - start >= _ORPHAN_RECOVERY_WINDOW_S:
+            return
+
+
 async def recording_checkpoint_loop(stop_event: asyncio.Event) -> None:
     interval = _interval_s()
-    # Start-up recovery runs ONCE, on the first moment this process is the call
-    # owner (the loop may start just before the ownership lock is taken). A
-    # non-owner would treat the owner's live folders as orphans.
-    orphans_done = False
-    if loop_may_run("recording_checkpoint_loop"):
-        orphans_done = True
-        try:
-            await recover_orphans()
-        except Exception as exc:
-            logger.error("recording_checkpoint_error err=%s", type(exc).__name__)
+    start = _now()
     if interval is None:
+        await _recover_once_when_owner(stop_event, start)
         return
     logger.info("recording_checkpoint_loop_started interval_s=%s", interval)
+    # Why the pass is NOT gated and the orphan recovery is: the pass only
+    # writes copies of sessions in THIS process's registry and recovers
+    # checkpoints this process wrote (_STATE), so it must always run; the
+    # start-up recovery takes folders this process does not know, which a
+    # non-owner would steal from the owner's live calls.
+    orphans_done = False
     try:
         while not stop_event.is_set():
             try:
@@ -613,9 +639,14 @@ async def recording_checkpoint_loop(stop_event: asyncio.Event) -> None:
                 break
             except asyncio.TimeoutError:
                 pass
-            if not loop_may_run("recording_checkpoint_loop"):
-                continue  # not the call owner right now: do nothing this round
-            if not orphans_done:
+            # The owner flag of the Redis backend starts True and is set by the
+            # ownership acquire, which main.py awaits after creating this loop:
+            # so no recovery before the delay has passed.
+            if (
+                loop_may_run("recording_checkpoint_loop")
+                and not orphans_done
+                and _now() - start >= _ORPHAN_RECOVERY_DELAY_S
+            ):
                 orphans_done = True
                 try:
                     await recover_orphans()

@@ -48,7 +48,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("RECORDING_CHECKPOINT_INTERVAL_S", "5")
     monkeypatch.setattr(tr, "_LOOP_FIRST_DELAY_S", 0.01)
     monkeypatch.setenv("RECORDING_SPOOL_RETRY_INTERVAL_S", "10")
-    backend = SimpleNamespace(owner=False, iter_voice_session_items=lambda: [])
+    backend = SimpleNamespace(owner=True, live=[])  # the real backend's flag starts True
+    backend.iter_voice_session_items = lambda: list(backend.live)
     backend.is_telephony_owner = lambda: backend.owner
     monkeypatch.setattr(lifecycle, "_state", lambda: backend)
     cp._LOOP_IDLE.clear()
@@ -111,9 +112,17 @@ def test_the_real_in_memory_backend_is_the_owner(monkeypatch):
 
 # ---- the checkpoint loop
 
-async def test_a_non_owner_checkpoint_loop_leaves_a_foreign_folder_alone(env, monkeypatch):
+def _clock(monkeypatch, start=1000.0):
+    clock = [start]
+    monkeypatch.setattr(cp, "_now", lambda: clock[0])
+    return clock
+
+
+def _fast_rounds(monkeypatch):
     monkeypatch.setattr(cp, "_interval_s", lambda: 0.02)
-    folder = _foreign_folder(env)
+
+
+def _count_recoveries(monkeypatch):
     calls = []
     real = cp.recover_orphans
 
@@ -122,57 +131,164 @@ async def test_a_non_owner_checkpoint_loop_leaves_a_foreign_folder_alone(env, mo
         return await real()
 
     monkeypatch.setattr(cp, "recover_orphans", counted)
-    stop = asyncio.Event()
-    task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
-    await asyncio.sleep(0.2)
+    return calls
+
+
+async def _stop(task, stop):
     stop.set()
     await asyncio.wait_for(task, 5)
-    assert calls == [] and folder.exists()
-    assert not spool.has_audio("live-1")
 
 
-async def test_ownership_arriving_later_recovers_the_orphan_once(env, monkeypatch, caplog):
-    monkeypatch.setattr(cp, "_interval_s", lambda: 0.02)
+async def test_a_boot_order_flag_true_then_false_never_recovers_a_foreign_folder(env, monkeypatch):
+    """The real Redis flag starts True and the awaited acquire turns it False."""
+    _fast_rounds(monkeypatch)
+    clock = _clock(monkeypatch)
     folder = _foreign_folder(env)
-    calls = []
-    real = cp.recover_orphans
+    calls = _count_recoveries(monkeypatch)
+    assert env.backend.is_telephony_owner() is True            # loop start: the default
+    stop = asyncio.Event()
+    task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
+    await asyncio.sleep(0.05)                                  # first rounds run on the default True
+    env.backend.owner = False                                  # the acquire answered False
+    for t in (1005.0, 1011.0, 1100.0, 5000.0):
+        clock[0] = t
+        await asyncio.sleep(0.1)
+    await _stop(task, stop)
+    assert calls == [] and folder.exists() and not spool.has_audio("live-1")
 
-    async def counted():
-        calls.append(1)
-        return await real()
 
-    monkeypatch.setattr(cp, "recover_orphans", counted)
-    caplog.set_level(logging.INFO)
+async def test_b_the_real_owner_recovers_once_at_the_first_round_after_the_delay(env, monkeypatch):
+    _fast_rounds(monkeypatch)
+    clock = _clock(monkeypatch)
+    folder = _foreign_folder(env)
+    calls = _count_recoveries(monkeypatch)
     stop = asyncio.Event()
     task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
     await asyncio.sleep(0.15)
-    assert calls == [] and folder.exists() and not spool.has_audio("live-1")
-    env.backend.owner = True
-    await asyncio.sleep(0.3)                                   # many owner passes
-    stop.set()
-    await asyncio.wait_for(task, 5)
-    assert calls == [1], "recover_orphans must run exactly once"
+    assert calls == [] and folder.exists()                     # t = 0: not before 10 s
+    clock[0] = 1000.0 + cp._ORPHAN_RECOVERY_DELAY_S - 0.1
+    await asyncio.sleep(0.15)
+    assert calls == [] and folder.exists()
+    clock[0] = 1000.0 + cp._ORPHAN_RECOVERY_DELAY_S
+    await asyncio.sleep(0.4)                                   # many rounds
+    clock[0] += 500
+    await asyncio.sleep(0.2)
+    await _stop(task, stop)
+    assert calls == [1]
     assert spool.has_audio("live-1") and not folder.exists()
+
+
+async def test_c_lost_at_boot_won_later_recovers_once_after_that(env, monkeypatch, caplog):
+    _fast_rounds(monkeypatch)
+    clock = _clock(monkeypatch)
+    folder = _foreign_folder(env)
+    calls = _count_recoveries(monkeypatch)
+    caplog.set_level(logging.INFO)
+    stop = asyncio.Event()
+    task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
+    await asyncio.sleep(0.05)
+    env.backend.owner = False
+    clock[0] = 1030.0
+    await asyncio.sleep(0.15)
+    assert calls == [] and folder.exists()
+    clock[0] = 1060.0
+    env.backend.owner = True                                   # won by the stale-lock retry
+    await asyncio.sleep(0.4)
+    await _stop(task, stop)
+    assert calls == [1] and spool.has_audio("live-1") and not folder.exists()
     text = [r.getMessage() for r in caplog.records]
     assert text.count("recording_loops_idle reason=not_call_owner loop=recording_checkpoint_loop") == 1
     assert text.count("recording_loops_active loop=recording_checkpoint_loop") == 1
 
 
-async def test_an_owner_at_start_up_recovers_immediately_as_today(env, monkeypatch):
-    monkeypatch.setattr(cp, "_interval_s", lambda: 0.02)
-    env.backend.owner = True
-    folder = _foreign_folder(env)
+class _Gw:
+    def __init__(self):
+        self.caller = [b"\x01\x00" * 800 for _ in range(10)]
+        self.agent = []
+        self._sample_rate = RATE
+
+    def get_recording_buffer(self, _c):
+        return self.caller
+
+    def get_tts_recording_buffer(self, _c):
+        return self.agent
+
+    def is_recording_enabled(self, _c):
+        return True
+
+
+def _own_session(sid="own-1"):
+    return SimpleNamespace(
+        call_id=sid, media_gateway=_Gw(), _dialer_tenant_id=TENANT,
+        config=SimpleNamespace(tenant_id=TENANT, campaign_id=None, lead_id=None),
+        call_session=None, _recording_policy_decided=True,
+    )
+
+
+async def test_d_the_pass_is_not_gated_a_non_owner_keeps_copies_of_its_own_calls(env, monkeypatch):
+    _fast_rounds(monkeypatch)
+    _clock(monkeypatch)
+    env.backend.owner = False
+    vs = _own_session()
+    env.backend.live = [("pbx-own", vs)]
     stop = asyncio.Event()
     task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
+    pcm = env.spool / "live" / "own-1" / "caller.pcm"
     await asyncio.sleep(0.2)
-    stop.set()
-    await asyncio.wait_for(task, 5)
-    assert spool.has_audio("live-1") and not folder.exists()
+    first = pcm.stat().st_size
+    vs.media_gateway.caller += [b"\x02\x00" * 800 for _ in range(10)]
+    await asyncio.sleep(0.2)
+    await _stop(task, stop)
+    assert first > 0 and pcm.stat().st_size > first
+
+
+async def test_e_a_live_call_of_this_process_is_not_an_orphan_but_a_foreign_folder_is(env, monkeypatch):
+    _fast_rounds(monkeypatch)
+    clock = _clock(monkeypatch)
+    foreign = _foreign_folder(env)
+    vs = _own_session()
+    env.backend.live = [("pbx-own", vs)]
+    stop = asyncio.Event()
+    task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
+    await asyncio.sleep(0.2)                                   # the pass checkpoints the own call
+    own = env.spool / "live" / "own-1"
+    assert own.exists() and [st.key for st in cp._STATE.values()] == ["own-1"]
+    clock[0] = 1000.0 + cp._ORPHAN_RECOVERY_DELAY_S
+    await asyncio.sleep(0.3)
+    await _stop(task, stop)
+    assert spool.has_audio("live-1") and not foreign.exists()   # the foreign one is recovered
+    assert own.exists() and not spool.has_audio("own-1")        # the own live call is not
+
+
+async def test_f_interval_disabled_owner_recovers_once_after_the_delay_then_returns(env, monkeypatch):
+    monkeypatch.setattr(cp, "_interval_s", lambda: None)
+    monkeypatch.setattr(cp, "_ORPHAN_RECOVERY_DELAY_S", 0.05)
+    monkeypatch.setattr(cp, "_ORPHAN_RECOVERY_WINDOW_S", 0.5)
+    folder = _foreign_folder(env)
+    calls = _count_recoveries(monkeypatch)
+    stop = asyncio.Event()
+    task = asyncio.create_task(cp.recording_checkpoint_loop(stop))
+    await asyncio.sleep(0.01)
+    assert calls == [] and folder.exists()                     # not before the delay
+    await asyncio.wait_for(task, 3)                            # returns by itself
+    assert calls == [1] and spool.has_audio("live-1")
+
+
+async def test_f_interval_disabled_non_owner_never_recovers_and_returns_within_the_window(env, monkeypatch):
+    monkeypatch.setattr(cp, "_interval_s", lambda: None)
+    monkeypatch.setattr(cp, "_ORPHAN_RECOVERY_DELAY_S", 0.05)
+    monkeypatch.setattr(cp, "_ORPHAN_RECOVERY_WINDOW_S", 0.3)
+    env.backend.owner = False
+    folder = _foreign_folder(env)
+    calls = _count_recoveries(monkeypatch)
+    await asyncio.wait_for(cp.recording_checkpoint_loop(asyncio.Event()), 3)
+    assert calls == [] and folder.exists() and not spool.has_audio("live-1")
 
 
 # ---- the pending loop
 
 async def test_a_non_owner_spool_pass_processes_nothing_and_deletes_nothing(env):
+    env.backend.owner = False
     spool.write_entry(_entry("pend-1"), _wav(1.0))
     assert await tr._spool_pass() == 0
     assert env.processed == []
@@ -180,6 +296,7 @@ async def test_a_non_owner_spool_pass_processes_nothing_and_deletes_nothing(env)
 
 
 async def test_the_spool_pass_runs_once_the_process_is_the_owner(env):
+    env.backend.owner = False
     spool.write_entry(_entry("pend-1"), _wav(1.0))
     assert await tr._spool_pass() == 0
     env.backend.owner = True
@@ -188,6 +305,7 @@ async def test_the_spool_pass_runs_once_the_process_is_the_owner(env):
 
 
 async def test_the_spool_loop_skips_the_whole_round_for_a_non_owner(env, monkeypatch, caplog):
+    env.backend.owner = False
     spool.write_entry(_entry("pend-1"), _wav(1.0))
     extras = []
     import app.domain.services.recording_spool as rsp
@@ -230,6 +348,6 @@ async def test_the_teardowns_own_save_is_not_gated(env, monkeypatch):
         config=SimpleNamespace(tenant_id=TENANT, campaign_id=None, lead_id=None),
         call_session=None, _recording_policy_decided=True,
     )
-    assert env.backend.owner is False
+    env.backend.owner = False
     assert await tr._save_call_recording_with_budget(vs, "pbx-own") == "captured"
     assert env.processed == ["own-call"]
