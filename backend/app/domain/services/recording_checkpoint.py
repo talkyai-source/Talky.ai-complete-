@@ -84,6 +84,7 @@ class _CallState:
     caller_bytes: int = 0
     need_reset: bool = False
     vanished_at: Optional[float] = None
+    first_copy_logged: bool = False
 
 
 # id(voice_session) -> state. Calls marked finished (dict used as ordered set).
@@ -600,6 +601,18 @@ async def _checkpoint_one(pbx_id: str, vs, sid: str) -> bool:
     except BaseException:
         st.need_reset = True  # files and memory disagree: start over next pass
         raise
+    if not st.first_copy_logged and sid not in _DONE:
+        # One line per call, so the log shows a safety copy really is written
+        # (the folder is root-only). The flag lives in _CallState, which
+        # checkpoint_done and the vanished-session cleanup already drop.
+        try:
+            st.first_copy_logged = True
+            logger.info(
+                "recording_checkpoint_first_copy call=%s seconds=%.1f",
+                str(st.key)[:12], st.caller_bytes / (_sample_rate(gateway) * 2),
+            )
+        except Exception:
+            pass
     return True
 
 
