@@ -53,6 +53,16 @@ _O_BINARY = getattr(os, "O_BINARY", 0)
 _VANISHED_GRACE_S = 120.0
 
 
+# A call's teardown that is still running in this process (it has taken the
+# session out of the registry and has not yet finished its recording save)
+# owns its checkpoint: the pass must not turn the older copy into a pending
+# recording that could be stored before the teardown's full capture.
+# Key: the session's call_id (what the pass reads as ``vs.call_id``) -> start.
+_TEARDOWN: dict[str, float] = {}
+# A teardown that never finishes must not hide the safety copy for ever.
+_TEARDOWN_MAX_S = 1800.0
+
+
 def _now() -> float:
     """Monotonic seconds; tests replace this to move the clock."""
     return time.monotonic()
@@ -101,12 +111,80 @@ def _interval_s() -> Optional[float]:
     return max(value, _MIN_INTERVAL_S)
 
 
+def _is_call_owner() -> bool:
+    """Is this process the telephony call owner right now?
+
+    Fails OPEN: an unreachable backend, a backend without the method, or an
+    error all answer True (the loops run as before). Only an explicit False
+    says "not the owner"; the gate must never cost a safety copy.
+    """
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        check = getattr(_state(), "is_telephony_owner", None)
+        if not callable(check):
+            return True
+        return check() is not False
+    except Exception:
+        return True
+
+
+# loop name -> True while it is idle because this process is not the owner
+_LOOP_IDLE: dict[str, bool] = {}
+
+
+def loop_may_run(loop_name: str) -> bool:
+    """Gate of a recording loop's pass. One INFO line per change, none per pass."""
+    owner = _is_call_owner()
+    if not owner:
+        if not _LOOP_IDLE.get(loop_name):
+            _LOOP_IDLE[loop_name] = True
+            logger.info("recording_loops_idle reason=not_call_owner loop=%s", loop_name)
+        return False
+    if _LOOP_IDLE.pop(loop_name, False):
+        logger.info("recording_loops_active loop=%s", loop_name)
+    return True
+
+
+def checkpoint_teardown_started(session_call_id) -> None:
+    """The call's teardown is running: keep its checkpoint. Never raises."""
+    try:
+        sid = str(session_call_id or "")
+        if sid:
+            now = _now()
+            # A teardown that never reaches its save (the recording was already
+            # saved at transfer) has no checkpoint for the pass to expire: drop
+            # entries past the limit here, so the table cannot grow for ever.
+            for old in [k for k, t in _TEARDOWN.items() if now - t >= _TEARDOWN_MAX_S]:
+                _TEARDOWN.pop(old, None)
+            _TEARDOWN[sid] = now
+    except Exception:
+        pass
+
+
+def checkpoint_teardown_finished(session_call_id) -> None:
+    """The teardown's save has returned (any result). Never raises.
+
+    The normal grace for a checkpoint that is still there starts now.
+    """
+    try:
+        sid = str(session_call_id or "")
+        if sid and _TEARDOWN.pop(sid, None) is not None:
+            now = _now()
+            for st in list(_STATE.values()):
+                if st.session_call_id == sid:
+                    st.vanished_at = now
+    except Exception:
+        pass
+
+
 def checkpoint_done(session_call_id) -> None:
     """Mark a call finished and remove its folder. Never raises."""
     try:
         sid = str(session_call_id or "")
         if not sid:
             return
+        _TEARDOWN.pop(sid, None)
         _DONE[sid] = None
         while len(_DONE) > _DONE_MAX:
             _DONE.pop(next(iter(_DONE)), None)
@@ -491,12 +569,19 @@ async def checkpoint_pass() -> int:
         # Gone from the registry and not done: its teardown may be saving right
         # now. Leave it alone until the grace has passed without checkpoint_done.
         now = _now()
+        started = _TEARDOWN.get(st.session_call_id)
+        if started is not None:
+            if now - started < _TEARDOWN_MAX_S:
+                st.vanished_at = None  # its own teardown is still running
+                continue
+            _TEARDOWN.pop(st.session_call_id, None)  # never finished: normal rules
         if st.vanished_at is None:
             st.vanished_at = now
             continue
         if now - st.vanished_at < _VANISHED_GRACE_S:
             continue
         _STATE.pop(sk, None)
+        _TEARDOWN.pop(st.session_call_id, None)
         # The call ended without the normal path finishing it: keep the audio.
         if os.path.isdir(_folder(st.key)):
             await _recover_key(st.key)
@@ -508,10 +593,16 @@ async def checkpoint_pass() -> int:
 
 async def recording_checkpoint_loop(stop_event: asyncio.Event) -> None:
     interval = _interval_s()
-    try:
-        await recover_orphans()
-    except Exception as exc:
-        logger.error("recording_checkpoint_error err=%s", type(exc).__name__)
+    # Start-up recovery runs ONCE, on the first moment this process is the call
+    # owner (the loop may start just before the ownership lock is taken). A
+    # non-owner would treat the owner's live folders as orphans.
+    orphans_done = False
+    if loop_may_run("recording_checkpoint_loop"):
+        orphans_done = True
+        try:
+            await recover_orphans()
+        except Exception as exc:
+            logger.error("recording_checkpoint_error err=%s", type(exc).__name__)
     if interval is None:
         return
     logger.info("recording_checkpoint_loop_started interval_s=%s", interval)
@@ -522,6 +613,14 @@ async def recording_checkpoint_loop(stop_event: asyncio.Event) -> None:
                 break
             except asyncio.TimeoutError:
                 pass
+            if not loop_may_run("recording_checkpoint_loop"):
+                continue  # not the call owner right now: do nothing this round
+            if not orphans_done:
+                orphans_done = True
+                try:
+                    await recover_orphans()
+                except Exception as exc:
+                    logger.error("recording_checkpoint_error err=%s", type(exc).__name__)
             try:
                 await checkpoint_pass()
             except Exception as exc:

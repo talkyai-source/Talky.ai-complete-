@@ -2789,7 +2789,13 @@ async def _on_ringing(call_id: str) -> None:
         # turn's stream request, so there is no HTTP/2 stream contention.
         llm_warm = getattr(voice_session.llm_provider, "warm_up", None)
         if llm_warm is not None:
-            asyncio.create_task(llm_warm())
+            async def _llm_warm_quietly():
+                try:
+                    await llm_warm()
+                except Exception as exc:  # closed provider after a short ring
+                    logger.debug("llm_warm_up_failed err=%s", type(exc).__name__)
+
+            _track_task(_llm_warm_quietly())
 
         # ── Pre-synthesize greeting audio during the ring window ────────
         # After TTS connect completes, synthesize the greeting and buffer all
@@ -5978,6 +5984,12 @@ async def _on_call_ended(
     _state().clear_first_speaker(call_id)  # per-call first-speaker stash cleanup
     voice_session = _state().pop_voice_session(call_id)
     if voice_session:
+        try:
+            from app.domain.services.recording_checkpoint import checkpoint_teardown_started
+
+            checkpoint_teardown_started(voice_session.call_id)
+        except Exception as exc:
+            logger.debug("checkpoint_teardown_started failed err=%s", type(exc).__name__)
         if not inbound_admission:
             inbound_admission = dict(getattr(voice_session, "_inbound_admission", None) or {})
             is_true_inbound = bool(inbound_admission.get("allowed"))

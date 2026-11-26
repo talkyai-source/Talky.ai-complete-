@@ -337,6 +337,9 @@ class FakeConn:
     async def fetchrow(self, *args, **kwargs):
         return {"id": "11111111-1111-1111-1111-111111111111"}
 
+    async def fetchval(self, *args, **kwargs):
+        return None  # the "already saved?" check: not saved yet
+
     async def execute(self, *args, **kwargs):
         return None
 

@@ -213,6 +213,9 @@ async def _finalize_locked(
     part_wav: Optional[bytes] = None
     reason = "not_started"
     retryable = False
+    # Read the pending agent part FIRST: a read error ends the pass with "retry"
+    # before the phone system's recording is stopped or fetched.
+    ai_wav = await asyncio.to_thread(spool.read_wav, entry.key)
     if name and adapter is None:
         reason = "no_adapter"
     elif name:
@@ -242,8 +245,6 @@ async def _finalize_locked(
                 part_wav = None
                 reason = "unreadable"
         retryable = part_wav is None
-
-    ai_wav = await asyncio.to_thread(spool.read_wav, entry.key)
 
     final_wav = ai_wav
     joined = False

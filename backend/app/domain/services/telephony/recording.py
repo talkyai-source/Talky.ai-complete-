@@ -195,12 +195,22 @@ async def _save_call_recording(
     """
     from app.domain.services.recording_service import _with_recording_pool_budget
 
-    return await _with_recording_pool_budget(_save_call_recording_with_budget)(
-        voice_session,
-        call_id,
-        awaiting_transfer=awaiting_transfer,
-        transfer_recording_name=transfer_recording_name,
-    )
+    try:
+        return await _with_recording_pool_budget(_save_call_recording_with_budget)(
+            voice_session,
+            call_id,
+            awaiting_transfer=awaiting_transfer,
+            transfer_recording_name=transfer_recording_name,
+        )
+    finally:
+        # The teardown's save is over (saved, retry or error): the checkpoint
+        # is no longer shielded. Never raises into the teardown.
+        try:
+            from app.domain.services.recording_checkpoint import checkpoint_teardown_finished
+
+            checkpoint_teardown_finished(voice_session.call_id)
+        except Exception:
+            pass
 
 
 async def _save_call_recording_with_budget(
@@ -376,7 +386,15 @@ async def _save_call_recording_with_budget(
         entry.awaiting = None
         entry.transfer_part = "missing"
 
-    outcome = await process_spool_entry(entry, wav_bytes=wav_bytes, voice_session=voice_session)
+    if spooled:
+        outcome = await process_spool_entry(entry, wav_bytes=wav_bytes, voice_session=voice_session)
+    else:
+        # No durable copy exists: an unavailable "already saved" check must not
+        # stop this save (the memory copy is destroyed right after).
+        outcome = await process_spool_entry(
+            entry, wav_bytes=wav_bytes, voice_session=voice_session,
+            proceed_if_check_unavailable=True,
+        )
     if not spooled and outcome != "retry":
         _checkpoint_done()
         # Free memory (today's timing when the spool write failed).
@@ -406,6 +424,12 @@ async def _mark_retry(entry, reason: str) -> str:
         "recording_spool_retry call=%s reason=%s attempts=%d",
         str(entry.pbx_call_id)[:12], reason, entry.attempts,
     )
+    if reason == "saved_check_unavailable" and entry.attempts >= 3:
+        # Only WARNINGs until the 30-day expiry deletes the audio otherwise.
+        logger.error(
+            "recording_saved_check_still_unavailable call=%s attempts=%d",
+            str(entry.pbx_call_id)[:12], entry.attempts,
+        )
     return "retry"
 
 
@@ -421,12 +445,18 @@ async def _finish(entry, status: str) -> str:
     return status
 
 
-async def process_spool_entry(entry, *, wav_bytes=None, voice_session=None) -> str:
+async def process_spool_entry(
+    entry, *, wav_bytes=None, voice_session=None, proceed_if_check_unavailable: bool = False,
+) -> str:
     """Save one pending recording. Returns "saved", "refused" or "retry"; never raises."""
     if entry.key in _PROCESSING:
         return "retry"
     _PROCESSING.add(entry.key)
     try:
+        if proceed_if_check_unavailable:
+            return await _process_locked(
+                entry, wav_bytes, voice_session, proceed_if_check_unavailable=True,
+            )
         return await _process_locked(entry, wav_bytes, voice_session)
     except Exception as exc:
         return await _mark_retry(entry, type(exc).__name__)
@@ -434,7 +464,9 @@ async def process_spool_entry(entry, *, wav_bytes=None, voice_session=None) -> s
         _PROCESSING.discard(entry.key)
 
 
-async def _process_locked(entry, wav_bytes, voice_session) -> str:
+async def _process_locked(
+    entry, wav_bytes, voice_session, *, proceed_if_check_unavailable: bool = False,
+) -> str:
     from app.domain.services import recording_service as _rs
     from app.domain.services.recording_policy_service import (
         _CALLEE_COUNTRY, get_disclosure_state,
@@ -617,6 +649,7 @@ async def _process_locked(entry, wav_bytes, voice_session) -> str:
         # One "failed" row tells the story; a retry every few minutes must not
         # add another each time.
         mark_failure=entry.attempts == 0,
+        **({"proceed_if_check_unavailable": True} if proceed_if_check_unavailable else {}),
     )
     status = getattr(outcome, "status", None)
     if status == _rs.SAVE_SAVED:
@@ -648,6 +681,12 @@ def _env_float(name: str, default: float, minimum: float = 0.0) -> float:
         return default
 
 
+def _loop_may_run(loop_name: str) -> bool:
+    from app.domain.services.recording_checkpoint import loop_may_run
+
+    return loop_may_run(loop_name)
+
+
 async def _spool_pass() -> int:
     """One retry pass; returns the number of entries processed."""
     from datetime import datetime, timezone
@@ -657,6 +696,8 @@ async def _spool_pass() -> int:
         has_audio, list_entries, read_entry, remove_entry, update_entry,
     )
 
+    if not _loop_may_run("recording_spool_loop"):
+        return 0
     entries = await asyncio.to_thread(list_entries)
     now = datetime.now(timezone.utc)
     awaiting_max = _env_float("RECORDING_AWAITING_MAX_AGE_S", 4500.0)
@@ -733,6 +774,8 @@ async def recording_spool_loop(stop_event: asyncio.Event) -> None:
             except asyncio.TimeoutError:
                 pass
             delay = interval
+            if not _loop_may_run("recording_spool_loop"):
+                continue  # not the call owner right now: do nothing this round
             try:
                 await _spool_pass()
             except Exception as exc:

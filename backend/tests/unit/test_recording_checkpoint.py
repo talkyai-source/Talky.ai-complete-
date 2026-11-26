@@ -382,7 +382,7 @@ def hooks(tmp_path, monkeypatch):
     monkeypatch.setattr(cp, "checkpoint_done", lambda sid: calls.append(sid))
     state = SimpleNamespace(calls=calls, outcome="saved")
 
-    async def fake_process(entry, *, wav_bytes=None, voice_session=None):
+    async def fake_process(entry, *, wav_bytes=None, voice_session=None, **kw):
         return state.outcome
 
     monkeypatch.setattr(tr, "process_spool_entry", fake_process)
