@@ -242,7 +242,8 @@ async def test_flush_waits_for_the_chain_lock_then_gives_up_and_keeps_its_entrie
     module = importlib.import_module("app.domain.services.audit_logger")
     key = getattr(module, "_CHAIN_LOCK_KEY", None)
     assert key is not None, "chain writers must serialise on a fixed advisory lock key"
-    monkeypatch.setattr(module, "_CHAIN_LOCK_TIMEOUT_MS", 200)
+    # The lock limit is fixed text in the SQL (5000 ms, pinned to _CHAIN_LOCK_TIMEOUT_MS by
+    # test_audit_chain_lock_sql_literals_20261126.py): this test waits the real 5 seconds.
     a = await cluster.logger()
     await a.log(AuditEvent.RECORD_VIEWED, action="held-1")
     await a.log(AuditEvent.RECORD_VIEWED, action="held-2")

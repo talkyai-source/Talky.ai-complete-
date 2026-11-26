@@ -882,12 +882,16 @@ class AuditLogger:
             async with acquire_with_tenant(self.db_pool, None) as conn:
                 # One chain writer at a time across every process. The lock is
                 # held until this transaction ends, so it covers the tail read
-                # and the inserts. The wait is bounded; the setting goes back
-                # to the default afterwards so the inserts are not subject to it.
+                # and the inserts. The wait is bounded; the caller's own lock
+                # limit is read first and put back afterwards (not "TO DEFAULT").
+                # Same constant text as lock_transaction; literals 5000 and
+                # 7022629598040908648 equal _CHAIN_LOCK_TIMEOUT_MS / _CHAIN_LOCK_KEY,
+                # pinned by a unit test.
                 await conn.execute(
-                    f"SET LOCAL lock_timeout = {_CHAIN_LOCK_TIMEOUT_MS}; "
-                    f"SELECT pg_advisory_xact_lock({_CHAIN_LOCK_KEY}); "
-                    "SET LOCAL lock_timeout TO DEFAULT"
+                    "DO $chain$ DECLARE prev text := current_setting('lock_timeout'); BEGIN "
+                    "PERFORM set_config('lock_timeout', '5000', true); "
+                    "PERFORM pg_advisory_xact_lock(7022629598040908648); "
+                    "PERFORM set_config('lock_timeout', prev, true); END $chain$"
                 )
                 # A separate statement, taken after the lock: under READ
                 # COMMITTED (the default) it sees what the previous holder
@@ -907,6 +911,10 @@ class AuditLogger:
                         await conn.executemany(sql, rows)
                     return
                 except Exception as exc:
+                    if isinstance(exc, asyncpg.exceptions.LockNotAvailableError):
+                        # A lock wait that ran out is not a bad row. Keep the whole
+                        # batch (the handler below puts it back) for the next flush.
+                        raise
                     logger.warning(
                         "audit_logger batch flush failed (%s rows): %s — "
                         "falling back to per-row inserts and dropping rejected rows.",
@@ -926,6 +934,8 @@ class AuditLogger:
                         async with conn.transaction():
                             await conn.execute(sql, *row)
                     except Exception as row_exc:
+                        if isinstance(row_exc, asyncpg.exceptions.LockNotAvailableError):
+                            raise  # as above: the transaction rolls back, the batch is kept
                         dropped += 1
                         logger.error(
                             "audit_logger dropping bad row event_id=%s actor_id=%s: %s",
