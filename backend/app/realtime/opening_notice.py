@@ -29,6 +29,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from app.realtime import notice_repeat
+
 logger = logging.getLogger(__name__)
 
 ENV_SWITCH = "REALTIME_OPENING_NOTICE_ENABLED"
@@ -64,6 +66,11 @@ class OpeningGate:
     call_id: str = ""
     first_speaker: str = "-"
     policy_reason: str = "-"
+    # The notice sentence alone, kept for one repeat after a cut (realtime/notice_repeat.py).
+    notice_sentence: str = ""
+    repeat_state: str = "none"  # none, owed, requested, playing, done, skipped
+    repeat_epoch: Any = None
+    repeat_deferrals: int = 0
     _extra: dict = field(default_factory=dict)
 
 
@@ -143,12 +150,12 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
     direction = getattr(getattr(config, "direction", None), "value", getattr(config, "direction", None))
     first_speaker = "agent" if greet_on_start else "caller"
 
-    def gate(required, notice, *, owed=False, outbound=True, cont=False, reason="-"):
+    def gate(required, notice, *, owed=False, outbound=True, cont=False, reason="-", sentence=""):
         return OpeningGate(
             voice_session=voice_session, call_ids=call_ids, required_text=required or "",
             notice_owed=owed, notice=notice, outbound=outbound, continue_after=cont,
             state="pending" if required else "off", call_id=str(call_id),
-            first_speaker=first_speaker, policy_reason=reason)
+            first_speaker=first_speaker, policy_reason=reason, notice_sentence=sentence if owed else "")
     gate_direction = str(direction or "-")
 
     if _is_true_inbound_session(voice_session):
@@ -222,7 +229,7 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
             g = gate(realtime_opening_line(config), "not_required", reason=reason)
         elif placement.in_opening:
             g = gate(realtime_opening_line(config, recorded_line=True), "platform_in_opener",
-                     owed=True, reason=reason)
+                     owed=True, reason=reason, sentence=text)
         elif len(normalize_words(f"{text} {realtime_opening_line(config)}")) > MAX_REQUIRED_WORDS:
             # Too long to be one reply: asking for it would end in silence and a hang-up.
             # The opening is still required; the notice is recorded as NOT confirmed.
@@ -233,7 +240,7 @@ async def decide_opening(voice_session, *, greet_on_start: bool) -> OpeningGate:
             g = gate(realtime_opening_line(config), "tenant_text_too_long", reason=reason)
         else:
             g = gate(f"{text} {realtime_opening_line(config)}", "tenant_text_first",
-                     owed=True, reason=reason)
+                     owed=True, reason=reason, sentence=text)
     except Exception as exc:  # noqa: BLE001 — fail closed: marked not confirmed
         record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
         logger.error("recording_disclosure_failed call_id=%s err=%s — the recording is kept "
@@ -259,8 +266,10 @@ def settle_unconfirmed(gate: OpeningGate, reason: str, text: Optional[str] = Non
 async def admit_opening(bridge, event, utterance) -> bool:
     """True when the reply may go on to play; False when it was withheld (repair sent)."""
     gate = bridge._opening_gate
-    if gate is None or gate.state != "pending":
+    if gate is None:
         return True
+    if gate.state != "pending":
+        return await notice_repeat.admit(bridge, event, utterance)
     if getattr(bridge._action_session, "_caller_opted_out", False):
         settle_unconfirmed(gate, "opt_out", event.text)
         return True
@@ -313,6 +322,8 @@ async def admit_opening(bridge, event, utterance) -> bool:
 async def settle_opening(bridge, utterance, text) -> None:
     """After playback: count the opening as delivered only on the normal path's receipt rule."""
     gate = bridge._opening_gate
+    if gate is not None and utterance.get("notice_repeat"):
+        return await notice_repeat.settle(bridge, utterance, text)
     if gate is None or gate.state != "playing":
         return
     from app.domain.services.recording_policy_service import (
@@ -349,10 +360,13 @@ def settle_interrupted(bridge, utterance) -> None:
     """From the playback ``finally``: audio already submitted is unconfirmed, never restarted;
     nothing submitted means the next reply must still be the opening."""
     gate = bridge._opening_gate
+    if gate is not None and utterance.get("notice_repeat"):
+        return notice_repeat.settle_interrupted(bridge, utterance)
     if gate is None or gate.state != "playing":
         return
     if utterance.get("submission_started"):
         settle_unconfirmed(gate, "interrupted", utterance.get("text"))
+        notice_repeat.owe(gate, utterance)
     else:
         gate.state = "pending"
 

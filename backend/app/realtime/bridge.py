@@ -910,6 +910,7 @@ class RealtimeBridge:
             flush = getattr(self._gw, "flush_audio_buffer", None) or getattr(self._gw, "flush_tts_buffer", None)
             if callable(flush):
                 await flush(self._call_id)
+            utterance["submission_complete"] = True
             if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             finish = getattr(self._gw, "finish_playback", None)
@@ -926,7 +927,8 @@ class RealtimeBridge:
             if not await self._admit_opt_out_playback(event, utterance) or not self._owns_unfinished_playback(utterance):
                 return
             utterance["receipt"] = receipt
-            self._record_turn("assistant", event.text, metadata={"delivery": receipt})
+            self._record_turn("assistant", event.text, metadata={"delivery": receipt, **(
+                {"recording_notice": "repeated_after_cut"} if utterance.get("notice_repeat") else {})})
             utterance["transcript_recorded"] = True
             if utterance.get("opening_gate"):
                 from app.realtime.opening_notice import settle_opening
