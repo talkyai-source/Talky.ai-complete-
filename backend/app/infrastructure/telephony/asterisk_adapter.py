@@ -5814,6 +5814,20 @@ class AsteriskAdapter(CallControlAdapter):
                     # Window closed with a legitimate next turn. Stop attributing.
                     utt.pop("retired_at", None)
         except Exception as exc:
+            if (
+                isinstance(exc, GatewayResponseError)
+                and exc.status == 404
+                and exc.code == "session_not_found"
+            ):
+                # The gateway already dropped this call's session: the person hung
+                # up. Same as having no session here: not a delivery fault, not
+                # counted, no ERROR line.
+                logger.info(
+                    "[AsteriskAdapter] send_tts_audio: gateway session gone for call_id=%s "
+                    "(session_not_found): the call has ended",
+                    call_id[:12],
+                )
+                raise TtsSessionGoneError(str(exc)) from exc
             # A 409 is the idempotency gate doing its job: this chunk belongs to
             # an utterance that was already barged-in/replaced. Expected after an
             # interrupt — count it undelivered but don't log it as a failure.
