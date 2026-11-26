@@ -116,7 +116,7 @@ def _run_probe(tmp_path: Path, *, originate_status: int = 0, inbound_arrives: bo
 
 
 def test_the_probe_succeeds_only_when_the_call_reaches_the_inbound_call_plan(tmp_path):
-    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True)
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, outgoing_channel=True)
     assert result.returncode == 0, result.stderr
     assert "reached the inbound call plan" in result.stdout
     # asterisk_calls[0] is the pre-originate baseline snapshot (ops-8): only a
@@ -143,7 +143,8 @@ def test_a_rejected_originate_still_fails_before_waiting(tmp_path):
 # --- the failure says WHY (2026-11-26) ---------------------------------------
 # The Asterisk output forms used here ("Unable to find object" for an unknown
 # endpoint; the outgoing channel named PJSIP/<endpoint>-<id> in `core show
-# channels concise`) are from memory, not run on the server.
+# channels concise`) were written from memory; the channel-name form was then
+# confirmed in the server's own call records (PJSIP/<endpoint name>-<8 hex>).
 
 
 def test_a_missing_trunk_endpoint_fails_at_once_and_sends_no_originate(tmp_path):
@@ -157,7 +158,7 @@ def test_a_missing_trunk_endpoint_fails_at_once_and_sends_no_originate(tmp_path)
 
 
 def test_an_endpoint_check_that_errors_carries_on_as_before(tmp_path):
-    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, endpoint_mode="error")
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, endpoint_mode="error", outgoing_channel=True)
     assert result.returncode == 0, result.stderr
     assert any("channel originate" in c for c in asterisk_calls)
 
@@ -177,3 +178,25 @@ def test_an_outgoing_channel_without_arrival_keeps_the_generic_message(tmp_path)
     assert result.returncode == 1
     assert "never came back in on the inbound call plan within 18s" in result.stderr
     assert "no outgoing channel on" not in result.stderr
+
+
+# --- a real incoming call is not the probe (2026-11-27) -----------------------
+# On 2026-11-26 five hourly runs "passed" although the probe placed no call: a
+# real incoming call reached the inbound call plan during the wait and was
+# counted as the probe's arrival.
+
+
+def test_an_incoming_call_with_no_outgoing_leg_of_the_probe_is_not_a_pass(tmp_path):
+    result, asterisk_calls = _run_probe(tmp_path, inbound_arrives=True, outgoing_channel=False)
+    assert result.returncode == 1
+    assert "reached the inbound call plan" not in result.stdout
+    assert "no outgoing channel on 'blazedigitel-endpoint' was seen while waiting" in result.stderr
+    assert "1 real incoming call(s) arrived meanwhile and were not counted as the probe" in result.stderr
+    # it kept waiting for the probe's own call for the whole window
+    assert sum("core show channels concise" in call for call in asterisk_calls) == 19
+
+
+def test_the_probes_own_call_still_passes_when_its_outgoing_leg_is_seen(tmp_path):
+    result, _ = _run_probe(tmp_path, inbound_arrives=True, outgoing_channel=True)
+    assert result.returncode == 0, result.stderr
+    assert "reached the inbound call plan" in result.stdout
