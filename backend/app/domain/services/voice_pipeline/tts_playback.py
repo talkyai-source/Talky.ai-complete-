@@ -576,6 +576,13 @@ class TtsPlayback:
                         except Exception:  # noqa: BLE001
                             pass
                         break
+                # Counted BEFORE the send: a cancel that lands inside the send must still
+                # read as "audio may have left" (notice_repeat.py never restarts a sentence
+                # that may have been partly heard).
+                try:
+                    session._tts_send_attempts = int(getattr(session, "_tts_send_attempts", 0) or 0) + 1
+                except Exception:
+                    pass
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
                 # WHEN DID AUDIO LAST LEAVE FOR THE CALLER?

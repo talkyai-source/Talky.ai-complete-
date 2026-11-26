@@ -6,6 +6,10 @@ a broken robot, see ``modes/agent_first.py``). This module is the one allowed se
 chance: the notice SENTENCE alone (never the opener), once, before the model's next
 reply. It is proven by the same receipt rule as the first saying; if it is cut again
 the recording stays marked "notice not confirmed" and nothing is tried a third time.
+One exception: a try that provably put NO audio on the line (cancelled or failed before
+even its first send was started) does not count. It is tried again at the next reply,
+at most ``_MAX_TRIES`` tries per call; a sentence that may have been partly heard is
+never started again.
 
 Skipped when the person opted out, a transfer is under way, the call is ending, or
 the notice is already proven. Inbound calls never reach it (the owed sentence is only
@@ -18,6 +22,46 @@ import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+_MAX_TRIES = 3
+
+
+def _audio_marks(session) -> tuple:
+    """What ``tts_playback`` has counted so far: sends started (counted BEFORE each send)
+    and the stamp it sets right after each chunk is handed to the media gateway."""
+    return (getattr(session, "_tts_send_attempts", None), getattr(session, "_last_tts_chunk_at", None))
+
+
+def _defer_if_no_audio(voice, session, call_id: str, marks_before) -> bool:
+    """Synchronous. True when it is PROVEN that no audio of this sentence reached the line.
+
+    Then the attempt is not spent (up to ``_MAX_TRIES`` unproven tries per call).
+    Proof = ``tts_playback`` still says "pending" (never "submitted"/"partial") or "failed"
+    (it fails before the first chunk) AND neither of its two marks moved since this try
+    began: no send was even started (a cancel INSIDE the first send counts as started, so
+    a sentence that may have been partly heard is never restarted), and no chunk was
+    handed over.
+    Anything else (missing, unknown, audio handed over) means spent. Never raises.
+    """
+    try:
+        status = getattr(session, "_tts_delivery_status", None)
+        if status not in ("pending", "failed"):
+            return False
+        if _audio_marks(session) != marks_before:
+            return False
+        tries = int(getattr(voice, "_notice_repeat_tries", 0) or 0) + 1
+        voice._notice_repeat_tries = tries
+        if tries >= _MAX_TRIES:
+            return False
+        voice._notice_repeat_done = False
+        logger.info(
+            "recording_notice_repeat_deferred call_id=%s reason=no_audio_sent tries=%d",
+            call_id[:12], tries,
+        )
+        return True
+    except Exception:  # noqa: BLE001 - bookkeeping only; default is spent
+        return False
 
 
 async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str = "") -> str | None:
@@ -75,6 +119,7 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
         session._tts_playback_receipt = None
         session._tts_playback_utterance_id = None
         session._tts_delivery_status = "pending"
+        marks_before = _audio_marks(session)
         was_in_flight = getattr(session, "_disclosure_in_flight", False)
         session._disclosure_in_flight = True  # a bare "Hello?" must not cut it
         try:
@@ -83,10 +128,12 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
             )
         except asyncio.CancelledError:
             # Its task was cancelled mid-sentence (barge-in or hang-up): never silent.
-            logger.warning(
-                "recording_disclosure_unconfirmed call_id=%s attempt=2 cancelled=True — "
-                "repeated notice cut off; not tried again", call_id[:12],
-            )
+            if not _defer_if_no_audio(voice, session, call_id, marks_before):
+                logger.warning(
+                    "recording_disclosure_unconfirmed call_id=%s attempt=2 cancelled=True tries=%d — "
+                    "repeated notice cut off; not tried again",
+                    call_id[:12], int(getattr(voice, "_notice_repeat_tries", 0) or 0),
+                )
             raise
         finally:
             session._disclosure_in_flight = was_in_flight
@@ -99,11 +146,13 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
 
         receipt = getattr(session, "_tts_playback_receipt", None)
         if not notice_receipt_proves_delivery(session, interrupted):
-            logger.warning(
-                "recording_disclosure_unconfirmed call_id=%s attempt=2 interrupted=%s "
-                "delivery=%s — repeated notice not proven; not tried again",
-                call_id[:12], interrupted, getattr(session, "_tts_delivery_status", None),
-            )
+            if not _defer_if_no_audio(voice, session, call_id, marks_before):
+                logger.warning(
+                    "recording_disclosure_unconfirmed call_id=%s attempt=2 interrupted=%s "
+                    "delivery=%s tries=%d — repeated notice not proven; not tried again",
+                    call_id[:12], interrupted, getattr(session, "_tts_delivery_status", None),
+                    int(getattr(voice, "_notice_repeat_tries", 0) or 0),
+                )
             return None
         record_disclosure_state(
             DISCLOSURE_SPOKEN if receipt["evidence"] == "transport_played"
