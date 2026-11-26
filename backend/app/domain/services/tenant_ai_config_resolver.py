@@ -180,10 +180,12 @@ async def resolve_ai_config_for_did(
                 if route.resolved and route.tenant_id:
                     tenant_id = str(route.tenant_id)
         except Exception as exc:  # noqa: BLE001 — never block a call
+            from app.domain.services.dialer.bulk_ingest import mask_phone
+
             logger.warning(
                 "resolve_ai_config_for_did_failed did=%s err=%s "
                 "— using process default",
-                did, exc,
+                mask_phone(did), type(exc).__name__,
             )
 
     config = await get_tenant_ai_config_resolver().for_tenant_async(

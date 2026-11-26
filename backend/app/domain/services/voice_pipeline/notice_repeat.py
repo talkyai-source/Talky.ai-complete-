@@ -31,7 +31,7 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
     voice._notice_repeat_done = True  # tried: set before any await
     call_id = str(getattr(session, "call_id", "") or "")
     try:
-        from app.domain.services.end_session_action import caller_signaled_end
+        from app.domain.services.end_session_action import caller_signaled_end, previous_assistant_turn
         from app.domain.services.voice_pipeline.identity_disposition import contains_dnc
         from app.domain.services.recording_policy_service import (
             DISCLOSURE_FAILED,
@@ -57,7 +57,10 @@ async def repeat_cut_notice_once(pipeline, session, websocket, transcript: str =
             reason = "transfer_in_progress"
         elif contains_dnc(transcript):
             reason = "opt_out_phrase"
-        elif caller_signaled_end(transcript):
+        elif caller_signaled_end(
+            transcript,
+            previous_assistant_text=previous_assistant_turn(session.conversation_history),
+        ):
             reason = "caller_ending"
         else:
             reason = await _notice_skip_reason(voice, voice.call_id)

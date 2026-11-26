@@ -446,3 +446,28 @@ async def test_an_error_inside_the_repeat_never_breaks_the_turn(monkeypatch, cap
     assert "synthetic provider failure" not in warnings[0]
     assert h.order == ["reply", "reply"]
     assert calls == [PLATFORM]
+
+
+@pytest.mark.asyncio
+async def test_a_bare_no_after_anything_else_is_a_goodbye_and_the_notice_is_not_repeated(monkeypatch, caplog):
+    from app.domain.models.conversation import Message
+    h = await _call(monkeypatch, slow=True, with_event=True)
+    await _cut_opener(h)
+    h.session.conversation_history.append(
+        Message(role=MessageRole.ASSISTANT, content="Is there anything else I can help you with?"))
+    caplog.set_level(logging.INFO)
+    await _turn(h, "No.")
+    assert h.provider.texts == [OPENER]
+    assert any("recording_notice_repeat_skipped" in r.getMessage() and "reason=caller_ending" in r.getMessage()
+               for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_a_bare_no_to_another_question_is_an_answer_and_the_notice_is_repeated(monkeypatch):
+    from app.domain.models.conversation import Message
+    h = await _call(monkeypatch, slow=True, with_event=True)
+    await _cut_opener(h)
+    h.session.conversation_history.append(
+        Message(role=MessageRole.ASSISTANT, content="Am I speaking with John?"))
+    await _turn(h, "No.")
+    assert h.provider.texts == [OPENER, PLATFORM]

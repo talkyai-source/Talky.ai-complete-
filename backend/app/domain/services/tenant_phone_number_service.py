@@ -118,9 +118,11 @@ class TenantPhoneNumberService:
             # acquire_with_tenant raises ValueError for non-UUID tenant ids.
             return False
         except Exception as exc:
+            from app.domain.services.dialer.bulk_ingest import mask_phone
+
             logger.error(
                 "tenant_phone_number_lookup_failed tenant=%s e164=%s err=%s",
-                tenant_id, lookup_e164, exc,
+                tenant_id, mask_phone(lookup_e164), type(exc).__name__,
             )
             return False
 

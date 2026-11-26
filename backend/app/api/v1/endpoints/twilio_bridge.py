@@ -362,9 +362,11 @@ async def twilio_answer(request: Request):
             str(params.get("Direction") or "missing")[:32],
         )
         return Response(status_code=503)
+    from app.domain.services.dialer.bulk_ingest import mask_phone
+
     logger.info(
         "Twilio answer webhook: callSid=%s from=%s to=%s",
-        call_sid[:16], from_number, to_number,
+        call_sid[:16], mask_phone(from_number), mask_phone(to_number),
     )
     token = _mint_ws_token(to_number=to_number, call_sid=call_sid)
     if not token:

@@ -97,17 +97,21 @@ async def check_caller_id_ownership(
             require_attestation=require_attestation,
         )
     except Exception as did_exc:
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
         logger.error(
             "caller_id_verification_lookup_failed tenant=%s caller_id=%s err=%s",
-            tenant_id, caller_id, did_exc,
+            tenant_id, mask_phone(caller_id), type(did_exc).__name__,
         )
         caller_id_ok = False
 
     if not caller_id_ok:
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
         logger.warning(
             "caller_id_unauthorized tenant=%s caller_id=%s mode=%s "
             "environment=%s require_attestation=%s",
-            tenant_id, caller_id, enforcement_mode,
+            tenant_id, mask_phone(caller_id), enforcement_mode,
             environment, require_attestation,
         )
 

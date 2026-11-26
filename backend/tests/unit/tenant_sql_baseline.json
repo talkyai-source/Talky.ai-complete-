@@ -5222,7 +5222,7 @@
       "id": "a81342649f3c108e15a8f24dc8007bea5049509f9ed4c6c7f6005ea9d36df1dd",
       "file": "app/domain/services/tenant_phone_number_service.py",
       "function": "TenantPhoneNumberService.revoke",
-      "line": 400,
+      "line": 402,
       "method": "fetchval",
       "tables": [
         "inbound_did_assignments"
@@ -7032,7 +7032,7 @@
       "id": "e4cfdd7db305f3500af2981a6514fcfa7141ab32ca05c04ad82d98ce1d15ef6c",
       "file": "app/domain/services/tenant_phone_number_service.py",
       "function": "TenantPhoneNumberService.create_pending",
-      "line": 185,
+      "line": 187,
       "method": "fetchrow",
       "tables": [
         "tenant_phone_numbers"
@@ -8100,7 +8100,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "d3e43e7c6178b7407ec5f1e97eb670a3f81c2960dede9fa9e9eb3e989a91ca44",
+      "id": "bfe857c604fdc4a6c6eca118fcc222fb85fcbc006ac2fe4ab5502bce8253cec5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
       "line": 4400,
@@ -8115,7 +8115,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "e029866f99be119185d88a83eadec065182def9258c3c9db9d269bd9522f3708",
+      "id": "6932e8ed7f2837430b09d92e8aa079191bc75beba71317600d245a774da301f5",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
       "line": 5323,
@@ -8130,7 +8130,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "b601408161a379d6082e9b92d9e90012b1c39ff146e6f6d03a9948b593f1e42c",
+      "id": "0b903b456db07703cb2a8e390d199a62ca8d69bd62a2929aa5661e7f6b4cb0dc",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
       "line": 3408,
@@ -8145,7 +8145,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "c8f3ab462b1cd55d00e5194f74d689832c7f29cb06c6dbbe3100940546f7b0f2",
+      "id": "d3ae1795799ff2f57af5fa254ee8ba504cb73a018203a7a7f039a512090b6b4e",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
       "line": 5497,
@@ -8160,7 +8160,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "bbb650b12ca084b6800c7ddd6204ff868fcb6be966f2f9c690595d1b9194f440",
+      "id": "fe0578475d8e18373d7c1413d97cc3cd4bce9b15a98592f986cef3d816d84fdb",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
       "line": 3758,
@@ -8175,10 +8175,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "a4682d4cb97ee9b1af72e2cf1b0a878ad9bc36fa98260ecf0ee150cb0485b697",
+      "id": "37a1d1d83a76658fc362ea4e5c0d129d634d632f9362bcce6399e09b39784824",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 6208,
+      "line": 6213,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -8315,7 +8315,7 @@
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
-      "line": 3225,
+      "line": 3229,
       "method": "fetch",
       "tables": [
         "call_legs"
@@ -8325,14 +8325,14 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3225.",
+      "reason": "Missing tenant is refused before DB/provider work. Calls are selected by campaign AND c.tenant_id=$3; the pending-state write repeats that tenant. Tenantless call_legs receives only durable call IDs from that scoped, locked selection. Both campaign-service callers forward their authorized campaign tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/telephony_bridge.py:3229.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "9bc12a1f5f903f78b64e7fa2e9da4ccd89a206ed6bf42808dc77e96eafa626d9",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_audit_outbound_transfer_event",
-      "line": 3572,
+      "line": 3576,
       "method": "execute",
       "tables": [
         "call_events"
@@ -8342,14 +8342,14 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3572.",
+      "reason": "Appends one audit line for an outbound transfer to call_events, which has no tenant column and is scoped through its parent call. The call id and tenant come from the calls row that authorize_inbound_transfer locked for this transfer, and the insert runs on a connection opened with acquire_with_tenant for that tenant, so row security applies. Only the last four digits of the destination are written. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:3576.",
       "category": "reviewed_tenant_scoped"
     },
     {
       "id": "d07ad7a7c0c8258e9a7378e4eea2337103cf9b899c8f1476599954cba0690d9a",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "_prepare_outbound_transfer",
-      "line": 3652,
+      "line": 3656,
       "method": "fetchrow",
       "tables": [
         "call_legs",
@@ -8360,7 +8360,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3652.",
+      "reason": "Reads the trunk endpoint and own number of this call's first outbound PSTN leg. call_legs has no tenant column, so the statement joins its parent and filters c.tenant_id = $2; the call id and the tenant both come from the calls row that authorize_inbound_transfer locked for this transfer, the connection is opened with acquire_with_tenant for that tenant, and a missing tenant or call id is refused before any read. The result only chooses the trunk for this same call. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:3656.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -9795,7 +9795,7 @@
       "id": "602eba86f12b3f8e5fdfe7bfe309f3db109443c67afffed324db475d3dfce7c3",
       "file": "app/domain/services/tenant_phone_number_service.py",
       "function": "TenantPhoneNumberService._other_tenant_holding_verified",
-      "line": 262,
+      "line": 264,
       "method": "fetchrow",
       "tables": [
         "tenant_phone_numbers"
@@ -9805,7 +9805,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Phone ownership verification must detect an existing verified holder in any other tenant. The explicit tenant_id <> requester condition is deliberate; only the conflicting holder is used to reject a duplicate claim. Exact reviewed operation: fetchrow; app/domain/services/tenant_phone_number_service.py:262.",
+      "reason": "Phone ownership verification must detect an existing verified holder in any other tenant. The explicit tenant_id <> requester condition is deliberate; only the conflicting holder is used to reject a duplicate claim. Exact reviewed operation: fetchrow; app/domain/services/tenant_phone_number_service.py:264.",
       "category": "system_uniqueness"
     },
     {
@@ -12993,7 +12993,7 @@
       "category": "system_discovery"
     },
     {
-      "id": "a76a1251724905953c7ca95b926bb2766e53b84e381156e6138a6efb9ac7e2ae",
+      "id": "8d85f8b1f6e4ff449046e0aa5d950fee999507c3551c770055a66373a8b9cfa1",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter.delete_stored_recording",
       "line": 2714,

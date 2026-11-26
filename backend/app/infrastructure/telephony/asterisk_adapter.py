@@ -6105,10 +6105,15 @@ class AsteriskAdapter(CallControlAdapter):
             self._discard_originated_channel(pre_id)
             self._track_originated_channel(channel_id)
 
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        # The log line must never be able to raise: the call is already placed.
+        dialled = str(destination or "")
+        masked = mask_phone(dialled)
         logger.info(
             "AsteriskAdapter: originated call to %s via %s channel=%s",
-            destination,
-            endpoint,
+            masked,
+            str(endpoint).replace(dialled, masked) if dialled else str(endpoint),
             channel_id[:12],
         )
 

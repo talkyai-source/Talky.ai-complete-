@@ -328,9 +328,11 @@ async def vonage_answer(request: Request):
         )
         return JSONResponse(content={"error": "unavailable"}, status_code=503)
 
+    from app.domain.services.dialer.bulk_ingest import mask_phone
+
     logger.info(
         "Vonage answer webhook: uuid=%s from=%s to=%s",
-        call_uuid[:12], from_number, to_number,
+        call_uuid[:12], mask_phone(from_number), mask_phone(to_number),
     )
 
     token = _mint_ws_token(to_number=to_number, call_uuid=call_uuid)
