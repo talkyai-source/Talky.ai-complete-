@@ -196,7 +196,7 @@ def observe_wait_entry(db, monkeypatch, writer, connector_id, lock_kind):
 
         async def observed_execute(conn, query, *args, **kwargs):
             if (conn.get_server_pid() == observation.get("candidate_pid")
-                    and f"SELECT pg_advisory_xact_lock({audit_module._CHAIN_LOCK_KEY})" in query):
+                    and f"pg_advisory_xact_lock({audit_module._CHAIN_LOCK_KEY})" in query):
                 observation["waiter_pid"] = conn.get_server_pid()
                 entered.set()
             return await original_execute(conn, query, *args, **kwargs)
