@@ -40,6 +40,18 @@ async def build_campaign_voice_config(data, ai_config, *, existing=None, pool=No
             selection["realtime_prompt"] = RealtimePrompt.model_validate(prompt or {}).model_dump()
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
+        # Same rule as the tenant-level save: refuse realtime when no key resolves.
+        # Only when THIS save puts the campaign onto the engine. A campaign that
+        # was already on it (stored, or inherited from the account default) stays
+        # editable after its key was removed: the website sends the engine fields
+        # with every save, so "the request names the engine" says nothing.
+        previously = previous.get("pipeline_mode") or (ai_config.pipeline_mode if existing else None)
+        if previously != "realtime":
+            from app.domain.services.ai_option_availability import unavailable_detail
+            from app.domain.services.credential_resolver import get_credential_resolver
+            rt_provider = str((selection.get("realtime_settings") or {}).get("provider") or "openai").strip().lower()
+            if not await get_credential_resolver().resolve(rt_provider, tenant_id=tenant_id):
+                raise HTTPException(400, unavailable_detail(f"{rt_provider} key missing for Realtime"))
         # Identity and transport remain shared. Traditional guidance/slots are
         # retained for switching back but never composed or read by Realtime.
         script = {

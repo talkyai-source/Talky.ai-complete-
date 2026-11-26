@@ -44,6 +44,10 @@ async def assemble(monkeypatch, config, *, mock_connect=True, db_pool=None):
 
 @pytest.mark.asyncio
 async def test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit(monkeypatch):
+    from types import SimpleNamespace as _NS
+    from unittest.mock import AsyncMock as _AM
+    from app.domain.services import credential_resolver as _cr
+    monkeypatch.setattr(_cr, "get_credential_resolver", lambda: _NS(resolve=_AM(return_value="dummy")))
     from app.api.v1.schemas.campaigns import CampaignCreateRequest, CampaignUpdateRequest
     from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
     source = AIProviderConfig(pipeline_mode="realtime", realtime_settings={"prompt": {"instructions": "ACCOUNT NOTE"}})
@@ -270,7 +274,11 @@ async def test_echo_omissions_and_runtime_instruction_digest_are_truthful(monkey
 
 
 @pytest.mark.asyncio
-async def test_campaign_prompt_precedence_on_nested_update_and_explicit_alias():
+async def test_campaign_prompt_precedence_on_nested_update_and_explicit_alias(monkeypatch):
+    from types import SimpleNamespace as _NS
+    from unittest.mock import AsyncMock as _AM
+    from app.domain.services import credential_resolver as _cr
+    monkeypatch.setattr(_cr, "get_credential_resolver", lambda: _NS(resolve=_AM(return_value="dummy")))
     from app.api.v1.schemas.campaigns import CampaignUpdateRequest
     from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
     source = AIProviderConfig(pipeline_mode="realtime", realtime_settings={"prompt": {"instructions": "ACCOUNT"}})
@@ -328,7 +336,11 @@ def test_xai_unsupported_controls_fail_before_serialization(settings):
         XAIRealtimeSession(api_key="synthetic-key", voice="eve", settings=settings)
 
 @pytest.mark.asyncio
-async def test_partial_campaign_settings_do_not_replace_account_prompt_with_schema_default():
+async def test_partial_campaign_settings_do_not_replace_account_prompt_with_schema_default(monkeypatch):
+    from types import SimpleNamespace as _NS
+    from unittest.mock import AsyncMock as _AM
+    from app.domain.services import credential_resolver as _cr
+    monkeypatch.setattr(_cr, "get_credential_resolver", lambda: _NS(resolve=_AM(return_value="dummy")))
     from app.api.v1.schemas.campaigns import CampaignCreateRequest
     from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
     source = AIProviderConfig(pipeline_mode="realtime", realtime_settings={"prompt": {"instructions": "ACCOUNT"}})
