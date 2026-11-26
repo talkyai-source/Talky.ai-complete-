@@ -970,20 +970,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "130dafb014dbbe66015e2d69c96b687efea88687d4bb8daabf3f1bde3b3d0a0c",
-      "file": "app/domain/services/audit_logger.py",
-      "function": "AuditLogger.lock_transaction",
-      "line": 514,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL lock_timeout = {Constant(value=5000)}; SELECT pg_advisory_xact_lock({Constant(value=7022629598040908648)}); SET LOCAL lock_timeout TO DEFAULT",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "131f2f16b6b2674faefa13d90ca70f595b966162372b6b7f85c83262ad996720",
       "file": "app/domain/services/topup_service.py",
       "function": "TopupService.reinstate_dispute",
@@ -1980,7 +1966,7 @@
       "id": "3e931bf97a43ccffec869282e31a38b5857e1236b5097869efef3bb3b6d91594",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._update_call_recording_url",
-      "line": 1270,
+      "line": 1411,
       "method": "execute",
       "tables": [
         "calls"
@@ -2242,7 +2228,7 @@
       "id": "4535123439c117fa963d367c1efd7de0d8bb84ff7ec8526fa2000980251f875c",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._mark_upload_failed",
-      "line": 1370,
+      "line": 1511,
       "method": "execute",
       "tables": [
         "recordings_s3"
@@ -2609,10 +2595,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5007ffb9df2292f9f87d58ff81fbfbd8ac94f8e440964ccbf5ea873920d1306f",
+      "id": "bf57c935a99b3f481e4b0b49fcd8f1abb7a58985281a957e64159f6b2bb532a3",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.query",
-      "line": 1067,
+      "line": 1074,
       "method": "fetch",
       "tables": [
         "audit_logs"
@@ -3021,7 +3007,7 @@
       "id": "d20a8fbbd1d8afcf1667f7e6e042e8c9832f0636f8eb1c0609b1cc62bcda6c8c",
       "file": "app/domain/services/telephony/recording.py",
       "function": "_process_locked",
-      "line": 538,
+      "line": 571,
       "method": "execute",
       "tables": [
         "calls"
@@ -3724,7 +3710,7 @@
       "id": "763e98b964ecb1b8370605e159dd56fd770a870ba8e771f9cecd5b382edefc7f",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._discard_unregistered_object",
-      "line": 1296,
+      "line": 1437,
       "method": "fetchval",
       "tables": [
         "recordings_s3"
@@ -6595,7 +6581,7 @@
       "id": "d370c718fa96490e5215192bcbecee39257ff66b2fa551b8e3b25d665444a6a1",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._resolve_call_uuid",
-      "line": 1140,
+      "line": 1281,
       "method": "fetchrow",
       "tables": [
         "calls"
@@ -9124,7 +9110,7 @@
       "id": "4200a977699ac044001d6fb4bd1a312705036a437b95414e31c8aac1e8ce7511",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger._flush_locked",
-      "line": 888,
+      "line": 895,
       "method": "fetchrow",
       "tables": [
         "audit_logs"
@@ -9134,7 +9120,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:888.",
+      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:895.",
       "category": "system_audit_chain"
     },
     {
@@ -9308,7 +9294,7 @@
       "id": "4a6cc7650c0851dd81611fe5154c25827e3fa4f749b697bce6f7a12c2ea20929",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.log_in_transaction",
-      "line": 575,
+      "line": 582,
       "method": "fetchrow",
       "tables": [
         "audit_logs"
@@ -9318,7 +9304,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Transactional audit writes must read the global hash-chain tail under the shared writer lock before appending the tenant-tagged event; tenant filtering would create incompatible chain branches. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:575.",
+      "reason": "Transactional audit writes must read the global hash-chain tail under the shared writer lock before appending the tenant-tagged event; tenant filtering would create incompatible chain branches. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:582.",
       "category": "system_audit_chain"
     },
     {
@@ -9792,7 +9778,7 @@
       "id": "60286b5cbe327c226f6e8b681b047515d220525536b487fb59da22e9251bde3d",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.is_on_dnc",
-      "line": 407,
+      "line": 409,
       "method": "fetchrow",
       "tables": [
         "dnc_entries"
@@ -9802,7 +9788,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "The DNC match explicitly binds tenant_id=$1 OR tenant_id IS NULL and the normalized number. Global suppressions must affect every tenant; other tenants non-null suppressions are excluded. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:407.",
+      "reason": "The DNC match explicitly binds tenant_id=$1 OR tenant_id IS NULL and the normalized number. Global suppressions must affect every tenant; other tenants non-null suppressions are excluded. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:409.",
       "category": "reviewed_tenant_plus_global"
     },
     {
@@ -10219,7 +10205,7 @@
       "id": "775d52c63c40da23b8c35135ef8f3cd887550e6a5cf4283fe7ad775fd649d4da",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.verify_chain_integrity",
-      "line": 1114,
+      "line": 1121,
       "method": "fetch",
       "tables": [
         "audit_logs"
@@ -10229,7 +10215,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Verifying the global audit hash chain requires every predecessor across tenants, in event order. This is integrity verification, not a tenant-facing audit-history query. Exact reviewed operation: fetch; app/domain/services/audit_logger.py:1114.",
+      "reason": "Verifying the global audit hash chain requires every predecessor across tenants, in event order. This is integrity verification, not a tenant-facing audit-history query. Exact reviewed operation: fetch; app/domain/services/audit_logger.py:1121.",
       "category": "system_audit_chain"
     },
     {
@@ -11533,10 +11519,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "c359c00601f620ab086a8749d99d9f54307904bb3774167071f2c3aa5f97697c",
+      "id": "fe281bc620b8dec5f57b6c38e9b37711dec7b15f0ffc3bcf4c1f4a959bf2b1a5",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger._flush_locked",
-      "line": 880,
+      "line": 887,
       "method": "execute",
       "tables": [],
       "sql": "SET LOCAL lock_timeout = {Constant(value=5000)}; SELECT pg_advisory_xact_lock({Constant(value=7022629598040908648)}); SET LOCAL lock_timeout TO DEFAULT",
@@ -11544,14 +11530,14 @@
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: execute; app/domain/services/audit_logger.py:880.",
+      "reason": "The audit hash chain is global; one advisory-locked writer reads the chain tail and appends the buffered tenant-tagged entries. Tenant-filtering the chain tail would break chain integrity. Exact reviewed operation: execute; app/domain/services/audit_logger.py:887.",
       "category": "system_audit_chain"
     },
     {
-      "id": "c48f556f3c23d643349385d2f788ed9969b948d4781afef55ad8578eb6e4da7b",
+      "id": "e5242a96e33389f52b475fbe39d762d0dfc487211e5cd90d1373869a41b52b63",
       "file": "app/domain/services/audit_logger.py",
       "function": "AuditLogger.log_in_transaction",
-      "line": 596,
+      "line": 603,
       "method": "fetchval",
       "tables": [
         "audit_logs"
@@ -11561,7 +11547,7 @@
       "unresolved": true,
       "bypass": null,
       "count": 1,
-      "reason": "Transactional audit writes must read the global hash-chain tail under the shared writer lock before appending the tenant-tagged event; tenant filtering would create incompatible chain branches. Exact reviewed operation: fetchval; app/domain/services/audit_logger.py:596.",
+      "reason": "Transactional audit writes must read the global hash-chain tail under the shared writer lock before appending the tenant-tagged event; tenant filtering would create incompatible chain branches. Exact reviewed operation: fetchval; app/domain/services/audit_logger.py:603.",
       "category": "system_audit_chain"
     },
     {
@@ -12339,10 +12325,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "de471fa87bf5d2b3d19d40cde147f49acd6f5820d6639a4adf7dbf498abc9dfc",
+      "id": "7a1844a91e6519f57e2b3178333a552c6e7c6af2494a17718de3ceb3cf2a1992",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.list_for_tenant",
-      "line": 390,
+      "line": 392,
       "method": "fetch",
       "tables": [],
       "sql": "{Call(func=Attribute(value=Constant(value='\\n            SELECT id, tenant_id, normalized_number, source, reason,\\n                   expires_at, created_at\\n            FROM dnc_entries\\n            WHERE (tenant_id = $1 {global_clause})\\n              AND (expires_at IS NULL OR expires_at > NOW())\\n            ORDER BY created_at DESC\\n            LIMIT $2\\n        '), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='global_clause', value=IfExp(test=Name(id='include_global', ctx=Load()), body=Constant(value='OR tenant_id IS NULL'), orelse=Constant(value='')))])}",
@@ -12427,7 +12413,7 @@
       "id": "1adf09fc40ac770d4cd6914c6b5ae7aef6261523634e96d9b7d83fdb7b3ad72b",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.remove_any",
-      "line": 349,
+      "line": 351,
       "method": "fetchrow",
       "tables": [
         "dnc_entries"
@@ -12437,7 +12423,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Administrator-selected DNC removal by explicit row ID (QA F12-10, moved from call_limits.remove_dnc_entry): the only caller is DELETE /admin/dnc/{entry_id}, which requires platform_admin, and global suppressions have no tenant. The removal and its audit row commit in one transaction. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:349.",
+      "reason": "Administrator-selected DNC removal by explicit row ID (QA F12-10, moved from call_limits.remove_dnc_entry): the only caller is DELETE /admin/dnc/{entry_id}, which requires platform_admin, and global suppressions have no tenant. The removal and its audit row commit in one transaction. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:351.",
       "category": "platform_admin"
     },
     {

@@ -322,6 +322,11 @@ class TelephonyStateBackend(Protocol):
         """Cheap sync check: may this process serve telephony right now?"""
         ...
 
+    def telephony_ownership_decided(self) -> bool:
+        """Has the ownership question been answered in this process? Until it
+        has, ``is_telephony_owner`` is only a default, not an answer."""
+        ...
+
     async def telephony_owner_id(self) -> Optional[str]:
         """The incarnation id currently holding the owner lock (for the
         503 message / diagnostics). ``None`` when not applicable."""
@@ -637,6 +642,9 @@ class LocalOnlyStateBackend:
     def is_telephony_owner(self) -> bool:
         return True
 
+    def telephony_ownership_decided(self) -> bool:
+        return True
+
     async def telephony_owner_id(self) -> Optional[str]:
         return None
 
@@ -824,6 +832,7 @@ class RedisBackedStateBackend:
         # at startup, which every process runs before any call arrives. A
         # loser of the startup race flips this False and 503s telephony.
         self._is_owner: bool = True
+        self._ownership_decided: bool = False
         self._ownership_loss_drained: bool = False
 
     # ── Fire-and-forget helper ──────────────────────────────────────
@@ -1566,6 +1575,7 @@ class RedisBackedStateBackend:
         self._is_owner = await self._registry.try_acquire_ari_ownership(
             self._HEARTBEAT_TTL_S,
         )
+        self._ownership_decided = True
         return self._is_owner
 
     async def acquire_telephony_ownership_strict(self) -> bool:
@@ -1574,6 +1584,7 @@ class RedisBackedStateBackend:
         if not callable(acquire):
             raise RuntimeError("Redis registry lacks strict ownership support")
         self._is_owner = await acquire(self._HEARTBEAT_TTL_S)
+        self._ownership_decided = True
         return self._is_owner
 
     @property
@@ -1582,6 +1593,9 @@ class RedisBackedStateBackend:
 
     def is_telephony_owner(self) -> bool:
         return self._is_owner
+
+    def telephony_ownership_decided(self) -> bool:
+        return self._ownership_decided
 
     async def telephony_owner_id(self) -> Optional[str]:
         return await self._registry.current_ari_owner()

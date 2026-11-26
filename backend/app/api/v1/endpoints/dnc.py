@@ -35,6 +35,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.security.rbac import Permission, UserRole, normalize_role, require_permission
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.dialer.bulk_ingest import mask_phone
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
     SOURCE_BULK_IMPORT,
@@ -168,7 +169,7 @@ async def add_dnc_entry(
         raise HTTPException(status_code=422, detail=[{"row": 1, "field": "e164", "message": "Invalid phone number for the selected country"}]) from exc
     logger.info(
         "dnc_entry_added tenant=%s number=%s source=%s",
-        tenant_id, entry.normalized_number, entry.source,
+        tenant_id, mask_phone(entry.normalized_number), entry.source,
     )
     return _to_response(entry)
 
@@ -243,7 +244,7 @@ async def caller_opt_out(
         raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     logger.warning(
         "dnc_caller_opt_out tenant=%s number=%s call=%s",
-        tenant_id, entry.normalized_number, payload.call_id,
+        tenant_id, mask_phone(entry.normalized_number), payload.call_id,
     )
     return _to_response(entry)
 

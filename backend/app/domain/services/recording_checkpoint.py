@@ -134,20 +134,79 @@ def _is_call_owner() -> bool:
         return True
 
 
+def _ownership_decided() -> bool:
+    """Has the backend answered the ownership question in this process?
+
+    The Redis backend's owner flag STARTS True and only the ownership acquire
+    assigns the real answer. Fails OPEN: a backend without the method, an
+    error, or a non-boolean answer all count as decided.
+    """
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        check = getattr(_state(), "telephony_ownership_decided", None)
+        if not callable(check):
+            return True
+        answer = check()
+        return answer if isinstance(answer, bool) else True
+    except Exception:
+        return True
+
+
 # loop name -> True while it is idle because this process is not the owner
 _LOOP_IDLE: dict[str, bool] = {}
+# loop name -> when the gate first saw an undecided answer (clock of ``_now``)
+_UNDECIDED_SINCE: dict[str, float] = {}
+_UNDECIDED_WARNED: set[str] = set()
+# loop name -> when the loop started (set by the loop itself)
+_LOOP_STARTED: dict[str, float] = {}
+# A process whose acquire never answered must not lose its start-up recovery
+# for ever: after this long undecided the gate fails open.
+_OWNERSHIP_UNDECIDED_MAX_S = 60.0
+
+
+def _line(loop_name: str, idle: bool) -> None:
+    if loop_name == "recording_checkpoint_loop":
+        # This loop keeps writing safety copies of its own calls; only the
+        # start-up recovery of foreign folders waits.
+        if idle:
+            logger.info("recording_orphan_recovery_waiting reason=not_call_owner")
+        else:
+            logger.info("recording_orphan_recovery_allowed")
+    elif idle:
+        logger.info("recording_loops_idle reason=not_call_owner loop=%s", loop_name)
+    else:
+        logger.info("recording_loops_active loop=%s", loop_name)
 
 
 def loop_may_run(loop_name: str) -> bool:
-    """Gate of a recording loop's pass. One INFO line per change, none per pass."""
+    """Gate of a recording loop's pass. One INFO line per change, none per pass.
+
+    Three answers: owner (decided, True) runs; not owner (decided, False) is
+    idle; UNDECIDED waits quietly (it is not "not the owner"), but never for
+    longer than ``_OWNERSHIP_UNDECIDED_MAX_S`` after the loop started (recorded
+    in ``_LOOP_STARTED``; default: the first time this gate saw it undecided).
+    """
+    if not _ownership_decided():
+        now = _now()
+        since = _UNDECIDED_SINCE.setdefault(loop_name, _LOOP_STARTED.get(loop_name, now))
+        if now - since < _OWNERSHIP_UNDECIDED_MAX_S:
+            logger.debug("recording_ownership_undecided loop=%s", loop_name)
+            return False
+        if loop_name not in _UNDECIDED_WARNED:
+            _UNDECIDED_WARNED.add(loop_name)
+            logger.warning("recording_ownership_undecided_timeout loop=%s", loop_name)
+    else:
+        _UNDECIDED_SINCE.pop(loop_name, None)
+        _UNDECIDED_WARNED.discard(loop_name)
     owner = _is_call_owner()
     if not owner:
         if not _LOOP_IDLE.get(loop_name):
             _LOOP_IDLE[loop_name] = True
-            logger.info("recording_loops_idle reason=not_call_owner loop=%s", loop_name)
+            _line(loop_name, True)
         return False
     if _LOOP_IDLE.pop(loop_name, False):
-        logger.info("recording_loops_active loop=%s", loop_name)
+        _line(loop_name, False)
     return True
 
 
@@ -622,6 +681,7 @@ async def _recover_once_when_owner(stop_event: asyncio.Event, start: float) -> N
 async def recording_checkpoint_loop(stop_event: asyncio.Event) -> None:
     interval = _interval_s()
     start = _now()
+    _LOOP_STARTED["recording_checkpoint_loop"] = start
     if interval is None:
         await _recover_once_when_owner(stop_event, start)
         return
