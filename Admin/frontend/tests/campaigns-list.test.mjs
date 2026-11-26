@@ -49,7 +49,7 @@ test('api: getAdminCampaigns reads GET /admin/campaigns with only the filters th
 
 test('menu: Campaigns sits directly after Calls, platform admins only, at /campaigns', () => {
     const ids = C.ADMIN_ROUTES.map((entry) => entry.id);
-    assert.equal(ids.length, 16);
+    assert.equal(ids.length, 17);
     assert.equal(ids.indexOf('campaigns'), ids.indexOf('calls') + 1);
     const entry = C.ADMIN_ROUTES.find((rule) => rule.id === 'campaigns');
     assert.deepEqual({ ...entry }, { id: 'campaigns', label: 'Campaigns', path: '/campaigns', platformOnly: true });
@@ -65,7 +65,7 @@ test('menu: a platform admin sees Campaigns after Calls and it is the current en
     await settle();
     const links = [...state.host.querySelectorAll('.sidebar-nav a')];
     const labels = links.map((node) => node.textContent.trim());
-    assert.equal(labels.length, 16);
+    assert.equal(labels.length, 17);
     assert.equal(labels[labels.indexOf('Calls') + 1], 'Campaigns');
     const current = links.filter((node) => node.getAttribute('aria-current') === 'page');
     assert.deepEqual(current.map((node) => node.textContent.trim()), ['Campaigns']);

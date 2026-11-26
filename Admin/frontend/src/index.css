@@ -124,6 +124,14 @@ body {
   padding: 10px;
 }
 
+/* The column is fixed to the window's height: on a short window the entries scroll inside it, so the last ones stay reachable. */
+@media (min-width: 601px) {
+  .sidebar-nav {
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
 .sidebar-nav-item {
   display: flex;
   align-items: center;

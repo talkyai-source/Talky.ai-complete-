@@ -4,8 +4,9 @@ import { useAuthGeneration } from './use-auth-generation';
 
 type ReadResult<T> = { data?: T; error?: { message: string } };
 
-/** Poll one bounded read at a time; only its mounted session may publish it. */
-export function useAdminRead<T>(load: () => Promise<ReadResult<T>>, intervalMs: number, validate?: (value: T) => boolean) {
+/** Poll one bounded read at a time; only its mounted session may publish it.
+ *  An interval of null reads once on mount and then only when refresh() is called: no timer. */
+export function useAdminRead<T>(load: () => Promise<ReadResult<T>>, intervalMs: number | null, validate?: (value: T) => boolean) {
     const generation = useAuthGeneration();
     const mounted = useRef(false);
     const sequence = useRef(0);
@@ -38,8 +39,8 @@ export function useAdminRead<T>(load: () => Promise<ReadResult<T>>, intervalMs: 
         mounted.current = true;
         pending.current = false;
         void refresh();
-        const timer = setInterval(() => void refresh(), intervalMs);
-        return () => { mounted.current = false; pending.current = false; sequence.current += 1; clearInterval(timer); };
+        const timer = intervalMs === null ? null : setInterval(() => void refresh(), intervalMs);
+        return () => { mounted.current = false; pending.current = false; sequence.current += 1; if (timer !== null) clearInterval(timer); };
     }, [refresh, intervalMs]);
     return { ...(state.owner === generation ? state : { data: null, error: null, loading: true }), refresh };
 }

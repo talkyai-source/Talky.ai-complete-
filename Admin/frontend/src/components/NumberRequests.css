@@ -1,0 +1,161 @@
+/* Phone Number Requests: the list and one request. */
+.number-requests-heading {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+
+.number-requests .page-title,
+.number-requests .page-description {
+  overflow-wrap: anywhere;
+}
+
+/* The three status tabs: always inside their row, wrapping before they would be cut. */
+.number-request-tabs {
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: visible;
+}
+
+.number-request-tabs .page-tab {
+  flex: 0 0 auto;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.number-request-tabs .page-tab:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+  .number-request-tabs .page-tab {
+    padding: 10px 12px;
+  }
+}
+
+.number-request-banner {
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.number-request-banner p {
+  flex: 1 1 200px;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.number-request-notice {
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.number-requests-table td {
+  vertical-align: top;
+}
+
+/* A long company name (or the id shown in its place) wraps inside its cell. */
+.number-request-company {
+  min-width: 160px;
+  max-width: 320px;
+  overflow-wrap: anywhere;
+}
+
+.number-request-pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.number-request-summary,
+.number-request-document {
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.number-request-summary dl,
+.number-request-document dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.number-request-summary dl > div,
+.number-request-document dl > div {
+  min-width: 0;
+}
+
+.number-request-summary dt,
+.number-request-document dt {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.number-request-summary dd,
+.number-request-document dd {
+  margin: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.number-request-reason {
+  grid-column: 1 / -1;
+}
+
+.number-request-reason dd {
+  white-space: pre-wrap;
+}
+
+.number-request-decision {
+  margin-bottom: 16px;
+}
+
+.number-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.number-request-actions:focus {
+  outline: none;
+}
+
+.number-request-documents h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.number-request-document h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.number-request-caution,
+.number-request-deleted {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.number-request-caution {
+  color: var(--accent-orange);
+}
+
+.number-request-document .btn {
+  margin-top: 12px;
+}
+
+.number-request-document .number-request-banner {
+  margin: 12px 0 0;
+}

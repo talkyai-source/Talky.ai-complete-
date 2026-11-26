@@ -17,6 +17,7 @@ import {
     LifeBuoy,
     PhoneForwarded,
     Wallet,
+    FileCheck,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { ADMIN_ROUTES, canAccessAdminRoute } from '../lib/admin-routes';
@@ -25,7 +26,7 @@ import { revealCurrentNavEntry, revealNavEntry } from '../lib/nav-strip';
 const icons = { 'command-center': <LayoutDashboard />, tenants: <Building2 />, enquiries: <Inbox />,
     users: <Users />, calls: <Phone />, campaigns: <Megaphone />, trunks: <PhoneForwarded />, payments: <Wallet />, inbound: <PhoneIncoming />, actions: <FileText />,
     connectors: <Link2 />, 'usage-cost': <DollarSign />, plans: <CreditCard />, incidents: <AlertTriangle />, 'system-health': <Activity />,
-    support: <LifeBuoy /> };
+    support: <LifeBuoy />, 'number-requests': <FileCheck /> };
 
 export function Sidebar() {
     const location = useLocation();

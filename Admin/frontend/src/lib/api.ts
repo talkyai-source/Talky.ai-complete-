@@ -8,6 +8,9 @@ import type {
     ArticleCreateInput, ArticlePatchInput, StaffMessage, StaffMessageInput, StaffQueuePage, StaffTicketDetail,
     StaffTicketPatch, SupportArticle, SupportMetrics, UploadReceipt,
 } from './support-contracts';
+import type {
+    NumberRequestDecisionAnswer, NumberRequestDecisionInput, NumberRequestDetail, NumberRequestPage,
+} from './number-request-contracts';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -2018,6 +2021,31 @@ class ApiClient {
                 message: controller.signal.aborted ? 'The upload timed out. Refresh to check the current state before retrying.'
                     : error instanceof Error ? error.message : 'Network error occurred' } };
         } finally { clearTimeout(timer); }
+    }
+
+    // Phone number requests (platform staff). Each list read, request read and
+    // document opening writes an audit row on the server, so nothing here polls.
+    /** `query` is numberRequestQuery() from number-request-filters.ts. */
+    async getNumberRequests(query: string) {
+        return this.request<NumberRequestPage>(`/admin/telephony/number-requests?${query}`, { timeoutMs: 15_000 });
+    }
+
+    async getNumberRequest(tenantId: string, requestId: string) {
+        return this.request<NumberRequestDetail>(
+            `/admin/telephony/number-requests/${encodeURIComponent(tenantId)}/${encodeURIComponent(requestId)}`, { timeoutMs: 15_000 });
+    }
+
+    /** One POST. request() never replays a mutation, and no caller retries this on its own. */
+    async decideNumberRequest(tenantId: string, requestId: string, body: NumberRequestDecisionInput) {
+        return this.request<NumberRequestDecisionAnswer>(
+            `/admin/telephony/number-requests/${encodeURIComponent(tenantId)}/${encodeURIComponent(requestId)}/decision`,
+            { method: 'POST', body, timeoutMs: 20_000 });
+    }
+
+    /** The decrypted document. Throws an Error carrying the server's own message. */
+    async downloadNumberRequestDocument(tenantId: string, requestId: string, documentId: string) {
+        return this.requestBlob(
+            `/admin/telephony/number-requests/${encodeURIComponent(tenantId)}/${encodeURIComponent(requestId)}/documents/${encodeURIComponent(documentId)}`);
     }
 
     // Support console (platform staff with support:manage)

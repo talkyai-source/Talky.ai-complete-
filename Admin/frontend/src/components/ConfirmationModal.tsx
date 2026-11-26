@@ -18,6 +18,12 @@ interface ConfirmationModalProps {
     reasonLabel?: string;
     reasonPlaceholder?: string;
     reasonMinLength?: number;
+    /** Replaces the helper line under the reason; shown as the only helper line. */
+    reasonHelp?: string;
+    /** Accept any non-blank reason instead of the minimum-length-and-a-letter rule. */
+    reasonAnyNonBlank?: boolean;
+    /** Keep the confirm button off, e.g. after an answer that must not be sent again. */
+    confirmDisabled?: boolean;
     /** Preserve the exact reason/body after a deletion intent has been sent. */
     reasonReadOnly?: boolean;
     /** Failure from the confirmed action; the modal stays open and shows it. */
@@ -41,6 +47,9 @@ export function ConfirmationModal({
     reasonLabel = 'Reason for this action',
     reasonPlaceholder = 'Explain why this irreversible action is required',
     reasonMinLength = 8,
+    reasonHelp,
+    reasonAnyNonBlank = false,
+    confirmDisabled = false,
     reasonReadOnly = false,
     error = null,
     returnFocusFallback,
@@ -51,7 +60,8 @@ export function ConfirmationModal({
     const requiresReason = Boolean(onReasonChange);
     const normalizedReason = reason.trim();
     const reasonIsValid = !requiresReason
-        || (normalizedReason.length >= reasonMinLength && /\p{L}/u.test(normalizedReason));
+        || (reasonAnyNonBlank ? normalizedReason.length > 0
+            : normalizedReason.length >= reasonMinLength && /\p{L}/u.test(normalizedReason));
 
     useDialogFocus(isOpen, modalRef, onCancel, loading, returnFocusFallback);
 
@@ -115,7 +125,7 @@ export function ConfirmationModal({
                                 value={reason}
                                 onChange={(event) => onReasonChange(event.target.value)}
                                 placeholder={reasonPlaceholder}
-                                minLength={reasonMinLength}
+                                minLength={reasonAnyNonBlank ? undefined : reasonMinLength}
                                 maxLength={1000}
                                 rows={3}
                                 required
@@ -124,7 +134,7 @@ export function ConfirmationModal({
                                 aria-describedby="modal-reason-help"
                             />
                             <small id="modal-reason-help">
-                                {reasonReadOnly ? 'This request has been sent. Its reason stays fixed when retrying the same deletion.' : reasonIsValid
+                                {reasonHelp !== undefined ? reasonHelp : reasonReadOnly ? 'This request has been sent. Its reason stays fixed when retrying the same deletion.' : reasonIsValid
                                     ? 'This reason will be retained in the deletion audit.'
                                     : `Enter a meaningful reason of at least ${reasonMinLength} characters.`}
                             </small>
@@ -149,7 +159,7 @@ export function ConfirmationModal({
                         ref={confirmButtonRef}
                         className={`btn btn-${variant}`}
                         onClick={onConfirm}
-                        disabled={loading || !reasonIsValid}
+                        disabled={loading || !reasonIsValid || confirmDisabled}
                     >
                         {loading ? (
                             <>

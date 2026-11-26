@@ -21,6 +21,8 @@ import { ContactEnquiriesPage } from './pages/ContactEnquiriesPage';
 import { SupportTicketsPage } from './pages/SupportTicketsPage';
 import { SupportTicketPage } from './pages/SupportTicketPage';
 import { SupportArticlesPage } from './pages/SupportArticlesPage';
+import { NumberRequestsPage } from './pages/NumberRequestsPage';
+import { NumberRequestPage } from './pages/NumberRequestPage';
 import './index.css';
 
 const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
@@ -176,6 +178,16 @@ function App() {
           <Route path="/support/:id" element={
             <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
               <SupportTicketPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/number-requests" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <NumberRequestsPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/number-requests/:tenantId/:requestId" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <NumberRequestPage />
             </AdminRouteGuard>
           } />
 

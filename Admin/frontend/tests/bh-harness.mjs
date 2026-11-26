@@ -79,6 +79,8 @@ const bundle = await build({
             export { SupportTicketPage } from './src/pages/SupportTicketPage';
             export { SupportArticlesPage } from './src/pages/SupportArticlesPage';
             export { SupportMetricsCard } from './src/components/SupportMetricsCard';
+            export { NumberRequestsPage } from './src/pages/NumberRequestsPage';
+            export { NumberRequestPage } from './src/pages/NumberRequestPage';
             export { Routes, Route } from 'react-router-dom';
         `,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)),
