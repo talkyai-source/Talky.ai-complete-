@@ -313,6 +313,15 @@ async def run(args) -> int:
         rows = [dict(r) for r in await conn.fetch(sql, *params)]
 
         print(f"dnc_entries rows read: {len(rows)}")
+        if not rows and not getattr(args, "allow_empty", False):
+            print(
+                "ERROR: 0 rows were read from dnc_entries. This usually means the\n"
+                "  connection's role cannot see the table (row security), not that\n"
+                "  every number is already normalised. Nothing was changed.\n"
+                "  If the table is genuinely empty, re-run with --allow-empty.",
+                file=sys.stderr,
+            )
+            return 2
         print(f"raw source column 'phone_number' present: {has_raw}")
         if not has_raw:
             print(
@@ -414,6 +423,10 @@ def main() -> int:
         "--delete-duplicates", action="store_true",
         help="With --apply, delete the newer row of a colliding pair "
              "instead of leaving it in place.",
+    )
+    parser.add_argument(
+        "--allow-empty", action="store_true",
+        help="Treat reading 0 rows as success (for a genuinely empty table).",
     )
     parser.add_argument(
         "--limit", type=int, default=50,
