@@ -113,10 +113,11 @@ fi
 arrive_window=$((wait_seconds + 10))
 arrived=""
 saw_outgoing=""
+other_calls=0
 for _ in $(seq 1 "$arrive_window"); do
     snapshot="$(channels_raw)"
-    # The probe's own outgoing leg is named PJSIP/<endpoint>-<id> (name form
-    # from memory, not run on the server).
+    # The probe's own outgoing leg is named PJSIP/<endpoint>-<id> (the form the
+    # server's own call records show: PJSIP/<endpoint name>-<8 hex digits>).
     if [ -z "$saw_outgoing" ] &&
        awk -F'!' -v p="PJSIP/${endpoint}-" 'index($1, p) == 1 { found = 1 } END { exit !found }' <<<"$snapshot"; then
         saw_outgoing=1
@@ -124,8 +125,16 @@ for _ in $(seq 1 "$arrive_window"); do
     while IFS= read -r channel; do
         [ -n "$channel" ] || continue
         if ! grep -qxF -- "$channel" <<<"$baseline_channels"; then
-            arrived=1
-            break
+            if [ -n "$saw_outgoing" ]; then
+                arrived=1
+                break
+            fi
+            # A new incoming call while the probe has no outgoing leg is somebody's
+            # real call, not the probe. It used to count as the probe's arrival:
+            # on 2026-11-26 five hourly runs "passed" that way while the probe
+            # placed no call at all. Remember it and keep waiting for the probe.
+            baseline_channels="${baseline_channels}"$'\n'"${channel}"
+            other_calls=$((other_calls + 1))
         fi
     done < <(inbound_from_snapshot <<<"$snapshot")
     if [ -n "$arrived" ]; then
@@ -134,7 +143,11 @@ for _ in $(seq 1 "$arrive_window"); do
     sleep 1
 done
 if [ -z "$arrived" ] && [ -z "$saw_outgoing" ]; then
-    echo "INBOUND_SYNTHETIC CRITICAL: the probe did not arrive within ${arrive_window}s: no outgoing channel on '${endpoint}' was seen while waiting (Asterisk accepted the command, but either placed no call or the call was refused at once) (did=${did})" >&2
+    not_counted=""
+    if [ "$other_calls" -gt 0 ]; then
+        not_counted="; ${other_calls} real incoming call(s) arrived meanwhile and were not counted as the probe"
+    fi
+    echo "INBOUND_SYNTHETIC CRITICAL: the probe did not arrive within ${arrive_window}s: no outgoing channel on '${endpoint}' was seen while waiting (Asterisk accepted the command, but either placed no call or the call was refused at once${not_counted}) (did=${did})" >&2
     exit 1
 fi
 if [ -z "$arrived" ]; then
