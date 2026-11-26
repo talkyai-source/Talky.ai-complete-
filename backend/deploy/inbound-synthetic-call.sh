@@ -76,11 +76,28 @@ command_text="channel originate PJSIP/${did}@${endpoint} application Wait ${wait
 # Channels already on the inbound call plan BEFORE the probe is sent. A real
 # customer call in the window must not be mistaken for the probe's own leg
 # (ops-8, 2026-10-20): only a channel that was not here before can count.
+channels_raw() {
+    timeout 5 asterisk -rx "core show channels concise" 2>/dev/null || true
+}
+inbound_from_snapshot() {
+    awk -F'!' '$2 == "from-talky-inbound" { print $1 }'
+}
 inbound_channels() {
-    timeout 5 asterisk -rx "core show channels concise" 2>/dev/null |
-        awk -F'!' '$2 == "from-talky-inbound" { print $1 }' || true
+    channels_raw | inbound_from_snapshot || true
 }
 baseline_channels="$(inbound_channels)"
+
+# Is the trunk endpoint known to Asterisk at all? A wrong or removed endpoint
+# makes `channel originate` create no channel, yet `asterisk -rx` still exits 0.
+# NOTE: the "Unable to find object" wording is from memory, not run on the
+# server, so the match is case-insensitive. If the command itself fails or
+# times out the check is advisory: carry on as before.
+if endpoint_check="$(timeout 10 asterisk -rx "pjsip show endpoint ${endpoint}" 2>&1)"; then
+    if [[ "${endpoint_check,,}" == *"unable to find object"* ]]; then
+        echo "INBOUND_SYNTHETIC CRITICAL: trunk endpoint '${endpoint}' does not exist in Asterisk (check INBOUND_SYNTHETIC_TRUNK_ENDPOINT)" >&2
+        exit 1
+    fi
+fi
 
 echo "inbound synthetic: originating carrier hairpin did=${did} endpoint=${endpoint}"
 if ! timeout "$((wait_seconds + 20))" asterisk -rx "$command_text"; then
@@ -95,19 +112,31 @@ fi
 # inbound call plan while the probe waits.
 arrive_window=$((wait_seconds + 10))
 arrived=""
+saw_outgoing=""
 for _ in $(seq 1 "$arrive_window"); do
+    snapshot="$(channels_raw)"
+    # The probe's own outgoing leg is named PJSIP/<endpoint>-<id> (name form
+    # from memory, not run on the server).
+    if [ -z "$saw_outgoing" ] &&
+       awk -F'!' -v p="PJSIP/${endpoint}-" 'index($1, p) == 1 { found = 1 } END { exit !found }' <<<"$snapshot"; then
+        saw_outgoing=1
+    fi
     while IFS= read -r channel; do
         [ -n "$channel" ] || continue
         if ! grep -qxF -- "$channel" <<<"$baseline_channels"; then
             arrived=1
             break
         fi
-    done < <(inbound_channels)
+    done < <(inbound_from_snapshot <<<"$snapshot")
     if [ -n "$arrived" ]; then
         break
     fi
     sleep 1
 done
+if [ -z "$arrived" ] && [ -z "$saw_outgoing" ]; then
+    echo "INBOUND_SYNTHETIC CRITICAL: the probe did not arrive within ${arrive_window}s: no outgoing channel on '${endpoint}' was seen while waiting (Asterisk accepted the command, but either placed no call or the call was refused at once) (did=${did})" >&2
+    exit 1
+fi
 if [ -z "$arrived" ]; then
     echo "INBOUND_SYNTHETIC CRITICAL: the probe never came back in on the inbound call plan within ${arrive_window}s (did=${did} endpoint=${endpoint})" >&2
     exit 1
