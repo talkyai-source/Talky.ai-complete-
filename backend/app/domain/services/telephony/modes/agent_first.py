@@ -220,6 +220,43 @@ async def _notice_skip_reason(voice_session, call_id) -> str | None:
     return _skip_reason
 
 
+def notice_receipt_proves_delivery(session, interrupted) -> bool:
+    """The receipt rule for a spoken notice (first saying and the one repeat).
+
+    The phone gateway's finish receipt is status="transmitted" with
+    evidence="transmitted" (voice_gateway /v1/sessions/tts/finish); the
+    browser's is status="completed". Requiring "completed" alone failed
+    every telephony notice from 2026-10-05 to 2026-10-21.
+    """
+    receipt = getattr(session, "_tts_playback_receipt", None)
+    return bool(
+        not interrupted
+        and getattr(session, "_tts_delivery_status", None) == "submitted"
+        and isinstance(receipt, dict)
+        and receipt.get("utterance_id")
+        and receipt.get("utterance_id") == getattr(session, "_tts_playback_utterance_id", None)
+        and (
+            (receipt.get("status") == "completed"
+             and receipt.get("evidence") in {"transport_played", "transmitted"})
+            or (receipt.get("status") == "transmitted"
+                and receipt.get("evidence") == "transmitted")
+        )
+    )
+
+
+def _owe_notice_repeat(voice_session, session, sentence) -> None:
+    """Keep the cut notice's sentence for one repeat at the next reply (outgoing only).
+
+    Not owed when the whole audio was already handed to the phone system (status
+    "submitted", only its receipt was awaited): the person has heard it.
+    """
+    from app.domain.services.telephony.recording import _is_true_inbound_session
+
+    if (sentence and getattr(session, "_tts_delivery_status", None) != "submitted"
+            and not _is_true_inbound_session(voice_session)):
+        voice_session._notice_repeat_text = sentence
+
+
 async def _speak_recording_disclosure(
     voice_session, *, opener_with_notice=None, carrier: str = "opening",
 ) -> None:
@@ -340,6 +377,7 @@ async def _speak_recording_disclosure(
             pinned=pinned_override is not None, call_id=call_id, path="cascaded",
             carrier=carrier,
         ).in_opening
+        notice_sentence = text  # the sentence owed, before it is merged into an opener
         if as_opener:
             text = opener_with_notice
         if not text:
@@ -442,30 +480,26 @@ async def _speak_recording_disclosure(
                 session, text, websocket=None, track_latency=False,
                 **premade_kwargs(voice_session, session, text),
             )
+        except asyncio.CancelledError:
+            # Its task was cancelled mid-notice (barge-in): never silent.
+            record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
+            _owe_notice_repeat(voice_session, session, notice_sentence)
+            logger.warning(
+                "recording_disclosure_unconfirmed call_id=%s cancelled=True — notice "
+                "cut off; the recording is kept and marked notice not confirmed",
+                call_id[:12],
+            )
+            raise
         finally:
             session._disclosure_in_flight = disclosure_was_in_flight
         # Spoken, even if cut short: the opener is never restarted from the
         # top (same rule as the notice, see the single-attempt note above).
         voice_session._opener_spoken_as_notice = as_opener
         receipt = getattr(session, "_tts_playback_receipt", None)
-        # The phone gateway's finish receipt is status="transmitted" with
-        # evidence="transmitted" (voice_gateway /v1/sessions/tts/finish); the
-        # browser's is status="completed". Requiring "completed" alone failed
-        # every telephony notice from 2026-10-05 to 2026-10-21.
-        delivered = bool(
-            not interrupted
-            and getattr(session, "_tts_delivery_status", None) == "submitted"
-            and isinstance(receipt, dict)
-            and receipt.get("utterance_id")
-            and receipt.get("utterance_id") == getattr(session, "_tts_playback_utterance_id", None)
-            and (
-                (receipt.get("status") == "completed"
-                 and receipt.get("evidence") in {"transport_played", "transmitted"})
-                or (receipt.get("status") == "transmitted"
-                    and receipt.get("evidence") == "transmitted")
-            )
-        )
+        delivered = notice_receipt_proves_delivery(session, interrupted)
         if not delivered:
+            if interrupted is True:
+                _owe_notice_repeat(voice_session, session, notice_sentence)
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
                 "recording_disclosure_unconfirmed call_id=%s interrupted=%s delivery=%s "
