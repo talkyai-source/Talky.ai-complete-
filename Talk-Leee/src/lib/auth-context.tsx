@@ -370,7 +370,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             || (publicPage && !accessTokenRef.current);
         // Settle a deferred public bootstrap, or mark protected discovery in
         // flight. Navigation must never reopen a logout/identity boundary.
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         setLoading(!skipBootstrap);
         if (skipBootstrap) return;
         const epoch = identityEpoch.current;
