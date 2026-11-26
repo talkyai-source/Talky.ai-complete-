@@ -24,7 +24,7 @@ from __future__ import annotations
 import contextvars
 import uuid
 from contextlib import contextmanager, nullcontext
-from typing import ContextManager, Iterator
+from typing import ContextManager, Iterator, Optional
 
 from app.core.security.tenant_isolation import (
     _bypass_rls,
@@ -52,6 +52,37 @@ def tenant_scope(tenant_id: object) -> Iterator[str]:
             # Closed from another context (a task destroyed while it was still
             # waiting, at shutdown). That context never had these values, so
             # there is nothing to put back.
+            pass
+
+
+@contextmanager
+def bypass_scope(tenant_id: object = None) -> Iterator[Optional[str]]:
+    """Bypass row security for the ``with`` block, then put back what was there.
+
+    For a call's final settlement, which must run with the bypass on and the
+    call's account named. A value that is empty or not a UUID names no account
+    (None); it never raises. On the way out the earlier bypass and account are
+    put back, also on an exception, so a long-lived task (a watchdog) does not
+    keep the last call's account.
+    """
+    try:
+        canonical = str(uuid.UUID(str(tenant_id))) if tenant_id else None
+    except ValueError:
+        canonical = None
+    tenant_token = _tenant_context.set(canonical)
+    try:
+        bypass_token = _bypass_rls.set(True)
+    except BaseException:
+        _tenant_context.reset(tenant_token)
+        raise
+    try:
+        yield canonical
+    finally:
+        try:
+            _bypass_rls.reset(bypass_token)
+            _tenant_context.reset(tenant_token)
+        except ValueError:
+            # Closed from another context: nothing to put back there.
             pass
 
 

@@ -535,7 +535,7 @@ class CallService:
 
         if not bypass and not tenant_id:
             # Neither bypass nor a tenant context is set. Not expected on
-            # the real teardown path (both lifecycle.py call sites set
+            # the real teardown path (all three lifecycle.py call sites set
             # bypass_rls=True before invoking handle_call_status) — fail
             # loud-but-caught (by the outer try/except in
             # handle_call_status) instead of silently guessing an RLS scope.
