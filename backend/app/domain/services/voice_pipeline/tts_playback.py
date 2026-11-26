@@ -700,7 +700,10 @@ class TtsPlayback:
             session._tts_playout_completed = False
             raise
         except Exception as exc:
-            if isinstance(exc, SessionGoneError):
+            from app.infrastructure.tts.elevenlabs_tts import ProviderClosedError
+
+            if isinstance(exc, (SessionGoneError, ProviderClosedError)):
+                # a provider closed because the call ended is the same as a gone session
                 silent_reason = "session_gone"
             elif isinstance(exc, TtsDeliveryError):
                 silent_reason = "tts_delivery_error"

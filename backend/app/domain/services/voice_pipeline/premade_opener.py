@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 # needed for the shorter plain greeting on 20 Nov, so the longer line normally
 # finishes, while a stuck provider is released well before a typical ring ends.
 OPENER_PREMADE_BACKGROUND_TIMEOUT_S = 8.0
+PREMADE_STOP_WAIT_S = 1.0  # how long a call that ends waits for the cancelled task
 _STORE_ATTR = "_premade_opener_lines"
 _PENDING_ATTR = "_premade_opener_pending"
 _CONSUMED_ATTR = "_premade_opener_consumed"
@@ -118,8 +119,10 @@ async def _make_notice_line(pre_warm_session, store, consumed, notice_text, spok
         logger.info("opener_premade_failed call_id=%s kind=%s reason=timeout", call_id, kind)
         return False
     except Exception as exc:  # noqa: BLE001 - a background task never raises
-        logger.info("opener_premade_failed call_id=%s kind=%s reason=error:%s",
-                    call_id, kind, type(exc).__name__)
+        # A call that ends is stopped by stop_premade_for_ended_call before its
+        # provider closes, so an error here is a real provider fault.
+        logger.warning("opener_premade_failed call_id=%s kind=%s reason=error:%s",
+                       call_id, kind, type(exc).__name__)
         return False
     finally:
         getattr(pre_warm_session, _PENDING_ATTR, {}).pop(notice_text, None)
@@ -217,6 +220,30 @@ async def premake_caller_first_lines(
     except Exception as exc:  # noqa: BLE001 - the call must ring whatever happens here
         logger.warning("opener_premade_failed call_id=%s kind=any reason=error:%s",
                        call_id, type(exc).__name__)
+
+
+async def stop_premade_for_ended_call(voice_session, wait_s: Optional[float] = None) -> None:
+    """Cancel the background line-making task of a call that is ending.
+
+    Called by ``VoiceOrchestrator.end_session`` BEFORE the voice provider is
+    closed, so the task never runs into a closed provider (false failure) or sits
+    on a provider slot until its time limit. Does nothing, and logs nothing, when
+    no task is running. Waits at most ``wait_s`` (default
+    ``PREMADE_STOP_WAIT_S``) for the task to end; never raises for the task.
+    """
+    task = getattr(voice_session, "_premade_opener_task", None)
+    if task is None or task.done():
+        return
+    call_id = str(getattr(voice_session, "call_id", ""))[:12]
+    pending = getattr(voice_session, _PENDING_ATTR, None)
+    kinds = getattr(voice_session, _KINDS_ATTR, None)
+    first = next(iter(pending), None) if isinstance(pending, dict) and pending else None
+    kind = (kinds.get(first) if isinstance(kinds, dict) else None) or "unknown"
+    logger.info("opener_premade_stopped call_id=%s kind=%s reason=call_ended", call_id, kind)
+    task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=PREMADE_STOP_WAIT_S if wait_s is None else wait_s)
+    if not done:
+        logger.warning("opener_premade_stop_timeout call_id=%s", call_id)
 
 
 def premade_kwargs(voice_session, session, text) -> dict:
