@@ -10,7 +10,10 @@
 #      the Aug-28/29/30 dumps in /home/admins/backups are exactly that (three
 #      identical 22 MB files, 0 "TABLE DATA" entries). The bypass GUC is set on
 #      the dump connection via PGOPTIONS and the result is verified: TABLE DATA
-#      entries must be present; a dump under half the previous good one is
+#      entries must be present. That count is only the number of tables with a
+#      data entry (pg_dump writes one even when row security filtered every row
+#      out), so it cannot prove the bypass worked; the row count of public.calls
+#      read from the archive is the row check. A dump under half the previous good one is
 #      still published but exits non-zero once so the alert fires (refusing it
 #      would pin the baseline and fail every later night). pg_dump ALSO needs --enable-row-security: by default
 #      it sets row_security=off, which Postgres refuses on a FORCE RLS table
@@ -78,10 +81,37 @@ if [[ "$table_data" -lt "$min_table_data" ]]; then
     echo "DB-BACKUP CRITICAL: only ${table_data} TABLE DATA entries (< ${min_table_data}) — schema-only dump? (RLS bypass missing)" >&2
     exit 1
 fi
+# --- verify: rows survived (TABLE DATA above only counts tables) ---------------
+# Count the rows of public.calls by reading the archive itself (no restore). A
+# probe that PROVES the table short refuses the dump; a probe that cannot be
+# read (pg_restore failed, no COPY header) warns and publishes: an unverified
+# check must never refuse a good backup.
+min_call_rows="${TALKY_BACKUP_MIN_CALL_ROWS:-1}"
+[[ "$min_call_rows" =~ ^[0-9]+$ ]] || min_call_rows=1
+min_call_rows=$((10#$min_call_rows))  # "08" is eight, not a bad octal number
+# A stuck probe must not hold the nightly unit for ever: after the limit it
+# counts as "could not be read" (warn and publish).
+probe_limit_s="${TALKY_BACKUP_ROW_CHECK_TIMEOUT_S:-1800}"
+[[ "$probe_limit_s" =~ ^[1-9][0-9]*$ ]] || probe_limit_s=1800
+probe_limit=()
+if command -v timeout >/dev/null 2>&1; then probe_limit=(timeout -k 5 "$probe_limit_s"); fi
+probe_rc=0
+probe_out="$(${probe_limit[@]+"${probe_limit[@]}"} docker exec -i "$CONTAINER" pg_restore --data-only --schema=public --table=calls --file=- < "${partial}" \
+    | awk '/^COPY public\.calls /{seen=1; inside=1; next} inside && $0 == "\\." {inside=0; next} inside {n++} END {print (seen ? "seen" : "none"), n+0}')" || probe_rc=$?
+call_rows="unknown"
+if [[ "$probe_rc" -eq 0 && "$probe_out" =~ ^seen\ ([0-9]+)$ ]]; then
+    call_rows="${BASH_REMATCH[1]}"
+    if [[ "$call_rows" -lt "$min_call_rows" ]]; then
+        echo "DB-BACKUP CRITICAL: the dump holds ${call_rows} rows in public.calls (fewer than ${min_call_rows}): rows were filtered out or the table was not dumped; not published" >&2
+        exit 1
+    fi
+else
+    echo "DB-BACKUP WARNING: could not count the rows of public.calls in the dump (the row check could not be read); published without it" >&2
+fi
 size="$(stat -c %s "${partial}")"
 # A shrink below half of the previous dump is suspicious but NOT a reason to
-# throw the fresh dump away: the TABLE DATA check above already rejects the
-# RLS-bypass failure, and a legitimate purge (audit-flood cleanup, big-table
+# throw the fresh dump away: the row check above already rejects a dump whose
+# calls rows were filtered out, and a legitimate purge (audit-flood cleanup, big-table
 # truncation) would otherwise fail every later night against the same old
 # baseline and leave no backup at all. So publish it (the baseline moves), keep
 # retention reachable, and exit non-zero ONCE after publishing so the alert fires.
@@ -140,7 +170,7 @@ else
     echo "db-backup: local retention skipped, every copy on this server is kept until a copy elsewhere is verified"
 fi
 
-echo "db-backup: ok ${dump} size=${size} table_data=${table_data} sha256=${digest:0:12}… kept_days=${keep_days}"
+echo "db-backup: ok ${dump} size=${size} table_data=${table_data} call_rows=${call_rows} sha256=${digest:0:12}… kept_days=${keep_days}"
 
 if [[ -n "$shrunk_from" ]]; then
     echo "DB-BACKUP CRITICAL: dump is ${size} bytes, previous good was ${shrunk_from} — published anyway so the baseline moves; confirm the shrink was a legitimate purge (${dump})" >&2

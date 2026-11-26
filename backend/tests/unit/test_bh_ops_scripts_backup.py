@@ -18,6 +18,15 @@ SCRIPT = BACKEND / "deploy" / "db-backup.sh"
 
 FAKE_DOCKER = """#!/usr/bin/env bash
 case "$*" in
+  *pg_restore*--data-only*)
+    cat > /dev/null
+    sleep "${FAKE_DATA_PROBE_SLEEP:-0}"
+    if [ "${FAKE_CALL_HEADER:-1}" = "1" ]; then
+      echo "COPY public.calls (id) FROM stdin;"
+      for i in $(seq 1 "${FAKE_CALL_ROWS:-1}"); do echo "row$i"; done
+      echo '\\.'
+    fi
+    exit "${FAKE_DATA_PROBE_EXIT:-0}" ;;
   *pg_restore*)
     cat > /dev/null
     for i in $(seq 1 "${FAKE_TABLE_DATA}"); do echo "1; 0 0 TABLE DATA public t$i owner"; done ;;
@@ -52,7 +61,7 @@ def _real_bash() -> str | None:
 pytestmark = pytest.mark.skipif(_real_bash() is None, reason="no POSIX bash available")
 
 
-def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper_exit=0, principal="00000000-0000-4000-8000-000000000001"):
+def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper_exit=0, principal="00000000-0000-4000-8000-000000000001", call_rows=1, data_probe_exit=0, call_header=1, min_call_rows=None, probe_sleep=0, row_check_timeout=None):
     shim = tmp_path / "shim"
     shim.mkdir(exist_ok=True)
     docker = shim / "docker"
@@ -73,7 +82,17 @@ def _run_backup(tmp_path: Path, dump_bytes: int, table_data: int = 60, *, helper
         FAKE_TABLE_DATA=str(table_data),
         FAKE_HELPER_EXIT=str(helper_exit),
         TALKY_BACKUP_PRINCIPAL_ID=principal,
+        FAKE_CALL_ROWS=str(call_rows),
+        FAKE_DATA_PROBE_EXIT=str(data_probe_exit),
+        FAKE_CALL_HEADER=str(call_header),
+        FAKE_DATA_PROBE_SLEEP=str(probe_sleep),
     )
+    env.pop("TALKY_BACKUP_MIN_CALL_ROWS", None)
+    env.pop("TALKY_BACKUP_ROW_CHECK_TIMEOUT_S", None)
+    if min_call_rows is not None:
+        env["TALKY_BACKUP_MIN_CALL_ROWS"] = str(min_call_rows)
+    if row_check_timeout is not None:
+        env["TALKY_BACKUP_ROW_CHECK_TIMEOUT_S"] = str(row_check_timeout)
     # Git Bash re-prepends /usr/bin to PATH at startup, which would shadow shims
     # for ``install``; put the shim dir first from inside the shell instead.
     launcher = (
@@ -166,3 +185,65 @@ def test_keeper_or_configuration_failure_never_publishes_or_runs_retention(tmp_p
     assert _published(tmp_path) == [previous]
     assert previous.exists()
     assert not list((tmp_path / "backups").glob("*.partial"))
+
+
+def test_a_dump_with_no_rows_in_calls_is_refused_and_not_published(tmp_path):
+    previous = _seed_previous(tmp_path, 10_000, 1, "talky-20261001T000000Z.dump")
+
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=0)
+
+    assert result.returncode == 1
+    assert "the dump holds 0 rows in public.calls (fewer than 1)" in result.stderr
+    assert _published(tmp_path) == [previous]
+    assert not list((tmp_path / "backups").glob("*.partial"))
+
+
+@pytest.mark.parametrize("kwargs", [{"data_probe_exit": 3}, {"call_header": 0}])
+def test_an_unreadable_row_probe_warns_and_still_publishes(tmp_path, kwargs):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=0, **kwargs)
+
+    assert result.returncode == 0, result.stderr
+    assert "could not count the rows of public.calls" in result.stderr
+    assert "call_rows=unknown" in result.stdout
+    assert len(_published(tmp_path)) == 1
+
+
+def test_a_healthy_dump_reports_its_call_rows(tmp_path):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=3)
+
+    assert result.returncode == 0, result.stderr
+    assert "call_rows=3" in result.stdout
+
+
+def test_a_zero_minimum_lets_an_empty_calls_table_publish(tmp_path):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=0, min_call_rows=0)
+
+    assert result.returncode == 0, result.stderr
+    assert "call_rows=0" in result.stdout
+    assert len(_published(tmp_path)) == 1
+
+
+def test_a_higher_minimum_refuses_too_few_call_rows(tmp_path):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=3, min_call_rows=5)
+
+    assert result.returncode == 1
+    assert "holds 3 rows in public.calls (fewer than 5)" in result.stderr
+    assert _published(tmp_path) == []
+    assert not list((tmp_path / "backups").glob("*.partial"))
+
+
+def test_a_minimum_written_with_a_leading_zero_is_a_number(tmp_path):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=3, min_call_rows="08")
+
+    assert result.returncode == 1
+    assert "holds 3 rows in public.calls (fewer than 8)" in result.stderr
+    assert _published(tmp_path) == []
+
+
+def test_a_stuck_row_probe_is_given_up_after_its_time_limit_and_the_dump_is_published(tmp_path):
+    result = _run_backup(tmp_path, dump_bytes=9_000, call_rows=3, probe_sleep=4, row_check_timeout=1)
+
+    assert result.returncode == 0, result.stderr
+    assert "could not count the rows of public.calls" in result.stderr
+    assert "call_rows=unknown" in result.stdout
+    assert len(_published(tmp_path)) == 1
