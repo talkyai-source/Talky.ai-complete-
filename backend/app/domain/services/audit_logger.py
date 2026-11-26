@@ -511,10 +511,17 @@ class AuditLogger:
         """
         if not conn.is_in_transaction():
             raise RuntimeError("Transactional audit requires an open transaction")
+        # One round trip. The transaction's own lock limit (set when it began)
+        # is read first and put back after the chain lock; "TO DEFAULT" would
+        # restore the session default (0 = no limit) while the chain lock is held.
         await conn.execute(
-            f"SET LOCAL lock_timeout = {_CHAIN_LOCK_TIMEOUT_MS}; "
-            f"SELECT pg_advisory_xact_lock({_CHAIN_LOCK_KEY}); "
-            "SET LOCAL lock_timeout TO DEFAULT"
+            # Constant text (the SQL guard resolves it); the literals 5000 (ms)
+            # and 7022629598040908648 equal _CHAIN_LOCK_TIMEOUT_MS / _CHAIN_LOCK_KEY,
+            # pinned by a unit test.
+            "DO $chain$ DECLARE prev text := current_setting('lock_timeout'); BEGIN "
+            "PERFORM set_config('lock_timeout', '5000', true); "
+            "PERFORM pg_advisory_xact_lock(7022629598040908648); "
+            "PERFORM set_config('lock_timeout', prev, true); END $chain$"
         )
 
     async def log_in_transaction(

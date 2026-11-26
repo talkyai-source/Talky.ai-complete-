@@ -335,3 +335,27 @@ async def test_a_role_without_rights_on_the_audit_table_ends_at_once_with_one_er
     assert "InsufficientPrivilegeError" in missing[0].getMessage()
     _, audit = await _rows(world.plain, world.a)
     assert audit == []
+
+
+@pytest.mark.asyncio
+async def test_the_audit_write_keeps_the_transactions_own_lock_limit(world, monkeypatch):
+    """After the short wait for the chain lock, the rest of the audit transaction runs
+    under the limit the transaction began with, not with no limit at all."""
+    result = await _caller(world.plain, world.a)
+    assert result["dnc_added"] is True
+    await _drain()
+    dnc, _ = await _rows(world.plain, world.a)
+    async with acquire_with_tenant(world.plain, world.a) as conn:
+        own_limit = await conn.fetchval("SHOW lock_timeout")
+    assert own_limit not in ("0", "0ms")           # the application sets one per transaction
+    seen = []
+    real = sma._audit_dnc_change
+
+    async def spy(audit, conn, *args, **kwargs):
+        seen.append(await conn.fetchval("SHOW lock_timeout"))
+        return await real(audit, conn, *args, **kwargs)
+
+    monkeypatch.setattr(sma, "_audit_dnc_change", spy)
+    assert await sma.write_mark_audit(
+        world.plain, tenant_id=world.a, entry_id=str(dnc[0]["id"]), actor_role="caller_opt_out") is True
+    assert seen == [own_limit]

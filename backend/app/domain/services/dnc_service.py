@@ -285,9 +285,11 @@ class DNCService:
                     # entries and the caller receives no success receipt.
                     raise
                 except Exception as exc:
+                    from app.domain.services.dialer.bulk_ingest import mask_phone
+
                     logger.warning(
-                        "dnc_bulk_import_row_failed number=%s err=%s",
-                        normalized, exc,
+                        "dnc_bulk_import_row_failed number=%s err_type=%s",
+                        mask_phone(normalized), type(exc).__name__,
                     )
                     skipped.append(normalized)
         return {
