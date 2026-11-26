@@ -119,7 +119,9 @@ class VonageSMSProvider(SMSProvider):
             return SMSResult(success=False, provider=self.provider_name, to_number=to_number,
                 error="Vonage SMS SDK is unavailable", metadata={**(metadata or {}), "status": "failed"})
 
-        logger.info(f"Sending SMS via Vonage: {from_number} -> {to_number[:6]}...")
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.info("Sending SMS via Vonage: %s -> %s", mask_phone(from_number), mask_phone(to_number))
         
         try:
             if VONAGE_V4 and SmsMessage:

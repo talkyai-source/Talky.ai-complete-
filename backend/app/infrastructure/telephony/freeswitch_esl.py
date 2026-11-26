@@ -1066,7 +1066,9 @@ class FreeSwitchESL:
 
         command = f"originate {dial_string} {app_string}"
 
-        logger.info(f"ESL originate command: {command}")
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.info(f"ESL originate command: {command.replace(str(destination), mask_phone(destination)) if destination else command}")
         result = await self.api(command)
         logger.info(f"ESL originate result: {result}")
 
@@ -1075,7 +1077,9 @@ class FreeSwitchESL:
             parts = result.strip().split()
             if len(parts) >= 2:
                 uuid = parts[1]
-                logger.info(f"📞 Originated call to {destination}: {uuid[:8]}")
+                from app.domain.services.dialer.bulk_ingest import mask_phone
+
+                logger.info("📞 Originated call to %s: %s", mask_phone(destination), uuid[:8])
                 return uuid
 
         logger.error(f"Failed to originate call: {result}")
@@ -1090,7 +1094,9 @@ class FreeSwitchESL:
 
         command = f"originate {dial_string} '{app_string}'"
 
-        logger.info(f"ESL originate with playback: {command}")
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.info(f"ESL originate with playback: {command.replace(str(destination), mask_phone(destination)) if destination else command}")
         result = await self.api(command)
         logger.info(f"ESL originate result: {result}")
 
@@ -1098,7 +1104,9 @@ class FreeSwitchESL:
             parts = result.strip().split()
             if len(parts) >= 2:
                 uuid = parts[1]
-                logger.info(f"📞 Originated call with playback to {destination}: {uuid[:8]}")
+                from app.domain.services.dialer.bulk_ingest import mask_phone
+
+                logger.info("📞 Originated call with playback to %s: %s", mask_phone(destination), uuid[:8])
                 return uuid
 
         logger.error(f"Failed to originate call with playback: {result}")

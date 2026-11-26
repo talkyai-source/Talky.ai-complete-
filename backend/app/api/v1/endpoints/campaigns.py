@@ -2275,7 +2275,12 @@ async def add_contact_to_campaign(
                 "campaign_id", campaign_id
             ).execute()
             revived_row = _require_contact_write(revived, campaign_id, "revive")
-            logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
+            from app.domain.services.dialer.bulk_ingest import mask_phone
+
+            logger.info(
+                "Contact revived in campaign %s: %s (lead %s)",
+                campaign_id, mask_phone(normalized_phone), revive_id,
+            )
             await _queue_new_contacts_if_running(
                 db_client, campaign, campaign_id, current_user.tenant_id, str(revive_id))
             return {
@@ -2302,7 +2307,9 @@ async def add_contact_to_campaign(
         response = db_client.table("leads").insert(lead_data).execute()
         created = _require_contact_write(response, campaign_id, "create")
 
-        logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
+        from app.domain.services.dialer.bulk_ingest import mask_phone
+
+        logger.info("Contact added to campaign %s: %s", campaign_id, mask_phone(normalized_phone))
         await _count_new_contact_if_running(
             db_client, campaign, campaign_id, current_user.tenant_id,
             do_not_call=bool(expanded_values["do_not_call"]))

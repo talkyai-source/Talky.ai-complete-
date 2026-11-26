@@ -1805,12 +1805,14 @@ def _outbound_capacity_refusal(destination: object) -> Optional[dict]:
     if not (_readiness.is_pod_at_capacity() or committed >= _MAX_TELEPHONY_SESSIONS):
         return None
     active = get_state_backend().voice_session_count()
+    from app.domain.services.dialer.bulk_ingest import mask_phone
+
     logger.warning(
         "make_call_pod_at_capacity active=%d committed_calls=%d cap=%d dest=%s",
         active,
         committed,
         _MAX_TELEPHONY_SESSIONS,
-        destination,
+        mask_phone(destination),
     )
     return {
         "error": "pod_at_capacity",
@@ -2160,13 +2162,15 @@ async def make_call(request: Request, body: MakeCallRequest):
             for reason in failed_reasons
         )
     )
+    from app.domain.services.dialer.bulk_ingest import mask_phone
+
     if allow_dev_guard_bypass and bypassable_guard_error:
         logger.warning(
             "Bypassing CallGuard block in %s due to local guard configuration/schema errors: "
             "tenant=%s dest=%s reasons=%s",
             environment,
             effective_tenant_id,
-            destination,
+            mask_phone(destination),
             failed_reasons,
         )
         guard_result = GuardResult(
@@ -2189,7 +2193,7 @@ async def make_call(request: Request, body: MakeCallRequest):
     if guard_result.decision == GuardDecision.BLOCK:
         logger.warning(
             f"Call blocked by guard: tenant={effective_tenant_id}, "
-            f"dest={destination}, reasons={guard_result.failed_checks}"
+            f"dest={mask_phone(destination)}, reasons={guard_result.failed_checks}"
         )
         raise HTTPException(
             status_code=429,
@@ -2202,7 +2206,7 @@ async def make_call(request: Request, body: MakeCallRequest):
 
     if guard_result.decision == GuardDecision.THROTTLE:
         logger.warning(
-            f"Call throttled by guard: tenant={effective_tenant_id}, " f"dest={destination}"
+            f"Call throttled by guard: tenant={effective_tenant_id}, " f"dest={mask_phone(destination)}"
         )
         raise HTTPException(
             status_code=429,
@@ -2217,7 +2221,7 @@ async def make_call(request: Request, body: MakeCallRequest):
     if guard_result.decision == GuardDecision.QUEUE:
         logger.info(
             f"Call queued by guard: tenant={effective_tenant_id}, "
-            f"dest={destination}, position={guard_result.queue_position}"
+            f"dest={mask_phone(destination)}, position={guard_result.queue_position}"
         )
         return JSONResponse(
             status_code=202,  # Accepted
