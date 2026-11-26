@@ -32,6 +32,12 @@ _EL_MAX_RETRIES = 2
 _EL_RETRY_BASE_DELAY = 0.3  # 300ms base, exponential with jitter
 
 
+class ProviderClosedError(RuntimeError):
+    """The provider was closed (cleanup(), the call ended) while a request was
+    waiting or retrying. A closure we caused ourselves: not a provider failure,
+    so it is neither retried nor counted in the provider telemetry."""
+
+
 class ElevenLabsPartialAudioError(RuntimeError):
     """Raised when synthesis is cut short AFTER some audio was already
     yielded to the caller (e.g. a read timeout mid-sentence).
@@ -184,6 +190,8 @@ class ElevenLabsTTSProvider(TTSProvider):
             # both except clauses.
             chunks_yielded = False
             for attempt in range(_EL_MAX_RETRIES + 1):
+                if self._session is None:  # closed by cleanup() since the last attempt
+                    raise ProviderClosedError("ElevenLabs provider closed during synthesis")
                 key_ctx = (
                     self._pool.acquire() if self._pool is not None
                     else _SingleKeyLease(self._api_key)
@@ -198,6 +206,8 @@ class ElevenLabsTTSProvider(TTSProvider):
                         (self._observation_context or {}).get("source") != "tenant" else None)
                     _t_post = asyncio.get_event_loop().time()
                     try:
+                        if self._session is None:  # closed while the key lease was awaited
+                            raise ProviderClosedError("ElevenLabs provider closed during synthesis")
                         async with self._session.post(
                             url, headers=headers, params=params, json=payload,
                         ) as response:
@@ -266,7 +276,13 @@ class ElevenLabsTTSProvider(TTSProvider):
                             lease.report_success()
                             return  # success — exit retry loop
 
+                    except ProviderClosedError:
+                        observation.finish(outcome="cancelled")  # our own closure: not a failure
+                        raise
                     except asyncio.TimeoutError as exc:
+                        if self._session is None:
+                            observation.finish(outcome="cancelled")
+                            raise ProviderClosedError("ElevenLabs provider closed during synthesis") from exc
                         observation.finish(exc)
                         lease.report_failure(retryable=True)
                         last_err = exc
@@ -298,6 +314,9 @@ class ElevenLabsTTSProvider(TTSProvider):
                             continue
                         raise RuntimeError("ElevenLabs TTS request timeout") from exc
                     except aiohttp.ClientError as exc:
+                        if self._session is None:  # we closed it: no failure, no retry warning
+                            observation.finish(outcome="cancelled")
+                            raise ProviderClosedError("ElevenLabs provider closed during synthesis") from exc
                         observation.finish(exc)
                         lease.report_failure(retryable=True)
                         if chunks_yielded:
@@ -383,9 +402,11 @@ class ElevenLabsTTSProvider(TTSProvider):
         return [voice.model_dump() for voice in voices]
 
     async def cleanup(self) -> None:
-        if self._session:
-            await self._session.close()
-            self._session = None
+        # Take the session out FIRST: closing it wakes in-flight requests with a
+        # disconnect error, and they must already see the provider as closed.
+        session, self._session = self._session, None
+        if session is not None:
+            await session.close()
 
     @property
     def name(self) -> str:

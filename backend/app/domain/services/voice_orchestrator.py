@@ -1020,6 +1020,12 @@ class VoiceOrchestrator:
                 # Gateway/provider cleanup and active-session removal still apply.
                 logger.warning("voice_pipeline_cancel_failed call=%s", call_id[:8], exc_info=True)
 
+        try:  # stop the ringing-time opener task BEFORE its provider is closed below
+            from app.domain.services.voice_pipeline.premade_opener import stop_premade_for_ended_call
+            await stop_premade_for_ended_call(session)
+        except Exception:
+            logger.debug("premade_opener_stop_failed call=%s", call_id[:8], exc_info=True)
+
         # Realtime teardown (idempotent): cancelling pipeline_task already runs
         # bridge.run()'s finally→stop(), which closes the speech-to-speech
         # socket. Call stop() again explicitly so a session torn down WITHOUT a

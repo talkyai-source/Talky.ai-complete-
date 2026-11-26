@@ -272,22 +272,21 @@ async def test_the_background_bound_is_8_seconds_and_a_stuck_provider_fails_calm
 
 
 async def test_a_session_ended_early_leaves_one_calm_info_line(monkeypatch, caplog):
+    # 26 Nov 2026: the contract changed. This test used to fake a closed provider as
+    # a ConnectionError and accept reason=error:ConnectionError (the real provider
+    # never raises that). A call that ends while its opener is still being made now
+    # stops the task BEFORE the provider closes: one INFO line, nothing else.
     caplog.set_level(logging.INFO)
-    provider = Provider()
-    voice, *_ = make_voice(monkeypatch, provider=provider)
-    real = provider.stream_synthesize
-
-    async def closed(text, **kw):
-        if provider.texts:
-            raise ConnectionError("provider closed under the task")
-        async for c in real(text, **kw):
-            yield c
-
-    provider.stream_synthesize = closed
-    await _ring(voice)                                         # nothing escapes
-    lines = [r for r in caplog.records if r.name == LOGGER and "opener_premade_failed" in r.getMessage()]
-    assert len(lines) == 1 and lines[0].levelno == logging.INFO
-    assert "error:ConnectionError" in lines[0].getMessage()
+    voice, *_ = make_voice(monkeypatch, provider=Provider(delay=30, delay_on=2))
+    await prepare_pre_originate_greeting(voice, "user")
+    await premade_opener.stop_premade_for_ended_call(voice)
+    assert voice._premade_opener_task.done()
+    mine = [r for r in caplog.records if r.name == LOGGER]
+    assert "opener_premade_failed" not in " ".join(r.getMessage() for r in mine)
+    stopped = [r for r in mine if "opener_premade_stopped" in r.getMessage()]
+    assert len(stopped) == 1 and stopped[0].levelno == logging.INFO
+    assert "reason=call_ended" in stopped[0].getMessage()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 async def test_a_cancelled_background_task_ends_quietly_and_the_caller_is_not_hurt(monkeypatch, caplog):
