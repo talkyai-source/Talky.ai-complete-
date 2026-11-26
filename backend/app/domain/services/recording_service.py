@@ -39,6 +39,7 @@ import logging
 import math
 import os
 import secrets
+import stat
 import struct
 import time
 import wave
@@ -564,22 +565,37 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
             if not os.path.isdir(directory):
                 raise
 
-    # The temporary file is always new (mode 0600, owned by the writing process)
-    # and is renamed over the destination, so an existing file is REPLACED by
-    # a new file with mode 0600 and this process as owner; its old mode and
-    # owner do not carry over. Trusted, non-writable storage parents are still needed:
+    # The temporary file is created with mode 0600 and renamed over the
+    # destination. An EXISTING destination keeps the mode and owner its operator
+    # set (they are carried over to the new file before the rename); only a
+    # newly created recording gets 0600. Trusted, non-writable storage parents are still needed:
     # this is not a descriptor-relative traversal against hostile directory swaps.
     # Write a temporary file of its own in the SAME (checked) directory, flush it
     # to disk, then replace the destination: at every moment the destination is
     # whole-old or whole-new, never empty or half-written.
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        existing = os.stat(path, follow_symlinks=False)
+    except OSError:
+        existing = None
     tmp_path = f"{path}.{secrets.token_hex(6)}.tmp"
     descriptor = os.open(tmp_path, flags, 0o600)
     try:
         with os.fdopen(descriptor, "wb") as fh:
             fh.write(wav_data)
             fh.flush()
+            if existing is not None and stat.S_ISREG(existing.st_mode):
+                if hasattr(os, "fchown"):
+                    try:
+                        os.fchown(fh.fileno(), existing.st_uid, existing.st_gid)
+                    except OSError:
+                        pass  # not permitted: the file stays ours
+                kept_mode = stat.S_IMODE(existing.st_mode)
+                if hasattr(os, "fchmod"):
+                    os.fchmod(fh.fileno(), kept_mode)
+                else:  # Windows: by name
+                    os.chmod(tmp_path, kept_mode)
             os.fsync(fh.fileno())
         os.replace(tmp_path, path)
     except BaseException:

@@ -272,14 +272,16 @@ def test_h3_the_old_bytes_stay_whole_while_the_new_ones_are_being_written(tmp_pa
     real_fsync = os.fsync
 
     def spy_fsync(fd):
-        # at the moment the new data is being flushed, the destination is whole-old
-        seen.append(open(dest, "rb").read() == old)
+        seen.append(open(dest, "rb").read())
         return real_fsync(fd)
 
     monkeypatch.setattr(os, "fsync", spy_fsync)
     new = mk_wav(1.0)
     rs._write_wav_file(root, dest, new)
-    assert seen and all(seen)
+    # The first flush is the new data's own file: the destination is still whole-old.
+    # On Linux a second flush follows the rename (the directory): whole-new by then.
+    assert seen and seen[0] == old
+    assert all(content in (old, new) for content in seen)
     assert open(dest, "rb").read() == new
 
 
