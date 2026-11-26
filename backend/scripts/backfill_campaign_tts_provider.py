@@ -99,6 +99,15 @@ async def run(args: Any) -> int:
             sql += " AND tenant_id = $1::uuid"
             params.append(args.tenant)
         rows = [dict(r) for r in await conn.fetch(sql, *params)]
+        if not rows and not getattr(args, "allow_empty", False):
+            print(
+                "ERROR: 0 rows were read from campaigns. This usually means the\n"
+                "  connection's role cannot see the table (row security), not that\n"
+                "  no campaign needs a pinned provider. Nothing was changed.\n"
+                "  If there are genuinely none, re-run with --allow-empty.",
+                file=sys.stderr,
+            )
+            return 2
         tenant_providers: dict[str, Optional[str]] = {}
         if rows:
             cfg = await conn.fetch(
@@ -148,6 +157,7 @@ def main() -> int:
     )
     parser.add_argument("--apply", action="store_true", help="Actually write. Without this the script only reports.")
     parser.add_argument("--tenant", default=None, help="Restrict to one tenant_id (UUID).")
+    parser.add_argument("--allow-empty", action="store_true", help="Treat reading 0 rows as success (genuinely nothing to repair).")
     parser.add_argument("--limit", type=int, default=100, help="Rows to print (default 100).")
     return asyncio.run(run(parser.parse_args()))
 
