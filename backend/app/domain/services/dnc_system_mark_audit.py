@@ -54,10 +54,13 @@ async def write_mark_audit(pool: Any, *, tenant_id: str, entry_id: str, actor_ro
         # CHAIN_WAIT_MS per try), as lock_transaction does but with a short
         # timeout. On failure the transaction ends and the connection goes back,
         # so no savepoint is needed.
+        # The transaction's own lock limit is put back afterwards ("TO DEFAULT"
+        # would leave the rest of this transaction with no limit at all).
         try:
+            own_limit = await conn.fetchval("SELECT current_setting('lock_timeout')")
             await conn.fetchval("SELECT set_config('lock_timeout', $1, true)", f"{int(CHAIN_WAIT_MS)}ms")
             await conn.fetchval("SELECT pg_advisory_xact_lock($1::bigint)", _CHAIN_LOCK_KEY)
-            await conn.execute("SET LOCAL lock_timeout TO DEFAULT")
+            await conn.fetchval("SELECT set_config('lock_timeout', $1, true)", own_limit)
         except asyncpg.LockNotAvailableError as exc:
             raise ChainBusy() from exc
         await audit.lock_transaction(conn)  # already ours: returns at once
