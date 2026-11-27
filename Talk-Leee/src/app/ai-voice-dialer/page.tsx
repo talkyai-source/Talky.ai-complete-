@@ -3,12 +3,11 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
-import { LocalAmount } from "@/components/pricing/local-price";
 
 export const metadata: Metadata = {
-  title: "AI Voice Dialer That Actually Books Meetings",
+  title: "AI Voice Dialer | Talk-Lee AI",
   description:
-    "Looking for a way to automate outbound calls? Our AI Voice Dialer dials, qualifies, and books leads while your team closes. Book a Demo!",
+    "Run outbound calls from a contact list, ask qualifying questions and review the results in Call History.",
 };
 
 export default function AIVoiceDialerPage() {
@@ -49,54 +48,54 @@ export default function AIVoiceDialerPage() {
   ];
 
   const costStats = [
-    { value: "40%", label: "Rep time lost to dialing, not selling." },
-    { value: "300", label: "Daily call ceiling, dialing manually." },
-    { value: <LocalAmount usd={0} usdText="$0" />, label: "Return on missed dials and follow-ups." },
+    { value: "Contacts", label: "Choose which contacts to call." },
+    { value: "Calling hours", label: "Set a calling window for your campaign." },
+    { value: "Call outcomes", label: "Review the results in Call History." },
   ];
 
   // QA F1-04: no unmeasured numbers or absolutes.
   const whatChanges = [
-    "More dialing capacity without more reps",
+    "Calls from your contact list",
     "Leads qualified on the call",
     "Follow-ups you can track",
-    "Real-time analytics on what’s working",
+    "Call outcomes by campaign",
   ];
 
   const howItWorks = [
     {
       title: "Connect Your List",
-      description: "Upload a spreadsheet or sync your CRM. Your contact list is ready for calling within minutes.",
+      description: "Upload a CSV file, paste contact numbers or add a contact by hand.",
     },
     {
       title: "Set Your Campaign",
       description:
-        "Define your call flow, goals, and qualifying questions; this teaches the AI what a “qualified lead” looks like.",
+        "Choose an opening objective and the details you want the agent to collect.",
     },
     {
       title: "AI Dials Automatically",
       description:
-        "The dialer works through your list in sequence, handling voicemail, no-answers, and callbacks on its own.",
+        "Start the campaign to call contacts during the calling hours you set.",
     },
     {
-      title: "AI Handles & Records",
+      title: "Review Each Call",
       description:
-        "Every call runs live and logs its outcome instantly — qualified, follow-up, or not interested — so your team always knows where things stand.",
+        "Open Call History to see the outcome and review the lead details.",
     },
   ];
 
   const audiences = [
     { title: "Sales Teams", description: "Automate prospecting and lead qualification." },
-    { title: "Marketing Agencies", description: "Run outbound campaigns for multiple clients." },
+    { title: "Marketing Agencies", description: "Organize outreach by campaign." },
     { title: "Lead Gen Companies", description: "Automate lead outreach and qualification." },
-    { title: "Real Estate", description: "Contact leads, qualify prospects, schedule appointments." },
-    { title: "Service Businesses", description: "Handle inquiries, follow-ups, and appointment calls." },
+    { title: "Real Estate", description: "Ask buyers what they are looking for and collect their answers." },
+    { title: "Service Businesses", description: "Ask prospects which service they need and how your team can reach them." },
   ];
 
   const features = [
     {
       label: "Dialing",
       title: "Automated Voice Dialing",
-      description: "Automatically dials large contact lists and removes manual dialing entirely.",
+      description: "Place outbound calls from a campaign contact list.",
     },
     {
       label: "Conversation",
@@ -106,7 +105,7 @@ export default function AIVoiceDialerPage() {
     {
       label: "Scale",
       title: "AI Outbound Calling",
-      description: "Run outbound campaigns at scale and reach more prospects without more headcount.",
+      description: "Set calling hours for each outbound campaign.",
     },
     {
       label: "Prospecting",
@@ -116,58 +115,58 @@ export default function AIVoiceDialerPage() {
     {
       label: "Timing",
       title: "Call Scheduling & Follow-Ups",
-      description: "Schedules callbacks and automates follow-up calls without manual tracking.",
+      description: "When you enable callbacks for the campaign, the agent can agree a follow-up time with the contact.",
     },
     {
       label: "Insight",
-      title: "Call Recording & Analytics",
-      description: "Tracks calls, monitors outcomes, and analyzes campaign performance.",
+      title: "Call History",
+      description: "Review call outcomes and notes by campaign.",
     },
   ];
 
   const comparisonRows = [
     { traditional: "Manual dialing", ai: "Automated dialing" },
-    { traditional: "One call at a time", ai: "Multiple calls at scale" },
+    { traditional: "One call at a time", ai: "Campaign calling limits" },
     { traditional: "Requires sales reps", ai: "AI handles conversations" },
-    { traditional: "Manual follow-ups", ai: "Automated follow-ups" },
-    { traditional: "Limited calling capacity", ai: "Scalable outbound campaigns" },
+    { traditional: "Manual follow-ups", ai: "Callback scheduling when enabled" },
+    { traditional: "Limited calling capacity", ai: "Configured calling hours" },
   ];
 
   const benefits = [
-    { title: "Increase calling capacity", description: "Reach more contacts, without more headcount." },
-    { title: "Reduce manual dialing", description: "Cut the hours lost to pressing numbers." },
-    { title: "Qualify leads faster", description: "Screening happens live, on the call." },
-    { title: "Improve follow-up speed", description: "Callbacks always happen on time." },
-    { title: "Scale cold calling campaigns", description: "Grow volume, not costs." },
-    { title: "Capture more sales opportunities", description: "Fewer leads lost, more deals closed." },
+    { title: "Call a list", description: "Start an outbound campaign for the contacts you select." },
+    { title: "Reduce manual dialing", description: "The dialer places calls from the campaign list." },
+    { title: "Qualify leads", description: "Choose which questions the agent asks during the call." },
+    { title: "Arrange a callback", description: "Enable callbacks in the campaign brief to agree a time with a contact." },
+    { title: "Set calling hours", description: "Choose when your outbound campaign can call." },
+    { title: "Review responses", description: "Check the lead details and add notes in Call History." },
   ];
 
   const riskFreeSteps = [
-    "Start with a single campaign — no long-term contract required.",
-    "Review real call data and outcomes before scaling up spend or volume.",
-    "Cancel anytime — no penalty, no lock-in, no awkward conversation.",
+    "Choose a contact list for your first campaign.",
+    "Set the opening objective and review the campaign brief.",
+    "After the calls, review the outcomes in Call History.",
   ];
 
   const faqs = [
     {
-      question: "Will this sound robotic to my prospects?",
+      question: "Will prospects know who is calling?",
       answer:
-        "No. The AI handles a natural, back-and-forth conversation, not a script read aloud word for word. Most prospects don’t realize they’re not speaking with a human until they’re told. By then, they’ve already answered the questions that matter.",
+        "The agent introduces itself as an AI assistant and explains why it is calling.",
     },
     {
-      question: "What if it books the wrong leads?",
+      question: "How do I choose what to ask a lead?",
       answer:
-        "You define the qualifying questions and criteria before the first call goes out. Nothing gets passed to your team blind — only contacts that meet the bar you set get forwarded as a qualified opportunity.",
+        "Set the objective and required lead fields in your campaign brief. Review the answers in Call History.",
     },
     {
       question: "Is this going to replace my sales team?",
       answer:
-        "No. It replaces the dialing, not the closing. Your reps stop spending their day on cold numbers and start spending it on conversations that are already warm.",
+        "The agent can ask the first questions. Your reps can review the answers and decide who needs a follow-up.",
     },
     {
-      question: "How fast can we actually start?",
+      question: "What do I need before starting a campaign?",
       answer:
-        "Most campaigns are live within 48 hours of setup. Connect your contact list, define your call flow, and the AI Voice Dialer starts working through it the same week.",
+        "Add the contacts you have permission to call, connect a phone line and review the campaign’s readiness checks.",
     },
     {
       question: "Can an AI Voice Dialer make outbound calls automatically?",
@@ -177,7 +176,7 @@ export default function AIVoiceDialerPage() {
     {
       question: "Can AI Voice Dialers be used for cold calling?",
       answer:
-        "Yes. AI cold calling introduces your offer, asks qualifying questions, and passes interested prospects to your sales team.",
+        "It can introduce an offer and ask qualifying questions on calls to contacts you have permission to call.",
     },
     {
       question: "What is the difference between an AI phone dialer and an auto dialer?",
@@ -187,7 +186,7 @@ export default function AIVoiceDialerPage() {
     {
       question: "Can AI calling software qualify leads?",
       answer:
-        "Yes — it asks qualifying questions during the call and scores or routes leads based on the responses.",
+        "Yes. Choose the lead details to collect and review the answers after the call.",
     },
   ];
 
@@ -203,18 +202,17 @@ export default function AIVoiceDialerPage() {
             AI Calling Software for automated outbound calling.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Stop dialing one number at a time. Our AI Voice Dialer works through your contact list, holds real conversations,
-            qualifies leads, and books the ones worth your time &mdash; while your team focuses on closing.
+            The dialer calls contacts on your campaign list and asks the qualifying questions you choose. Your team can review the answers after each call.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Start Calling with AI
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                See a Live Call
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -250,30 +248,23 @@ export default function AIVoiceDialerPage() {
             you&rsquo;ve defined.
           </p>
           <p className={bodyClassName}>
-            For sales and support teams, this means more numbers reached, more conversations had, and more qualified opportunities
-            handed off without adding headcount to the phones.
+            Your team can review the outcome of each call and decide which contacts to follow up with.
           </p>
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>The Real Cost</p>
+          <p className={eyebrowClassName}>Campaign Setup</p>
           <h2 className={`mt-3 ${headingClassName}`}>
-            Every hour your reps spend dialing is an hour they&rsquo;re not selling
+            Choose who to call and when
           </h2>
           <p className={bodyClassName}>
-            Manual dialing isn&rsquo;t just slow &mdash; it&rsquo;s expensive in ways most sales teams never measure.
-            You&rsquo;re paying a skilled closer&rsquo;s salary for time spent listening to rings, leaving voicemails, and logging
-            outcomes by hand.
+            Start with the list of contacts who have given you permission to call.
           </p>
           <p className={bodyClassName}>
-            <span className="font-semibold text-primary dark:text-foreground">Do the math:</span> if a rep costs{" "}
-            <LocalAmount usd={60000} usdText="$60,000" /> a year and spends 40% of their day dialing instead of closing,
-            that&rsquo;s roughly <LocalAmount usd={24000} usdText="$24,000" /> annually just to press phone
-            numbers. Across a five-person team, manual dialing alone costs you six figures before a single deal closes.
+            <span className="font-semibold text-primary dark:text-foreground">Plan the conversation.</span> Choose what the agent should ask and which answers it needs to collect.
           </p>
           <p className={bodyClassName}>
-            There&rsquo;s a hidden cost too &mdash; reps who spend their day on repetitive dialing burn out faster and leave
-            sooner, turning a productivity problem into a recruiting one.
+            When the campaign runs, open Call History to review its progress.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {costStats.map((stat) => (
@@ -286,7 +277,7 @@ export default function AIVoiceDialerPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See AI in Action
+                Get Started
               </Link>
             </Button>
           </div>
@@ -294,11 +285,9 @@ export default function AIVoiceDialerPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>What Changes</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Built to fill your pipeline. Not just place calls.</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>What happens when someone answers?</h2>
           <p className={bodyClassName}>
-            The AI works through your contact list, and when someone answers, it doesn&rsquo;t just connect the call &mdash; it
-            talks. It asks your qualifying questions, handles objections, and only sends your team the conversations that are
-            actually worth their time.
+            The agent introduces itself as an AI assistant, explains the reason for the call and asks the questions in your campaign brief.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {whatChanges.map((item) => (
@@ -308,9 +297,7 @@ export default function AIVoiceDialerPage() {
             ))}
           </div>
           <p className={bodyClassName}>
-            No more cold dial lists. No more chasing voicemail callbacks. Campaigns finish in days instead of weeks, follow-ups
-            happen without anyone remembering to make them, and every outcome is logged &mdash; so your next move is a decision,
-            not a guess.
+            If a contact asks for a call later, the agent can schedule a callback when that action is enabled for the campaign.
           </p>
         </section>
 
@@ -328,7 +315,7 @@ export default function AIVoiceDialerPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Launch Your First Campaign
+                Get Started
               </Link>
             </Button>
           </div>
@@ -338,7 +325,7 @@ export default function AIVoiceDialerPage() {
           <p className={eyebrowClassName}>Who It&rsquo;s For</p>
           <h2 className={`mt-3 ${headingClassName}`}>Who can use an AI Voice Dialer?</h2>
           <p className={bodyClassName}>
-            Built for teams that want to call more, qualify faster, and grow without adding more reps.
+            Teams can use the campaign brief to choose different opening questions for different contact lists.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
             {audiences.map((audience) => (
@@ -351,7 +338,7 @@ export default function AIVoiceDialerPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Stop Dialing. Start Closing.
+                Get Started
               </Link>
             </Button>
           </div>
@@ -374,7 +361,7 @@ export default function AIVoiceDialerPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                Still Curious? See It Live
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -411,8 +398,7 @@ export default function AIVoiceDialerPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Benefits of Using an AI Voice Dialer</h2>
           <p className={bodyClassName}>
-            Turn outbound calling from a manual grind into an automated engine that fills your pipeline while your team focuses on
-            closing.
+            Choose the list, questions and calling hours for each campaign. Your team can then review the contacts it wants to call again.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -427,11 +413,10 @@ export default function AIVoiceDialerPage() {
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Zero Risk to Start</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Try it before you commit to it</h2>
+          <p className={eyebrowClassName}>Your First Campaign</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Start with one contact list</h2>
           <p className={bodyClassName}>
-            We don&rsquo;t ask you to overhaul your outbound process on faith. Start small, see the data, and scale only once the
-            results are in front of you.
+            Build the brief around one question you want your contacts to answer.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ol className="space-y-3 list-decimal pl-5 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -455,7 +440,7 @@ export default function AIVoiceDialerPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                Still Have Questions? Talk to Us &rarr;
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -464,25 +449,24 @@ export default function AIVoiceDialerPage() {
         <section className="mt-14">
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <p className={eyebrowClassName}>Get Started</p>
-            <h2 className={`mt-3 ${headingClassName}`}>Your competitors are already automating outbound. Are you?</h2>
+            <h2 className={`mt-3 ${headingClassName}`}>Ready to set up your first campaign?</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Every day you dial manually is a day they&rsquo;re reaching more prospects, faster, at a lower cost per lead. The
-              gap only gets wider the longer manual dialing stays the default.
+              Create an account to set up your contact list and campaign brief, or book a demo to see how outbound calling works.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
                 <Link href="/auth/register">
-                  Start Your AI Calling Campaign Now
+                  Get Started
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/book-a-demo">
-                  Talk to a Growth Strategist
+                  Book a Demo
                 </Link>
               </Button>
             </div>
             <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-              No contracts. Live in 48 hours. Cancel anytime.
+              <Link href="/pricing">View Pricing</Link>
             </p>
           </div>
         </section>
