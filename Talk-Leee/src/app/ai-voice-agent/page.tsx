@@ -6,9 +6,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "AI Voice Agent - Real-Time Call Automation | Talk-Lee AI",
+  title: "AI Voice Agents | Talk-Lee AI",
   description:
-    "Get an AI voice agent that listens, understands, and takes action. Automate calls and customer workflows with Talk-Lee AI. Start today.",
+    "See how a voice agent answers inbound calls, asks qualifying questions and records what callers need your team to review.",
 };
 
 export default function AIVoiceAgentPage() {
@@ -43,16 +43,16 @@ export default function AIVoiceAgentPage() {
     "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
 
   const capabilityPills = [
-    "24/7 Availability",
+    "Call History",
     "Natural Conversations",
     "Inbound & Outbound",
-    "Business Automation",
+    "Campaign Actions",
   ];
 
   const becomes = [
     "A question can become an answer.",
     "A lead can become a qualified opportunity.",
-    "A call can become an appointment.",
+    "A caller can leave a request for your team.",
     "A conversation can become an action.",
   ];
 
@@ -64,12 +64,12 @@ export default function AIVoiceAgentPage() {
     "Maintain context",
     "Ask follow-up questions",
     "Answer with business knowledge",
-    "Collect & verify information",
+    "Collect contact details",
     "Qualify leads",
-    "Schedule appointments",
+    "Take a callback request",
     "Handle customer requests",
     "Follow business rules",
-    "Trigger workflows",
+    "Use approved campaign actions",
     "Record requests for team review",
   ];
 
@@ -88,17 +88,17 @@ export default function AIVoiceAgentPage() {
     },
     {
       title: "Complete the Task",
-      description: "Follow your workflow — qualifying, booking, collecting, or routing.",
+      description: "Use the campaign brief to ask qualifying questions and collect the details your team needs.",
     },
     {
       title: "Collects requests",
-      description: "Records requests for your team to review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
+      description: "Save the caller’s request for your team to review in Call History.",
     },
   ];
 
   const callerQuotes = [
-    "“I need to speak with someone about getting an appointment sometime next week.”",
-    "“Is there anything available Thursday afternoon?”",
+    "“Could someone call me back to talk about my order?”",
+    "“Who can I speak to about the service I need?”",
   ];
 
   const understandingTraits = [
@@ -111,38 +111,38 @@ export default function AIVoiceAgentPage() {
 
   const talkToTask = [
     {
-      title: "Booking",
+      title: "Callback requests",
       description:
-        "When a customer wants to book: the AI asks the necessary questions, checks availability, and guides them through booking.",
+        "The agent can ask why a caller wants a callback and collect the details for your team.",
     },
     {
       title: "Sales",
       description:
-        "When a prospect wants to learn more: the AI answers questions, qualifies the opportunity, and captures what your sales team needs.",
+        "Ask a prospect about their requirements and capture the answers for your sales team.",
     },
     {
       title: "Support",
       description:
-        "When a customer needs support: the AI identifies the issue, provides information, and escalates when necessary.",
+        "Answer routine questions using the campaign knowledge base and record requests for help.",
     },
     {
       title: "Follow-Up",
-      description: "When a lead needs follow-up: the AI initiates outbound contact and continues the workflow.",
+      description: "On an outbound campaign, ask contacts whether they would like a follow-up call.",
     },
     {
       title: "Recruitment",
-      description: "When a candidate needs to schedule: the AI collects information and coordinates the next step.",
+      description: "Ask candidates about their experience and capture their answers for a recruiter to review.",
     },
     {
       title: "Workflow",
-      description: "The phone call becomes part of your business workflow — not a separate manual task.",
+      description: "Choose the details you want the agent to collect during each conversation.",
     },
   ];
 
   const industries = [
     {
       title: "Healthcare",
-      description: "Routine patient calls, appointment scheduling, reminders, and general inquiries.",
+      description: "Answer general questions about the practice using its knowledge base.",
     },
     {
       title: "Retail & E-commerce",
@@ -150,7 +150,7 @@ export default function AIVoiceAgentPage() {
     },
     {
       title: "Real Estate",
-      description: "Collect buyer or renter requirements, qualify prospects, and schedule viewings.",
+      description: "Ask buyers or renters what they need and record their requests for a viewing.",
     },
     {
       title: "Sales & Marketing",
@@ -158,24 +158,24 @@ export default function AIVoiceAgentPage() {
     },
     {
       title: "HR & Recruitment",
-      description: "Candidate outreach, screening, information collection, and interview scheduling.",
+      description: "Ask screening questions and collect a candidate’s preferred contact details.",
     },
     {
       title: "Small Business",
       description:
-        "An always-available assistant that answers calls, books appointments, and reduces phone work.",
+        "Answer routine questions and record requests for the team to review.",
     },
   ];
 
   const callDirections = [
     {
       label: "Inbound",
-      title: "Never miss an inbound opportunity",
+      title: "Answer incoming calls",
       description: "When someone calls your business, timing matters. A missed call can become a lost lead.",
       steps: [
         { name: "Welcome", detail: "Greets callers and understands why they’re calling." },
         { name: "Answer", detail: "Handles questions using your business knowledge." },
-        { name: "Qualify", detail: "Identifies needs, qualifies opportunities, and books appointments." },
+        { name: "Qualify", detail: "Ask what the caller needs and collect the details your team requests." },
         { name: "Record", detail: "Captures a caller's request for your team to review." },
       ],
     },
@@ -187,7 +187,7 @@ export default function AIVoiceAgentPage() {
       steps: [
         { name: "Follow Up", detail: "Reconnects with leads after an inquiry or interaction." },
         { name: "Reach Out", detail: "Handles sales and prospecting conversations at scale." },
-        { name: "Remind", detail: "Makes appointment, service, and payment reminders." },
+        { name: "Ask", detail: "Collect the lead details you selected for the campaign." },
         { name: "Reactivate", detail: "Re-engages previous customers and inactive leads." },
       ],
     },
@@ -196,12 +196,12 @@ export default function AIVoiceAgentPage() {
   const outboundPills = [
     "Lead Follow-Ups",
     "Sales Outreach",
-    "Appointment Reminders",
+    "Callback Requests",
     "Customer Reactivation",
-    "Surveys",
-    "Notifications",
+    "Campaign Questions",
+    "Contact Details",
     "Lead Qualification",
-    "Service Reminders",
+    "Call Outcomes",
   ];
 
   const workingTogether = [
@@ -211,8 +211,8 @@ export default function AIVoiceAgentPage() {
         "Routine questions",
         "Initial inquiries",
         "Lead qualification",
-        "Appointment requests",
-        "Reminders",
+        "Requests for a callback",
+        "Contact details",
         "Repetitive follow-ups",
       ],
     },
@@ -229,14 +229,14 @@ export default function AIVoiceAgentPage() {
   ];
 
   const transcript = [
-    { speaker: "Customer", line: "Hi, I’d like to book an appointment for next week." },
-    { speaker: "AI", line: "Absolutely. What day works best for you?" },
-    { speaker: "Customer", line: "Thursday afternoon." },
-    { speaker: "AI", line: "I have 2:30 PM and 4:00 PM available. Which works better?" },
-    { speaker: "Customer", line: "4:00 PM." },
+    { speaker: "Customer", line: "Hello, is this the right number to ask about your services?" },
+    { speaker: "AI", line: "Yes, I’m an AI assistant. Which service are you interested in?" },
+    { speaker: "Customer", line: "We need help calling people who asked us for a quote." },
+    { speaker: "AI", line: "What would you like the team to know about those calls?" },
+    { speaker: "Customer", line: "We want to ask each person which service they need." },
     {
       speaker: "AI",
-      line: "Perfect. You’re booked for Thursday at 4:00 PM. You’ll receive a confirmation shortly. Is there anything else I can help with?",
+      line: "Thank you. I’ll include that in your request. Is there anything else you’d like the team to know?",
     },
     { speaker: "Customer", line: "No, that’s all. Thank you." },
     { speaker: "AI", line: "You’re welcome. Have a great day!" },
@@ -248,7 +248,7 @@ export default function AIVoiceAgentPage() {
     "Real-Time Interaction",
     "Inbound & Outbound",
     "Automated Actions",
-    "24/7 Availability",
+    "Calling Hours",
     "Scalable Call Handling",
     "Requests for Human Review",
     "Flexible Use Cases",
@@ -258,37 +258,37 @@ export default function AIVoiceAgentPage() {
     {
       title: "Discover",
       description:
-        "We learn how your business works, who your customers are, which calls you handle, and what you want to automate.",
+        "Decide what the agent should learn during the call and who it should be speaking with.",
     },
     {
       title: "Design",
       description:
-        "We map the conversation flow, define how the AI should respond, and plan the actions it should take at each stage.",
+        "Write the opening objective and choose the actions your campaign permits.",
     },
     {
-      title: "Train",
-      description: "We equip your AI with your business knowledge, services, FAQs, policies, terminology, and workflows.",
+      title: "Add knowledge",
+      description: "Add your business information and answers to common questions to the knowledge base.",
     },
     {
-      title: "Integrate",
+      title: "Choose actions",
       description:
-        "We connect your AI agent with the tools and systems it needs to take action, capture information, and move conversations forward.",
+        "Select the actions your agent can use, such as scheduling a callback.",
     },
     {
       title: "Launch",
-      description: "We test the experience, refine the workflows, and put your AI voice agent into action.",
+      description: "Test your campaign and review its readiness checks before you start calling.",
     },
     {
       title: "Optimize",
       description:
-        "We review how the agent performs, identify opportunities for improvement, and continuously refine the experience as your business evolves.",
+        "Review call outcomes and refine the campaign questions for your next calls.",
     },
   ];
 
   const askYourself = [
     "How many calls does your team answer every day?",
     "How many leads don’t receive immediate follow-up?",
-    "How much time is spent scheduling appointments?",
+    "Which details do you need before returning a customer’s call?",
     "How many customers call with the same questions?",
     "How many repetitive calls could be handled automatically?",
   ];
@@ -297,7 +297,7 @@ export default function AIVoiceAgentPage() {
     "Inquiry",
     "Qualification",
     "Follow-Up",
-    "Appointment",
+    "Callback request",
     "Review",
     "Customer Support",
   ];
@@ -316,12 +316,12 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can an AI voice agent make outbound calls?",
       answer:
-        "Yes. It supports outbound workflows like lead follow-ups, reminders, reactivation, surveys, notifications, and qualification.",
+        "Yes. Set up an outbound campaign to contact leads, ask qualifying questions and collect their answers.",
     },
     {
       question: "Can an AI voice agent answer incoming calls?",
       answer:
-        "It can answer incoming calls, use approved information, collect caller details, and use enabled scheduling actions. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
+        "It can answer incoming calls using the campaign knowledge base and record what the caller needs your team to review.",
     },
     {
       question: "Can AI voice agents handle sales conversations?",
@@ -329,23 +329,23 @@ export default function AIVoiceAgentPage() {
         "Yes. A sales-focused agent can engage prospects, identify requirements, qualify leads, and move opportunities forward.",
     },
     {
-      question: "Can an AI voice agent book appointments?",
+      question: "Can the agent arrange a callback?",
       answer:
-        "Yes. When connected to your scheduling workflow, it can find available times, book, confirm, and manage changes.",
+        "When callbacks are enabled for a campaign, the agent can ask for a time, read it back and request the callback.",
     },
     {
-      question: "Can the AI transfer calls to a human?",
+      question: "When can a caller speak with someone on my team?",
       answer:
-        "The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign. Otherwise it can record a request for your team to review; this does not arrange a callback.",
+        "An incoming call can request a transfer when live transfer is available, you have enabled it for the campaign and you have listed an approved destination on a two-way phone line. An outbound call can request a transfer when transfer is an approved campaign action and the campaign lists the destination number. A request does not guarantee an answer.",
     },
     {
       question: "Can I customize the AI’s voice and behavior?",
-      answer: "Yes — the AI experience is configured around your business requirements.",
+      answer: "Yes. Choose a voice, write your campaign brief and select the information the agent should collect.",
     },
     {
       question: "How much do AI voice agent services cost?",
       answer:
-        "Pricing depends on call volume, functionality, integrations, customization, and workflow complexity.",
+        <Link href="/pricing">View Pricing</Link>,
     },
   ];
 
@@ -364,9 +364,7 @@ export default function AIVoiceAgentPage() {
             Intelligent AI voice agents for conversations that move your business forward.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI gives your business an intelligent voice agent that can listen, understand, respond, and take action
-            in real time &mdash; answering inbound calls, qualifying leads, booking appointments, following up with
-            prospects, and handling customer inquiries around the clock.
+            Talk-Lee AI can answer inbound calls and ask qualifying questions on outbound campaigns. Set the information it can use and the details it should collect.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -376,7 +374,7 @@ export default function AIVoiceAgentPage() {
             </Button>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Build Your AI Agent
+                Get Started
               </Link>
             </Button>
           </div>
@@ -393,8 +391,7 @@ export default function AIVoiceAgentPage() {
           <h2 className={headingClassName}>Every Unanswered Call Is a Missed Opportunity</h2>
           <h3 className={`mt-3 ${subHeadingClassName}`}>Your customers are already calling. Let AI answer.</h3>
           <p className={bodyClassName}>
-            A customer may be looking for information. A prospect may be ready to buy. Someone may want to schedule an
-            appointment. A candidate may be waiting for a response. But your team can&rsquo;t always answer every call.
+            A customer may have a question about a service. A prospect may want to discuss a quote. The agent can ask what they need and collect details for your team.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -404,14 +401,12 @@ export default function AIVoiceAgentPage() {
             </ul>
           </div>
           <p className={bodyClassName}>
-            Stay available with an AI-powered voice agent that handles conversations when your team is busy, after business
-            hours, or when call volumes increase. Instead of simply answering the phone, your AI understands why someone is
-            calling and helps them reach the right outcome.
+            Configure how your inbound campaign should handle calls during business hours and after closing.
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Stop Losing Calls to Voicemail &rarr;
+                Get Started
               </Link>
             </Button>
           </div>
@@ -505,12 +500,12 @@ export default function AIVoiceAgentPage() {
             ))}
           </div>
           <p className="mt-8 text-center text-base sm:text-lg font-semibold text-primary dark:text-foreground">
-            Tell us what happens on your calls. We&rsquo;ll show you what AI can automate.
+            Choose the questions and approved actions in your campaign brief.
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Turn Your Calls Into Actions &rarr;
+                Get Started
               </Link>
             </Button>
           </div>
@@ -532,7 +527,7 @@ export default function AIVoiceAgentPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                Find Out How It Fits Your Industry
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -600,12 +595,12 @@ export default function AIVoiceAgentPage() {
           </div>
           <h3 className={`mt-10 ${subHeadingClassName}`}>The result?</h3>
           <p className={`${bodyClassName} font-semibold text-primary dark:text-foreground`}>
-            Appointment booked. The customer helped. No employee needed to step away from their work.
+            The caller has described the service they need. Your team can review the request in Call History and decide how to follow up.
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                Hear Your AI in Action &rarr;
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -614,8 +609,8 @@ export default function AIVoiceAgentPage() {
               <div className={imageClipClassName}>
               <div className="relative aspect-[1536/1024] w-full">
                 <Image
-                  src="/images/ai-voice-agent/see-it-in-action.png"
-                  alt="See it in action: what an AI conversation can look like — a customer books an appointment for Thursday at 4:00 PM with the AI agent, alongside the outcome summary showing the appointment booked and synced automatically without the team stopping their work."
+                  src="/docs/outbound-campaigns-07-approved-actions.webp"
+                  alt="Campaign settings showing the actions an agent can use, including scheduling a callback and ending the call."
                   fill
                   sizes="(max-width: 768px) 100vw, (max-width: 1024px) 900px, 1152px"
                   quality={100}
@@ -649,8 +644,7 @@ export default function AIVoiceAgentPage() {
             From your first conversation to a fully operational AI voice agent.
           </h3>
           <p className={bodyClassName}>
-            We turn your business requirements into an AI voice experience built around your customers, workflows, and
-            goals.
+            Set the goal for the call, give the agent the information it needs, then test the campaign before launch.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {processSteps.map((step) => (
@@ -724,7 +718,7 @@ export default function AIVoiceAgentPage() {
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/book-a-demo">
-                  Talk to an AI Expert
+                  Book a Demo
                 </Link>
               </Button>
             </div>
