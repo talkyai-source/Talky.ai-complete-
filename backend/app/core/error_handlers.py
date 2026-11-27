@@ -16,6 +16,8 @@ Stable `code` values let clients branch on errors without scraping prose.
 from __future__ import annotations
 
 import logging
+import math
+import time
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -25,6 +27,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.request_id_middleware import get_request_id
+from app.core.retry_wait import wait_words
 from app.core.db import DATABASE_RETRYABLE_ERRORS
 
 logger = logging.getLogger(__name__)
@@ -172,15 +175,17 @@ async def validation_exception_handler(
 async def rate_limit_exception_handler(
     request: Request, exc: RateLimitExceeded
 ) -> JSONResponse:
-    # slowapi exposes the limit string ("5/minute"); we can't compute a precise
-    # Retry-After without parsing it, but a conservative default beats nothing.
-    # Clients should respect this header per RFC 6585.
-    retry_after = _retry_after_seconds(exc)
+    from app.core.api_security_middleware import NUMBER_REQUEST_SUBMIT_PATH
+
+    retry_after = _retry_after_seconds(request, exc)
+    message = "Too many requests. Wait a moment and try again."
+    if request.method == "POST" and request.url.path.rstrip("/") == NUMBER_REQUEST_SUBMIT_PATH:
+        message = f"You have sent too many requests. Please try again in {wait_words(retry_after)}."
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content=_envelope(
             code="rate_limited",
-            message="Too many requests. Wait a moment and try again.",
+            message=message,
             details={
                 "limit": str(exc.detail) if exc.detail else None,
                 "retry_after_seconds": retry_after,
@@ -240,8 +245,19 @@ async def unhandled_exception_handler(
     return response
 
 
-def _retry_after_seconds(exc: RateLimitExceeded) -> int:
-    """Best-effort parse of slowapi's '<n>/<period>' format → seconds."""
+def _retry_after_seconds(request: Request, exc: RateLimitExceeded) -> int:
+    window = getattr(request.state, "view_rate_limit", None)
+    if window is not None:
+        item, identifiers = window
+        try:
+            stats = request.app.state.limiter.limiter.get_window_stats(item, *identifiers)
+            return max(1, math.ceil(stats.reset_time - time.time()))
+        except Exception as error:
+            # The limit was reached even if its store can no longer report the reset.
+            logger.warning("Rate limit window unavailable: %s", type(error).__name__)
+            return item.get_expiry()
+
+    # A manually raised limit may have no window. Keep the existing fallback.
     try:
         raw = str(exc.detail)
         amount, _, period = raw.partition("/")
@@ -251,7 +267,6 @@ def _retry_after_seconds(exc: RateLimitExceeded) -> int:
             "hour": 3600, "hours": 3600,
             "day": 86400, "days": 86400,
         }.get(period.strip().lower(), 60)
-        # Suggest waiting the full window; safer than guessing remainder.
         return max(1, period_seconds // max(1, int(amount)))
     except Exception:
         return 60

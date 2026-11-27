@@ -12,6 +12,7 @@ import copy
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -395,16 +396,37 @@ async def test_422_when_not_multipart(env):
     assert err["details"] == {"field": "body"}
 
 
-async def test_429_on_the_eleventh_request(env, monkeypatch):
+@pytest.mark.parametrize("elapsed,expected_wait,wording", [
+    (0, 3600, "about 1 hour"),
+    (3000, 600, "about 10 minutes"),
+])
+async def test_429_on_the_eleventh_request(env, monkeypatch, elapsed, expected_wait, wording):
     # the hourly limit is under test here, not the cap on waiting requests
     monkeypatch.setattr(config, "MAX_OPEN_REQUESTS_PER_ACCOUNT", 100)
     app = make_app()
-    codes = []
-    for i in range(11):
-        r = await post(app, key=f"key-aaaaaaaa-{i:04d}")
-        codes.append(r.status_code)
-    assert codes[:10] == [201] * 10 and codes[10] == 429
-    assert "Retry-After" in r.headers
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    for i in range(10):
+        response = await post(app, key=f"key-aaaaaaaa-{i:04d}")
+        assert response.status_code == 201
+    now += elapsed
+    response = await post(app, key="eleventh")
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) == expected_wait
+    error = response.json()["error"]
+    assert error["details"]["retry_after_seconds"] == expected_wait
+    assert error["message"] == f"You have sent too many requests. Please try again in {wording}."
+
+
+@pytest.mark.parametrize("seconds,words", [
+    (0, "less than a minute"), (59, "less than a minute"),
+    (60, "about 1 minute"), (90, "about 2 minutes"),
+    (3599, "about 1 hour"), (3600, "about 1 hour"), (None, "a little while"),
+])
+def test_wait_words(seconds, words):
+    from app.core.retry_wait import wait_words
+
+    assert wait_words(seconds) == words
 
 
 # ---------------------------------------------------- saved together / 503 ----
