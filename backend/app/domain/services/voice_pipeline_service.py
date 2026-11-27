@@ -643,6 +643,7 @@ class VoicePipelineService:
             and not pending.done()
             and getattr(pending, "_turn_type", "final") == "final"
             and not session.tts_active
+            and not getattr(pending, "_withdrawn_reissue", False)
         ):
             # 2026-08-11 (review finding 2): NOT cancelling is only half the
             # decision. The protected answer must also not START speaking while
@@ -717,6 +718,7 @@ class VoicePipelineService:
             _cancelled_turn["text"] = getattr(cancelled_task, "_source_text", None)
             _cancelled_turn["type"] = getattr(cancelled_task, "_turn_type", "final")
             _cancelled_turn["caller_turn_order"] = getattr(cancelled_task, "_caller_turn_order", None)
+            _cancelled_turn["prior_caller_turn_orders"] = getattr(cancelled_task, "_prior_caller_turn_orders", ())
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -788,6 +790,11 @@ class VoicePipelineService:
             cancel_task=_cancel_pending_turn,
             tts_provider=self.tts_provider,
         )
+        from app.domain.services.voice_pipeline.withdrawn_interruption import (
+            remember_cut_reply,
+        )
+
+        remember_cut_reply(session, _cancelled_turn, _barge_at)
         if _cancelled_turn.get("text") and _cancelled_turn.get("type") == "final":
             asyncio.create_task(
                 self._resume_after_false_barge_in(
@@ -833,6 +840,8 @@ class VoicePipelineService:
         call_id = session.call_id
         if call_id not in self._barge_in_events:
             return  # session torn down
+        if getattr(session, "_withdrawn_reissued_for", None) == barge_at:
+            return  # the withdrawn-turn path already re-issued this cut
         if (caller_turn_order is not None
                 and getattr(session, "_accepted_caller_turn_order", None) != caller_turn_order):
             return  # a newer accepted caller turn owns the reply, even if finished
