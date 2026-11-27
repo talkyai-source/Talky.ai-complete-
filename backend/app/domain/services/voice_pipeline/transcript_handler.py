@@ -24,6 +24,9 @@ from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sani
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
+from app.domain.services.voice_pipeline.withdrawn_interruption import (
+    reissue_after_withdrawn_turn,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +199,7 @@ class TranscriptHandler:
             session._last_transcript_confidence = None
             session._last_transcript_alternatives = ()
             session._suppressed_backchannel_seq = None
+            await reissue_after_withdrawn_turn(self._p, session, websocket)
             return
         self._p.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
