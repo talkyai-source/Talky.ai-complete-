@@ -55,6 +55,13 @@ export type NumberRequest = z.infer<typeof requestSchema>;
 export const NUMBER_REQUEST_NOT_SAVED_MESSAGE = "Your documents could not be saved. Nothing was kept. Please try again.";
 /** The server's sentence when a save may or may not have happened (503 save_unconfirmed). */
 export const NUMBER_REQUEST_UNCONFIRMED_MESSAGE = "We could not confirm that your documents were saved. Please send the same files again.";
+/** The server's own 401 sentence (backend dependencies.py), shown only when a 401 arrives with no message of its own. */
+export const NUMBER_REQUEST_SESSION_ENDED_MESSAGE = "Your login session has ended. Please sign in again.";
+/** The sentences of the two decision emails (backend notify.py), shown when a retry finds a request staff already decided. */
+export const NUMBER_REQUEST_APPROVED_MESSAGE = "Your request was approved. Our team will contact you about the next steps.";
+export const NUMBER_REQUEST_REJECTED_MESSAGE = "Your request was not approved.";
+/** The shared client's own word for a 401 that carried no message (http-client.ts defaultMessageForStatus). */
+const CLIENT_DEFAULT_401_MESSAGE = "Unauthorized";
 
 /**
  * The 5xx codes the backend sends on purpose, with a message written for the customer:
@@ -74,9 +81,12 @@ export function numberRequestTimeoutMs(totalBytes: number): number {
  * failure or a 5xx with no envelope (the client's own "server_error") may have
  * saved the documents, so the server's "could not confirm" sentence is used.
  * Anything else that is not an API error gets the server's "could not be saved" sentence.
+ * A 401 keeps the server's message too; with none, the server's usual "session has ended" sentence is used.
  */
 export function numberRequestFailureMessage(err: unknown): string {
     if (!isApiClientError(err)) return NUMBER_REQUEST_NOT_SAVED_MESSAGE;
+    // The session ended and could not be renewed: the server's own sentence, or its usual one when it sent none.
+    if (err.status === 401) return err.message && err.message !== CLIENT_DEFAULT_401_MESSAGE ? err.message : NUMBER_REQUEST_SESSION_ENDED_MESSAGE;
     // The browser says it is offline: the request never left, and the client's own message says so.
     if (err.code === "network_error" && typeof navigator !== "undefined" && navigator.onLine === false) {
         return err.message || NUMBER_REQUEST_UNCONFIRMED_MESSAGE;
@@ -115,6 +125,8 @@ export async function submitNumberRequest(input: {
         body: form,
         headers: { "Idempotency-Key": input.idempotencyKey },
         timeoutMs: numberRequestTimeoutMs(Object.values(input.files).reduce((total, f) => total + f.size, 0)),
+        // A session that ended must not send the customer to the login page: the window and the chosen files stay.
+        suppressAuthRedirect: true,
         signal: input.signal,
     });
     // Any 2xx means the documents are saved: a body that is not the expected shape is not a failure.
@@ -136,4 +148,53 @@ export function refuseNumberRequestFile(file: File, field: string, config: Numbe
     const extension = dot === -1 || dot === file.name.length - 1 ? "" : file.name.slice(dot).toLowerCase();
     if (extension !== "" && !config.accepted_extensions.includes(extension)) return `${label} must be a PDF, JPG or PNG file.`;
     return null;
+}
+
+/** True when the server refused the key because it was already used with other documents (400 idempotency_key_reused). */
+export function isNumberRequestKeyReused(err: unknown): boolean {
+    return isApiClientError(err) && err.code === "idempotency_key_reused";
+}
+
+/**
+ * One-way SHA-256 (64 hex characters) of the two files' details: name, size, last-changed date and type.
+ * This, never a file name, is what is kept beside a key. Null when the browser cannot hash; the key then stays in memory only.
+ */
+export async function hashNumberRequestFiles(files: readonly File[]): Promise<string | null> {
+    try {
+        const details = files.map((f) => [f.name, f.size, f.lastModified, f.type].join("|")).join("\n");
+        const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(details));
+        return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    } catch {
+        return null;
+    }
+}
+
+// The key of an unfinished request, kept for this browser tab so a retry after leaving the Telephony tab or a reload
+// finds the first request. Same shape as the saved purchase (billing-purchase.ts readSavedPurchase / storeSavedPurchase):
+// sessionStorage, one entry per signed-in person and account, every access inside try/catch.
+const savedKeySchema = z.object({ key: z.string().regex(/^[A-Za-z0-9_-]{8,128}$/), files: z.string().regex(/^[0-9a-f]{64}$/) });
+export type SavedNumberRequestKey = z.infer<typeof savedKeySchema>;
+const keyStorageName = (scope: string, useType: NumberRequestUseType) => `talklee.number-request-key.v1:${encodeURIComponent(scope)}:${useType}`;
+
+/** The kept key for this person, account and use, or null (nothing kept, unreadable, or storage closed). Never throws. */
+export function readSavedNumberRequestKey(scope: string, useType: NumberRequestUseType): SavedNumberRequestKey | null {
+    try {
+        const raw = window.sessionStorage.getItem(keyStorageName(scope, useType));
+        if (!raw || raw.length > 400) return null;
+        const result = savedKeySchema.safeParse(JSON.parse(raw));
+        return result.success ? result.data : null;
+    } catch {
+        return null;
+    }
+}
+
+/** Keeps the key and the files' hash, or removes the entry when `saved` is null. False when storage is closed. Never throws. */
+export function storeSavedNumberRequestKey(scope: string, useType: NumberRequestUseType, saved: SavedNumberRequestKey | null): boolean {
+    try {
+        if (saved) window.sessionStorage.setItem(keyStorageName(scope, useType), JSON.stringify({ key: saved.key, files: saved.files }));
+        else window.sessionStorage.removeItem(keyStorageName(scope, useType));
+        return true;
+    } catch {
+        return false;
+    }
 }

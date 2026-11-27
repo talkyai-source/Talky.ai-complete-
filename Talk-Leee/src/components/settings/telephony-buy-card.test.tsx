@@ -9,6 +9,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "@/lib/api";
+import { setSessionExpiredHandler } from "@/lib/http-client";
 import { notificationsStore } from "@/lib/notifications";
 import { NotificationToaster } from "@/components/notifications/notification-toaster";
 import { TelephonyBuyCard } from "./telephony-buy-card";
@@ -53,6 +54,8 @@ beforeEach(() => {
         return call.method === "GET" ? configAnswer() : postAnswer();
     }) as typeof fetch;
     notificationsStore.setIdentity({ tenantId: "buy-card", userId: "someone" });
+    // A key kept for this browser tab by one test must not reach the next.
+    window.sessionStorage.clear();
 });
 afterEach(() => {
     cleanup();
@@ -645,38 +648,6 @@ for (const [name, answerWith] of [
     });
 }
 
-test("an answer for an already-decided request: the key is forgotten and ONE more send goes out with a new key", async () => {
-    let n = 0;
-    postAnswer = async () => { n += 1; return json(n === 1 ? { ...CREATED, status: "rejected" } : CREATED, 201); };
-    mount();
-    await openWindow();
-    fill(BUSINESS);
-    fireEvent.click(submit(BUSINESS));
-    await settle();
-    assert.equal(writes().length, 2);
-    assert.notEqual(keysSent()[1], keysSent()[0], "a new key");
-    assert.equal(isOpen(), false);
-    assert.equal(toastShown(), true);
-});
-
-test("the second send after a decided request fails: its message shows and the files stay", async () => {
-    let n = 0;
-    postAnswer = async () => {
-        n += 1;
-        return n === 1 ? json({ ...CREATED, status: "approved" }, 201) : json({ error: { code: "too_many_open_requests", message: "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents.", details: {}, request_id: "r" } }, 429);
-    };
-    mount();
-    await openWindow();
-    fill(BUSINESS);
-    fireEvent.click(submit(BUSINESS));
-    await settle();
-    assert.equal(writes().length, 2, "exactly one more send, no loop");
-    assert.equal(isOpen(), true);
-    assert.equal(toastShown(), false);
-    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents.");
-    assert.equal(shownName(boxes(BUSINESS)[0]), "doc-0.pdf");
-});
-
 test("a new request answered 'submitted' is exactly one POST", async () => {
     mount();
     await openWindow();
@@ -687,12 +658,281 @@ test("a new request answered 'submitted' is exactly one POST", async () => {
     assert.equal(isOpen(), false);
 });
 
-test("a decided answer twice is not looped: two POSTs at most", async () => {
-    postAnswer = async () => json({ ...CREATED, status: "rejected" }, 201);
+// ───────── fixes F1 to F6 ─────────
+const APPROVED = "Your request was approved. Our team will contact you about the next steps.";
+const REJECTED = "Your request was not approved.";
+const SESSION_ENDED = "Your login session has ended. Please sign in again.";
+const failWithCode = (status: number, code: string, message: string) => () => Promise.resolve(json({ error: { code, message, details: null, request_id: "r" } }, status));
+/** The document POSTs only: a 401 also makes the shared client try to renew the session (POST /auth/refresh). */
+const submits = () => writes().filter((call) => /\/telephony\/number-requests$/.test(call.url));
+const KEPT = /^talklee\.number-request-key\.v1:/;
+const keptEntries = () => Object.keys(window.sessionStorage).filter((name) => KEPT.test(name)).map((name) => [name, window.sessionStorage.getItem(name) ?? ""] as const);
+
+// F1
+for (const [what, answerWith, shown] of [
+    ["with the server's message", failWithCode(401, "unauthorized", "Session has expired or is invalid"), "Session has expired or is invalid"],
+    ["with no message", () => Promise.resolve(new Response(null, { status: 401 })), SESSION_ENDED],
+] as const) {
+    test(`F1: a 401 ${what} keeps the window and both files, shows the sentence in that card and does not send the customer to the login page`, async () => {
+        let sentToLogin = 0;
+        setSessionExpiredHandler(() => { sentToLogin += 1; });
+        try {
+            postAnswer = answerWith;
+            mount();
+            await openWindow();
+            fill(BUSINESS);
+            fireEvent.click(submit(BUSINESS));
+            await settle();
+            assert.equal(submits().length >= 1, true, "the documents were sent");
+            assert.equal(sentToLogin, 0, "no trip to the login page");
+            assert.equal(isOpen(), true);
+            assert.equal(toastShown(), false);
+            const message = card(BUSINESS).querySelector("[data-submit-error]");
+            assert.equal(message?.textContent, shown);
+            assert.equal(message?.getAttribute("role"), "alert");
+            assert.equal(card(PERSONAL).querySelector("[data-submit-error]") === null, true);
+            assert.equal(shownName(boxes(BUSINESS)[0]), "doc-0.pdf");
+            assert.equal(shownName(boxes(BUSINESS)[1]), "doc-1.pdf");
+            assert.equal(submit(BUSINESS).disabled, false);
+        } finally {
+            setSessionExpiredHandler(null);
+        }
+    });
+}
+
+// F2
+test("F2: while sending, a spinner with no words shows on the pressed Submit only, and it goes when the answer arrives", async () => {
+    let release: () => void = () => {};
+    postAnswer = () => new Promise<Response>((resolve) => { release = () => resolve(json({ error: { code: "x", message: NOT_SAVED, details: null, request_id: "r" } }, 503)); });
+    mount();
+    await openWindow();
+    fill(BUSINESS);
+    fill(PERSONAL);
+    assert.equal(dialog().querySelectorAll("[data-submit-spinner]").length, 0, "no spinner before Submit");
+    fireEvent.click(submit(PERSONAL));
+    await settle();
+    const spinners = Array.from(dialog().querySelectorAll("[data-submit-spinner]"));
+    assert.equal(spinners.length, 1, "one spinner in the window");
+    assert.equal(submit(PERSONAL).contains(spinners[0]), true, "on the pressed Submit");
+    assert.equal(submit(BUSINESS).querySelector("[data-submit-spinner]") === null, true, "not on the other Submit");
+    assert.equal(spinners[0].getAttribute("aria-hidden"), "true");
+    assert.equal((spinners[0].textContent ?? "").trim(), "", "no words in the spinner");
+    assert.equal((submit(PERSONAL).textContent ?? "").trim(), "Submit", "the label is unchanged");
+    assert.equal(card(PERSONAL).getAttribute("aria-busy"), "true");
+    await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    assert.equal(dialog().querySelectorAll("[data-submit-spinner]").length, 0, "gone after the answer");
+});
+
+test("F2: when sending starts, keyboard focus moves to the window panel and never drops to the page", async () => {
+    let release: () => void = () => {};
+    postAnswer = () => new Promise<Response>((resolve) => { release = () => resolve(json(CREATED, 201)); });
+    mount();
+    await openWindow();
+    fill(BUSINESS);
+    submit(BUSINESS).focus();
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.equal(submit(BUSINESS).disabled, true);
+    assert.equal(document.activeElement === dialog(), true, "focus is on the window panel");
+    assert.equal(document.activeElement === document.body, false);
+    await act(async () => { release(); await new Promise((resolve) => setTimeout(resolve, 10)); });
+    assert.equal(isOpen(), false);
+    assert.equal(focusIsOnBuyNow(), true, "after success focus is back on Buy Now, as before");
+});
+
+// F3
+for (const [status, sentence] of [["approved", APPROVED], ["rejected", REJECTED]] as const) {
+    test(`F3: a retry that finds a request already ${status} sends nothing more, keeps the window and files, and says so as a status`, async () => {
+        postAnswer = async () => json({ ...CREATED, status }, 201);
+        mount();
+        await openWindow();
+        fillStable(BUSINESS);
+        fireEvent.click(submit(BUSINESS));
+        await settle();
+        assert.equal(writes().length, 1, "nothing is sent again");
+        assert.equal(isOpen(), true);
+        assert.equal(toastShown(), false, "no thank-you message");
+        const message = card(BUSINESS).querySelector("[data-submit-status]") as HTMLElement;
+        assert.equal(message.textContent, sentence);
+        assert.equal(message.getAttribute("role"), "status");
+        assert.equal(message.className.includes("text-destructive"), false, "not in the error colour");
+        assert.equal(card(BUSINESS).querySelector("[data-submit-error]") === null, true);
+        assert.equal(dialog().querySelectorAll('[role="alert"]').length, 0);
+        assert.equal(card(PERSONAL).querySelector("[data-submit-status]") === null, true);
+        assert.equal(shownName(boxes(BUSINESS)[0]), "stable-0.pdf");
+        assert.equal(shownName(boxes(BUSINESS)[1]), "stable-1.pdf");
+        assert.equal(submit(BUSINESS).disabled, false);
+        assert.equal(keptEntries().length, 0, "the kept key is cleared");
+        // The key was forgotten: the same two files sent again carry a new one.
+        postAnswer = created;
+        fireEvent.click(submit(BUSINESS));
+        await settle();
+        assert.equal(writes().length, 2);
+        assert.notEqual(keysSent()[1], keysSent()[0], "a new key after a decided request");
+    });
+}
+
+// F4
+test("F4: a key the server says belongs to other documents is forgotten and ONE more send goes out with a new key", async () => {
+    let n = 0;
+    postAnswer = async () => { n += 1; return n === 1 ? json({ error: { code: "idempotency_key_reused", message: "This Idempotency-Key was already used with different documents. Send a new key.", details: { field: "Idempotency-Key" }, request_id: "r" } }, 400) : json(CREATED, 201); };
     mount();
     await openWindow();
     fill(BUSINESS);
     fireEvent.click(submit(BUSINESS));
     await settle();
+    assert.equal(writes().length, 2, "one automatic resend");
+    assert.notEqual(keysSent()[1], keysSent()[0], "with a new key");
+    assert.equal(isOpen(), false);
+    assert.equal(toastShown(), true);
+});
+
+test("F4: when the automatic resend fails too, its server message shows, the files stay and nothing more is sent", async () => {
+    postAnswer = failWithCode(400, "idempotency_key_reused", "This Idempotency-Key was already used with different documents. Send a new key.");
+    mount();
+    await openWindow();
+    fill(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.equal(writes().length, 2, "once only: no third send");
+    assert.notEqual(keysSent()[1], keysSent()[0]);
+    assert.equal(isOpen(), true);
+    assert.equal(toastShown(), false);
+    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "This Idempotency-Key was already used with different documents. Send a new key.");
+    assert.equal(shownName(boxes(BUSINESS)[0]), "doc-0.pdf");
+});
+
+test("F4: any other refusal is not sent again", async () => {
+    postAnswer = failWithCode(400, "idempotency_key_invalid", "The Idempotency-Key must be 8 to 128 letters, digits, hyphens or underscores.");
+    mount();
+    await openWindow();
+    fill(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.equal(writes().length, 1);
+});
+
+// F6
+test("F6: the key survives the card being removed and shown again (a tab change or a reload) when the same two files are chosen", async () => {
+    postAnswer = failWith(503, UNSURE);
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    cleanup();
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
     assert.equal(writes().length, 2);
+    assert.equal(keysSent()[1], keysSent()[0], "the same key after a remount");
+});
+
+test("F6: what is kept is the key and a one-way hash only: no file name, scoped to the person, the account and the use", async () => {
+    postAnswer = failWith(503, UNSURE);
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    const kept = keptEntries();
+    assert.equal(kept.length, 1, "one entry, for the Business card");
+    const [name, value] = kept[0];
+    assert.equal(name, `talklee.number-request-key.v1:${encodeURIComponent(JSON.stringify(["buy-card", "someone"]))}:business`);
+    assert.deepEqual(Object.keys(JSON.parse(value)).sort(), ["files", "key"]);
+    assert.equal(JSON.parse(value).key, keysSent()[0]);
+    assert.match(JSON.parse(value).files, /^[0-9a-f]{64}$/);
+    for (const text of [name, value]) {
+        assert.equal(/stable|\.pdf|application/i.test(text), false, "no file name or file type in storage");
+        // The word the branding check refuses, built from parts so this file does not hold it.
+        assert.equal(new RegExp(["tal", "ky"].join(""), "i").test(text), false);
+    }
+    // Nothing of the files anywhere else in the tab's storage either.
+    for (const stored of Object.values(window.sessionStorage)) assert.equal(String(stored).includes("stable-"), false);
+    // A different person in the same browser tab does not get this key.
+    cleanup();
+    notificationsStore.setIdentity({ tenantId: "buy-card", userId: "someone-else" });
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.notEqual(keysSent()[1], keysSent()[0], "another person, another key");
+});
+
+test("F6: the kept key is cleared on success", async () => {
+    postAnswer = failWith(503, UNSURE);
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.equal(keptEntries().length, 1);
+    postAnswer = created;
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.equal(isOpen(), false);
+    assert.equal(keptEntries().length, 0, "cleared on success");
+    cleanup();
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.notEqual(keysSent()[2], keysSent()[1], "a new request after a success");
+});
+
+test("F6: after a remount a changed file makes a new key and replaces what is kept", async () => {
+    postAnswer = failWith(503, UNSURE);
+    mount();
+    await openWindow();
+    fillStable(BUSINESS);
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    const before = keptEntries()[0][1];
+    cleanup();
+    mount();
+    await openWindow();
+    choose(boxes(BUSINESS)[0], stable("other.pdf"));
+    choose(boxes(BUSINESS)[1], stable("stable-1.pdf"));
+    fireEvent.click(submit(BUSINESS));
+    await settle();
+    assert.notEqual(keysSent()[1], keysSent()[0], "a changed file, a new key");
+    const after = keptEntries();
+    assert.equal(after.length, 1, "replaced, not added");
+    assert.equal(JSON.parse(after[0][1]).key, keysSent()[1]);
+    assert.notEqual(JSON.parse(after[0][1]).files, JSON.parse(before).files);
+});
+
+test("F6: with the tab's storage blocked the key stays in memory, a retry re-uses it and nothing throws", async () => {
+    const proto = Object.getPrototypeOf(window.sessionStorage) as Storage;
+    const real = { getItem: proto.getItem, setItem: proto.setItem, removeItem: proto.removeItem };
+    const blocked = () => { throw new DOMException("blocked", "SecurityError"); };
+    proto.getItem = blocked;
+    proto.setItem = blocked;
+    proto.removeItem = blocked;
+    try {
+        postAnswer = failWith(503, UNSURE);
+        mount();
+        await openWindow();
+        fillStable(BUSINESS);
+        fireEvent.click(submit(BUSINESS));
+        await settle();
+        assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, UNSURE, "the server's message, not a storage error");
+        fireEvent.click(submit(BUSINESS));
+        await settle();
+        assert.equal(writes().length, 2);
+        assert.equal(keysSent()[1], keysSent()[0], "the in-memory key is re-used");
+        postAnswer = created;
+        fireEvent.click(submit(BUSINESS));
+        await settle();
+        assert.equal(isOpen(), false, "success still closes the window");
+        assert.equal(toastShown(), true);
+    } finally {
+        proto.getItem = real.getItem;
+        proto.setItem = real.setItem;
+        proto.removeItem = real.removeItem;
+    }
 });

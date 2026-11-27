@@ -1,14 +1,21 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, test } from "node:test";
-import { ApiClientError } from "@/lib/http-client";
+import { ApiClientError, setSessionExpiredHandler } from "@/lib/http-client";
 import {
     DEFAULT_NUMBER_REQUEST_CONFIG,
+    NUMBER_REQUEST_APPROVED_MESSAGE,
     NUMBER_REQUEST_NOT_SAVED_MESSAGE,
+    NUMBER_REQUEST_REJECTED_MESSAGE,
+    NUMBER_REQUEST_SESSION_ENDED_MESSAGE,
     NUMBER_REQUEST_UNCONFIRMED_MESSAGE,
     getNumberRequestConfig,
+    hashNumberRequestFiles,
+    isNumberRequestKeyReused,
     numberRequestFailureMessage,
     numberRequestTimeoutMs,
+    readSavedNumberRequestKey,
     refuseNumberRequestFile,
+    storeSavedNumberRequestKey,
     submitNumberRequest,
 } from "@/lib/telephony-number-requests-api";
 
@@ -168,5 +175,121 @@ test("offline: the client's own message is kept; online: the could-not-confirm s
         assert.equal(numberRequestFailureMessage(err), NUMBER_REQUEST_UNCONFIRMED_MESSAGE);
     } finally {
         if (real && Object.getOwnPropertyDescriptor(globalThis.navigator, "onLine")?.get !== real.get && Object.prototype.hasOwnProperty.call(globalThis.navigator, "onLine")) delete (globalThis.navigator as unknown as Record<string, unknown>).onLine;
+    }
+});
+
+// ───────── fixes F1 to F6 ─────────
+const apiError = (init: { code: string; message: string; status?: number }) => new ApiClientError({ ...init, url: "/x", method: "POST" });
+
+test("the three new sentences are the owner's exact words", () => {
+    assert.equal(NUMBER_REQUEST_SESSION_ENDED_MESSAGE, "Your login session has ended. Please sign in again.");
+    assert.equal(NUMBER_REQUEST_APPROVED_MESSAGE, "Your request was approved. Our team will contact you about the next steps.");
+    assert.equal(NUMBER_REQUEST_REJECTED_MESSAGE, "Your request was not approved.");
+});
+
+test("F1: a 401 keeps the server's own message; with none, the session-ended sentence is used", () => {
+    assert.equal(numberRequestFailureMessage(apiError({ code: "unauthorized", message: "Session mismatch. Please sign in again.", status: 401 })), "Session mismatch. Please sign in again.");
+    // The shared client's own word for a 401 that carried no message.
+    assert.equal(numberRequestFailureMessage(apiError({ code: "unauthorized", message: "Unauthorized", status: 401 })), NUMBER_REQUEST_SESSION_ENDED_MESSAGE);
+    assert.equal(numberRequestFailureMessage(apiError({ code: "unauthorized", message: "", status: 401 })), NUMBER_REQUEST_SESSION_ENDED_MESSAGE);
+    // Only a 401: another refusal with the same word is shown as sent.
+    assert.equal(numberRequestFailureMessage(apiError({ code: "forbidden", message: "Unauthorized", status: 403 })), "Unauthorized");
+});
+
+test("F1: a 401 on the POST reaches the caller and does not send the customer to the login page", async () => {
+    let sentToLogin = 0;
+    setSessionExpiredHandler(() => { sentToLogin += 1; });
+    try {
+        answer = () => json({ error: { code: "unauthorized", message: "Your login session has ended. Please sign in again.", details: null, request_id: "r" } }, 401);
+        await assert.rejects(
+            submitNumberRequest({ useType: "business", files: { business_registration: pdf("a.pdf"), business_photo_id: pdf("b.pdf") }, idempotencyKey: SAMPLE_ATTEMPT }),
+            (err: unknown) => err instanceof ApiClientError && err.status === 401 && err.message === "Your login session has ended. Please sign in again.",
+        );
+        assert.equal(sentToLogin, 0);
+    } finally {
+        setSessionExpiredHandler(null);
+    }
+});
+
+test("F4: only the server's idempotency_key_reused refusal asks for a new key", () => {
+    assert.equal(isNumberRequestKeyReused(apiError({ code: "idempotency_key_reused", message: "x", status: 400 })), true);
+    assert.equal(isNumberRequestKeyReused(apiError({ code: "idempotency_key_invalid", message: "x", status: 400 })), false);
+    assert.equal(isNumberRequestKeyReused(apiError({ code: "too_many_open_requests", message: "x", status: 429 })), false);
+    assert.equal(isNumberRequestKeyReused(new Error("idempotency_key_reused")), false);
+});
+
+const detailed = (name: string, lastModified = 1_700_000_000_000, type = "application/pdf") => new File(["x"], name, { type, lastModified });
+
+test("F6: the files' hash is 64 hex characters, the same for the same details, different for any changed detail, and holds no file name", async () => {
+    const a = await hashNumberRequestFiles([detailed("passport-jane.pdf"), detailed("bill.pdf")]);
+    assert.match(a ?? "", /^[0-9a-f]{64}$/);
+    assert.equal(await hashNumberRequestFiles([detailed("passport-jane.pdf"), detailed("bill.pdf")]), a);
+    assert.notEqual(await hashNumberRequestFiles([detailed("passport-john.pdf"), detailed("bill.pdf")]), a, "name");
+    assert.notEqual(await hashNumberRequestFiles([detailed("passport-jane.pdf", 1_700_000_000_001), detailed("bill.pdf")]), a, "last-changed date");
+    assert.notEqual(await hashNumberRequestFiles([detailed("passport-jane.pdf", 1_700_000_000_000, "image/png"), detailed("bill.pdf")]), a, "type");
+    assert.notEqual(await hashNumberRequestFiles([new File(["xy"], "passport-jane.pdf", { type: "application/pdf", lastModified: 1_700_000_000_000 }), detailed("bill.pdf")]), a, "size");
+    assert.notEqual(await hashNumberRequestFiles([detailed("bill.pdf"), detailed("passport-jane.pdf")]), a, "order");
+    assert.equal((a ?? "").includes("passport"), false);
+});
+
+test("F6: a browser that cannot hash gives null and does not throw", async () => {
+    const real = Object.getOwnPropertyDescriptor(globalThis.crypto, "subtle") ?? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(globalThis.crypto), "subtle");
+    Object.defineProperty(globalThis.crypto, "subtle", { configurable: true, get: () => undefined });
+    try {
+        assert.equal(await hashNumberRequestFiles([detailed("a.pdf"), detailed("b.pdf")]), null);
+    } finally {
+        delete (globalThis.crypto as unknown as Record<string, unknown>).subtle;
+        assert.equal(typeof globalThis.crypto.subtle?.digest, "function", real ? "the real one is back" : "");
+    }
+});
+
+test("F6: a kept key is read back for the same person, account and use only; null removes it", () => {
+    window.sessionStorage.clear();
+    const files = "a".repeat(64);
+    const scope = JSON.stringify(["tenant-1", "person-1"]);
+    assert.equal(readSavedNumberRequestKey(scope, "business"), null);
+    assert.equal(storeSavedNumberRequestKey(scope, "business", { key: SAMPLE_ATTEMPT, files }), true);
+    assert.deepEqual(readSavedNumberRequestKey(scope, "business"), { key: SAMPLE_ATTEMPT, files });
+    assert.equal(readSavedNumberRequestKey(scope, "personal"), null, "another use");
+    assert.equal(readSavedNumberRequestKey(JSON.stringify(["tenant-1", "person-2"]), "business"), null, "another person");
+    assert.equal(readSavedNumberRequestKey(JSON.stringify(["tenant-2", "person-1"]), "business"), null, "another account");
+    const names = Object.keys(window.sessionStorage);
+    assert.equal(names.length, 1);
+    assert.equal(names[0], `talklee.number-request-key.v1:${encodeURIComponent(scope)}:business`);
+    // The word the branding check refuses, built from parts so this file does not hold it.
+    assert.equal(new RegExp(["tal", "ky"].join(""), "i").test(names[0]), false);
+    assert.equal(window.sessionStorage.getItem(names[0]), JSON.stringify({ key: SAMPLE_ATTEMPT, files }));
+    assert.equal(storeSavedNumberRequestKey(scope, "business", null), true);
+    assert.equal(readSavedNumberRequestKey(scope, "business"), null);
+    assert.equal(Object.keys(window.sessionStorage).length, 0);
+});
+
+test("F6: an entry that is not a key and a hash is ignored", () => {
+    window.sessionStorage.clear();
+    const scope = JSON.stringify(["tenant-1", "person-1"]);
+    const name = `talklee.number-request-key.v1:${encodeURIComponent(scope)}:business`;
+    for (const raw of ["not json", "{}", JSON.stringify({ key: "short", files: "a".repeat(64) }), JSON.stringify({ key: SAMPLE_ATTEMPT, files: "passport.pdf" }), JSON.stringify({ key: SAMPLE_ATTEMPT, files: "a".repeat(64), name: "x".repeat(400) })]) {
+        window.sessionStorage.setItem(name, raw);
+        assert.equal(readSavedNumberRequestKey(scope, "business"), null, raw.slice(0, 30));
+    }
+    window.sessionStorage.clear();
+});
+
+test("F6: blocked storage reads as nothing kept, stores as false, and never throws", () => {
+    const proto = Object.getPrototypeOf(window.sessionStorage) as Storage;
+    const real = { getItem: proto.getItem, setItem: proto.setItem, removeItem: proto.removeItem };
+    const blocked = () => { throw new DOMException("blocked", "SecurityError"); };
+    proto.getItem = blocked;
+    proto.setItem = blocked;
+    proto.removeItem = blocked;
+    try {
+        const scope = JSON.stringify(["tenant-1", "person-1"]);
+        assert.equal(readSavedNumberRequestKey(scope, "business"), null);
+        assert.equal(storeSavedNumberRequestKey(scope, "business", { key: SAMPLE_ATTEMPT, files: "a".repeat(64) }), false);
+        assert.equal(storeSavedNumberRequestKey(scope, "business", null), false);
+    } finally {
+        proto.getItem = real.getItem;
+        proto.setItem = real.setItem;
+        proto.removeItem = real.removeItem;
     }
 });

@@ -1,4 +1,6 @@
 import { expect as baseExpect, test, type Page } from "@playwright/test";
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { E2E_AUTH_TOKEN, E2E_USER, mockApi, mockDashboardApi, mockPageApis, signInAsE2eUser } from "./support/session";
 import { PRIVACY_POLICY_DATES } from "../src/lib/privacy-policy-dates";
 
@@ -749,6 +751,434 @@ for (const [width, height] of SIZES) {
         expect(tracker.writes, "write requests no mock answered").toEqual([]);
         expect(tracker.unanswered, "requests no mock answered").toEqual([]);
     });
+}
+
+// ───────────────────────── every window state, every width / theme / role ─────────────────────────
+
+/*
+ * Every state of the window is OPENED and measured at all 13 sizes, in both themes, for an account admin and
+ * for a non-admin member. Every answer is in the backend's own shape (backend/app/api/v1/endpoints/
+ * telephony_number_requests.py, backend/app/domain/services/number_requests/errors.py, backend/app/core/
+ * error_handlers.py, backend/app/api/v1/dependencies.py).
+ *
+ * The rules, for every state:
+ *   - the window is inside the device window; where its body scrolls, every control is scrolled into view and
+ *     must then lie inside the window and the device window;
+ *   - no overlap: the centre and two corners of every control hit that control (a disabled button lets the
+ *     pointer through, so one of its own ancestors must be hit);
+ *   - no spill: the page does not scroll sideways, and neither does the window's body;
+ *   - no clipping: no text element is wider or taller than its own box;
+ *   - every message is inside the window and the device window.
+ *
+ * Set BUY_NOW_MEASUREMENTS_DIR to a folder to have every reading written there, one file per size, theme and role.
+ */
+
+type StateReading = {
+    window: { present: boolean; rect: number[]; insideViewport: boolean; scrollsInside: boolean };
+    controls: Array<{ name: string; disabled: boolean; reachable: boolean; hit: boolean; why?: string }>;
+    spill: { scrollWidth: number; innerWidth: number; ok: boolean; bodyScrollWidth: number | null; bodyClientWidth: number | null };
+    clipped: string[];
+    messages: Array<{ kind: string; role: string | null; text: string; card: string; rect: number[]; insideViewport: boolean; insideWindow: boolean; lines: number }>;
+    spinners: Array<{ card: string; insideSubmit: boolean; ariaHidden: string | null; rect: number[]; insideViewport: boolean }>;
+    focusOn: string;
+};
+type MessageReading = {
+    present: boolean; count: number; text?: string; rect?: number[]; insideViewport?: boolean; onTop?: boolean; dismissHit?: boolean | null;
+    clipped?: string[]; windowStillOpen?: boolean; focusOn?: string; spill: { scrollWidth: number; innerWidth: number; ok: boolean };
+};
+
+function installStateProbe() {
+    const win = window as unknown as { __states?: { window(): StateReading; message(): MessageReading } };
+    if (win.__states) return;
+    const visible = (el: Element) => {
+        if (!el.isConnected) return false;
+        if (!(el as HTMLElement).checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 1.5 && r.height > 1.5;
+    };
+    const ownText = (el: Element) => Array.from(el.childNodes).some((n) => n.nodeType === 3 && (n.textContent ?? "").trim().length > 0);
+    const name = (el: Element) => `${el.tagName.toLowerCase()}:${((el as HTMLElement).innerText || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim().slice(0, 60)}`;
+    const round = (r: DOMRect) => [r.left, r.top, r.right, r.bottom].map((n) => Math.round(n * 10) / 10);
+    const inViewport = (r: DOMRect) => r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+    const openDialog = () => Array.from(document.querySelectorAll('[role="dialog"]')).filter(visible).pop() as HTMLElement | undefined;
+    const pageSpill = () => ({ scrollWidth: document.documentElement.scrollWidth, innerWidth, ok: document.documentElement.scrollWidth <= innerWidth });
+    const clippedIn = (root: Element) => {
+        const out: string[] = [];
+        for (const el of [root, ...Array.from(root.querySelectorAll("*"))]) {
+            if (!visible(el) || el.closest("svg") || !ownText(el)) continue;
+            if (getComputedStyle(el).display === "inline") continue; // an inline box has no client size
+            const h = el as HTMLElement;
+            if (h.scrollWidth > h.clientWidth + 1 || h.scrollHeight > h.clientHeight + 1) out.push(`${name(el)} (scroll ${h.scrollWidth}x${h.scrollHeight}, client ${h.clientWidth}x${h.clientHeight})`);
+        }
+        return out;
+    };
+    const cardTitle = (el: Element) => el.closest("[data-document-card]")?.querySelector("h3")?.textContent ?? "";
+
+    const readWindow = (): StateReading => {
+        const dlg = openDialog();
+        if (!dlg) return { window: { present: false, rect: [], insideViewport: false, scrollsInside: false }, controls: [], spill: { ...pageSpill(), bodyScrollWidth: null, bodyClientWidth: null }, clipped: [], messages: [], spinners: [], focusOn: "" };
+        const body = Array.from(dlg.children).find((c) => /(auto|scroll)/.test(getComputedStyle(c).overflowY)) as HTMLElement | undefined;
+        const focusOn = document.activeElement === dlg ? "window panel" : document.activeElement === document.body ? "page body" : document.activeElement ? name(document.activeElement) : "";
+        const inside = (r: DOMRect) => { const d = dlg.getBoundingClientRect(); return r.left >= d.left - 0.5 && r.right <= d.right + 0.5 && r.top >= d.top - 0.5 && r.bottom <= d.bottom + 0.5; };
+
+        const messages = (Array.from(dlg.querySelectorAll("[data-submit-error],[data-submit-status],[data-file-error]")).filter(visible) as HTMLElement[]).map((el) => {
+            el.scrollIntoView({ block: "center" });
+            const r = el.getBoundingClientRect();
+            return {
+                kind: el.hasAttribute("data-file-error") ? "file" : el.hasAttribute("data-submit-status") ? "status" : "submit", role: el.getAttribute("role"),
+                text: el.textContent ?? "", card: cardTitle(el), rect: round(r), insideViewport: inViewport(r), insideWindow: inside(r),
+                lines: Math.round(r.height / parseFloat(getComputedStyle(el).lineHeight)),
+            };
+        });
+        const spinners = Array.from(dlg.querySelectorAll("[data-submit-spinner]")).map((el) => {
+            el.scrollIntoView({ block: "center" });
+            const r = el.getBoundingClientRect();
+            const button = el.closest("button");
+            const b = button ? button.getBoundingClientRect() : null;
+            return {
+                card: cardTitle(el), ariaHidden: el.getAttribute("aria-hidden"), rect: round(r), insideViewport: inViewport(r) && r.width > 1.5 && r.height > 1.5,
+                insideSubmit: Boolean(button && b && button.textContent?.trim() === "Submit" && r.left >= b.left && r.right <= b.right && r.top >= b.top && r.bottom <= b.bottom),
+            };
+        });
+        const controls = (Array.from(dlg.querySelectorAll("button,a,input:not([type=file]),textarea,select,[role=switch],[role=combobox]")).filter(visible) as HTMLElement[]).map((el) => {
+            el.scrollIntoView({ block: "center", inline: "nearest" });
+            const r = el.getBoundingClientRect();
+            const reachable = inside(r) && inViewport(r);
+            const disabled = (el as HTMLButtonElement).disabled === true;
+            const passThrough = getComputedStyle(el).pointerEvents === "none";
+            const inset = Math.min(7, r.width / 4, r.height / 4);
+            const points: Array<[number, number]> = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + inset, r.top + inset], [r.right - inset, r.bottom - inset]];
+            let why: string | undefined;
+            const hit = points.every(([x, y]) => {
+                const top = document.elementFromPoint(x, y);
+                const ok = Boolean(top && (passThrough ? top.contains(el) : el.contains(top)));
+                if (!ok && !why) why = `at ${Math.round(x)},${Math.round(y)} hit ${top ? name(top) : "nothing"}`;
+                return ok;
+            });
+            return { name: name(el), disabled, reachable, hit, ...(why ? { why } : {}) };
+        });
+        // Put back what the readings above scrolled, the window panel included (a box with hidden overflow can still be scrolled).
+        if (body) body.scrollTop = 0;
+        dlg.scrollTop = 0;
+        const d = dlg.getBoundingClientRect();
+        return {
+            window: { present: true, rect: round(d), insideViewport: inViewport(d), scrollsInside: body ? body.scrollHeight > body.clientHeight + 1 : false },
+            controls, spill: { ...pageSpill(), bodyScrollWidth: body ? body.scrollWidth : null, bodyClientWidth: body ? body.clientWidth : null },
+            clipped: clippedIn(dlg), messages, spinners, focusOn,
+        };
+    };
+
+    const readMessage = (): MessageReading => {
+        const toasts = Array.from(document.querySelectorAll('[role="status"][aria-label$=" notification"], [role="alert"][aria-label$=" notification"]')).filter(visible);
+        const toast = toasts.find((t) => t.getAttribute("aria-label") === "Success notification") as HTMLElement | undefined;
+        if (!toast) return { present: false, count: toasts.length, spill: pageSpill() };
+        const r = toast.getBoundingClientRect();
+        const points: Array<[number, number]> = [[r.left + r.width / 2, r.top + r.height / 2], [r.left + 7, r.top + 7], [r.right - 7, r.bottom - 7]];
+        const dismiss = toast.querySelector("button");
+        const dr = dismiss ? dismiss.getBoundingClientRect() : null;
+        return {
+            present: true, count: toasts.length, rect: round(r), insideViewport: inViewport(r),
+            text: Array.from(toast.querySelectorAll("div")).filter((el) => el.children.length === 0 && (el.textContent ?? "").trim() !== "").map((el) => el.textContent).join(" "),
+            onTop: points.every(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('[aria-label="Success notification"]'))),
+            dismissHit: dismiss && dr ? dismiss.contains(document.elementFromPoint(dr.left + dr.width / 2, dr.top + dr.height / 2)) : null,
+            clipped: clippedIn(toast), spill: pageSpill(), windowStillOpen: Boolean(openDialog()),
+            focusOn: document.activeElement ? name(document.activeElement) : "",
+        };
+    };
+    win.__states = { window: readWindow, message: readMessage };
+}
+
+// The backend's answers. "Label" is the server's name for the second document of the card that was sent.
+const SECOND_LABEL: Record<string, [string, string]> = {
+    business: ["business_photo_id", "Photo ID matching the business registration"],
+    personal: ["personal_photo_id", "Photo ID matching the utility bill"],
+};
+const serverError = (code: string, message: string, details: unknown) => ({ error: { code, message, details, request_id: "req-e2e" } });
+type StateAnswer = { status: number; body: unknown; headers?: Record<string, string> } | "abort";
+const createdFor = (use: string, status = "submitted"): StateAnswer => ({
+    status: 201,
+    body: {
+        id: "11111111-1111-1111-1111-111111111111", use_type: use, status, submitted_at: T,
+        documents: (use === "business" ? ["business_registration", "business_photo_id"] : ["utility_bill", "personal_photo_id"]).map((kind) => ({ kind, file_name: "document.pdf", content_type: "application/pdf", size_bytes: 13 })),
+    },
+});
+const WAITING_LIMIT = "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents.";
+const SESSION_ENDED = "Your login session has ended. Please sign in again.";
+const APPROVED = "Your request was approved. Our team will contact you about the next steps.";
+const REJECTED = "Your request was not approved.";
+const OFFLINE = "You appear to be offline. Reconnect, then try again.";
+/** A server answer shown in both cards at once: what the server sends for a card, and the sentence that card must show. */
+const SERVER_ANSWERS: Array<{ id: string; answer: (use: string) => StateAnswer; shows: (use: string) => string; as: "error" | "status" }> = [
+    { id: "429_waiting_limit_longest", as: "error", shows: () => WAITING_LIMIT, answer: () => ({ status: 429, body: serverError("too_many_open_requests", WAITING_LIMIT, { max_open_requests: 3 }) }) },
+    { id: "413_file_too_large", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} is larger than 10 MB.`, answer: (use) => ({ status: 413, body: serverError("file_too_large", `${SECOND_LABEL[use][1]} is larger than 10 MB.`, { field: SECOND_LABEL[use][0], max_file_bytes: 10485760 }) }) },
+    { id: "415_unsupported_file_type", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} must be a PDF, JPG or PNG file.`, answer: (use) => ({ status: 415, body: serverError("unsupported_file_type", `${SECOND_LABEL[use][1]} must be a PDF, JPG or PNG file.`, { field: SECOND_LABEL[use][0], accepted_types: ["application/pdf", "image/jpeg", "image/png"] }) }) },
+    { id: "422_empty_file", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} is empty.`, answer: (use) => ({ status: 422, body: serverError("empty_file", `${SECOND_LABEL[use][1]} is empty.`, { field: SECOND_LABEL[use][0] }) }) },
+    { id: "429_rate_limited", as: "error", shows: () => "Too many requests. Wait a moment and try again.", answer: () => ({ status: 429, headers: { "Retry-After": "360" }, body: serverError("rate_limited", "Too many requests. Wait a moment and try again.", { limit: "10 per 1 hour", retry_after_seconds: 360 }) }) },
+    { id: "503_storage_unavailable", as: "error", shows: () => "Your documents could not be saved. Nothing was kept. Please try again.", answer: () => ({ status: 503, headers: { "Retry-After": "30" }, body: serverError("storage_unavailable", "Your documents could not be saved. Nothing was kept. Please try again.", null) }) },
+    { id: "503_save_unconfirmed", as: "error", shows: () => "We could not confirm that your documents were saved. Please send the same files again.", answer: () => ({ status: 503, headers: { "Retry-After": "30" }, body: serverError("save_unconfirmed", "We could not confirm that your documents were saved. Please send the same files again.", null) }) },
+    // F1: the session ended and could not be renewed. With the server's sentence, then with no body at all.
+    { id: "401_with_server_message", as: "error", shows: () => "Session has expired or is invalid", answer: () => ({ status: 401, body: serverError("unauthorized", "Session has expired or is invalid", null) }) },
+    { id: "401_without_message", as: "error", shows: () => SESSION_ENDED, answer: () => ({ status: 401, body: "" }) },
+    // F3: the kept key brought back a request staff already decided.
+    { id: "decided_approved", as: "status", shows: () => APPROVED, answer: (use) => createdFor(use, "approved") },
+    { id: "decided_rejected", as: "status", shows: () => REJECTED, answer: (use) => createdFor(use, "rejected") },
+];
+
+const MEASUREMENTS_DIR = process.env.BUY_NOW_MEASUREMENTS_DIR;
+
+for (const role of ["tenant_admin", "user"] as const) {
+    for (const [width, height] of SIZES) {
+        for (const theme of THEMES) {
+            test(`${role === "tenant_admin" ? "admin" : "non-admin"} ${width}x${height} ${theme}: every window state opened and measured`, async ({ page }) => {
+                test.setTimeout(600_000);
+                await page.setViewportSize({ width, height });
+                const tracker = await openApp(page, { theme, sidebar: sidebarsFor(width)[0], role });
+                // Registered after openApp, so it runs first: the document POSTs and the session renewal of this test.
+                const posts: Array<{ use: string; key: string | undefined; fields: string[] }> = [];
+                let answer: (use: string, nth: number) => StateAnswer = (use) => createdFor(use);
+                let hold = false;
+                let release: () => void = () => {};
+                let gate = new Promise<void>((resolve) => { release = resolve; });
+                let renewals = 0;
+                await page.route((url) => /\/api\/v1\/(telephony\/number-requests|auth\/refresh)\/?$/.test(url.pathname), async (route) => {
+                    const request = route.request();
+                    if (request.method() !== "POST") return route.fallback();
+                    if (/auth\/refresh\/?$/.test(new URL(request.url()).pathname)) {
+                        renewals += 1;
+                        return route.fulfill({ status: 401, contentType: "application/json", body: JSON.stringify(serverError("unauthorized", "Session has expired or is invalid", null)) });
+                    }
+                    const raw = request.postDataBuffer()?.toString("latin1") ?? "";
+                    const use = /name="use_type"\r\n\r\n(\w+)/.exec(raw)?.[1] ?? "";
+                    posts.push({ use, key: request.headers()["idempotency-key"], fields: Array.from(raw.matchAll(/name="([a-z_]+)"/g)).map((m) => m[1]) });
+                    if (hold) { await gate; gate = new Promise<void>((resolve) => { release = resolve; }); }
+                    const a = answer(use, posts.length);
+                    if (a === "abort") return route.abort("connectionfailed");
+                    return route.fulfill({ status: a.status, contentType: "application/json", headers: a.headers, body: typeof a.body === "string" ? a.body : JSON.stringify(a.body) });
+                });
+                await page.addInitScript(installStateProbe);
+                await openTelephony(page, role);
+                expect(await page.evaluate(() => document.documentElement.classList.contains("dark"))).toBe(theme === "dark");
+                await page.locator(CARD).evaluate((el) => el.scrollIntoView({ block: "center" }));
+
+                const buy = page.getByRole("button", { name: "Buy Now" });
+                const dialog = page.getByRole("dialog", { name: TITLE });
+                const inputs = dialog.locator('input[type="file"]');
+                const cards = dialog.locator("[data-document-card]");
+                const submit = (i: number) => cards.nth(i).getByRole("button", { name: "Submit" });
+                const uses = ["business", "personal"] as const;
+                const records: unknown[] = [];
+                const openWindow = async () => {
+                    await buy.click();
+                    await expect(dialog).toBeVisible();
+                    await expect(dialog).toBeFocused();
+                    await page.waitForTimeout(300);
+                };
+                /** Reads the open window, writes the reading down and requires every rule to hold. */
+                const measure = async (state: string, note?: string) => {
+                    const reading = await page.evaluate(() => (window as unknown as { __states: { window(): StateReading } }).__states.window());
+                    const problems: string[] = [];
+                    if (!reading.window.present) problems.push("window missing");
+                    else if (!reading.window.insideViewport) problems.push(`window outside the device window ${JSON.stringify(reading.window.rect)}`);
+                    for (const control of reading.controls) {
+                        if (!control.reachable) problems.push(`not reachable: ${control.name}`);
+                        if (!control.hit) problems.push(`covered: ${control.name} (${control.why})`);
+                    }
+                    if (!reading.spill.ok) problems.push(`page scrolls sideways (${reading.spill.scrollWidth} > ${reading.spill.innerWidth})`);
+                    if (reading.spill.bodyScrollWidth !== null && reading.spill.bodyClientWidth !== null && reading.spill.bodyScrollWidth > reading.spill.bodyClientWidth + 1) problems.push("window body scrolls sideways");
+                    for (const cut of reading.clipped) problems.push(`clipped: ${cut}`);
+                    for (const message of reading.messages) if (!message.insideViewport || !message.insideWindow) problems.push(`message outside: ${message.text.slice(0, 40)}`);
+                    for (const spinner of reading.spinners) if (!spinner.insideViewport || !spinner.insideSubmit || spinner.ariaHidden !== "true") problems.push(`spinner: ${JSON.stringify(spinner)}`);
+                    records.push({ role, width, height, theme, state, ...(note ? { note } : {}), pass: problems.length === 0, problems, ...reading });
+                    expect(problems, `${state}: every rule holds`).toEqual([]);
+                    return reading;
+                };
+                const messagesOf = (reading: StateReading, kind: string) => reading.messages.filter((m) => m.kind === kind).map((m) => m.text);
+
+                // ── open, no files ──
+                await openWindow();
+                await expect(dialog.getByText(EMPTY)).toHaveCount(4);
+                await measure("open_no_files");
+
+                // ── each refusal before upload, in all four boxes at once; nothing is sent ──
+                for (let i = 0; i < 4; i++) await inputs.nth(i).setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("x") });
+                await expect(dialog.locator("[data-file-error]")).toHaveCount(4);
+                expect(messagesOf(await measure("refusal_wrong_type"), "file")).toEqual([
+                    "Business registration must be a PDF, JPG or PNG file.", "Photo ID matching the business registration must be a PDF, JPG or PNG file.",
+                    "Utility bill (proof of address) must be a PDF, JPG or PNG file.", "Photo ID matching the utility bill must be a PDF, JPG or PNG file.",
+                ]);
+                for (let i = 0; i < 4; i++) await inputs.nth(i).setInputFiles({ name: "empty.pdf", mimeType: "application/pdf", buffer: Buffer.alloc(0) });
+                await expect(dialog.locator("[data-file-error]").first()).toHaveText("Business registration is empty.");
+                expect(messagesOf(await measure("refusal_empty"), "file")).toEqual([
+                    "Business registration is empty.", "Photo ID matching the business registration is empty.",
+                    "Utility bill (proof of address) is empty.", "Photo ID matching the utility bill is empty.",
+                ]);
+                // One byte over 10 MB, made in the page and dropped on each box.
+                for (let i = 0; i < 4; i++) {
+                    const transfer = await page.evaluateHandle(() => { const data = new DataTransfer(); data.items.add(new File([new Uint8Array(10485761)], "scan.pdf", { type: "application/pdf" })); return data; });
+                    await dialog.locator("[data-upload-box]").nth(i).dispatchEvent("drop", { dataTransfer: transfer });
+                    await transfer.dispose();
+                }
+                await expect(dialog.locator("[data-file-error]").first()).toHaveText("Business registration is larger than 10 MB.");
+                expect(messagesOf(await measure("refusal_too_large"), "file")).toEqual([
+                    "Business registration is larger than 10 MB.", "Photo ID matching the business registration is larger than 10 MB.",
+                    "Utility bill (proof of address) is larger than 10 MB.", "Photo ID matching the utility bill is larger than 10 MB.",
+                ]);
+                await expect(dialog.getByText(EMPTY), "no refused file was taken").toHaveCount(4);
+                expect(posts.length, "nothing sent for refused files").toBe(0);
+                await dialog.getByRole("button", { name: "Cancel" }).click();
+                await expect(dialog).toHaveCount(0);
+
+                // ── one file in each card, then both files in each card ──
+                await openWindow();
+                await inputs.nth(0).setInputFiles(pdf("registration.pdf"));
+                await inputs.nth(2).setInputFiles(pdf("utility-bill.pdf"));
+                await expect(dialog.locator("[data-file-name]")).toHaveCount(2);
+                await expect(submit(0)).toBeDisabled();
+                await expect(submit(1)).toBeDisabled();
+                await measure("one_file_in_each_card");
+                await inputs.nth(1).setInputFiles(pdf("photo-id.pdf"));
+                await inputs.nth(3).setInputFiles(pdf("passport.pdf"));
+                await expect(dialog.locator("[data-file-name]")).toHaveCount(4);
+                await expect(submit(0)).toBeEnabled();
+                await expect(submit(1)).toBeEnabled();
+                await measure("both_files_in_each_card");
+
+                // ── sending, in each card: the spinner on the pressed Submit only, focus on the window panel ──
+                const send = async (i: number) => {
+                    const before = posts.length;
+                    await submit(i).click();
+                    await expect.poll(() => posts.length, { timeout: 30_000 }).toBeGreaterThan(before);
+                };
+                const answered = async (i: number, as: "error" | "status", text: string) => {
+                    await expect(submit(i)).toBeEnabled({ timeout: 30_000 });
+                    await expect(cards.nth(i).locator(as === "error" ? "[data-submit-error]" : "[data-submit-status]")).toHaveText(text);
+                    await expect(cards.nth(i).locator(as === "error" ? "[data-submit-status]" : "[data-submit-error]")).toHaveCount(0);
+                };
+                answer = SERVER_ANSWERS[0].answer;
+                hold = true;
+                for (const i of [0, 1]) {
+                    await send(i);
+                    await expect(submit(i)).toBeDisabled();
+                    await expect(dialog, "sending: keyboard focus is on the window panel, not the page").toBeFocused();
+                    await expect(dialog.locator("[data-submit-spinner]"), "one spinner").toHaveCount(1);
+                    await expect(submit(i).locator("[data-submit-spinner]"), "on the pressed Submit").toHaveCount(1);
+                    await expect(submit(i), "the label is unchanged").toHaveText("Submit");
+                    await expect(dialog.getByRole("button", { name: "Cancel" })).toBeDisabled();
+                    await expect(dialog.locator("[data-document-grid]")).toHaveAttribute("aria-busy", "true");
+                    await page.keyboard.press("Escape");
+                    await page.waitForTimeout(250);
+                    await expect(dialog, "Escape does not close the window while sending").toBeVisible();
+                    const sending = await measure(`sending_${uses[i]}`);
+                    expect(sending.focusOn, "sending: focus").toBe("window panel");
+                    expect(sending.controls.every((control) => control.disabled), "sending: every control is locked").toBe(true);
+                    expect(sending.spinners.map((spinner) => spinner.card)).toEqual([i === 0 ? "1. Business Use" : "2. Personal Use"]);
+                    release();
+                    await answered(i, "error", WAITING_LIMIT);
+                    await expect(dialog.locator("[data-submit-spinner]"), "the spinner goes with the answer").toHaveCount(0);
+                    await expect(cards.nth(i).locator("[data-submit-error]"), "after a failure focus is on the message").toBeFocused();
+                }
+                hold = false;
+
+                // ── every server answer, shown in both cards at once, with both files still in place ──
+                for (const [index, shown] of SERVER_ANSWERS.entries()) {
+                    answer = shown.answer;
+                    // The first one is already on screen in both cards: it released the two sending states.
+                    if (index > 0) for (const i of [0, 1]) { await send(i); await answered(i, shown.as, shown.shows(uses[i])); }
+                    const reading = await measure(`answer_${shown.id}`);
+                    expect(messagesOf(reading, shown.as === "error" ? "submit" : "status")).toEqual([shown.shows("business"), shown.shows("personal")]);
+                    expect(reading.messages.map((m) => m.role)).toEqual(shown.as === "error" ? ["alert", "alert"] : ["status", "status"]);
+                    await expect(dialog.locator("[data-file-name]"), `${shown.id}: both files stay in both cards`).toHaveCount(4);
+                    await expect(page.getByRole("status", { name: "Success notification" })).toHaveCount(0);
+                    expect(page.url(), `${shown.id}: still on Settings`).toContain("/settings");
+                    if (shown.as === "status") {
+                        const colours = await dialog.locator("[data-submit-status]").evaluateAll((els) => els.map((el) => el.className.includes("text-destructive")));
+                        expect(colours, "a decided request is not shown in the error colour").toEqual([false, false]);
+                    }
+                }
+                expect(renewals, "the session renewal was tried and refused (F1)").toBeGreaterThan(0);
+                // F3 sends nothing more: one POST per card for each decided answer.
+                const sentBeforeOffline = posts.length;
+
+                // ── offline ──
+                await page.context().setOffline(true);
+                answer = () => "abort";
+                for (const i of [0, 1]) { await submit(i).click(); await page.waitForTimeout(150); await answered(i, "error", OFFLINE); }
+                await measure("offline");
+                await page.context().setOffline(false);
+                await page.waitForFunction(() => navigator.onLine === true);
+                await page.waitForTimeout(500);
+
+                // The same two files carried one key per card until a decided request made the card forget it.
+                const keysOf = (use: string) => posts.slice(0, sentBeforeOffline).filter((sent) => sent.use === use).map((sent) => sent.key);
+                for (const use of uses) {
+                    const keys = keysOf(use);
+                    // One POST for the sending state (released with the first answer), then one for each later answer.
+                    expect(keys.length, `${use}: one POST per answer, none repeated (F3 sends nothing more)`).toBe(SERVER_ANSWERS.length);
+                    const untilApproved = keys.slice(0, SERVER_ANSWERS.findIndex((a) => a.id === "decided_approved") + 1);
+                    expect(new Set(untilApproved).size, `${use}: one key for every retry of the same files`).toBe(1);
+                    expect(keys[keys.length - 1], `${use}: a new key after the approved answer forgot the old one`).not.toBe(untilApproved[0]);
+                }
+                for (const sent of posts) expect(sent.fields, "use_type first, then the two documents of that use").toEqual(sent.use === "business" ? ["use_type", "business_registration", "business_photo_id"] : ["use_type", "utility_bill", "personal_photo_id"]);
+
+                // ── F4: the key is refused as used with other documents; one automatic resend with a new key succeeds ──
+                const readMessage = () => page.evaluate(() => (window as unknown as { __states: { message(): MessageReading } }).__states.message());
+                const measureMessage = async (state: string, note: string) => {
+                    await expect(dialog).toHaveCount(0, { timeout: 60_000 });
+                    await expect(page.getByRole("status", { name: "Success notification" })).toBeVisible();
+                    await page.waitForTimeout(700);
+                    const reading = await readMessage();
+                    const problems: string[] = [];
+                    if (!reading.present) problems.push("message missing");
+                    else {
+                        if (!reading.insideViewport) problems.push("message outside the device window");
+                        if (reading.text !== MESSAGE) problems.push(`message text: ${reading.text}`);
+                        if (!reading.onTop) problems.push("message covered");
+                        if (reading.dismissHit === false) problems.push("Dismiss covered");
+                        if (reading.windowStillOpen) problems.push("window still open");
+                        if (reading.count !== 1) problems.push(`${reading.count} messages on screen`);
+                        for (const cut of reading.clipped ?? []) problems.push(`clipped: ${cut}`);
+                    }
+                    if (!reading.spill.ok) problems.push("page scrolls sideways");
+                    records.push({ role, width, height, theme, state, note, pass: problems.length === 0, problems, message: reading });
+                    expect(problems, `${state}: every rule holds`).toEqual([]);
+                    expect(await buy.evaluate((el) => document.activeElement === el), `${state}: focus back on Buy Now`).toBe(true);
+                };
+                const beforeResend = posts.length;
+                answer = (use, nth) => (nth === beforeResend + 1 ? { status: 400, body: serverError("idempotency_key_reused", "This Idempotency-Key was already used with different documents. Send a new key.", { field: "Idempotency-Key" }) } : createdFor(use));
+                await submit(0).click();
+                await measureMessage("resend_with_new_key_then_success", "400 idempotency_key_reused, then 201 for the automatic resend");
+                expect(posts.length - beforeResend, "exactly one automatic resend").toBe(2);
+                expect(posts[beforeResend + 1].key, "the resend carries a new key").not.toBe(posts[beforeResend].key);
+                expect(posts[beforeResend + 1].key).toMatch(/^[A-Za-z0-9_-]{8,128}$/);
+
+                // ── a plain success: the window closes and the message shows ──
+                await page.getByRole("status", { name: "Success notification" }).getByRole("button", { name: "Dismiss notification" }).click();
+                await expect(page.getByRole("status", { name: "Success notification" })).toHaveCount(0);
+                await page.mouse.move(1, 1);
+                await page.waitForTimeout(400);
+                await openWindow();
+                await expect(dialog.getByText(EMPTY), "a reopened window starts empty").toHaveCount(4);
+                await inputs.nth(2).setInputFiles(pdf("utility-bill.pdf"));
+                await inputs.nth(3).setInputFiles(pdf("passport.pdf"));
+                answer = (use) => createdFor(use);
+                const beforeSuccess = posts.length;
+                await submit(1).click();
+                await measureMessage("success_message_after_close", "201 for the Personal card");
+                expect(posts.length - beforeSuccess, "one POST").toBe(1);
+                // Nothing of the files is kept for the browser tab: only keys and one-way hashes, and none after a success.
+                const kept = await page.evaluate(() => Object.keys(window.sessionStorage).filter((name) => name.startsWith("talklee.number-request-key.v1:")).map((name) => [name, window.sessionStorage.getItem(name) ?? ""]));
+                for (const [name, value] of kept) expect(`${name} ${value}`, "no file name in the tab's storage").not.toMatch(/registration|photo-id|utility-bill|passport|\.pdf/);
+                expect(kept.filter(([name]) => name.endsWith(":personal")), "the Personal key is cleared on success").toEqual([]);
+
+                expect(tracker.writes, "write requests no mock answered").toEqual([]);
+                expect(tracker.unanswered, "requests no mock answered").toEqual([]);
+                if (MEASUREMENTS_DIR) {
+                    fs.mkdirSync(MEASUREMENTS_DIR, { recursive: true });
+                    fs.writeFileSync(path.join(MEASUREMENTS_DIR, `${role}-${width}x${height}-${theme}.json`), JSON.stringify({ role, width, height, theme, records }, null, 1));
+                }
+            });
+        }
+    }
 }
 
 // ───────────────────────── the card hover lift does not flicker ─────────────────────────
