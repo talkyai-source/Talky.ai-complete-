@@ -210,7 +210,7 @@ class SubmissionReader:
     def _on_part_begin(self) -> None:
         self._parts_seen += 1
         if self._parts_seen > MAX_PARTS:
-            raise errors.invalid_form("Send only the documents for this request.")
+            raise errors.invalid_form(errors.TOO_MANY_PARTS_MESSAGE)
         self._part = _Part()
         self._disposition = b""
 
