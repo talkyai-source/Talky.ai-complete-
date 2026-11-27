@@ -421,7 +421,7 @@ test("a retry with the same files re-uses the key; a changed file makes a new ke
 for (const [status, code, message] of [
     [429, "too_many_open_requests", "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents."],
     [503, "save_unconfirmed", "We could not confirm that your documents were saved. Please send the same files again."],
-    [422, "invalid_form", "Send Business registration as a file."],
+    [422, "invalid_form", "Please choose a file for Business registration."],
 ] as const) {
     test(`${code} (${status}): the server's message shows in the card as sent, the files stay, and a second Submit re-uses the same key`, async () => {
         postAnswer = () => Promise.resolve(json({ error: { code, message, details: {}, request_id: "r" } }, status));
@@ -775,7 +775,7 @@ for (const [status, sentence] of [["approved", APPROVED], ["rejected", REJECTED]
 // F4
 test("F4: a key the server says belongs to other documents is forgotten and ONE more send goes out with a new key", async () => {
     let n = 0;
-    postAnswer = async () => { n += 1; return n === 1 ? json({ error: { code: "idempotency_key_reused", message: "This Idempotency-Key was already used with different documents. Send a new key.", details: { field: "Idempotency-Key" }, request_id: "r" } }, 400) : json(CREATED, 201); };
+    postAnswer = async () => { n += 1; return n === 1 ? json({ error: { code: "idempotency_key_reused", message: "These documents were already sent with different files. Please press Submit again.", details: { field: "Idempotency-Key" }, request_id: "r" } }, 400) : json(CREATED, 201); };
     mount();
     await openWindow();
     fill(BUSINESS);
@@ -788,7 +788,7 @@ test("F4: a key the server says belongs to other documents is forgotten and ONE 
 });
 
 test("F4: when the automatic resend fails too, its server message shows, the files stay and nothing more is sent", async () => {
-    postAnswer = failWithCode(400, "idempotency_key_reused", "This Idempotency-Key was already used with different documents. Send a new key.");
+    postAnswer = failWithCode(400, "idempotency_key_reused", "These documents were already sent with different files. Please press Submit again.");
     mount();
     await openWindow();
     fill(BUSINESS);
@@ -798,12 +798,12 @@ test("F4: when the automatic resend fails too, its server message shows, the fil
     assert.notEqual(keysSent()[1], keysSent()[0]);
     assert.equal(isOpen(), true);
     assert.equal(toastShown(), false);
-    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "This Idempotency-Key was already used with different documents. Send a new key.");
+    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "These documents were already sent with different files. Please press Submit again.");
     assert.equal(shownName(boxes(BUSINESS)[0]), "doc-0.pdf");
 });
 
 test("F4: any other refusal is not sent again", async () => {
-    postAnswer = failWithCode(400, "idempotency_key_invalid", "The Idempotency-Key must be 8 to 128 letters, digits, hyphens or underscores.");
+    postAnswer = failWithCode(400, "idempotency_key_invalid", "Your request could not be sent. Please close this window, open Buy Now again and press Submit.");
     mount();
     await openWindow();
     fill(BUSINESS);

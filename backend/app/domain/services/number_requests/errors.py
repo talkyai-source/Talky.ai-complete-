@@ -9,6 +9,12 @@ from typing import Any
 
 from app.domain.services.number_requests.config import KIND_LABELS, max_file_bytes
 
+REUSED_KEY_MESSAGE = "These documents were already sent with different files. Please press Submit again."
+INVALID_KEY_MESSAGE = "Your request could not be sent. Please close this window, open Buy Now again and press Submit."
+UNREADABLE_FORM_MESSAGE = "Your documents could not be read. Please choose the files again and press Submit."
+TOO_MANY_PARTS_MESSAGE = "Please send only the two documents for this request."
+NOT_A_FILE_MESSAGE = "Please choose a file for {label}."
+
 
 class NumberRequestRefused(Exception):
     """A refusal the customer can act on. The router maps it to an HTTP error."""
@@ -51,7 +57,7 @@ def clamp_field_name(raw: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "", raw)[:64]
 
 
-def invalid_form(message: str = "Send the documents as multipart/form-data.") -> NumberRequestRefused:
+def invalid_form(message: str = UNREADABLE_FORM_MESSAGE) -> NumberRequestRefused:
     return NumberRequestRefused(422, "invalid_form", message, field="body")
 
 
@@ -80,7 +86,7 @@ def too_many_open_requests(limit: int) -> NumberRequestRefused:
 
 
 def not_a_file(kind: str) -> NumberRequestRefused:
-    return NumberRequestRefused(422, "invalid_form", f"Send {label(kind)} as a file.", field=kind)
+    return NumberRequestRefused(422, "invalid_form", NOT_A_FILE_MESSAGE.format(label=label(kind)), field=kind)
 
 
 def duplicate_document(kind: str) -> NumberRequestRefused:

@@ -55,7 +55,7 @@ _CONFIRM_TIMEOUT = 5.0
 def _reused() -> errors.NumberRequestRefused:
     return errors.NumberRequestRefused(
         400, "idempotency_key_reused",
-        "This Idempotency-Key was already used with different documents. Send a new key.",
+        errors.REUSED_KEY_MESSAGE,
         field="Idempotency-Key")
 
 

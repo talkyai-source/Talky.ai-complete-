@@ -155,11 +155,11 @@ async def submit_number_request(
     key = request.headers.get("Idempotency-Key")
     if not key:
         raise ApiError(code="idempotency_key_required", status=400,
-                       message="Send an Idempotency-Key header with a new random ID for this submission.",
+                       message=errors.INVALID_KEY_MESSAGE,
                        details={"field": "Idempotency-Key"})
     if not _KEY_RE.match(key):
         raise ApiError(code="idempotency_key_invalid", status=400,
-                       message="The Idempotency-Key must be 8 to 128 letters, digits, hyphens or underscores.",
+                       message=errors.INVALID_KEY_MESSAGE,
                        details={"field": "Idempotency-Key"})
 
     await _refuse_if_disk_low()
