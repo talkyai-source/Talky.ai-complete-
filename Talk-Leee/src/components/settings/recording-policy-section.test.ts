@@ -95,12 +95,11 @@ test("clearing retention to retype does not snap back; clamps on blur (forms aud
     assert.equal(box.value, "3650");
 });
 
-test("opt-out key accepts only 0-9, * and # (forms audit B-F18)", () => {
+test("opt-out key is read-only for everyone: a key press does nothing in this release (was: accepts only 0-9, * and #)", () => {
     render(TWO_PARTY);
     const box = screen.getByLabelText("Opt-out key") as HTMLInputElement;
+    assert.equal(box.disabled, true);
     assert.equal(box.getAttribute("pattern"), "[0-9*#]");
-    fireEvent.change(box, { target: { value: "x" } });
-    assert.equal(box.value, "");
     fireEvent.change(box, { target: { value: "#" } });
-    assert.equal(box.value, "#");
+    assert.equal(box.value, "");
 });
