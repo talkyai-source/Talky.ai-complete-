@@ -35,8 +35,9 @@ def _create(statements, table):
     return found[0]
 
 
-def test_0108_is_the_single_head_on_top_of_0107():
-    assert SCRIPTS.get_heads() == [REVISION]
+def test_0108_sits_on_0107_and_0109_sits_on_it():
+    assert SCRIPTS.get_heads() == ["0109_plan_retention_line"]
+    assert SCRIPTS.get_revision("0109_plan_retention_line").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0107_staff_suspension"
     assert len(REVISION) <= 32 and _module().revision == REVISION
 
