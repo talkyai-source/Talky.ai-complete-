@@ -775,7 +775,7 @@ for (const [status, sentence] of [["approved", APPROVED], ["rejected", REJECTED]
 // F4
 test("F4: a key the server says belongs to other documents is forgotten and ONE more send goes out with a new key", async () => {
     let n = 0;
-    postAnswer = async () => { n += 1; return n === 1 ? json({ error: { code: "idempotency_key_reused", message: "These documents were already sent with different files. Please press Submit again.", details: { field: "Idempotency-Key" }, request_id: "r" } }, 400) : json(CREATED, 201); };
+    postAnswer = async () => { n += 1; return n === 1 ? json({ error: { code: "idempotency_key_reused", message: "Your files have changed since your last try. Please press Submit again.", details: { field: "Idempotency-Key" }, request_id: "r" } }, 400) : json(CREATED, 201); };
     mount();
     await openWindow();
     fill(BUSINESS);
@@ -788,7 +788,7 @@ test("F4: a key the server says belongs to other documents is forgotten and ONE 
 });
 
 test("F4: when the automatic resend fails too, its server message shows, the files stay and nothing more is sent", async () => {
-    postAnswer = failWithCode(400, "idempotency_key_reused", "These documents were already sent with different files. Please press Submit again.");
+    postAnswer = failWithCode(400, "idempotency_key_reused", "Your files have changed since your last try. Please press Submit again.");
     mount();
     await openWindow();
     fill(BUSINESS);
@@ -798,12 +798,12 @@ test("F4: when the automatic resend fails too, its server message shows, the fil
     assert.notEqual(keysSent()[1], keysSent()[0]);
     assert.equal(isOpen(), true);
     assert.equal(toastShown(), false);
-    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "These documents were already sent with different files. Please press Submit again.");
+    assert.equal(card(BUSINESS).querySelector("[data-submit-error]")?.textContent, "Your files have changed since your last try. Please press Submit again.");
     assert.equal(shownName(boxes(BUSINESS)[0]), "doc-0.pdf");
 });
 
 test("F4: any other refusal is not sent again", async () => {
-    postAnswer = failWithCode(400, "idempotency_key_invalid", "Your request could not be sent. Please close this window, open Buy Now again and press Submit.");
+    postAnswer = failWithCode(400, "idempotency_key_invalid", "Your request could not be sent. Please try again.");
     mount();
     await openWindow();
     fill(BUSINESS);
