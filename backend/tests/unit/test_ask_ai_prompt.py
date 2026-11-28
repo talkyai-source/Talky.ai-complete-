@@ -48,3 +48,12 @@ def test_tessa_never_hides_that_she_is_an_ai():
     assert scan_instruction_conflicts(ASK_AI_SYSTEM_PROMPT) == []
     assert scan_instruction_conflicts(rules) == []
     assert "Talk-Lee's AI assistant" in ASK_AI_SYSTEM_PROMPT
+
+
+def test_demo_spoken_identity_uses_the_public_brand():
+    from app.domain.services.ask_ai_session_config import build_ask_ai_session_config
+    from app.domain.services.voice_pipeline.speech_guard import guard_spoken_sentence
+
+    assert guard_spoken_sentence(build_ask_ai_session_config(), "I'm a real person.") == (
+        "I'm an AI assistant for Talk-Lee."
+    )

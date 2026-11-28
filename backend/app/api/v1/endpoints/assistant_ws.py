@@ -423,7 +423,7 @@ async def assistant_chat(
         # STEP 3: Send connected confirmation
         await manager.send_json(connection_id, {
             "type": "connected",
-            "message": "Connected to Talky Assistant",
+            "message": "Connected to Talk-Lee Assistant",
             "conversation_id": conversation_id or "new"
         })
         

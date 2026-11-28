@@ -1077,7 +1077,7 @@ _is_prod = (_settings_for_app.environment or "").strip().lower() == "production"
 # the recon phase done for them. We keep the docs available on
 # staging/dev where they're genuinely useful.
 app = FastAPI(
-    title="Talky.ai — AI Voice Dialer",
+    title="Talk-Lee — AI Voice Dialer",
     description="Intelligent voice communication platform with AI agents",
     version="1.0.0",
     lifespan=lifespan,

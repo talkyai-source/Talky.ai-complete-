@@ -4,6 +4,7 @@ import httpx
 import pytest
 
 import app.infrastructure.connectors.crm.hubspot as module
+from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference
 from app.infrastructure.connectors.crm.hubspot import HubSpotConnector
 from app.infrastructure.connectors.base import ConnectorProviderError
 
@@ -46,8 +47,63 @@ async def test_hubspot_create_and_reconcile_share_reference(monkeypatch):
     assert await connector.log_call('contact', f'Talky.ai call id: {REFERENCE}', 10) == 'hs-call'
     assert await connector.find_call_by_reference(REFERENCE) == 'hs-call'
     title = json.loads(requests[0].content)['properties']['hs_call_title']
-    search = json.loads(requests[1].content)['filterGroups'][0]['filters'][0]
-    assert search == {'propertyName': 'hs_call_title', 'operator': 'EQ', 'value': title}
+    assert title == f'Talk-Lee call {REFERENCE}'
+    assert json.loads(requests[0].content)['properties']['hs_call_body'] == f'Talky.ai call id: {REFERENCE}'
+    assert json.loads(requests[1].content)['filterGroups'] == [
+        {'filters': [{'propertyName': 'hs_call_title', 'operator': 'EQ', 'value': heading}]}
+        for heading in (title, f'Talky.ai call {REFERENCE}')
+    ]
+
+
+async def _hubspot_holding(monkeypatch, activities):
+    """A stand-in for HubSpot that holds `activities`: the search answers by exact title
+    (any of the groups, up to the limit), and a PATCH changes only the properties it sends."""
+    def respond(request):
+        payload = json.loads(request.content)
+        if request.method == 'POST' and request.url.path.endswith('/calls/search'):
+            titles = {group['filters'][0]['value'] for group in payload['filterGroups']}
+            rows = [{'id': key} for key, properties in activities.items() if properties['hs_call_title'] in titles]
+            return httpx.Response(200, json={'results': rows[:payload['limit']]})
+        key = request.url.path.rsplit('/', 1)[-1]
+        assert request.method == 'PATCH' and key in activities
+        activities[key].update(payload['properties'])
+        return httpx.Response(200, json={'id': key})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(module.httpx, 'AsyncClient', lambda **kwargs: client_class(
+        transport=httpx.MockTransport(respond), **kwargs))
+    connector = HubSpotConnector('tenant', 'connector')
+    await connector.set_access_token('dummy')
+    return connector
+
+
+async def test_hubspot_finds_a_call_under_the_previous_title_and_an_update_keeps_that_title(monkeypatch):
+    # The look-up serves the read-only admin inspection; the sync itself updates by the stored id.
+    old_title = f'Talky.ai call {REFERENCE}'
+    activities = {'old-activity': {'hs_call_title': old_title, 'hs_call_body': 'Original'}}
+    connector = await _hubspot_holding(monkeypatch, activities)
+    found = await connector.find_call_by_reference(REFERENCE)
+    assert found == 'old-activity'
+    assert await connector.update_call_log(found, call_body=f'Updated\nTalky.ai call id: {REFERENCE}')
+    assert activities[found]['hs_call_body'] == f'Updated\nTalky.ai call id: {REFERENCE}'
+    assert activities[found]['hs_call_title'] == old_title      # an update never renames the record
+
+
+async def test_hubspot_finds_a_call_under_the_new_title(monkeypatch):
+    activities = {'new-activity': {'hs_call_title': f'Talk-Lee call {REFERENCE}', 'hs_call_body': 'Body'}}
+    connector = await _hubspot_holding(monkeypatch, activities)
+    assert await connector.find_call_by_reference(REFERENCE) == 'new-activity'
+
+
+async def test_hubspot_reports_one_call_under_both_titles_as_ambiguous(monkeypatch):
+    # One record under each title for the same call: the look-up must see both and refuse to pick.
+    activities = {
+        'old-activity': {'hs_call_title': f'Talky.ai call {REFERENCE}', 'hs_call_body': 'First'},
+        'new-activity': {'hs_call_title': f'Talk-Lee call {REFERENCE}', 'hs_call_body': 'Second'},
+    }
+    connector = await _hubspot_holding(monkeypatch, activities)
+    with pytest.raises(AmbiguousCRMCallReference):
+        await connector.find_call_by_reference(REFERENCE)
 
 
 async def test_hubspot_ambiguous_reconciliation_never_selects_first(monkeypatch):

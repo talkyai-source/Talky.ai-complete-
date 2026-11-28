@@ -17,6 +17,7 @@ from app.core.security.recovery import (
     store_recovery_codes,
 )
 from app.core.security.totp import (
+    TOTP_ISSUER_NAME,
     decrypt_totp_secret,
     encrypt_totp_secret,
     generate_qr_code_data_uri,
@@ -121,7 +122,7 @@ async def setup_mfa(
     return MFASetupResponse(
         provisioning_uri=provisioning_uri,
         qr_code=qr_data_uri,
-        issuer="Talky.ai",
+        issuer=TOTP_ISSUER_NAME,
         account=current_user.email,
     )
 

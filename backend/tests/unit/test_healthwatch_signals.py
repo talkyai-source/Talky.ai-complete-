@@ -130,6 +130,8 @@ async def observe(watch, redis, row, elapsed):
 
 async def test_trunk_alert_requires_five_continuous_minutes_and_recovery_resets_it(watch, redis):
     row = trunk()
+    # Only a line that was seen working alerts: this one was ready just before it went down.
+    assert (await observe(watch, redis, trunk(status="registered"), 0))["status"] == "ok"
     for elapsed in (0, 120, 240, 299):
         assert (await observe(watch, redis, row, elapsed))["status"] == "pending"
     assert (await observe(watch, redis, row, 300))["status"] == "alert"
@@ -277,7 +279,9 @@ async def test_database_signals_count_payment_reviews_and_scope_every_trunk_read
             if "FROM calls" in query:
                 return {"answered": 0, "mode": None}
             return {"recorded": 0, "unconfirmed": 0, "recorded_answered": 0,
-                    "unconfirmed_answered": 0, "transfer_missing": 0, "matched": 0}
+                    "unconfirmed_answered": 0, "answered_long": 0, "unconfirmed_long": 0,
+                    "answered_recent": 0, "unconfirmed_recent": 0,
+                    "transfer_missing": 0, "matched": 0}
 
     @asynccontextmanager
     async def acquire(pool, tenant_id, **kwargs):

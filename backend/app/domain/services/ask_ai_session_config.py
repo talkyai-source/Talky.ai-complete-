@@ -101,7 +101,7 @@ def create_ask_ai_agent_config() -> AgentConfig:
     """Create the fixed agent config used by Ask AI demo sessions."""
     return AgentConfig(
         agent_name="Tessa",
-        company_name="Talky.ai",
+        company_name="Talk-Lee",
         business_type="Voice AI Platform",
         goal=AgentGoal.INFORMATION_GATHERING,
         tone="friendly, warm, and helpful",

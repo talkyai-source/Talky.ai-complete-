@@ -747,7 +747,7 @@ async def _enqueue_callback(
         ):
             raise _CallbackConflict(409, {
                 "error": "do_not_call",
-                "message": "This contact is flagged do-not-call in Talky.ai; the callback was not queued.",
+                "message": "This contact is flagged do-not-call in Talk-Lee; the callback was not queued.",
             })
         duplicate = True
         lead_id = str(lead["id"])
@@ -823,7 +823,7 @@ async def _enqueue_callback(
         return CallbackResponse(
             accepted=True, lead_id=lead_id, campaign_id=str(campaign["id"]), list_id=list_id,
             duplicate=duplicate, queued=True, jobs_enqueued=int(start.jobs_enqueued or 0),
-            message="Callback queued for the Talky.ai agent." if start.jobs_enqueued else
+            message="Callback queued for the Talk-Lee agent." if start.jobs_enqueued else
                     "Lead saved; it already has an active dial job or is outside the calling window.",
         )
     except CampaignError as exc:

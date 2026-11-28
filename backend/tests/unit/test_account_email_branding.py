@@ -1,7 +1,10 @@
 """Configured email/CRM/Drive branding without providers, sockets or .env reads."""
+import re
 from datetime import datetime, timezone
 from html import escape
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -90,3 +93,30 @@ def test_drive_folder_and_transcript_footer_use_the_configured_brand():
     assert BRAND in transcript
     assert 'talky.ai' not in transcript.lower()
     assert CALL_ID in transcript
+
+
+@pytest.mark.parametrize("kind", ["verification", "signup", "reset", "invite"])
+async def test_account_email_default_brand_and_public_links(configured, kind):
+    configured.brand_name = config.Settings.model_fields["brand_name"].default
+    configured.frontend_url = "https://talkleeai.com"
+    service = mail.EmailService()
+    service.send_email = AsyncMock(return_value=True)
+    recipient = "fixture@example.invalid"
+    if kind == "verification":
+        await service.send_verification_email(recipient, "Fixture", "/auth/verify-email?token=dummy")
+    elif kind == "signup":
+        await service.send_signup_code_email(recipient, "Fixture", "123456")
+    elif kind == "reset":
+        await service.send_password_reset_email(recipient, "Fixture", "123456")
+    else:
+        await service.send_team_invite_email(recipient, "Workspace", "Inviter", "user", "dummy", "2026-11-30")
+    payload = service.send_email.await_args.kwargs
+    if kind == "verification":
+        assert payload["subject"] == "Please verify your email address"
+    else:
+        assert "Talk-Lee" in payload["subject"]
+    assert "Talk-Lee" in payload["text_body"]
+    links = re.findall(r'href="(https?://[^"]+)"', payload["html_body"])
+    if kind in {"verification", "reset", "invite"}:
+        assert links
+    assert all(urlsplit(link).hostname == "talkleeai.com" for link in links)

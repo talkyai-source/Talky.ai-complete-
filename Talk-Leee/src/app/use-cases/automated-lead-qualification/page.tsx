@@ -5,9 +5,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "Need Automated Lead Qualification Services? | AI Solutions",
+  title: "Automated Lead Qualification | Talk-Lee AI",
   description:
-    "Never miss a qualified lead. Automate engagement, qualification, scoring, and routing with AI-powered lead qualification services. Book a Demo.",
+    "Set up outbound qualification calls, capture the answers to your campaign questions and review the results with your sales team.",
 };
 
 export default function AutomatedLeadQualificationUseCasePage() {
@@ -34,117 +34,117 @@ export default function AutomatedLeadQualificationUseCasePage() {
 
   const automationPillars = [
     {
-      title: "Instant engagement",
+      title: "Outbound calls",
       description:
-        "The moment a lead fills out a form or calls in, our AI lead qualification agent reaches out by voice or chat within seconds, not hours.",
+        "Use the Lead Generation agent type to call contacts in an outbound campaign.",
     },
     {
       title: "Structured qualification",
       description:
-        "The agent works through your qualification framework — budget, authority, need, timeline — the same way a trained SDR would, every single time.",
+        "Choose the questions you want the agent to ask, such as which service a contact needs.",
     },
     {
-      title: "Real-time scoring & routing",
+      title: "Answers for review",
       description:
-        "Each conversation is scored and routed automatically, so reps open their day with a prioritized list instead of a raw lead dump.",
+        "Your team can review captured answers and decide which contacts to follow up with.",
     },
   ];
 
   const agentSteps = [
     {
-      title: "Trained on your playbook",
+      title: "Define your questions",
       description:
-        "We configure the agent with your qualifying questions, objection handling, and ideal customer profile.",
+        "Set the campaign goal and choose the details you want to learn from the call.",
     },
     {
-      title: "Engages the lead naturally",
+      title: "Introduce the agent",
       description:
-        "Runs a live, conversational call or chat — not a static form — so leads answer honestly instead of clicking through a survey.",
+        "The agent introduces itself as an AI assistant during the call.",
     },
     {
-      title: "Qualifies against your criteria",
+      title: "Capture the answers",
       description:
-        "Confirms budget, authority, need, and timeline, and flags anything that disqualifies the lead early.",
+        "For example, ask when the contact wants to start and the timing the contact gives is saved from the conversation for your team to check.",
     },
     {
-      title: "Books or routes the outcome",
+      title: "Review the result",
       description:
-        "Qualified leads are booked straight onto a rep’s calendar; unqualified leads are logged and nurtured automatically.",
+        "Open the call record to check the outcome and the details the contact shared.",
     },
   ];
 
   const b2bStats = [
-    { value: "100%", label: "of inbound leads engaged, no exceptions" },
-    { value: "<2 min", label: "average time to first qualification contact" },
-    { value: "24/7", label: "coverage, including evenings and weekends" },
-    { value: "1", label: "prioritized queue your reps actually work from" },
+    { value: "Need", label: "What would the contact like to change?" },
+    { value: "Timing", label: "When would they want to start?" },
+    { value: "Scope", label: "Which service are they asking about?" },
+    { value: "Next step", label: "What should the team follow up on?" },
   ];
 
   const withoutAutomation = [
-    "Reps manually screen every inbound lead",
-    "Slow follow-up loses warm prospects",
-    "No consistent qualification criteria",
-    "Evenings and weekends go uncovered",
-    "Pipeline visibility lags by days",
+    "Choose the contacts for the campaign",
+    "Check permission to call",
+    "Set the campaign goal",
+    "Choose the questions to ask",
+    "Select the actions the agent may offer",
   ];
 
   const withTalkLee = [
-    "Every lead engaged automatically, instantly",
-    "Consistent BANT-style qualification, every time",
-    "Reps only see sales-ready conversations",
-    "Full 24/7 coverage, no added headcount",
-    "Live scoring and routing in one queue",
+    "Review each call in Call History",
+    "Check the call outcome",
+    "Review captured details",
+    "Read the transcript where available",
+    "Choose the next step for your team",
   ];
 
   const platformCapabilities = [
     {
       number: "01",
-      title: "Voice & chat agent",
-      description: "One agent, deployed across phone and web chat, trained on the same qualification logic.",
+      title: "Voice agent",
+      description: "The agent asks the contact questions over the phone.",
     },
     {
       number: "02",
-      title: "Lead scoring engine",
-      description: "Configurable scoring model that ranks every lead the moment qualification finishes.",
+      title: "Captured details",
+      description: "Contact details and the answers saved from the call, for your team to check.",
     },
     {
       number: "03",
-      title: "CRM & calendar sync",
-      description: "Qualified leads and call notes sync directly into your CRM and land on a rep’s calendar.",
+      title: "Call logging",
+      description: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       number: "04",
-      title: "Custom qualification criteria",
-      description: "Define your own BANT, MEDDIC, or custom framework — the agent follows it exactly.",
+      title: "Qualification questions",
+      description: "Give the agent a question for each detail it should ask the contact to share.",
     },
     {
       number: "05",
-      title: "Real-time dashboard",
-      description: "See every conversation, score, and outcome as it happens, with full call transcripts.",
+      title: "Call History",
+      description: "Review campaign calls and read the transcript where available.",
     },
     {
       number: "06",
       title: "Human review",
-      description: "Your team can review captured lead details and caller requests. Recording a request does not arrange a callback.",
+      description: "Your team can review captured lead details and caller requests.",
     },
   ];
 
   const benefits = [
     {
-      title: "Faster response times",
-      description: "Engage leads within minutes instead of hours, when interest is highest.",
+      title: "Contact lists",
+      description: "Select the contacts for an outbound campaign.",
     },
     {
-      title: "Higher rep productivity",
-      description: "Reps spend their time closing sales-ready leads, not screening cold ones.",
+      title: "Call outcomes",
+      description: "See which calls were answered in Call History.",
     },
     {
-      title: "Consistent qualification",
-      description: "Every lead is qualified against the same criteria — no rep-to-rep variance.",
+      title: "Shared questions",
+      description: "Choose a common set of questions for a campaign.",
     },
     {
-      title: "Full pipeline coverage",
-      description: "No lead falls through the cracks, regardless of when it arrives.",
+      title: "Follow-up email",
+      description: "When Gmail is connected and the campaign has an approved email action, the agent can offer the configured follow-up email.",
     },
   ];
 
@@ -152,26 +152,26 @@ export default function AutomatedLeadQualificationUseCasePage() {
     {
       question: "What are lead qualification services?",
       answer:
-        "Lead qualification services engage inbound leads, ask qualifying questions about budget, authority, need, and timeline, and determine which leads are ready for your sales team to pursue.",
+        "An outbound campaign can ask contacts about their needs and record their answers for a sales representative to review.",
     },
     {
-      question: "How is AI lead qualification different from a chatbot?",
+      question: "Can I choose what the agent asks?",
       answer:
-        "An AI lead qualification agent runs a structured, conversational qualification process built around your specific criteria — it’s designed to qualify and score leads, not just answer FAQs.",
+        "Yes. Set up your qualification questions and choose which contact details the agent may capture.",
     },
     {
       question: "Can this work alongside our existing sales team?",
       answer:
-        "Yes. The agent handles qualification and routes sales-ready leads directly to your reps, with the option to hand off live calls when a lead is hot.",
+        "Yes. Your representatives can review a contact’s answers after the call. When transfer is switched on for your account and is an approved action for the outgoing campaign, the agent can request a transfer to a listed destination within the transfer hours you set, if any. An approved transfer request does not guarantee that someone answers.",
     },
     {
-      question: "Does this integrate with our CRM?",
-      answer: "Qualified leads, scores, and call transcripts sync automatically to your CRM and calendar tools.",
+      question: "Can we log calls in HubSpot or Salesforce?",
+      answer: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       question: "Is this suited for B2B lead qualification specifically?",
       answer:
-        "Yes — the platform is built around longer B2B sales cycles and multi-stakeholder buying processes, not simple consumer intake forms.",
+        "For example, a B2B team could ask which service a contact needs and when their team expects to make a decision.",
     },
   ];
 
@@ -181,16 +181,14 @@ export default function AutomatedLeadQualificationUseCasePage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Lead Qualification Services
+            Lead Qualification
           </h1>
-          <h2 className={`mt-4 ${subHeadingClassName}`}>AI-Powered Lead Qualification Services</h2>
+          <h2 className={`mt-4 ${subHeadingClassName}`}>AI-Powered Lead Qualification</h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI provides AI-powered lead qualification services that call, score, and qualify every inbound lead
-            within minutes &mdash; day or night.
+            Use an outbound campaign to ask contacts about their needs and collect the answers your team wants to review.
           </p>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Our AI lead qualification agent asks the questions your SDRs would ask, then hands your sales team only the
-            conversations worth having.
+            Choose Lead Generation in the dashboard and define the details you want to capture.
           </p>
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -199,8 +197,8 @@ export default function AutomatedLeadQualificationUseCasePage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                See How It Works
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
@@ -209,9 +207,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Automate Lead Qualification With AI</h2>
           <p className={bodyClassName}>
-            Manual lead qualification doesn&rsquo;t scale. Reps skip low-priority leads, follow-up slips, and by the time
-            someone calls back the prospect has already talked to a competitor. AI lead qualification closes that gap by
-            engaging every lead the moment they arrive.
+            A qualification call can start with a simple question about what the contact needs. Add that question to the campaign’s qualification questions.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {automationPillars.map((pillar) => (
@@ -227,8 +223,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
           <p className={eyebrowClassName}>The Agent</p>
           <h2 className={`mt-3 ${headingClassName}`}>How Talk-Lee AI&rsquo;s Lead Qualification Agent Works</h2>
           <p className={bodyClassName}>
-            Built specifically for lead qualification services &mdash; not a generic chatbot. The agent is trained on your
-            offer, your ICP, and your disqualifying criteria before it ever talks to a lead.
+            Configure the campaign before the agent calls, then review the information it captures.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {agentSteps.map((step) => (
@@ -241,10 +236,9 @@ export default function AutomatedLeadQualificationUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>B2B Lead Qualification Services</h2>
+          <h2 className={headingClassName}>B2B Lead Qualification</h2>
           <p className={bodyClassName}>
-            B2B pipelines involve longer cycles and more stakeholders than B2C. Our B2B lead qualification services are
-            built around multi-touch, multi-stakeholder buying processes &mdash; not simple one-and-done consumer forms.
+            These example questions can help your team decide what to ask a business contact.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {b2bStats.map((stat) => (
@@ -259,14 +253,13 @@ export default function AutomatedLeadQualificationUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Automated Lead Qualification That Saves Your Sales Team Time</h2>
+          <h2 className={headingClassName}>Before and after a qualification call</h2>
           <p className={bodyClassName}>
-            Every hour an AE spends chasing unqualified leads is an hour not spent closing. Automated lead qualification
-            moves that work off your team&rsquo;s plate entirely.
+            Prepare the campaign around your questions, then look at what the contact actually said.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className={accentCardClassName} style={accentCardStyle}>
-              <h3 className={`${cardTitleClassName} text-center`}>Without automation</h3>
+              <h3 className={`${cardTitleClassName} text-center`}>Prepare the campaign</h3>
               <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 {withoutAutomation.map((item) => (
                   <li key={item} className="py-3 text-center">
@@ -276,7 +269,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
               </ul>
             </div>
             <div className={accentCardClassName} style={accentCardStyle}>
-              <h3 className={`${cardTitleClassName} text-center`}>With Talk-Lee AI</h3>
+              <h3 className={`${cardTitleClassName} text-center`}>Review the call</h3>
               <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 {withTalkLee.map((item) => (
                   <li key={item} className="py-3 text-center font-medium text-primary dark:text-foreground">
@@ -291,8 +284,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Lead Qualification Software &amp; Solutions</h2>
           <p className={bodyClassName}>
-            A complete lead qualification solution &mdash; not just a script. Everything below is included as part of the
-            platform.
+            Use campaign settings to prepare the call and review the results in the dashboard.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {platformCapabilities.map((capability) => (
@@ -320,13 +312,11 @@ export default function AutomatedLeadQualificationUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Why Use Lead Qualification Automation?</h2>
           <p className={bodyClassName}>
-            Buyers expect an immediate response. Lead qualification automation is what makes that possible without
-            expanding your SDR headcount.
+            Captured answers give the next person a starting point for a follow-up conversation.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <blockquote className="text-base sm:text-lg md:text-xl font-medium text-primary dark:text-foreground leading-relaxed">
-              &ldquo;The team that responds first and asks the right questions first wins the deal. Automation is how you
-              guarantee that happens on every single lead.&rdquo;
+              &ldquo;When would you like to start using the service?&rdquo; is one way to ask about timing.
             </blockquote>
           </div>
         </section>
@@ -357,7 +347,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/book-a-demo">
+                <Link href="/contact">
                   Talk to Sales
                 </Link>
               </Button>

@@ -6,19 +6,19 @@ export const productNavItems = [
   {
     label: "AI Voice Dialer",
     href: "/ai-voice-dialer",
-    description: "Automate calls, emails, and workflows with human-like voice agents.",
+    description: "Place outbound calls to contacts in a campaign.",
     icon: PhoneCall,
   },
   {
     label: "AI Assist",
     href: "/ai-assist",
-    description: "Real-time guidance, call insights, and automated follow-ups for teams.",
+    description: "Ask the dashboard assistant about campaigns, recent calls and AI minutes.",
     icon: Sparkles,
   },
   {
     label: "AI Voice Agent",
     href: "/ai-voice-agent",
-    description: "Smarter conversations with natural dialogue and seamless handoffs.",
+    description: "Use a voice agent for inbound or outbound campaign calls.",
     icon: Bot,
   },
 ] as const;
@@ -27,13 +27,13 @@ export const useCaseNavItems = [
   {
     label: "Customer Services & Support",
     href: "/use-cases/customer-services-support",
-    description: "Deliver faster resolutions and consistent support with AI-powered conversations.",
+    description: "Answer incoming calls with the Customer Support agent.",
     icon: Headphones,
   },
   {
     label: "Automated Lead Qualification",
     href: "/use-cases/automated-lead-qualification",
-    description: "Engage, score, and route leads instantly so reps focus on high-intent prospects.",
+    description: "Ask leads the qualification questions you set for your campaign.",
     icon: BadgeCheck,
   },
 ] as const;

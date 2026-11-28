@@ -36,6 +36,8 @@ LAST_RUN_KEY = "talky:healthwatch:last_run"  # read by GET /healthz/watch
 _OWN_UNITS = frozenset({"talky-healthwatch.service"})
 _UNIT_NAME = re.compile(r"[A-Za-z0-9@_.:-]{1,200}\Z")
 _MAX_TRUNKS = 1000
+# how long "this line was seen working" is remembered after it was last ready, or last alerted
+_TRUNK_READY_SECONDS = 7 * 86400
 _UNAVAILABLE = {"status": "unavailable", "reason": "observation_unavailable"}
 _TRUNK_STATE = """
 local now = tonumber(ARGV[1])
@@ -216,7 +218,7 @@ async def check_email(redis, *, now):
 async def check_trunks(rows, redis, *, now):
     if len(rows) > _MAX_TRUNKS:
         return {"status": "unavailable", "reason": "trunk_limit_exceeded"}
-    pending, alerts = 0, 0
+    pending, alerts, never_ready = 0, 0, 0
     unavailable = False
     try:
         for row in rows:
@@ -226,18 +228,32 @@ async def check_trunks(rows, redis, *, now):
             stale = readiness.code in {"status_missing", "status_stale", "status_clock_skew"}
             ignored = not row.get("is_active") or row.get("deleted_at") is not None
             mode = "clear" if readiness.ready or stale or ignored else "unhealthy"
-            key = f"talky:healthwatch:trunk:{UUID(str(row['tenant_id']))}:{UUID(str(row['id']))}"
+            ids = f"{UUID(str(row['tenant_id']))}:{UUID(str(row['id']))}"
+            key = f"talky:healthwatch:trunk:{ids}"
+            ready_key = f"talky:healthwatch:trunk_ready:{ids}"
+            if readiness.ready and not ignored:
+                # Remember that this line worked; only such a line alerts when it goes down.
+                if not await asyncio.wait_for(redis.set(ready_key, "1", ex=_TRUNK_READY_SECONDS), IO_TIMEOUT_SECONDS):
+                    raise ValueError("Invalid ready marker write")
             result = await asyncio.wait_for(redis.eval(_TRUNK_STATE, 1, key, now.timestamp(), mode), IO_TIMEOUT_SECONDS)
             if type(result) is not int or result not in {0, 1}:
                 raise ValueError("Invalid monitor state")
             unavailable |= stale
             if mode == "unhealthy":
-                alerts += result
                 pending += not result
+                if result:
+                    # One call: true when the marker exists, and it is renewed, so a line
+                    # that stays down keeps alerting after the 7 days.
+                    was_ready = await asyncio.wait_for(redis.expire(ready_key, _TRUNK_READY_SECONDS), IO_TIMEOUT_SECONDS)
+                    if type(was_ready) not in {bool, int} or was_ready not in {0, 1}:
+                        raise ValueError("Invalid ready marker")
+                    alerts += bool(was_ready)
+                    never_ready += not was_ready
         if unavailable:
             return {"status": "unavailable", "reason": "trunk_runtime_missing_or_stale", "alert_count": alerts}
         return {"status": "alert" if alerts else "pending" if pending else "ok",
-                "alert_count": alerts, "pending_count": pending, "checked": len(rows)}
+                "alert_count": alerts, "pending_count": pending, "never_ready_count": never_ready,
+                "checked": len(rows)}
     except Exception:
         return dict(_UNAVAILABLE)
 
@@ -260,13 +276,41 @@ _CALLS_ANSWERED_SQL = """SELECT count(*) AS answered,
 # outage that stops the notice being spoken would otherwise remove those calls from both
 # counts and silence the alarm. A call that ends before the agent speaks is recorded with
 # notice_state 'unconfirmed' by design, so voicemails stay out.
+# About half of answered calls are hung up within seconds, mid-notice, and are 'unconfirmed' by
+# design, so a ratio over ALL answered calls flaps at its threshold. Three arms instead:
+#  - long calls (the person stayed on 30 s or more, ended_at - answered_at; the number 30 is
+#    written in the SQL below): half or more never got the notice. Measured on five calling days
+#    of November 2026: 48 answered calls lasted 30 s or more and 2 of them never got a confirmed notice;
+#  - nobody gets it over 24 hours: four in five of all answered calls (and at least 15) have no
+#    confirmed notice. The share of all answered calls with no confirmed notice was between 32% and
+#    61% a day (30 of 57 and 37 of 76 on two of them);
+#  - the notice has stopped over 4 hours: 12 or more answered calls and not one confirmed, which
+#    the 24-hour share is too slow to show when the agent goes silent in the afternoon.
+# The two denominators (recorded_answered, answered_long) count only recordings that need a notice
+# ('delivered' or 'unconfirmed'; 'not_required' and empty are left out).
+# The arms are the three functions below; fingerprint() uses the last two too.
 _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.notice_state = 'unconfirmed') AS unconfirmed,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
-      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')) AS recorded_answered,
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND r.notice_state IN ('delivered', 'unconfirmed')) AS recorded_answered,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
       AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
       AND r.notice_state = 'unconfirmed') AS unconfirmed_answered,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND r.notice_state IN ('delivered', 'unconfirmed')
+      AND c.ended_at - c.answered_at >= interval '30 seconds') AS answered_long,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND c.ended_at - c.answered_at >= interval '30 seconds'
+      AND r.notice_state = 'unconfirmed') AS unconfirmed_long,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '4 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND r.notice_state IN ('delivered', 'unconfirmed')) AS answered_recent,
+    count(*) FILTER (WHERE r.created_at >= now() - interval '4 hours'
+      AND c.answered_at IS NOT NULL AND COALESCE(c.outcome, '') NOT IN ('voicemail', 'no_answer')
+      AND r.notice_state = 'unconfirmed') AS unconfirmed_recent,
     count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours' AND r.transfer_part = 'missing') AS transfer_missing,
     count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
@@ -275,7 +319,8 @@ _RECORDINGS_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - inter
     WHERE r.tenant_id = $1::uuid AND r.status = 'uploaded' AND r.created_at >= now() - interval '25 hours'"""
 # Before migration 0103 the notice/transfer columns do not exist: same shape, zero counts.
 _RECORDINGS_OLD_SQL = """SELECT count(*) FILTER (WHERE r.created_at >= now() - interval '24 hours') AS recorded,
-    0 AS unconfirmed, 0 AS recorded_answered, 0 AS unconfirmed_answered, 0 AS transfer_missing,
+    0 AS unconfirmed, 0 AS recorded_answered, 0 AS unconfirmed_answered, 0 AS answered_long, 0 AS unconfirmed_long,
+    0 AS answered_recent, 0 AS unconfirmed_recent, 0 AS transfer_missing,
     count(DISTINCT r.call_id) FILTER (WHERE c.direction = 'outbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
       AND c.duration_seconds >= 5) AS matched
@@ -295,6 +340,21 @@ _INBOUND_SQL = """SELECT count(*) AS answered_inbound,
     WHERE c.tenant_id = $1::uuid AND c.direction = 'inbound' AND c.is_test = false AND c.answered_at <= now()
       AND c.ended_at >= now() - interval '24 hours' AND c.ended_at <= now() - interval '15 minutes'
       AND c.duration_seconds >= 5 AND c.consent_status = 'granted'"""
+
+
+def _notice_missed_on_long_calls(unconfirmed_long, answered_long):
+    """People stayed on 30 s or more, and half or more of them never got the notice."""
+    return unconfirmed_long >= 3 and unconfirmed_long * 2 >= answered_long
+
+
+def _notice_reaches_nobody(unconfirmed_answered, recorded_answered):
+    """Four in five answered calls, and at least 15, have no confirmed notice."""
+    return unconfirmed_answered >= 15 and unconfirmed_answered * 5 >= recorded_answered * 4
+
+
+def _notice_has_stopped(unconfirmed_recent, answered_recent):
+    """Twelve or more answered calls in the last 4 hours and not one got a confirmed notice."""
+    return answered_recent >= 12 and unconfirmed_recent == answered_recent
 
 
 def _pending_stuck(now):
@@ -352,6 +412,7 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                 return result
             rows = []
             missing = unconfirmed = transfer_missing = recorded = recorded_answered = unconfirmed_answered = 0
+            answered_long = unconfirmed_long = answered_recent = unconfirmed_recent = 0
             recordings_read = True
             missing_inbound = 0 if inbound_switch is not None else None
             recordings_sql = _RECORDINGS_SQL if notice_columns == 2 else _RECORDINGS_OLD_SQL
@@ -379,6 +440,10 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                                 recorded += stats["recorded"]
                                 recorded_answered += stats["recorded_answered"]
                                 unconfirmed_answered += stats["unconfirmed_answered"]
+                                answered_long += stats["answered_long"]
+                                unconfirmed_long += stats["unconfirmed_long"]
+                                answered_recent += stats["answered_recent"]
+                                unconfirmed_recent += stats["unconfirmed_recent"]
                                 if inbound_switch and missing_inbound is not None:
                                     # Own savepoint: a fault here makes only the incoming part unreadable.
                                     try:
@@ -401,7 +466,9 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
             except Exception:
                 pending = None
             alert = (missing > 0 or (missing_inbound or 0) > 0 or (pending or 0) > 0 or transfer_missing > 0
-                     or (unconfirmed_answered >= 3 and unconfirmed_answered * 2 >= recorded_answered))
+                     or _notice_missed_on_long_calls(unconfirmed_long, answered_long)
+                     or _notice_reaches_nobody(unconfirmed_answered, recorded_answered)
+                     or _notice_has_stopped(unconfirmed_recent, answered_recent))
             if recordings_read and pending is None and not alert:
                 # The counts are fine but the pending folder could not be read:
                 # that is not "ok".
@@ -411,14 +478,20 @@ async def check_database(pool, redis, *, now, max_tenants=1000):
                                         "transfer_missing": transfer_missing,
                                         "unconfirmed": unconfirmed, "recorded": recorded,
                                         "recorded_answered": recorded_answered,
-                                        "unconfirmed_answered": unconfirmed_answered}
+                                        "unconfirmed_answered": unconfirmed_answered,
+                                        "answered_long": answered_long, "unconfirmed_long": unconfirmed_long,
+                                        "answered_recent": answered_recent,
+                                        "unconfirmed_recent": unconfirmed_recent}
             elif recordings_read:
                 result["recordings"] = {"status": "alert" if alert else "ok", "missing": missing,
                                         "missing_inbound": missing_inbound,
                                         "pending_stuck": pending, "transfer_missing": transfer_missing,
                                         "unconfirmed": unconfirmed, "recorded": recorded,
                                         "recorded_answered": recorded_answered,
-                                        "unconfirmed_answered": unconfirmed_answered}
+                                        "unconfirmed_answered": unconfirmed_answered,
+                                        "answered_long": answered_long, "unconfirmed_long": unconfirmed_long,
+                                        "answered_recent": answered_recent,
+                                        "unconfirmed_recent": unconfirmed_recent}
     except Exception:
         pass
     return result
@@ -481,11 +554,20 @@ def fingerprint(name, value):
                 return f"{base}:{'+'.join(failed)}"
         if name == "recordings":
             text = (f"{base}:{_count(value['missing'])}+{_count(value['pending_stuck'])}"
-                    f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed_answered'])}")
+                    f"+{_count(value['transfer_missing'])}+{_count(value['unconfirmed_long'])}")
             # Added only when an incoming recording is missing, so the text of
             # every other state stays what it was (no repeat notice on release).
             if _count(value.get("missing_inbound")) != "0":
                 text += f"+in{_count(value['missing_inbound'])}"
+            # The nobody-gets-it arm and the notice-has-stopped arm: a fixed word each ("all",
+            # "now"), not a count, which changes with every call. Always AFTER the "in<N>"
+            # part, so that part keeps its place.
+            every, answered = value.get("unconfirmed_answered"), value.get("recorded_answered")
+            if type(every) is int and type(answered) is int and _notice_reaches_nobody(every, answered):
+                text += "+all"
+            recent, answered_recent = value.get("unconfirmed_recent"), value.get("answered_recent")
+            if type(recent) is int and type(answered_recent) is int and _notice_has_stopped(recent, answered_recent):
+                text += "+now"
             return text
     except (KeyError, TypeError):
         pass

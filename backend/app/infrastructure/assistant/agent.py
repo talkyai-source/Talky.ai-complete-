@@ -48,7 +48,7 @@ class AgentState(TypedDict):
 # SYSTEM PROMPT
 # =============================================================================
 
-SYSTEM_PROMPT = """You are Talky Assistant, an AI assistant for the Talky.ai voice calling platform.
+SYSTEM_PROMPT = """You are Talk-Lee Assistant, an AI assistant for the Talk-Lee voice calling platform.
 
 You help users with:
 1. **Querying Data**: Answer questions about calls, campaigns, leads, usage, and statistics

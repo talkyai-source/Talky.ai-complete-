@@ -77,8 +77,8 @@ TOTP_INTERVAL: int = 30
 # This covers up to ±30 s of clock skew — standard practice per RFC 6238 §5.2.
 TOTP_VALID_WINDOW: int = 1
 
-# Issuer name shown in the authenticator app (e.g. "Talky.ai (user@example.com)").
-TOTP_ISSUER_NAME: str = os.getenv("TOTP_ISSUER_NAME", "Talky.ai")
+# Issuer shown when a new authenticator is enrolled.
+TOTP_ISSUER_NAME: str = os.getenv("TOTP_ISSUER_NAME", "Talk-Lee")
 
 
 # ---------------------------------------------------------------------------
@@ -216,8 +216,8 @@ def get_provisioning_uri(
     it once to register the account in their authenticator app.
 
     Example output:
-        otpauth://totp/Talky.ai:user%40example.com
-          ?secret=JBSWY3DPEHPK3PXP&issuer=Talky.ai
+        otpauth://totp/Talk-Lee:user%40example.com
+          ?secret=<generated-secret>&issuer=Talk-Lee
 
     Parameters
     ----------
@@ -227,7 +227,7 @@ def get_provisioning_uri(
         The user's email address — shown as the account label in the app.
     issuer:
         The service name shown in the authenticator app.  Defaults to the
-        value of the TOTP_ISSUER_NAME env var (fallback: "Talky.ai").
+        value of the TOTP_ISSUER_NAME env var (fallback: "Talk-Lee").
 
     Returns
     -------
