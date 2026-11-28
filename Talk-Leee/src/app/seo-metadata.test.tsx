@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { Metadata } from "next";
 import robots from "@/app/robots";
 import sitemap from "@/app/sitemap";
+import { docsPages } from "@/app/docs/_content/registry";
 import { PUBLIC_ROUTES } from "@/lib/public-routes";
 import { BRAND_TITLE_SUFFIX, SITE_URL, pageTitle, sharedMetadata } from "@/lib/site-metadata";
 
@@ -28,10 +29,11 @@ const rootDescription = /description: "([^"]+)"/.exec(
 )?.[1];
 const rootMetadata = { description: rootDescription, metadataBase: sharedMetadata.metadataBase };
 
-// The ten industry pages get their titles in another package; the sign-in
-// pages (/auth/*) and the docs pages (/docs*) keep their own title forms.
+// The ten industry pages get their titles in another package, and the docs
+// pages (/docs*) keep their own title form. A new page under either folder is
+// NOT covered by the title and description checks below.
 const OTHER_FORM = (route: string) =>
-    route.startsWith("/industries/") || route.startsWith("/auth/") || route === "/docs" || route.startsWith("/docs/");
+    route.startsWith("/industries/") || route === "/docs" || route.startsWith("/docs/");
 
 const checked = PUBLIC_ROUTES.filter((route) => !OTHER_FORM(route));
 
@@ -87,7 +89,7 @@ test("T3: the canonical base is the one site origin", () => {
     assert.equal((rootMetadata.metadataBase as URL).origin, "https://talkleeai.com");
 });
 
-test("T4: the sitemap lists exactly the public routes, none signed-in, and not all stamped with the build time", () => {
+test("T4: the sitemap lists exactly the public routes, none signed-in, and stamps none with a date", () => {
     const entries = sitemap();
     const routes = entries.map((e) => {
         const p = new URL(e.url).pathname;
@@ -97,25 +99,35 @@ test("T4: the sitemap lists exactly the public routes, none signed-in, and not a
     for (const route of routes) {
         assert.doesNotMatch(route, /^\/(dashboard|calls|campaigns|billing|admin|settings|team|recordings|403)(\/|$)/);
     }
-    const now = Date.now();
-    const stamped = entries.filter((e) => e.lastModified && Math.abs(new Date(e.lastModified).getTime() - now) < 60_000);
-    assert.ok(stamped.length < entries.length, "every address carries the current time");
+    // The only date available is the build time, which would claim that every
+    // page changed on every deploy.
+    assert.ok(entries.every((e) => e.lastModified === undefined), "a sitemap entry carries a date");
 });
 
 const SIGNED_IN_AND_UTILITY = [
     "/recordings", "/team", "/notifications", "/support", "/assistant", "/email",
-    "/meetings", "/reminders", "/403", "/sentry-example-page", "/auth/callback",
+    "/meetings", "/reminders", "/auth/callback",
 ];
 
 test("T5: robots disallows the signed-in and utility paths and no public route", () => {
     const rules = robots().rules as { disallow: string[] };
     const disallow = rules.disallow;
     for (const p of SIGNED_IN_AND_UTILITY) assert.ok(disallow.includes(p), `${p} is not disallowed`);
+    // A robots rule is a prefix of the address: "/team" would also block "/teamwork/".
     for (const route of PUBLIC_ROUTES) {
         if (route === "/") continue;
         for (const d of disallow) {
-            assert.ok(!(route === d || route.startsWith(d + "/")), `${route} is public but robots disallows ${d}`);
+            assert.ok(!`${route}/`.startsWith(d), `${route} is public but robots disallows ${d}`);
         }
+    }
+});
+
+test("T5b: the two noindex pages are not disallowed, so a crawler can read the noindex", () => {
+    const disallow = (robots().rules as { disallow: string[] }).disallow;
+    // A crawler that may not fetch a page never sees its noindex, and a
+    // disallow line would name the error-check page in a public file.
+    for (const p of ["/403", "/sentry-example-page"]) {
+        assert.ok(!disallow.some((d) => `${p}/`.startsWith(d)), `${p} is disallowed`);
     }
 });
 
@@ -136,24 +148,42 @@ test("T6b: /403 and /sentry-example-page each have a description of their own", 
     assert.notEqual(a.metadata.description, b.metadata.description);
 });
 
-test("T7: the three old addresses redirect permanently, with and without the slash, to routes that exist", async () => {
-    type Rule = { source: string; destination: string; permanent: boolean };
-    const mod = (await import("../../next.config")) as { default: { redirects?: () => Promise<Rule[]> } };
+type RedirectRule = { source: string; destination: string; permanent: boolean };
+
+async function redirectRules(): Promise<RedirectRule[]> {
+    const mod = (await import("../../next.config")) as { default: { redirects?: () => Promise<RedirectRule[]> } };
     assert.ok(mod.default.redirects);
-    const rules = await mod.default.redirects();
-    const expected: Record<string, string> = {
-        "/docs/support": "/docs",
-        "/docs/partners": "/docs",
-        "/ai-voices": "/ai-voice-agent",
-    };
-    for (const [from, to] of Object.entries(expected)) {
+    return mod.default.redirects();
+}
+
+test("T7: the three old addresses redirect once, with and without the slash, to a public page", async () => {
+    const rules = await redirectRules();
+    // The two docs pages are withheld only until they are enabled again, so
+    // their redirects are temporary; the /ai-voices page was removed for good.
+    const expected = [
+        { from: "/docs/support", to: "/docs/", permanent: false },
+        { from: "/docs/partners", to: "/docs/", permanent: false },
+        { from: "/ai-voices", to: "/ai-voice-agent/", permanent: true },
+    ];
+    for (const { from, to, permanent } of expected) {
         for (const source of [from, `${from}/`]) {
             const rule = rules.find((r) => r.source === source);
             assert.ok(rule, `no redirect for ${source}`);
+            // The destination carries the trailing slash, or the proxy adds a second redirect.
             assert.equal(rule.destination, to);
-            assert.equal(rule.permanent, true);
+            assert.equal(rule.permanent, permanent);
         }
-        assert.ok((PUBLIC_ROUTES as readonly string[]).includes(to), `${to} is not a public route`);
+        assert.ok((PUBLIC_ROUTES as readonly string[]).includes(to.replace(/\/$/, "")), `${to} is not a public route`);
+    }
+});
+
+test("T7b: no redirect hides a page that is published", async () => {
+    // A redirect runs before the page route, so an entry left behind would
+    // silently hide a page that is published later.
+    const published = new Set<string>([...PUBLIC_ROUTES, ...docsPages.map((page) => `/docs/${page.slug}`)]);
+    for (const rule of await redirectRules()) {
+        const source = rule.source === "/" ? "/" : rule.source.replace(/\/$/, "");
+        assert.ok(!published.has(source), `${rule.source} redirects away from a published page`);
     }
 });
 

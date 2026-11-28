@@ -81,7 +81,8 @@ function isPublicContactPath(pathname: string) {
         pathname === "/api/contact-enquiries" || pathname === "/api/contact-enquiries/";
 }
 
-function isPublicPath(pathname: string) {
+// Exported for proxy.public-paths.test.ts only.
+export function isPublicPath(pathname: string) {
     if (pathname === "/") return true;
     if (isPublicContactPath(pathname)) return true;
     if (pathname.startsWith("/auth/")) return true;

@@ -103,8 +103,5 @@ test("the page is not in the sitemap's route list and nothing in the app links t
         }
     };
     walk(root);
-    // robots.ts names the address only to disallow it (W8); no link or import may.
-    assert.deepEqual(found, ["app/robots.ts"]);
-    const robots = fs.readFileSync(path.join(root, "app/robots.ts"), "utf8");
-    assert.match(robots, /^\s*"\/sentry-example-page",$/m);
+    assert.deepEqual(found, []);
 });

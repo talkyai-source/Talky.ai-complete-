@@ -6,7 +6,7 @@ import { pageTitle } from "@/lib/site-metadata";
 export const metadata: Metadata = {
   title: pageTitle("Products"),
   description:
-    "See the Talk-Lee AI voice products: the AI Voice Dialer, AI Assist and AI Voice Agent, and what each one does for your calls.",
+    "See the three Talk-Lee AI products: the AI Voice Dialer, AI Assist and the AI Voice Agent, and what each one does.",
 };
 
 // The same list the navbar's Products dropdown renders.

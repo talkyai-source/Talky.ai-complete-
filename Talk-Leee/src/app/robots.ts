@@ -31,8 +31,6 @@ export default function robots(): MetadataRoute.Robots {
         "/email",
         "/meetings",
         "/reminders",
-        "/403",
-        "/sentry-example-page",
         "/auth/callback",
       ],
     },
