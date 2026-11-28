@@ -12,7 +12,7 @@ import { ApiClientError } from "@/lib/http-client";
 import { AuthProvider } from "@/lib/auth-context";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import RegisterClientPage from "./register-client";
-import { destinationAfterSignup, signInHref } from "./register-next";
+import { destinationAfterSignup, signInHref, signUpHref } from "./register-next";
 import { ASKAI_SIGNIN_FLAG } from "@/components/auth/askai-signin-notice";
 
 // W2-T11 to T14: the sign-up page follows a safe `next` and ignores every unsafe one.
@@ -170,3 +170,14 @@ test("M2 an unsafe next, a white-label role and an Ask AI arrival reach the hard
     await completeSignup(SAFE, "tenant_admin", askAi);
     assert.deepEqual(askAi, ["/"]);
 });
+
+test("the sign-up link of the sign-in page keeps a safe next, in the same trailing-slash form as signInHref", () => {
+    assert.equal(signUpHref(SAFE), `/auth/register/?next=${encodeURIComponent(SAFE)}`);
+    assert.equal(signUpHref(null), "/auth/register/");
+});
+
+for (const [name, value] of UNSAFE) {
+    test(`the sign-up link of the sign-in page does not carry ${name}`, () => {
+        assert.equal(signUpHref(value), "/auth/register/");
+    });
+}

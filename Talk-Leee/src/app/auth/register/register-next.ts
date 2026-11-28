@@ -19,6 +19,12 @@ export function signInHref(next: string | null): string {
     return safe ? `/auth/login/?next=${encodeURIComponent(safe)}` : "/auth/login";
 }
 
+/** The sign-up link of the sign-in page keeps a safe `next`, so a visitor who chose "Sign in" and then "Create an account" keeps their plan. */
+export function signUpHref(next: string | null): string {
+    const safe = safeInternalPath(next);
+    return safe ? `/auth/register/?next=${encodeURIComponent(safe)}` : "/auth/register/";
+}
+
 /**
  * Where the visitor goes once the account exists. An Ask AI arrival returns to
  * the homepage unless the role is white-label; everyone else follows the shared

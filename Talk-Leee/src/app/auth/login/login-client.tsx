@@ -37,6 +37,7 @@ import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
+import { nextFromAddress, signUpHref } from "@/app/auth/register/register-next";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Step = "email" | "password" | "mfa" | "passkey";
@@ -548,7 +549,7 @@ export default function LoginClientPage() {
                                         <p className="text-sm text-muted-foreground text-center">
                                             New to Talk-Lee?{" "}
                                             <Link
-                                                href="/auth/register"
+                                                href={signUpHref(nextFromAddress(searchParams))}
                                                 className="text-foreground font-medium hover:underline"
                                             >
                                                 Create an account
