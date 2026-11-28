@@ -3,11 +3,12 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Professional Services | Call Us Today",
+  title: pageTitle("AI Voice Agents for Professional Services"),
   description:
-    "Looking for AI for professional services? Automate calls, lead qualification, appointments, and client support. Get Started Today.",
+    "How consultants, agencies and advisory firms can use AI voice agents to answer routine calls and collect client enquiries for their team.",
 };
 
 export default function ProfessionalServicesIndustryPage() {
@@ -27,8 +28,6 @@ export default function ProfessionalServicesIndustryPage() {
   const bodyClassName =
     "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
   const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
-  const listClassName = "mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
-  const priceClassName = "text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground";
   const buttonSizeClassName = "rounded-full min-h-12 sm:min-h-14 h-auto whitespace-normal text-center max-w-full px-8 sm:px-10 text-sm sm:text-base font-semibold";
   const primaryButtonClassName = `${buttonSizeClassName} bg-blue-600 hover:bg-blue-700 text-white`;
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
@@ -37,28 +36,28 @@ export default function ProfessionalServicesIndustryPage() {
   const repetitiveWork = [
     "Configure call intake",
     "Capture new client inquiries",
-    "Schedule consultations",
+    "Request callbacks for your team",
     "Handle routine business questions",
-    "Route calls intelligently",
-    "Provide support after hours",
+    "Collect requests for your team",
+    "Answer calls in configured hours",
   ];
 
   const outcomeStats = [
     { value: "Enquiry", label: "Intake" },
     { value: "Request", label: "Details" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
   ];
 
   const assistantCapabilities = [
     {
       title: "AI Business Support",
       description:
-        "Automate routine client communication, follow-ups, reminders, scheduling, and everyday requests so your team can focus on high-value work.",
+        "Automate routine client calls and, when Gmail is connected, follow-up emails so your team can focus on high-value work.",
     },
     {
       title: "AI Call Automation",
       description:
-        "Handle incoming calls, answer common questions, qualify prospects, collect client details, and schedule consultations without disrupting your team.",
+        "Handle incoming calls, answer common questions, qualify prospects, collect client details, and schedule callbacks without disrupting your team.",
     },
     {
       title: "AI Voice Agents",
@@ -66,9 +65,9 @@ export default function ProfessionalServicesIndustryPage() {
         "Use approved information to answer routine client questions and collect requests for team review.",
     },
     {
-      title: "AI Appointment Scheduling",
+      title: "AI Callback Scheduling",
       description:
-        "Make booking effortless with AI that schedules consultations, meetings, and follow-ups based on your team’s availability.",
+        "Make follow-up effortless with AI that records callback requests so your team can return the call at a suitable time.",
     },
   ];
 
@@ -84,12 +83,12 @@ export default function ProfessionalServicesIndustryPage() {
         "Ask the right questions, understand client needs, and capture essential details before handing qualified prospects to your team.",
     },
     {
-      title: "Effortless Booking",
+      title: "Callback Requests",
       description:
-        "Turn qualified inquiries into scheduled consultations without the delays and back-and-forth of manual booking.",
+        "Turn qualified enquiries into callback requests for your team, without the delays of a manual call log.",
     },
     {
-      title: "24/7 Lead Capture",
+      title: "Configured Lead Capture",
       description:
         "Configure calling hours and capture enquiry details within your account and provider limits.",
     },
@@ -106,7 +105,7 @@ export default function ProfessionalServicesIndustryPage() {
     },
     {
       title: "Better Time Management",
-      description: "Automated scheduling and call handling reduce administrative tasks across the workday.",
+      description: "Automated call handling reduces administrative tasks across the workday.",
     },
     {
       title: "Consistent Communication",
@@ -124,7 +123,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Consulting Firms",
       description:
-        "Qualify new prospects, schedule discovery calls, answer service questions, and manage routine client communication.",
+        "Qualify new prospects, request callbacks, answer service questions, and manage routine client communication.",
     },
     {
       title: "Legal Practices",
@@ -134,20 +133,20 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Accounting & Tax Firms",
       description:
-        "Manage appointment requests, service questions, client calls, and seasonal increases in communication volume.",
+        "Collect callback requests, answer service questions, and handle seasonal increases in client calls.",
     },
     {
       title: "Marketing & Creative Agencies",
-      description: "Capture leads, qualify prospects, schedule strategy calls, and provide information about services.",
+      description: "Capture leads, qualify prospects, collect callback requests, and provide information about services.",
     },
     {
       title: "Financial & Advisory Firms",
       description:
-        "Manage appointment requests, general inquiries, follow-ups, and client communication while routing specialized conversations appropriately.",
+        "Answer general enquiries and collect callback requests and follow-up details for your advisers to review.",
     },
     {
       title: "Business Services Firms",
-      description: "Automate customer calls, scheduling, lead capture, and routine administrative communication.",
+      description: "Automate customer calls, lead capture, and routine administrative communication.",
     },
   ];
 
@@ -155,16 +154,16 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Before the Meeting",
       description:
-        "Answer questions, capture prospect details, qualify leads, and schedule consultations automatically.",
+        "Answer questions, capture prospect details, qualify leads, and schedule callbacks.",
     },
     {
       title: "During the Engagement",
-      description: "Handle routine requests, appointment changes, reminders, and client communications with ease.",
+      description: "Handle routine requests and client calls with approved answers, with ease.",
     },
     {
       title: "After the Meeting",
       description:
-        "Follow up with clients, confirm next steps, schedule future meetings, and keep conversations moving.",
+        "Follow up with clients by call or, when Gmail is connected, by email, and schedule callbacks.",
     },
   ];
 
@@ -176,11 +175,11 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Identify",
       description:
-        "Recognize whether the caller is a new prospect, existing client, appointment request, support inquiry, or another type of request.",
+        "Recognize whether the caller is a new prospect, existing client, support enquiry, or another type of request.",
     },
     {
       title: "Assist",
-      description: "Use approved answers, collect information and use scheduling actions enabled for your workflow.",
+      description: "Use approved answers, collect information and use the actions enabled for your workflow.",
     },
     {
       title: "Connect",
@@ -196,8 +195,8 @@ export default function ProfessionalServicesIndustryPage() {
         "Deliver natural, helpful conversations that reflect your firm’s professionalism from the very first interaction.",
     },
     {
-      title: "Always Available",
-      description: "Respond to prospects and clients beyond office hours, including evenings, weekends, and holidays.",
+      title: "Your Calling Hours",
+      description: "Respond to prospects and clients within the hours you configure, including evenings and weekends.",
     },
     {
       title: "Easy to Manage",
@@ -216,16 +215,16 @@ export default function ProfessionalServicesIndustryPage() {
       description: "Automatically collect prospect details and relevant conversation information.",
     },
     {
-      title: "Schedule Meetings",
-      description: "Book consultations and appointments based on your team’s real-time availability.",
+      title: "Request Callbacks",
+      description: "Record callback requests so your team can return calls at the right time.",
     },
     {
-      title: "Update Your CRM",
-      description: "Keep prospect and client information organized with less manual data entry.",
+      title: "Log Calls to Your CRM",
+      description: "Calls are logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
-      title: "Automate Follow-Ups",
-      description: "Trigger reminders and follow-up actions so important opportunities stay on track.",
+      title: "Send Follow-Up Emails",
+      description: "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
   ];
 
@@ -241,7 +240,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "AI Takes Action",
       description:
-        "It can answer questions, qualify prospects, schedule appointments, capture details, or handle routine requests.",
+        "It can answer questions, qualify prospects, schedule callbacks, capture details, or handle routine requests.",
     },
     {
       title: "Your Team Steps In",
@@ -251,13 +250,13 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "The Workflow Continues",
       description:
-        "Lead details, appointments, follow-ups, and other actions move seamlessly into your existing business processes.",
+        "Lead details and follow-ups appear in your call history, and reach HubSpot or Salesforce once connected.",
     },
   ];
 
   const aiCapabilities = [
     {
-      title: "24/7 AI Call Answering",
+      title: "AI Call Answering",
       description: "Collect client requests for review. Recording a request does not arrange a callback.",
     },
     {
@@ -265,70 +264,24 @@ export default function ProfessionalServicesIndustryPage() {
       description: "Understand prospect needs and collect essential information before a sales conversation.",
     },
     {
-      title: "Appointment Management",
-      description: "Book, reschedule, confirm, and manage consultations and meetings.",
+      title: "Callback Scheduling",
+      description: "Schedule callbacks when clients ask for one, so your team can reply at a suitable time.",
     },
     {
       title: "Client Support",
       description: "Answer routine questions and provide helpful information to existing clients.",
     },
     {
-      title: "Intelligent Call Routing",
+      title: "Specialist Requests",
       description: "Collect the requested department or specialist for your team to review. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
-      title: "Automated Follow-Ups",
-      description: "Keep prospects and clients engaged with timely reminders and follow-up communication.",
+      title: "Follow-Up Emails",
+      description: "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
     {
-      title: "Multilingual Conversations",
-      description: "Support clients who prefer to communicate in different languages.",
-    },
-  ];
-
-  const plans = [
-    {
-      price: "See pricing",
-      blurb: "For independent professionals and small firms getting started with AI.",
-      features: [
-        "AI call answering",
-        "Basic appointment scheduling",
-        "Lead capture",
-        "Business support automation",
-        "Email support",
-      ],
-      ctaLabel: "Get Started",
-      ctaHref: "/auth/register",
-      ctaVariant: "primary" as const,
-    },
-    {
-      price: "Custom Pricing",
-      blurb: "For established firms managing higher call and inquiry volumes.",
-      features: [
-        "Advanced AI voice agents",
-        "Lead qualification",
-        "Appointment automation",
-        "Intelligent call routing",
-        "Workflow automation",
-        "Priority support",
-      ],
-      ctaLabel: "Book a Private Demo",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
-    },
-    {
-      price: "Let’s Talk",
-      blurb: "For larger professional organizations with complex communication needs.",
-      features: [
-        "Advanced AI workflows",
-        "CRM & calendar integrations",
-        "Custom automation",
-        "High-volume call handling",
-        "Dedicated success manager",
-      ],
-      ctaLabel: "Contact Sales",
-      ctaHref: "/book-a-demo",
-      ctaVariant: "outline" as const,
+      title: "English Conversations",
+      description: "Conversations are in English by default; there is no language setting in this release.",
     },
   ];
 
@@ -336,17 +289,17 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "What is AI for professional services?",
       answer:
-        "AI for professional services automates calls, client communication, appointment scheduling, lead qualification, follow-ups, and other repetitive business tasks.",
+        "AI for professional services automates calls, lead qualification, call follow-up, and other repetitive phone tasks.",
     },
     {
       question: "Can AI handle calls for consultants?",
       answer:
-        "Yes. AI can answer consultant calls, understand prospect needs, collect project information, answer routine questions, and schedule consultations.",
+        "Yes. AI can answer consultant calls, understand prospect needs, collect project information, answer routine questions, and schedule a callback.",
     },
     {
-      question: "Can AI book professional appointments?",
+      question: "Can AI book meetings on the call?",
       answer:
-        "Yes. AI can schedule consultations, discovery calls, client meetings, and follow-ups according to your team’s availability.",
+        "No. The agent does not book into a calendar during a call. It can schedule a callback, and your team then arranges the meeting.",
     },
     {
       question: "Can AI qualify potential clients?",
@@ -361,12 +314,12 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "Can it work outside business hours?",
       answer:
-        "Yes. AI can remain available 24/7, allowing your firm to capture inquiries and provide assistance even when your office is closed.",
+        "Yes, within the calling hours you configure, so your firm can capture enquiries even when your office is closed.",
     },
     {
-      question: "Does it integrate with business tools?",
+      question: "Does it connect to business tools?",
       answer:
-        "Talk-Lee AI can be connected with calendars, CRMs, and other business workflows to help turn conversations into actionable tasks.",
+        "It connects to HubSpot, Salesforce, Gmail, Google Drive and Google Calendar. Calls are logged to HubSpot or Salesforce once connected.",
     },
   ];
 
@@ -383,12 +336,12 @@ export default function ProfessionalServicesIndustryPage() {
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Talk-Lee AI helps consultants, agencies, advisory firms, accounting practices, legal businesses, and other
-            professional services automate calls, appointments, client support, and everyday business communication.
+            professional services automate calls, client support, and everyday business communication.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See What AI Can Do
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -398,7 +351,7 @@ export default function ProfessionalServicesIndustryPage() {
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-semibold text-primary dark:text-foreground">
-            No complicated setup. Get your AI assistant working with your business in days.
+            You set it up in the dashboard. Calls need a paid plan or Pay as you go minutes.
           </p>
         </header>
 
@@ -411,8 +364,8 @@ export default function ProfessionalServicesIndustryPage() {
             shouldn&rsquo;t have to stop important work every time the phone rings.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI acts as an intelligent first point of contact, handling routine conversations while making sure
-            important opportunities reach the right person.
+            Talk-Lee AI acts as an intelligent first point of contact, handling routine conversations while collecting
+            important requests for your team.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -451,7 +404,7 @@ export default function ProfessionalServicesIndustryPage() {
           <h2 className={`mt-3 ${headingClassName}`}>Turn Every Call Into a Potential Client</h2>
           <p className={bodyClassName}>
             Talk-Lee AI uses approved information, captures enquiry details, and supports enabled actions to move requests
-            toward a scheduled consultation.
+            toward a callback from your team.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {opportunityCards.map((item) => (
@@ -466,8 +419,8 @@ export default function ProfessionalServicesIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Let Professionals Focus on Professional Work</h2>
           <p className={bodyClassName}>
-            Your team shouldn&rsquo;t spend valuable hours answering the same questions, confirming appointments, or
-            transferring routine calls.
+            Your team shouldn&rsquo;t spend valuable hours answering the same questions or taking the same details
+            on every call.
           </p>
           <p className={bodyClassName}>
             Our AI agents handle repetitive communication so your employees can concentrate on clients, projects,
@@ -546,8 +499,8 @@ export default function ProfessionalServicesIndustryPage() {
           <p className={eyebrowClassName}>Connect AI to Your Workflow</p>
           <h2 className={`mt-3 ${headingClassName}`}>Turn Every Conversation Into Action</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI helps turn conversations into practical business outcomes by connecting client interactions with
-            the workflows your team already uses.
+            Talk-Lee AI helps turn conversations into practical business outcomes by logging calls to your CRM
+            once you connect HubSpot or Salesforce.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {workflowActions.map((item) => (
@@ -589,34 +542,14 @@ export default function ProfessionalServicesIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Flexible Plans for Professional Firms</h2>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {plans.map((plan) => (
-              <div key={plan.price} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
-                <h3 className={priceClassName}>{plan.price}</h3>
-                <p className={cardBodyClassName}>{plan.blurb}</p>
-                <ul className={listClassName}>
-                  {plan.features.map((feature) => (
-                    <li key={feature}>&bull; {feature}</li>
-                  ))}
-                </ul>
-                <div className="mt-8 flex flex-1 items-end justify-center">
-                  {plan.ctaVariant === "primary" ? (
-                    <Button asChild size="lg" className={primaryButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                      <Link href={plan.ctaHref}>
-                        {plan.ctaLabel}
-                      </Link>
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
+          <h2 className={headingClassName}>Pricing</h2>
+          <p className={bodyClassName}>Prices are fixed and public. See the pricing page for the current plans.</p>
+          <div className={centeredCtaClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/pricing">
+                View Pricing
+              </Link>
+            </Button>
           </div>
         </section>
 

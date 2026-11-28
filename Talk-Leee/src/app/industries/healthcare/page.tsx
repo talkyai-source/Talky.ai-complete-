@@ -4,9 +4,10 @@ import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import Image from "next/image";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Healthcare Call Intake | Talk-Lee AI",
+  title: pageTitle("AI Voice Agents for Healthcare"),
   description:
     "Explore AI call intake for routine administrative enquiries. Review the workflow, data handling and service requirements before use.",
 };
@@ -59,7 +60,7 @@ export default function HealthcareIndustryPage() {
     { value: "Call", label: "Intake" },
     { value: "Configured", label: "Hours" },
     { value: "Request", label: "Capture" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
     { value: "Team", label: "Review" },
   ];
 
@@ -68,7 +69,7 @@ export default function HealthcareIndustryPage() {
     "Use approved answers for routine enquiries",
     "Collect administrative requests for review",
     "Live transfer to a person when it is set up for the campaign",
-    "Review available call records with your team",
+    "Review available call history with your team",
   ];
 
   const whyItMattersStats = [
@@ -89,19 +90,19 @@ export default function HealthcareIndustryPage() {
         "Collect the reason for a call and the details your team needs to review it. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
-      title: "Appointment Booking & Reminders",
+      title: "Follow-up Email",
       description:
-        "Use supported calendar connections for configured scheduling workflows, with confirmation before an action.",
+        "Send a follow-up email once Gmail is connected and the campaign has an email action. No calendar booking on calls.",
     },
     {
       title: "Insurance & Billing Questions",
       description:
-        "Common questions get answered on the spot, so your staff stops repeating the same answers all day long.",
+        "Questions your approved knowledge covers are answered on the call, so staff repeat fewer answers.",
     },
     {
       title: "Service Limits",
       description:
-        "This service does not provide emergency response or live transfer to clinical staff.",
+        "This service does not provide emergency response. A transfer to a person works only when it is set up.",
     },
     {
       title: "After-Hours Coverage",
@@ -121,9 +122,9 @@ export default function HealthcareIndustryPage() {
       description: "Set when your intake workflow is available and how calls outside those hours are handled.",
     },
     {
-      title: "Appointment Workflows",
+      title: "Enabled Actions",
       description:
-        "Review supported calendar and reminder options before enabling them for your practice.",
+        "Review the actions you can enable for a campaign before using them for your practice.",
     },
     {
       title: "Call Limits",
@@ -197,15 +198,15 @@ export default function HealthcareIndustryPage() {
     },
     {
       title: "Patient Intent Recognition",
-      description: "Capture essential patient information and identify high-quality leads automatically.",
+      description: "Capture the reason for the call and the details the caller gives, for your team to review.",
     },
     {
-      title: "Appointment Scheduling",
-      description: "Book, reschedule, and manage appointments seamlessly through AI-powered conversations.",
+      title: "Preferred Time Capture",
+      description: "Record the day and time a caller prefers. The agent does not book into a calendar.",
     },
     {
-      title: "Multilingual Support",
-      description: "Communicate naturally with patients in multiple languages for a personalized experience.",
+      title: "English by Default",
+      description: "Speech recognition is set to English by default, and there is no language setting.",
     },
   ];
 
@@ -213,7 +214,7 @@ export default function HealthcareIndustryPage() {
     {
       question: "What is Talk-Lee AI, exactly?",
       answer:
-        "Talk-Lee AI supports configured call intake, approved answers to routine questions and enabled scheduling actions. Live transfer to a person is available when it is set up for the campaign.",
+        "Talk-Lee AI supports configured call intake, approved answers to routine questions and enabled actions. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
       question: "Is my patients’ data safe?",
@@ -223,17 +224,17 @@ export default function HealthcareIndustryPage() {
     {
       question: "Can it handle emergency or urgent calls?",
       answer:
-        "No. This service does not provide emergency response or live transfer to clinical staff.",
+        "No. This service does not provide emergency response. A transfer to a person works only when it is set up.",
     },
     {
       question: "Do I need a tech team to set this up?",
       answer:
-        "No. Our team handles the setup for you. You don’t need to write a line of code or manage any complicated systems.",
+        "No. You set it up in the dashboard: phone line, approved knowledge and campaign. No code is needed.",
     },
     {
-      question: "Does it integrate with my existing EHR or scheduling system?",
+      question: "What about my existing patient records or scheduling system?",
       answer:
-        "Appointments booked over the phone are added to Google Calendar. A direct connection to EHR systems is not available in this release.",
+        "No. A direct connection to EHR systems is not available in this release. Calls do not book into a calendar.",
     },
     {
       question: "Will it work alongside my current staff?",
@@ -270,7 +271,7 @@ export default function HealthcareIndustryPage() {
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                See How It Works
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -383,8 +384,8 @@ export default function HealthcareIndustryPage() {
           </h2>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <p className={`${subHeadingClassName} leading-relaxed`}>
-              &ldquo;The best AI virtual receptionist for healthcare doesn&rsquo;t sound like a system. It sounds like someone
-              who genuinely cares.&rdquo;
+              &ldquo;The best AI virtual receptionist for healthcare is calm, clear and open about being an AI.
+              It says so on every call.&rdquo;
             </p>
             <p className={cardBodyClassName}>
               Talk-Lee AI isn&rsquo;t here to replace your team &mdash; it&rsquo;s here to give them room to breathe. While it
@@ -397,7 +398,7 @@ export default function HealthcareIndustryPage() {
 
         <section className="mt-14">
           <h2 className={headingClassName}>Why Choose Talk-Lee AI</h2>
-          <p className={bodyClassName}>Built specifically for healthcare. Not stretched to fit it.</p>
+          <p className={bodyClassName}>Set up around your practice&rsquo;s routine calls and approved answers.</p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {whyChoose.map((item) => (
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
@@ -471,7 +472,7 @@ export default function HealthcareIndustryPage() {
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/book-a-demo">
-                  Book a Consultation
+                  Book a Demo
                 </Link>
               </Button>
             </div>
@@ -496,7 +497,7 @@ export default function HealthcareIndustryPage() {
             <h2 className={headingClassName}>Stop losing patients to missed calls.</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Every day without Talk-Lee AI is another dropped call, another frustrated patient, another empty appointment
-              slot. Give your front desk a voice that never stops working.
+              slot. Give your front desk a voice for the hours you configure.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>

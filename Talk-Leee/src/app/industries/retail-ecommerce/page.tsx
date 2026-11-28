@@ -3,11 +3,12 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Retail & E-commerce | AI Customer Support",
+  title: pageTitle("AI Voice Agents for Retail & E-commerce"),
   description:
-    "Talk-Lee AI for retail and e-commerce that handles customer calls, product inquiries, order support, and follow-ups 24/7. Improve customer service with Talk-Lee AI.",
+    "How retail and e-commerce teams can use AI voice agents to answer routine product and store questions and collect customer requests for review.",
 };
 
 export default function RetailEcommerceIndustryPage() {
@@ -37,15 +38,15 @@ export default function RetailEcommerceIndustryPage() {
 
   const instantSupportCapabilities = [
     "Handle product questions",
-    "Provide order information",
-    "Support returns and common requests",
+    "Share approved order policies",
+    "Answer return policy questions",
     "Capture customer details",
-    "Schedule appointments",
+    "Schedule callbacks",
     "Capture requests for team review",
-    "Follow up with customers",
+    "Send follow-up emails when set up",
   ];
 
-  const instantSupportStats = ["Configured Hours", "Enquiry Intake", "Call Records"];
+  const instantSupportStats = ["Configured Hours", "Enquiry Intake", "Call History"];
 
   const completedActions = [
     {
@@ -56,22 +57,22 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "AI Order Inquiry Automation",
       description:
-        "Help customers with order-related questions, including order status, delivery updates, shipping information, and other supported requests.",
+        "Answer order-related questions from your approved information, such as shipping and delivery policies. Individual orders are not looked up.",
     },
     {
       title: "AI Product Inquiry Handling",
       description:
-        "Answer questions about products, features, availability, sizing, pricing, and other information based on your approved business and product data.",
+        "Answer questions about products, features, sizing, pricing, and other information based on your approved business and product data.",
     },
     {
       title: "AI Voice Agents for Retail",
       description:
-        "Give customers a natural voice experience that feels conversational rather than scripted, while handling high volumes of inbound and outbound calls.",
+        "Give customers a natural voice experience that feels conversational rather than scripted, while handling inbound and outbound calls within your account and provider limits.",
     },
     {
-      title: "AI Appointment Booking for Retail",
+      title: "AI Callback Scheduling for Retail",
       description:
-        "Allow customers to schedule consultations, store appointments, services, pickups, or other available bookings based on your business workflow.",
+        "Let customers ask for a callback, and schedule it when callbacks are among the campaign’s approved actions.",
     },
   ];
 
@@ -90,7 +91,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Drive the Next Step",
-      description: "Guide customers toward a purchase, appointment, follow-up, or connection with your team.",
+      description: "Guide customers toward a purchase, a callback, a follow-up, or a request for your team.",
     },
   ];
 
@@ -109,7 +110,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Handle Peak Demand",
-      description: "Stay responsive during promotions, product launches, holidays, and high-volume periods.",
+      description: "Answer routine calls during promotions, launches and holidays, within your account and provider limits.",
     },
   ];
 
@@ -117,11 +118,11 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "Find Products",
       description:
-        "Help customers discover the right products with answers about features, options, pricing, and availability.",
+        "Help customers discover the right products with answers about features, options, and pricing.",
     },
     {
-      title: "Track Orders",
-      description: "Handle common questions about order status, shipping, delivery, and post-purchase updates.",
+      title: "Answer Order Questions",
+      description: "Handle common questions about shipping and delivery policies; order lookup is not available.",
     },
     {
       title: "Handle Returns",
@@ -129,11 +130,11 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Share Store Info",
-      description: "Use approved information about locations, hours, services and store availability.",
+      description: "Use approved information about locations, hours and services.",
     },
     {
       title: "Stay Connected",
-      description: "Follow up after inquiries, purchases, appointments, or support conversations.",
+      description: "Follow up after enquiries or support conversations by email when Gmail is connected.",
     },
     {
       title: "Review Complex Requests",
@@ -143,14 +144,14 @@ export default function RetailEcommerceIndustryPage() {
 
   const keepEngaged = [
     {
-      title: "Recover Missed Calls",
+      title: "Capture Missed Requests",
       description:
-        "Reconnect with customers who called when your team was unavailable or couldn’t complete the conversation.",
+        "Capture requests from customers who called when your team was unavailable or couldn’t complete the conversation.",
     },
     {
-      title: "Follow Up Orders",
+      title: "Follow-Up Emails",
       description:
-        "Keep customers informed through supported follow-up workflows when an order requires additional communication.",
+        "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
     {
       title: "Re-Engage Leads",
@@ -159,7 +160,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "Support After Purchase",
       description:
-        "Continue communication after purchases, appointments, or service interactions to create a smoother customer experience.",
+        "Continue communication after purchases or service interactions with campaign calls you configure.",
     },
   ];
 
@@ -178,7 +179,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Guide the Customer",
-      description: "Move conversations toward order updates, appointments, follow-ups, or other supported actions.",
+      description: "Move conversations toward callbacks, follow-ups, or other actions enabled for the campaign.",
     },
     {
       title: "Review Requests",
@@ -190,38 +191,38 @@ export default function RetailEcommerceIndustryPage() {
 
   const conversationInsights = [
     "Customer Information",
-    "Order Details",
+    "Order Questions",
     "Product Interests",
     "Support Requests",
-    "Appointment Details",
+    "Callback Details",
     "Follow-Up Actions",
-    "Lead Routing",
+    "Lead Details",
   ];
 
   const whyRetailTeams = [
     "Retail-Focused AI",
     "Natural Conversations",
     "Faster Customer Journeys",
-    "Actionable Call Insights",
+    "Call History and Review",
     "Flexible Workflows",
     "Requests for Team Review",
-    "Peak-Time Ready",
+    "Configured Calling Hours",
     "Consistent Brand Experience",
   ];
 
   const conversationsIntoAction = [
     { title: "Customer Data", description: "Capture useful information from every conversation." },
     {
-      title: "Order Workflows",
-      description: "Connect supported order-related conversations to your existing processes.",
+      title: "Order Systems",
+      description: "No order system connector is available in this release.",
     },
     { title: "Product Information", description: "Give AI access to approved product and business information." },
     {
-      title: "Calendar Coordination",
-      description: "Support appointment and booking workflows based on available schedules.",
+      title: "Google Calendar",
+      description: "Connect it in the dashboard; the assistant there uses it, calls do not.",
     },
-    { title: "Lead Routing", description: "Send important conversations to the right team or representative." },
-    { title: "Follow-Up", description: "Trigger supported follow-up actions after customer interactions." },
+    { title: "Requests for Review", description: "Collect important requests for your team to review in your call history." },
+    { title: "Follow-Up", description: "Send a follow-up email when Gmail is connected and the campaign allows it." },
   ];
 
   const howItWorks = [
@@ -241,7 +242,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "Resolve",
       description:
-        "Routine conversations can be handled automatically while more complex requests can move to your team.",
+        "Routine conversations can be handled automatically while more complex requests are collected for your team to review.",
     },
     {
       title: "Follow Up",
@@ -256,7 +257,7 @@ export default function RetailEcommerceIndustryPage() {
     "AI Customer Engagement",
     "AI Product Inquiry Handling",
     "AI Retail Workflow Automation",
-    "AI Omnichannel Customer Support",
+    "AI Customer Call Support",
     "AI Virtual Assistant for E-commerce",
     "AI Inbound Retail Calls",
     "AI Retail Call Center",
@@ -275,7 +276,7 @@ export default function RetailEcommerceIndustryPage() {
     {
       title: "Retail Stores",
       description:
-        "Answer store-related questions, product inquiries, appointments, and customer requests even outside regular hours.",
+        "Answer store-related questions, product inquiries, and customer requests even outside regular hours.",
     },
     {
       title: "Multi-Location Retailers",
@@ -287,7 +288,7 @@ export default function RetailEcommerceIndustryPage() {
     },
     {
       title: "Service-Based Retail",
-      description: "Support bookings, consultations, appointments, customer questions, and follow-up conversations.",
+      description: "Collect callback requests, answer customer questions, and run follow-up conversations.",
     },
   ];
 
@@ -295,27 +296,27 @@ export default function RetailEcommerceIndustryPage() {
     {
       question: "What can AI do for retail customer support?",
       answer:
-        "AI can answer calls, handle product inquiries, support order-related questions, schedule appointments, route conversations, and assist with follow-up workflows.",
+        "AI can answer calls, handle product enquiries, answer order-policy questions, schedule callbacks, and send follow-up emails when set up.",
     },
     {
       question: "Can AI handle e-commerce order inquiries?",
       answer:
-        "Yes. When connected to the appropriate order information and workflows, AI can assist customers with supported questions about orders, shipping, delivery, and related requests.",
+        "In general terms. Order lookup is not available; AI answers questions about shipping, delivery and returns policies from your approved information.",
     },
     {
       question: "Can AI answer product questions?",
       answer:
-        "Yes. AI can provide answers based on your approved product catalog and business information, including supported questions about features, availability, pricing, sizing, and products.",
+        "Yes. AI can provide answers based on your approved product catalog and business information, including supported questions about features, pricing, sizing, and products.",
     },
     {
       question: "Can AI make outbound retail calls?",
       answer:
-        "Yes. Depending on your workflow, AI can support outbound conversations such as customer follow-ups, order-related communication, appointment reminders, and other approved use cases.",
+        "Yes. Depending on your workflow, AI can support outbound conversations such as customer follow-ups and other approved use cases.",
     },
     {
-      question: "Can AI schedule retail appointments?",
+      question: "Can AI schedule callbacks?",
       answer:
-        "Yes. Talk-Lee AI can support appointment booking for consultations, services, store appointments, pickups, and other scheduled activities based on your setup.",
+        "Yes. The agent can schedule a callback when callbacks are among the campaign’s approved actions. It does not book into a calendar during a call.",
     },
     {
       question: "Can AI transfer customers to human agents?",
@@ -325,12 +326,12 @@ export default function RetailEcommerceIndustryPage() {
     {
       question: "Does AI work after business hours?",
       answer:
-        "Yes. Our AI agent can remain available 24/7, allowing customers to reach your business outside normal operating hours.",
+        "Yes, within the calling hours you configure, so customers can reach your business outside normal operating hours.",
     },
     {
-      question: "Can we support multiple channels?",
+      question: "Is voice the only channel?",
       answer:
-        "Talk-Lee AI can fit into broader customer workflows involving voice, customer records, calendars, and follow-up processes, depending on your business setup and integrations.",
+        "Yes. Talk-Lee AI answers and makes phone calls only; it does not handle written messages, and email goes out only as a follow-up.",
     },
   ];
 
@@ -347,12 +348,12 @@ export default function RetailEcommerceIndustryPage() {
           </h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Give every customer a faster way to get answers with Talk-Lee AI. Handle calls, product questions, order
-            inquiries, and support conversations 24/7.
+            inquiries, and support conversations within your calling hours.
           </p>
           <div className={centeredCtaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See AI Handle a Retail Call
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -493,7 +494,7 @@ export default function RetailEcommerceIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>Configured Calling Hours</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Keep Serving Customers Around the Clock</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Keep Serving Customers Within Your Hours</h2>
           <p className={bodyClassName}>
             Customers shop and seek support at all hours. An after-hours question shouldn&rsquo;t automatically become a
             lost sale or frustrated customer.
@@ -514,7 +515,7 @@ export default function RetailEcommerceIndustryPage() {
           <h2 className={headingClassName}>Every Conversation Can Improve the Next One</h2>
           <p className={bodyClassName}>
             Every customer conversation reveals what people need, what they&rsquo;re asking for, and where your business
-            can improve. Talk-Lee AI captures valuable details and connects them with your existing workflows.
+            can improve. Talk-Lee AI captures valuable details and shows them in your call history.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -543,8 +544,8 @@ export default function RetailEcommerceIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Turn Customer Conversations Into Action</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI can fit into workflows involving customer records, calendars, order information, product data, and
-            follow-up processes, depending on your setup.
+            Talk-Lee AI uses approved product data, logs calls to HubSpot or Salesforce once you connect one, and sends
+            follow-up emails when Gmail is connected.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {conversationsIntoAction.map((item) => (
@@ -632,7 +633,7 @@ export default function RetailEcommerceIndustryPage() {
             <h2 className={headingClassName}>Your Next Customer Could Be Calling</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
               Don&rsquo;t let unanswered calls become lost sales or frustrated customers. Let Talk-Lee AI answer, assist,
-              qualify, schedule, and keep customer conversations moving.
+              qualify, and keep customer conversations moving.
             </p>
             <div className={centeredCtaPairClassName}>
               <Button asChild size="lg" className={primaryButtonClassName}>
@@ -641,8 +642,8 @@ export default function RetailEcommerceIndustryPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/book-a-demo">
-                  See AI in Action
+                <Link href="/auth/register">
+                  Get Started
                 </Link>
               </Button>
             </div>

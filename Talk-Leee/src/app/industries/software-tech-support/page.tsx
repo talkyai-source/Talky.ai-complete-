@@ -3,11 +3,12 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Software Companies | Automate Support",
+  title: pageTitle("AI Voice Agents for Software Support"),
   description:
-    "Looking for AI for software companies? Automate SaaS support, technical help, onboarding, voice calls, and customer service. Book a demo today.",
+    "Answer routine support calls for software companies from approved information and collect problem details for your technical team. A transfer to a person works only when it is set up.",
 };
 
 export default function SoftwareTechSupportIndustryPage() {
@@ -31,25 +32,25 @@ export default function SoftwareTechSupportIndustryPage() {
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
 
   const supportChallengeBullets = [
-    "Faster customer responses",
-    "Lower support workload",
-    "Smoother onboarding",
-    "Smarter call handling",
-    "24/7 customer availability",
-    "Consistent service at scale",
+    "Answers from approved information",
+    "Fewer routine calls for your team",
+    "Setup and feature questions answered",
+    "Requests captured for review",
+    "Configured calling hours",
+    "Consistent answers on every call",
   ];
 
   const supportChallengeStats = [
     { value: "Enquiry", label: "Intake" },
     { value: "Configured", label: "Hours" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
   ];
 
   const differenceAreas = [
     {
       title: "AI SaaS Customer Support",
       description:
-        "Resolve common product, account, billing, and subscription questions without making customers wait for an agent.",
+        "Answer common product, account, billing and subscription questions from approved information.",
     },
     {
       title: "AI Tech Support Automation",
@@ -64,7 +65,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "AI Onboarding Support Automation",
       description:
-        "Guide new customers through setup, feature discovery, and first-use questions to help them get value from your software faster.",
+        "Answer setup, feature and first-use questions from new customers, using your approved knowledge.",
     },
     {
       title: "AI Call Automation for Tech",
@@ -75,8 +76,8 @@ export default function SoftwareTechSupportIndustryPage() {
 
   const teamGains = [
     {
-      title: "Fewer Tickets",
-      description: "Automate common questions and routine requests before they reach your support team.",
+      title: "Fewer Routine Calls",
+      description: "Answer common questions from approved information before they reach your support team.",
     },
     {
       title: "Faster Resolution",
@@ -84,19 +85,19 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       title: "Easier Onboarding",
-      description: "Guide new users through setup and features so they can get started faster.",
+      description: "Answer setup and feature questions so new users can get started.",
     },
     {
       title: "Better Call Support",
-      description: "Handle routine calls automatically while your team focuses on important conversations.",
+      description: "Answer routine calls from approved information while your team focuses on important conversations.",
     },
     {
       title: "Consistent Service",
-      description: "Deliver reliable, on-brand support across every customer interaction.",
+      description: "Give the same approved answers on every call.",
     },
     {
-      title: "Easy to Scale",
-      description: "Handle growing customer demand without increasing your support workload at the same rate.",
+      title: "Clear Limits",
+      description: "Handle customer calls within your account call limits and your plan or Pay as you go minutes.",
     },
   ];
 
@@ -104,21 +105,21 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       title: "For SaaS Startups",
       description:
-        "Create a responsive support experience without building a large customer service operation from day one.",
+        "Answer routine support calls from approved information before you build a large support team.",
     },
     {
       title: "For Growing Software Companies",
       description:
-        "Handle increasing customer conversations without continuously increasing your support headcount.",
+        "Answer routine calls within your account call limits as your customer base grows.",
     },
     {
       title: "For B2B Technology Providers",
-      description: "Give business customers faster assistance while routing specialized requests to the appropriate teams.",
+      description: "Answer routine business customer calls and record specialized requests for the right team to review.",
     },
     {
-      title: "For Enterprise Software",
+      title: "For Larger Software Teams",
       description:
-        "Manage large-scale customer communication with consistent AI-powered support across multiple teams and workflows.",
+        "Give consistent approved answers on routine calls and record requests for your teams to review.",
     },
   ];
 
@@ -133,7 +134,7 @@ export default function SoftwareTechSupportIndustryPage() {
     },
     {
       title: "Assist",
-      description: "AI provides answers, guidance, or supported actions immediately.",
+      description: "AI provides answers from approved information, or an enabled action.",
     },
     {
       title: "Connect",
@@ -144,10 +145,10 @@ export default function SoftwareTechSupportIndustryPage() {
   const humanTouchPoints = [
     "Natural conversations",
     "Intelligent request recognition",
-    "Automated support workflows",
+    "Approved answers and enabled actions",
     "Requests for team review",
-    "24/7 availability",
-    "Scalable customer communication",
+    "Configured calling hours",
+    "Call history to review",
   ];
 
   const faqs = [
@@ -157,9 +158,9 @@ export default function SoftwareTechSupportIndustryPage() {
         "Use approved information for routine technical and onboarding questions, and collect requests for review. Available actions depend on your configuration.",
     },
     {
-      question: "Can AI support SaaS customers 24/7?",
+      question: "Can AI answer calls outside office hours?",
       answer:
-        "Yes. AI can provide continuous customer assistance across time zones and outside normal support hours.",
+        "Yes, within the hours you configure for the campaign. You set when the agent is active and how calls outside them are handled.",
     },
     {
       question: "Can AI voice agents handle technical calls?",
@@ -169,7 +170,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       question: "Can AI help with software onboarding?",
       answer:
-        "Yes. AI can guide customers through setup, explain features, answer common questions, and help users move through the onboarding process.",
+        "Yes, from the knowledge you upload. It can explain setup steps and features and answer common questions by phone.",
     },
     {
       question: "Will customers still be able to reach human agents?",
@@ -178,7 +179,7 @@ export default function SoftwareTechSupportIndustryPage() {
     {
       question: "Is this suitable for growing SaaS companies?",
       answer:
-        "Yes. AI automation can help growing companies manage higher support volumes without scaling their support workload at the same rate.",
+        "It can answer routine calls within your account call limits and your plan or Pay as you go minutes.",
     },
   ];
 
@@ -191,16 +192,16 @@ export default function SoftwareTechSupportIndustryPage() {
             Smarter Software Support With AI
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground">
-            Turn Support Into a Competitive Advantage
+            Answer Routine Support Calls
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI helps software companies respond faster, simplify technical support, guide new users, and manage
-            customer calls with intelligent automation.
+            Talk-Lee AI helps software companies answer routine support calls from approved information, guide new users, and
+            record requests for their team to review.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
-                See AI in Action
+              <Link href="/book-a-demo">
+                Book a Demo
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -370,12 +371,12 @@ export default function SoftwareTechSupportIndustryPage() {
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/book-a-demo">
-                  Book a Strategy Call
+                  Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/book-a-demo">
-                  See a Live Demo
+                <Link href="/pricing">
+                  View Pricing
                 </Link>
               </Button>
             </div>

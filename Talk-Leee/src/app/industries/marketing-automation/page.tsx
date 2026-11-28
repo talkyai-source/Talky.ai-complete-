@@ -3,13 +3,14 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "AI for Marketing Agencies | AI Marketing Automation Platform",
+  title: pageTitle("AI Voice Agents for Marketing Agencies"),
   description:
-    "Grow your agency with AI marketing automation. Automate lead qualification, outbound calling, appointment booking, and client campaigns from one white-label platform.",
+    "How marketing agencies can use AI voice agents to qualify leads and run outbound calling campaigns for their clients from one dashboard.",
 };
 
 export default function MarketingAutomationIndustryPage() {
@@ -37,26 +38,26 @@ export default function MarketingAutomationIndustryPage() {
 
   const heroStats = [
     { value: "Campaign", label: "Settings" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
     { value: "Configured", label: "Hours" },
     { value: "Lead", label: "Details" },
   ];
 
   const challengeHighlights = [
-    "Centralized dashboard for every client",
+    "Centralized dashboard for your campaigns",
     "AI-powered lead qualification",
-    "Automated appointment scheduling",
-    "White-label platform built for agencies",
+    "Callback requests for your team",
+    "One account for many campaigns",
     "Seamless campaign management",
   ];
 
-  const challengePills = ["24/7 Automation", "One Dashboard", "Built for Agencies"];
+  const challengePills = ["Your Calling Hours", "One Dashboard", "Built for Agencies"];
 
   const capabilities = [
     {
       title: "AI Voice Agents",
       description:
-        "Deploy AI voice agents that speak naturally, answer questions, qualify prospects, and represent each client’s brand - 24/7.",
+        "Deploy AI voice agents that speak naturally, answer questions, qualify prospects, and represent each client’s brand - on your schedule.",
     },
     {
       title: "AI Outbound Calling",
@@ -69,9 +70,9 @@ export default function MarketingAutomationIndustryPage() {
         "Automatically identify qualified prospects using the rules you define, so your clients receive leads that are ready to convert.",
     },
     {
-      title: "AI Appointment Booking",
+      title: "AI Callback Scheduling",
       description:
-        "Book meetings directly into your client’s calendar in real time, eliminating manual scheduling and missed opportunities.",
+        "Schedule a callback when a prospect asks for one, so your team can follow up without missed opportunities.",
     },
   ];
 
@@ -92,9 +93,9 @@ export default function MarketingAutomationIndustryPage() {
         "Configure campaign calling rules and review recorded outcomes and captured lead details.",
     },
     {
-      title: "Book More Meetings",
+      title: "Capture More Callbacks",
       description:
-        "Qualified leads are automatically scheduled into your clients’ calendars, keeping their pipelines full without manual follow-ups.",
+        "Prospects who ask for a call back are recorded as callback requests, so your team can follow up without delay.",
     },
     {
       title: "Scale Without Hiring",
@@ -104,7 +105,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Reduce Manual Work",
       description:
-        "Automate conversations, lead qualification, and appointment booking so your team spends less time on repetitive tasks.",
+        "Automate conversations and lead qualification so your team spends less time on repetitive tasks.",
     },
     {
       title: "Deliver Better Client Results",
@@ -118,54 +119,54 @@ export default function MarketingAutomationIndustryPage() {
     },
   ];
 
-  const scaleStats = ["Call Records", "CRM Integrations", "Configured Calling Hours"];
+  const scaleStats = ["Call History", "CRM Connectors", "Configured Calling Hours"];
 
   const whyTalkLee = [
     {
       title: "One Platform for Every Client",
       description:
-        "Manage every account, campaign, and conversation from one dashboard instead of juggling multiple tools.",
+        "Manage every campaign, script, and call from one dashboard instead of juggling multiple tools.",
     },
     {
-      title: "White-Label by Default",
+      title: "Your Scripts, Your Rules",
       description:
-        "Deliver AI-powered services completely under your own brand, creating a seamless experience for every client.",
+        "Set each campaign’s script, approved information and calling hours yourself, so every client’s calls follow your rules.",
     },
     {
       title: "Launch Clients Faster",
       description:
-        "Set up new campaigns and AI agents in hours, helping you onboard clients quickly and start delivering value sooner.",
+        "Set up new campaigns and AI agents in the dashboard, helping you onboard clients quickly and start delivering value sooner.",
     },
     {
       title: "Pricing That Makes Sense",
       description:
-        "Predictable pricing designed for agencies, making it easy to scale your services with confidence.",
+        "Fixed, public prices with Basic, Business and Pay as you go plans, so you always know what you will pay.",
     },
   ];
 
-  const integrations = [
+  const connectors = [
     {
-      title: "CRM Integrations",
-      description: "Automatically sync leads, call outcomes, and customer data with your preferred CRM.",
+      title: "CRM Connectors",
+      description: "Calls are logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
-      title: "Calendar Sync",
+      title: "Google Calendar",
       description:
-        "Schedule appointments directly into Google Calendar.",
+        "Connect it in the dashboard; the assistant there uses it, calls do not.",
     },
     {
       title: "Marketing Platforms",
       description:
-        "Connect campaigns and lead sources to keep every interaction organized from first contact to conversion.",
+        "No connector for marketing platforms or lead forms is available in this release.",
     },
     {
-      title: "Automation Workflows",
+      title: "Follow-up Email",
       description:
-        "Trigger follow-ups, notifications, and CRM updates automatically without manual data entry.",
+        "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
   ];
 
-  const integrationLogos = ["HubSpot", "Salesforce", "Google Calendar"];
+  const connectorLogos = ["HubSpot", "Salesforce", "Google Calendar"];
 
   const howItWorks = [
     {
@@ -179,14 +180,14 @@ export default function MarketingAutomationIndustryPage() {
         "Every conversation follows your qualification criteria, collecting details like budget, timeline, service needs, and buying intent before deciding the next step.",
     },
     {
-      title: "Schedule Every Meeting",
+      title: "Request Every Callback",
       description:
-        "Qualified prospects are scheduled directly into your client’s calendar in real time, eliminating manual follow-ups, scheduling conflicts, and unnecessary back-and-forth communication.",
+        "Prospects who want to talk to your team are recorded as callback requests, so your team can reply at a time that suits them.",
     },
     {
-      title: "Follow Up Automatically",
+      title: "Follow Up by Email",
       description:
-        "Automated follow-ups, reminders, and conversation workflows keep every lead engaged, helping your agency maintain momentum and improve conversion rates across every client campaign.",
+        "Send a follow-up email when Gmail is connected and the campaign allows it, so every lead hears from you after the call.",
     },
   ];
 
@@ -194,22 +195,22 @@ export default function MarketingAutomationIndustryPage() {
     {
       question: "Is this platform built specifically for marketing agencies?",
       answer:
-        "Yes. It’s designed specifically for agencies managing multiple client accounts, with white-label branding, agency workflows, and centralized management built into the platform from day one.",
+        "Yes. It’s designed specifically for agencies managing multiple client accounts, with campaign scripts, call history, and centralized management built into the platform.",
     },
     {
       question: "Can I manage multiple client campaigns at the same time?",
       answer:
-        "Absolutely. Each client has a dedicated workspace with its own AI voice agents, campaigns, scripts, and reporting, while your team manages everything from one centralized dashboard.",
+        "Yes. Each campaign has its own AI voice agent, script, and results, while your team manages every campaign from one centralized dashboard.",
     },
     {
-      question: "Can I white-label the platform for my agency?",
+      question: "Can I put my own branding on the platform?",
       answer:
-        "Yes. The platform is fully white-label, allowing you to use your own branding across client conversations, reporting, and the client portal for a seamless agency experience.",
+        "Not in this release. The dashboard and the platform carry the Talk-Lee AI name, and every call says it is an AI.",
     },
     {
-      question: "Does it integrate with the CRMs my clients already use?",
+      question: "Does it connect to the CRMs my clients already use?",
       answer:
-        "It connects to HubSpot and Salesforce and syncs lead and call data to them. Other CRM systems are not connected in this release.",
+        "It connects to HubSpot and Salesforce and logs call data to them once connected. Other CRM systems are not connected in this release.",
     },
     {
       question: "How does AI marketing lead qualification work?",
@@ -219,7 +220,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       question: "How quickly can my agency get started?",
       answer:
-        "Most agencies can launch their first AI voice agent within a few days. Setup is straightforward, allowing you to start automating conversations and booking appointments without a lengthy implementation process.",
+        "Setup depends on your phone line, approved knowledge and campaign. Review these before you start calling.",
     },
   ];
 
@@ -232,11 +233,11 @@ export default function MarketingAutomationIndustryPage() {
             AI Marketing Automation - Built for Agencies
           </h1>
           <p className="mt-4 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
-            More qualified leads. More booked meetings. Less manual work.
+            More qualified leads. More callbacks. Less manual work.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI automates lead qualification, appointment booking, and outbound calling across every client
-            account, so your agency can scale without hiring more people.
+            Talk-Lee AI automates lead qualification and outbound calling across every client
+            campaign, so your agency can scale without hiring more people.
           </p>
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -245,13 +246,13 @@ export default function MarketingAutomationIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                See How It Works
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
           <p className="mt-8 text-base sm:text-lg md:text-xl text-gray-700 dark:text-muted-foreground font-semibold">
-            Launch AI voice agents for your clients in days, not months.
+            Calls need a paid plan or Pay as you go minutes. See pricing.
           </p>
           <div className="mt-10 grid grid-cols-2 md:grid-cols-4 gap-4">
             {heroStats.map((stat) => (
@@ -277,7 +278,7 @@ export default function MarketingAutomationIndustryPage() {
           </p>
           <p className={bodyClassName}>
             Talk-Lee AI simplifies agency operations with AI marketing automation built for agencies. From one
-            white-label dashboard, you can automate conversations, streamline workflows, and scale every client account
+            dashboard, you can automate conversations, streamline workflows, and scale every client account
             without adding operational complexity.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
@@ -300,8 +301,8 @@ export default function MarketingAutomationIndustryPage() {
           <p className={eyebrowClassName}>What Talk-Lee AI Does</p>
           <h2 className={`mt-3 ${headingClassName}`}>Everything Your Agency Needs to Scale</h2>
           <p className={bodyClassName}>
-            Stop switching between platforms to manage client campaigns. Talk-Lee AI gives your agency one white-label
-            solution to automate conversations, qualify leads, and book appointments.
+            Stop switching between platforms to manage client campaigns. Talk-Lee AI gives your agency one
+            solution to automate conversations and qualify leads for every campaign.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {capabilities.map((item) => (
@@ -350,7 +351,7 @@ export default function MarketingAutomationIndustryPage() {
           <p className={eyebrowClassName}>Built to Scale</p>
           <h2 className={`mt-3 ${headingClassName}`}>Growing agencies need a platform they can rely on.</h2>
           <p className={bodyClassName}>
-            From your first client to your hundredth, every conversation, campaign, and appointment runs on a platform
+            From your first client to your hundredth, every conversation and campaign runs on a platform
             built for speed, reliability, and agency growth. Scale confidently without changing the way your team works.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -376,15 +377,15 @@ export default function MarketingAutomationIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Integrations</p>
+          <p className={eyebrowClassName}>Connectors</p>
           <h2 className={`mt-3 ${headingClassName}`}>Works With the Tools You Already Use</h2>
           <p className={bodyClassName}>
-            No need to change your workflow. Connect your favorite tools and keep every lead, conversation, and
-            appointment in sync.
+            No need to change your workflow. Connect HubSpot, Salesforce, Gmail or Google Calendar. Other tools are
+            not connected in this release.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-              {integrations.map((item) => (
+              {connectors.map((item) => (
                 <li key={item.title}>
                   &bull; <span className="font-semibold text-primary dark:text-foreground">{item.title}</span> &mdash;{" "}
                   {item.description}
@@ -393,7 +394,7 @@ export default function MarketingAutomationIndustryPage() {
             </ul>
           </div>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-            {integrationLogos.map((logo) => (
+            {connectorLogos.map((logo) => (
               <span key={logo} className={pillClassName}>
                 {logo}
               </span>
@@ -404,7 +405,7 @@ export default function MarketingAutomationIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>How It Works</h2>
           <p className={bodyClassName}>
-            From the first conversation to the booked appointment, every interaction is automated to help your agency
+            From the first conversation to the follow-up, every call is automated to help your agency
             capture, qualify, and convert more leads.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -433,7 +434,7 @@ export default function MarketingAutomationIndustryPage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>Stop Losing Leads to Slow Follow-Ups</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Start automating lead engagement, qualification, and appointment booking with AI built specifically for
+              Start automating lead engagement and qualification with AI built specifically for
               marketing agencies.
             </p>
             <div className={ctaPairClassName}>
@@ -444,7 +445,7 @@ export default function MarketingAutomationIndustryPage() {
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/pricing">
-                  See Agency Pricing
+                  View Pricing
                 </Link>
               </Button>
             </div>

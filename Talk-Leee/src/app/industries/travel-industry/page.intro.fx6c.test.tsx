@@ -31,15 +31,15 @@ test("the integrations intro no longer names reservations or guest information; 
             </PathnameContext.Provider>
         </AppRouterContext.Provider>,
     );
-    const heading = screen.getByRole("heading", { name: "Connect With the Hospitality Tools You Already Use" });
+    const heading = screen.getByRole("heading", { name: "Connect the Tools Talk-Lee AI Supports" });
     const intro = heading.nextElementSibling;
     assert.equal(intro?.tagName, "P");
     assert.equal(
         (intro?.textContent ?? "").replace(/\s+/g, " ").trim(),
-        "Keep the systems you trust while connecting calendars and daily operations into one connected workflow.",
+        "Connect HubSpot or Salesforce to log calls, and Gmail to send follow-up emails.",
     );
     // The section keeps its eyebrow, heading and the two cards FX6b left.
     const section = heading.closest("section")!;
-    assert.equal(section.querySelector("p")?.textContent, "Integrations");
-    assert.deepEqual(Array.from(section.querySelectorAll("h3")).map((node) => node.textContent), ["Calendar & Scheduling", "Workflow Automation"]);
+    assert.equal(section.querySelector("p")?.textContent, "Connectors");
+    assert.deepEqual(Array.from(section.querySelectorAll("h3")).map((node) => node.textContent), ["Call Logging", "Follow-up Email"]);
 });
