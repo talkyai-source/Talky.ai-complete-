@@ -132,7 +132,7 @@ export function PackagesSection() {
               className="text-base sm:text-lg font-light text-gray-700 dark:text-muted-foreground"
             >
               <span className="font-semibold">Start Small or Scale Big.</span> Launch with a single AI Agent or power your entire
-              contact center. Seamlessly integrates with all major CRM and CCaaS platforms.
+              contact center. Connects to HubSpot and Salesforce to log your calls.
             </motion.p>
           </div>
 
@@ -154,10 +154,10 @@ export function PackagesSection() {
                 icon: SlidersHorizontal,
                 title: "Make AI Agents Your Own",
                 points: [
-                  "Personalize every conversation with real‑time customer data.",
-                  "Connect instantly with your existing call center software.",
-                  "Automate interactions with drag‑and‑drop orchestration.",
-                  "Refine performance using built‑in A/B testing.",
+                  "Personalize every conversation with your own knowledge base.",
+                  "Use your own SIP trunk or request a phone number.",
+                  "Design agent behavior with the step‑by‑step AI builder.",
+                  "Refine your script and settings after reviewing calls.",
                 ],
               },
               {
@@ -174,9 +174,9 @@ export function PackagesSection() {
                 icon: Eye,
                 title: "Always Know What’s Happening",
                 points: [
-                  "Stay in control with live monitoring and Conversation Intelligence.",
+                  "Stay in control with Call History and captured details.",
                   "Set goals and track performance.",
-                  "Automated QA on every call.",
+                  "Review transcripts and, where enabled, recordings.",
                   "Real‑time transcripts and insights for smarter decisions.",
                 ],
               },
@@ -282,12 +282,12 @@ export function PackagesSection() {
             {[
               {
                 icon: CalendarDays,
-                title: "Automate Appointment Booking & Reminders",
+                title: "Capture Scheduling Requests",
                 description:
-                  "AI voice agents connect with live calendars to manage scheduling for dental clinics, beauty salons, dealerships, and more.",
+                  "AI voice agents note the time a caller prefers on incoming calls, and schedule callbacks on outgoing campaigns.",
                 points: [
-                  "Live calendar integration",
-                  "Works with Google Calendar",
+                  "Callbacks on outgoing campaigns",
+                  "Incoming requests noted for your team",
                 ],
               },
               {
@@ -296,15 +296,15 @@ export function PackagesSection() {
                 description: "Configure inbound call handling using approved information and your account and provider limits.",
                 points: [
                   "Configured hours and call limits",
-                  "Real‑time integration with your systems",
-                  "Inject support procedure documents",
+                  "Log calls to HubSpot or Salesforce once connected",
+                  "Add support documents to the knowledge base",
                 ],
               },
               {
                 icon: PhoneCall,
                 title: "Cold Calling for Sales Teams",
                 description:
-                  "Put sales on autopilot with AI voice agents that qualify leads, follow up, and book appointments.",
+                  "Put sales on autopilot with AI voice agents that qualify leads, follow up, and schedule callbacks on outgoing calls.",
                 points: ["Automated follow‑ups", "Lead qualification on autopilot", "Close deals faster without scaling your team"],
               },
             ].map((item) => (

@@ -27,7 +27,7 @@ export function SecondaryHero() {
               </h2>
 
               <p className="mt-3 sm:mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-                Stop renting AI. Start owning it. Protect your IP, secure your data, and scale with confidence on dedicated infrastructure.
+                Configure your own AI voice agents, keep your approved knowledge in one place, and manage calls within your account limits.
               </p>
             </div>
 
@@ -47,7 +47,7 @@ export function SecondaryHero() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-primary dark:text-foreground">Custom AI Voice Agents</div>
                     <div className="mt-1 text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      Fine‑tuned with your recordings and transcriptions. Deliver automated phone calls, inbound and outbound support, and appointment scheduling that sound truly human.
+                      Built from your approved knowledge and campaign settings. Deliver automated inbound and outbound phone calls, each introduced as an AI.
                     </div>
                   </div>
                 </div>
@@ -65,9 +65,9 @@ export function SecondaryHero() {
                     <Cpu className="h-4 w-4 text-black" aria-hidden />
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold text-primary dark:text-foreground">Dedicated Infrastructure</div>
+                    <div className="text-sm font-semibold text-primary dark:text-foreground">Plan-Based Capacity</div>
                     <div className="mt-1 text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      Your servers. Your GPUs. Enterprise‑grade AI call automation built for performance and reliability.
+                      Your plan sets how many calls can run at once, within your configured campaign and provider limits.
                     </div>
                   </div>
                 </div>
@@ -107,7 +107,7 @@ export function SecondaryHero() {
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-primary dark:text-foreground">Protected Data</div>
                     <div className="mt-1 text-sm text-gray-700 dark:text-muted-foreground leading-relaxed">
-                      Encrypted. Secure. Yours alone. Every customer interaction and call routing stays on your dedicated servers.
+                      Access, consent and recording controls are available. Review data handling for your use before launch.
                     </div>
                   </div>
                 </div>

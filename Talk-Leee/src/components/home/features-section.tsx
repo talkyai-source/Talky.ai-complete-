@@ -8,8 +8,8 @@ const services = [
   },
   {
     icon: Users,
-    title: "Knowledgebase Integration",
-    description: "Upload PDFs, images, or crawl websites so agents speak with your latest, accurate information.",
+    title: "Knowledge Base",
+    description: "Upload .md or .txt files so agents speak with your latest, accurate information.",
   },
   {
     icon: Bot,
@@ -24,7 +24,7 @@ const services = [
   {
     icon: Settings,
     title: "Requests for Your Team",
-    description: "Collect caller requests for review, or transfer a live call to a person on your list. Live transfer to a person is available when it is set up for the campaign.",
+    description: "Collect caller requests for review. Transfer needs set-up: approved numbers on outgoing calls, transfer switched on and a two-way line on incoming calls. An answer is not guaranteed.",
   },
   {
     icon: BarChart3,
@@ -39,7 +39,7 @@ const services = [
   {
     icon: Megaphone,
     title: "Outbound Campaigns",
-    description: "Import leads or connect with HubSpot/forms for automated outreach.",
+    description: "Import leads for automated outreach and log calls to HubSpot once it is connected.",
   },
 ];
 

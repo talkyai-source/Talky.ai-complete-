@@ -135,6 +135,7 @@ export function Navbar() {
       { label: "Use Cases", items: [...useCaseNavItems] },
       { label: "Industries", items: [...industryNavItems] },
       { label: "Pricing", href: "/pricing" },
+      { label: "Documentation", href: "/docs" },
       { label: "Contact Us", href: "/contact" },
     ];
   }, []);
