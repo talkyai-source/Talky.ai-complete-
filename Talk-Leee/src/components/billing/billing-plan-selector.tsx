@@ -48,14 +48,19 @@ export function BillingCheckoutReturn({ scope, onNavigate = navigate }: { scope:
   const purchase = useBillingPurchase(scope, onNavigate);
   return <PurchaseNotice purchase={purchase} />;
 }
-export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: string; onNavigate?: (url: string) => void }) {
+/** The billing period named in the plan page's address (`?interval=month` or `?interval=year`); anything else is no choice. */
+export function parseBillingInterval(value: string | null | undefined): "month" | "year" | null {
+  return value === "month" || value === "year" ? value : null;
+}
+
+export function BillingPlanSelector({ scope, onNavigate = navigate, initialInterval = "month" }: { scope: string; onNavigate?: (url: string) => void; initialInterval?: "month" | "year" }) {
   const plansQuery = useBillingPlans(scope);
   const subscriptionQuery = useBillingPlan(scope);
   const purchase = useBillingPurchase(scope, onNavigate);
   const refusal = useBillingRefusal("plan");
   const billingAdmin = useBillingAdmin();
   const paypalOpen = usePaypalPlansConfig().data?.paypal_plans_open === true;
-  const [interval, setInterval] = useState<"month" | "year">("month");
+  const [interval, setInterval] = useState<"month" | "year">(initialInterval);
   const [portalError, setPortalError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
   const portalLock = useRef(false);

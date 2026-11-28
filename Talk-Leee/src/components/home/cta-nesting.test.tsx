@@ -49,7 +49,7 @@ const cases: Array<[string, React.ComponentType, number]> = [
     // and their three buttons were removed from each page.
     ["/industries/healthcare/", HealthcarePage, 6],
     ["/industries/education/", EducationPage, 6],
-    ["/pricing/", PricingPage, 4],
+    ["/pricing/", PricingPage, 5],
     ["/", CTASection, 1],
 ];
 

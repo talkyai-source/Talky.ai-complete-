@@ -1,7 +1,15 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Switch } from "@/components/ui/switch";
+import { pageSavingPercent } from "./catalog";
+
+// The period chosen on this page, for the plan buttons: they carry it to the
+// dashboard's plan page. Annual until the visitor switches (the first paint).
+const BillingIntervalContext = createContext<"month" | "year">("year");
+export function useBillingInterval(): "month" | "year" {
+  return useContext(BillingIntervalContext);
+}
 
 // Monthly / annual switch for the plan cards. The only client state on the
 // pricing page: the cards and the comparison table stay server-rendered and
@@ -22,10 +30,10 @@ export function BillingPeriod({ children }: { children: ReactNode }) {
         </span>
         <Switch checked={annual} onCheckedChange={setAnnual} ariaLabel="Annual" />
         <span aria-hidden="true" className="justify-self-start">
-          Annual (save 17%)
+          Annual (save {pageSavingPercent()}%)
         </span>
       </div>
-      {children}
+      <BillingIntervalContext.Provider value={annual ? "year" : "month"}>{children}</BillingIntervalContext.Provider>
     </div>
   );
 }

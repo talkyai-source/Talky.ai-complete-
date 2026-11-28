@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { z } from "zod";
 import { apiBaseUrl } from "@/lib/env";
 import { BILLING_CURRENCY, formatEstimate } from "@/lib/display-currency";
@@ -38,7 +38,7 @@ export function formatBundlePrice(bundle: PaygBundle): string {
   }).format(bundle.price_cents / 10 ** exponent);
 }
 
-type CardStyle = { className?: string; style?: CSSProperties; titleClassName?: string; bodyClassName?: string };
+type CardStyle = { className?: string; style?: CSSProperties; titleClassName?: string; bodyClassName?: string; action?: ReactNode };
 
 export function PayAsYouGoSection(props: CardStyle) {
   const [bundles, setBundles] = useState<PaygBundle[] | null>(null);
@@ -50,12 +50,13 @@ export function PayAsYouGoSection(props: CardStyle) {
   return <PayAsYouGoCard bundles={bundles} {...props} />;
 }
 
-export function PayAsYouGoCard({ bundles, className, style, titleClassName, bodyClassName }: {
+export function PayAsYouGoCard({ bundles, className, style, titleClassName, bodyClassName, action }: {
   bundles: PaygBundle[] | null;
   className?: string;
   style?: CSSProperties;
   titleClassName?: string;
   bodyClassName?: string;
+  action?: ReactNode;
 }) {
   const display = useDisplayCurrency();
   return (
@@ -87,6 +88,7 @@ export function PayAsYouGoCard({ bundles, className, style, titleClassName, body
       ) : (
         <p className={bodyClassName}>Current pay-as-you-go prices are shown in Billing after you sign up.</p>
       )}
+      {action ? <div className="mt-6 flex justify-center">{action}</div> : null}
     </div>
   );
 }
