@@ -594,6 +594,12 @@ jobs:
         if: ${{ !cancelled() }}
         run: npm test
 
+      # The product name is spelled one way. The check reads src and public and
+      # leaves the names other systems hold (cookies, headers, CRM field names) alone.
+      - name: Brand check
+        if: ${{ !cancelled() }}
+        run: npm run check-branding
+
       - name: Build
         if: ${{ !cancelled() }}
         run: npm run build
