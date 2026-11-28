@@ -98,7 +98,9 @@ export function RecordingPolicyView({
     const [retentionTyped, setRetentionTyped] = useState<string | null>(null);
 
     const effective: RecordingPolicyInput = {
-        default_consent_mode: policy?.default_consent_mode ?? "disabled",
+        // No saved policy = recorded with a spoken notice (backend rule since 18 Nov 2026).
+        // The form starts on what is in force; "Do not record calls" must be chosen.
+        default_consent_mode: policy?.default_consent_mode ?? "two_party",
         announcement_text: policy?.announcement_text ?? "",
         opt_out_dtmf_digit: policy?.opt_out_dtmf_digit ?? "",
         two_party_country_codes: policy?.two_party_country_codes ?? [],
@@ -150,7 +152,7 @@ export function RecordingPolicyView({
                     <ShieldCheck className="h-5 w-5" aria-hidden /> Call recording policy
                 </CardTitle>
                 <CardDescription>
-                    Recording is off until a policy is saved. This is a legal statement about the jurisdictions you call, so only tenant admins can change it.
+                    With no saved policy, calls are recorded and the agent speaks a recording notice first; an incoming line is recorded only while its own &quot;Record inbound calls&quot; switch is on. This is a legal statement about the jurisdictions you call, so only tenant admins can change it.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -185,7 +187,7 @@ export function RecordingPolicyView({
                             ))}
                         </Select>
                         <div className="text-xs text-muted-foreground">
-                            One-party: lawful only where you and your callees are in one-party jurisdictions (or you are calling your own numbers). Two-party: the agent speaks a recording notice as the first thing on the call, in the countries you list below (empty list = everywhere).
+                            One-party: no notice, lawful only where you and your callees are in one-party jurisdictions; the notice is still spoken to a callee in a two-party country (the platform&apos;s list or yours) and when the callee&apos;s country is not known. Two-party: the notice is spoken first when the list below is empty, when the callee&apos;s country is on it, or when the callee&apos;s country is not known.
                         </div>
                     </div>
 
@@ -193,7 +195,7 @@ export function RecordingPolicyView({
                         <Label className="text-xs" htmlFor="rp-announcement">Spoken notice (two-party)</Label>
                         <Input
                             id="rp-announcement"
-                            placeholder="This call may be recorded for quality and training. Press 9 to opt out."
+                            placeholder="This call may be recorded for quality and training."
                             value={effective.announcement_text ?? ""}
                             onChange={(e) => setDraft((d) => ({ ...d, announcement_text: e.target.value }))}
                             disabled={!canEdit || effective.default_consent_mode !== "two_party"}
@@ -221,11 +223,14 @@ export function RecordingPolicyView({
                                 id="rp-dtmf"
                                 maxLength={1}
                                 pattern="[0-9*#]"
-                                placeholder="9"
                                 value={effective.opt_out_dtmf_digit ?? ""}
-                                onChange={(e) => setDraft((d) => ({ ...d, opt_out_dtmf_digit: e.target.value.replace(/[^0-9*#]/g, "") }))}
-                                disabled={!canEdit || effective.default_consent_mode !== "two_party"}
+                                // A key press does nothing (DTMF_OPT_OUT_SUPPORTED = False in the backend): shown, never editable.
+                                disabled
+                                aria-describedby="rp-dtmf-help"
                             />
+                            <div id="rp-dtmf-help" className="text-xs text-muted-foreground">
+                                No effect in this release: callers cannot opt out by pressing a key.
+                            </div>
                         </div>
                         <div className="space-y-1">
                             <Label className="text-xs" htmlFor="rp-retention">Keep for (days)</Label>
@@ -246,7 +251,7 @@ export function RecordingPolicyView({
                 <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="text-xs text-red-500">{saveError}</div>
                     {canEdit ? (
-                        <Button type="button" disabled={!dirty || saving} onClick={() => void save()} data-testid="recording-policy-save">
+                        <Button type="button" disabled={!dirty || saving || !policy} onClick={() => void save()} data-testid="recording-policy-save">
                             {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
                             Save policy
                         </Button>
