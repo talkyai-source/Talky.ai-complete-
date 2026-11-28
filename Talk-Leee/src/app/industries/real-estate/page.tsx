@@ -3,11 +3,12 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Real Estate | AI Voice Agents & Lead Automation",
+  title: pageTitle("AI Voice Agents for Real Estate"),
   description:
-    "Discover AI for real estate with 24/7 call answering, lead qualification, property inquiries, appointment scheduling, and automated follow-up. Book a demo today.",
+    "Answer property calls from approved listing information and capture buyer and seller details for your team. A transfer to a person works only when it is set up.",
 };
 
 export default function RealEstateIndustryPage() {
@@ -39,10 +40,10 @@ export default function RealEstateIndustryPage() {
     "Capture buyer and seller inquiries",
     "Ask qualifying questions",
     "Provide listing information",
-    "Schedule property viewings",
-    "Route high-value leads",
-    "Follow up with prospects",
-    "Support callers after hours",
+    "Capture viewing requests",
+    "Pass lead details to your team",
+    "Follow-up email once Gmail is connected",
+    "Answer calls in your configured hours",
   ];
 
   const coveragePills = ["Configured Hours", "Lead Details", "Appointment Requests"];
@@ -51,12 +52,12 @@ export default function RealEstateIndustryPage() {
     {
       title: "AI Call Automation",
       description:
-        "Handle inbound and outbound calls automatically, answer common questions, capture lead details, and keep conversations moving without requiring your team to answer every call.",
+        "Answer incoming calls and run outgoing campaigns, answer common questions from approved information, and capture lead details for your team.",
     },
     {
       title: "Property Inquiry Handling",
       description:
-        "Give prospects quick answers about listings, pricing, locations, features, availability, and property tours — whenever they call.",
+        "Give prospects answers about listings, pricing, locations and features from the information you approve, in your configured hours.",
     },
     {
       title: "Lead Qualification",
@@ -64,9 +65,9 @@ export default function RealEstateIndustryPage() {
         "Identify serious buyers, sellers, renters, and investors by asking about their budget, location, property needs, goals, financing, and timeline.",
     },
     {
-      title: "Appointment Scheduling",
+      title: "Viewing Requests",
       description:
-        "Let qualified prospects book property tours, consultations, listing appointments, and follow-ups based on your agents’ availability.",
+        "Capture the tour or consultation a prospect asks for, with their preferred time, for your agents to follow up.",
     },
     {
       title: "AI Voice Agents",
@@ -78,7 +79,7 @@ export default function RealEstateIndustryPage() {
   const captureSteps = [
     {
       title: "Respond Immediately",
-      description: "Every incoming inquiry gets attention instead of reaching voicemail or waiting for a callback.",
+      description: "Incoming calls are answered within your configured hours instead of reaching voicemail.",
     },
     {
       title: "Understand What They Want",
@@ -93,14 +94,14 @@ export default function RealEstateIndustryPage() {
     {
       title: "Move to the Next Step",
       description:
-        "Once the prospect is ready, AI can help schedule a viewing, consultation, or conversation with an agent.",
+        "Once the prospect is ready, AI can record the viewing or consultation they want for an agent to follow up.",
     },
   ];
 
   const routineWork = [
     {
       title: "Stay Connected",
-      description: "Answer every inquiry promptly, even when agents are busy with clients or property tours.",
+      description: "Answer enquiries within your configured hours, even when agents are busy with clients or property tours.",
     },
     {
       title: "Answer Faster",
@@ -108,11 +109,11 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Qualify Smarter",
-      description: "Capture key buyer and seller details before handing conversations to your agents.",
+      description: "Capture key buyer and seller details before your agents follow up.",
     },
     {
-      title: "Book More",
-      description: "Turn qualified inquiries into property tours and appointments without unnecessary delays.",
+      title: "Capture More",
+      description: "Record viewing and consultation requests for your agents to follow up.",
     },
     {
       title: "Work Smarter",
@@ -123,11 +124,11 @@ export default function RealEstateIndustryPage() {
   const conversationTypes = [
     {
       title: "Buyers",
-      description: "Answer property questions, understand preferences, qualify leads, and schedule viewings.",
+      description: "Answer property questions, understand preferences, qualify leads, and record viewing requests.",
     },
     {
       title: "Sellers",
-      description: "Capture property details, understand selling goals, and book agent consultations.",
+      description: "Capture property details, understand selling goals, and record consultation requests.",
     },
     {
       title: "Rentals",
@@ -135,35 +136,35 @@ export default function RealEstateIndustryPage() {
     },
     {
       title: "Property Management",
-      description: "Manage tenant inquiries, maintenance requests, and routine property calls.",
+      description: "Answer routine tenant calls and collect maintenance requests for your team.",
     },
     {
       title: "Investors",
-      description: "Capture investment needs, qualify opportunities, and connect prospects with the right specialist.",
+      description: "Capture investment needs, qualify opportunities, and record the details for the right specialist.",
     },
     {
       title: "Brokerages",
-      description: "Review call records and captured requests with the relevant agent or team.",
+      description: "Review call history and captured requests with the relevant agent or team.",
     },
   ];
 
   const followUps = [
     {
       title: "Re-Engage Leads",
-      description: "Reconnect with prospects who showed interest but never took the next step.",
+      description: "Run an outgoing campaign to reconnect with prospects who showed interest.",
     },
     {
-      title: "Keep Showings On Track",
-      description: "Send timely reminders so prospects stay prepared and appointments stay on schedule.",
+      title: "Send Follow-up Emails",
+      description: "Send a follow-up email once Gmail is connected, so prospects have the details they asked for.",
     },
     {
       title: "Follow Up After Viewings",
       description:
-        "Reach out after property tours to understand interest and guide prospects toward their next move.",
+        "Run an outgoing campaign after property tours to ask about interest and the next step.",
     },
     {
       title: "Nurture Future Buyers",
-      description: "Stay connected with prospects who need more time and keep your agency top of mind.",
+      description: "Call prospects who need more time, on an outgoing campaign.",
     },
   ];
 
@@ -186,12 +187,12 @@ export default function RealEstateIndustryPage() {
     {
       title: "Move Leads Forward",
       description:
-        "Guide qualified prospects toward a showing, consultation, or the right agent without unnecessary delays.",
+        "Record what a qualified prospect wants next, such as a showing or consultation, for the right agent.",
     },
     {
-      title: "Hand Off With Context",
+      title: "Transfer When Set Up",
       description:
-        "When human support is needed, route the conversation with the relevant details already captured so agents can pick up where AI left off.",
+        "When a transfer is set up for the campaign, a live call can go to a person on your list. This does not guarantee that someone answers.",
     },
   ];
 
@@ -199,12 +200,12 @@ export default function RealEstateIndustryPage() {
 
   const whyTeamsChoose = [
     {
-      title: "24/7 Availability",
-      description: "Stay ready for buyer, seller, rental, and investor calls around the clock.",
+      title: "Configured Hours",
+      description: "Answer buyer, seller, rental, and investor calls in the hours you configure.",
     },
     {
       title: "1st-Call Response",
-      description: "Engage prospects immediately instead of letting high-intent leads wait for a callback.",
+      description: "Answer the first call instead of letting a high-intent lead reach voicemail, within your hours.",
     },
     {
       title: "Lead Details",
@@ -215,12 +216,12 @@ export default function RealEstateIndustryPage() {
       description: "Collect a caller request for your team to review. Live transfer to a person is available when it is set up for the campaign.",
     },
     {
-      title: "More Leads, Less Work",
-      description: "Handle growing call volumes without adding the same workload to your real estate team.",
+      title: "Fewer Routine Calls",
+      description: "Answer routine calls from approved information, within your account call limits.",
     },
   ];
 
-  const workflowConnections = ["Lead Information", "Calendar Coordination", "Lead Routing", "Follow-Up Actions"];
+  const workflowConnections = ["Lead Information", "Call History", "HubSpot or Salesforce", "Follow-up Email"];
 
   const howItWorks = [
     {
@@ -236,7 +237,7 @@ export default function RealEstateIndustryPage() {
     {
       title: "Convert",
       description:
-        "AI answers questions, captures lead details, and guides qualified prospects toward showings, consultations, or appointments.",
+        "AI answers questions, captures lead details, and records the showing or consultation a qualified prospect wants.",
     },
     {
       title: "Team Review",
@@ -246,20 +247,20 @@ export default function RealEstateIndustryPage() {
   ];
 
   const everythingNeeded = [
-    "24/7 Call Answering",
+    "Configured Call Answering",
     "Lead Qualification",
     "Property Information",
-    "Showing Coordination",
-    "Intelligent Routing",
-    "Automated Follow-Up",
-    "Multilingual Conversations",
+    "Viewing Requests",
+    "Transfer When Set Up",
+    "Follow-up Email",
+    "English Only",
   ];
 
   const faqs = [
     {
       question: "What can AI do for real estate agents?",
       answer:
-        "AI can answer calls, handle property inquiries, qualify leads, schedule appointments, route conversations, and support follow-up workflows.",
+        "AI can answer calls, handle property enquiries from approved information, qualify leads, and record requests for your team.",
     },
     {
       question: "Can AI qualify real estate leads?",
@@ -267,14 +268,14 @@ export default function RealEstateIndustryPage() {
         "Yes. AI can ask predefined questions about budget, location, property type, timeline, buying or selling goals, and other criteria your team uses to qualify prospects.",
     },
     {
-      question: "Can AI schedule property showings?",
+      question: "Does AI put property showings in a calendar?",
       answer:
-        "Yes. AI can help schedule property tours, consultations, and other appointments according to available calendar slots.",
+        "No. It does not book into a calendar during a call. It can record the showing a prospect asks for, for your team to follow up.",
     },
     {
       question: "Can AI answer property questions?",
       answer:
-        "Yes. When connected to the appropriate listing or business information, AI can provide answers to common questions about properties, availability, features, pricing, and services.",
+        "Yes. From the listing information you upload as campaign knowledge, AI can answer common questions about properties, features and pricing.",
     },
     {
       question: "Can AI handle both buyers and sellers?",
@@ -282,19 +283,19 @@ export default function RealEstateIndustryPage() {
         "Yes. Separate conversation workflows can be designed for buyer inquiries, seller leads, rental requests, investors, and existing clients.",
     },
     {
-      question: "Can an agent take over the call?",
+      question: "Can a person join the call?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does AI work after business hours?",
       answer:
-        "Yes. Talk-Lee AI can remain available 24/7, allowing your business to capture inquiries when your agents are unavailable.",
+        "Yes, within the hours you configure for the campaign, so you can capture enquiries when your agents are unavailable.",
     },
     {
       question: "Can it work with our existing systems?",
       answer:
-        "Talk-Lee AI can connect conversations with business workflows such as calendars, lead management, and customer systems, depending on your setup.",
+        "Talk-Lee AI logs calls to HubSpot or Salesforce once you connect one (Business plan), and sends follow-up emails through Gmail. No listing systems are connected.",
     },
   ];
 
@@ -311,12 +312,12 @@ export default function RealEstateIndustryPage() {
           </h2>
           <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Talk-Lee AI gives real estate teams an intelligent AI voice agent that answers calls, understands property
-            inquiries, and qualifies prospects. It schedules appointments and keeps leads moving forward around the clock.
+            inquiries, and qualifies prospects. It records what each caller wants for your team to follow up.
           </p>
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See It Handle a Real Estate Call
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -360,7 +361,7 @@ export default function RealEstateIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>Built for Real Estate</p>
-          <h2 className={`mt-3 ${headingClassName}`}>From First Inquiry to Scheduled Showing</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>From First Inquiry to Captured Request</h2>
           <p className={bodyClassName}>
             Talk-Lee AI doesn&rsquo;t simply answer the phone. It helps move conversations toward the next valuable action.
           </p>
@@ -379,7 +380,7 @@ export default function RealEstateIndustryPage() {
           <h2 className={`mt-3 ${headingClassName}`}>Turn Property Interest Into Action</h2>
           <p className={bodyClassName}>
             Talk-Lee AI can answer routine questions using approved property information and capture requests for a
-            viewing or conversation. Scheduling depends on the actions enabled for your workflow.
+            viewing or conversation. Calendar booking is not done on calls.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {captureSteps.map((item) => (
@@ -392,7 +393,7 @@ export default function RealEstateIndustryPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See AI in Action
+                Get Started
               </Link>
             </Button>
           </div>
@@ -402,8 +403,8 @@ export default function RealEstateIndustryPage() {
           <p className={eyebrowClassName}>Focus on Clients, Not Calls</p>
           <h2 className={`mt-3 ${headingClassName}`}>Let AI Manage the Routine Work</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI takes care of repetitive calls, common property questions, lead follow-ups, and appointment
-            scheduling. So your agents can spend more time building relationships, showing properties, negotiating deals,
+            Talk-Lee AI takes care of repetitive calls, common property questions, and lead details. So your
+            agents can spend more time building relationships, showing properties, negotiating deals,
             and closing transactions.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -419,7 +420,7 @@ export default function RealEstateIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Built for Every Real Estate Conversation</h2>
           <p className={bodyClassName}>
-            One AI assistant designed to handle calls, inquiries, leads, and appointments across every part of your real
+            One AI voice agent designed to handle calls, enquiries and leads across every part of your real
             estate business.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -435,8 +436,7 @@ export default function RealEstateIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Review Captured Leads After a Conversation</h2>
           <p className={bodyClassName}>
-            Keep prospects engaged with timely, intelligent follow-ups that turn more conversations into real
-            opportunities.
+            Follow up with prospects by outgoing call, or by email once Gmail is connected.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {followUps.map((item) => (
@@ -450,10 +450,10 @@ export default function RealEstateIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>A Better Calling Experience</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Conversations That Feel Human</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Natural, Two-Way Conversations</h2>
           <p className={bodyClassName}>
             Talk-Lee AI replaces frustrating phone menus with natural, two-way conversations that help prospects get
-            answers, take action, and reach the right person faster.
+            answers and take action.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {callingExperience.map((item) => (
@@ -466,14 +466,14 @@ export default function RealEstateIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Make Your Listings Available Around the Clock</h2>
+          <h2 className={headingClassName}>Answer Calls Within Your Configured Hours</h2>
           <p className={bodyClassName}>
             Property searches don&rsquo;t follow office hours. Buyers may discover a listing late at night, sellers may
             call during a weekend, and renters may have questions when agents are unavailable.
           </p>
           <p className={bodyClassName}>
-            With an always-available AI assistant, your real estate business can continue responding when your team is
-            busy, traveling, showing properties, or offline.
+            With hours you configure, your real estate business can keep answering when your team is
+            busy, traveling, or showing properties.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {availabilityPills.map((pill) => (
@@ -509,12 +509,11 @@ export default function RealEstateIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Connect Conversations to Your Sales Workflow</h2>
           <p className={bodyClassName}>
-            Turn every call into actionable lead data that helps your team respond faster, follow up smarter, and close
-            more opportunities.
+            Turn each call into captured lead details that your team can review and follow up on.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI can connect conversation insights with your calendars, CRM, lead records, and follow-up workflows
-            &mdash; so important details don&rsquo;t get lost after the call ends.
+            Once you connect HubSpot or Salesforce (Business plan), Talk-Lee AI logs calls there. Calls do not book
+            into a calendar.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -541,7 +540,7 @@ export default function RealEstateIndustryPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See It Handle a Real Estate Call
+                Get Started
               </Link>
             </Button>
           </div>
@@ -578,7 +577,7 @@ export default function RealEstateIndustryPage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>Your Next Listing Lead Could Be Calling</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Configure approved answers, enquiry capture and enabled scheduling actions for your property workflow.
+              Configure approved answers, enquiry capture and enabled actions for your property workflow.
             </p>
             <div className={ctaPairClassName}>
               <Button asChild size="lg" className={primaryButtonClassName}>
@@ -587,8 +586,8 @@ export default function RealEstateIndustryPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/book-a-demo">
-                  See AI in Action
+                <Link href="/auth/register">
+                  Get Started
                 </Link>
               </Button>
             </div>

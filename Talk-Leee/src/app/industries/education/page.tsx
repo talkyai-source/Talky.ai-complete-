@@ -4,11 +4,12 @@ import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import { Video } from "lucide-react";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Education | Student Support & Automation",
+  title: pageTitle("AI Voice Agents for Education"),
   description:
-    "Looking for AI for education? Automate student support, admissions, call handling, scheduling, and e-learning assistance 24/7. Book a Demo Today.",
+    "Answer student and parent calls from approved information and collect requests for staff review. A transfer to a person works only when it is set up.",
 };
 
 export default function EducationIndustryPage() {
@@ -40,17 +41,17 @@ export default function EducationIndustryPage() {
 
   const whyItMattersPoints = [
     "Student enquiry intake",
-    "24/7 availability",
-    "Faster admission responses",
-    "Automated follow-ups",
-    "Smart call routing",
-    "Reduced administrative workload",
+    "Configured calling hours",
+    "Answers from approved information",
+    "Follow-up email when Gmail is connected",
+    "Transfer to a person when it is set up",
+    "Requests collected for staff review",
   ];
 
   const heroStats = [
     { value: "Enquiry", label: "Intake" },
     { value: "Configured", label: "Hours" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
   ];
 
   const whatWeDo = [
@@ -67,7 +68,7 @@ export default function EducationIndustryPage() {
     {
       title: "AI Call Automation for Education",
       description:
-        "Automate inbound and outbound calls for admissions, reminders, student inquiries, notifications, and routine communication.",
+        "Answer incoming calls and run outgoing campaigns for admissions and student enquiries, using your approved information.",
     },
     {
       title: "AI Admission Inquiry Handling",
@@ -75,29 +76,29 @@ export default function EducationIndustryPage() {
         "Answer prospective students’ questions about programs, eligibility, tuition, application requirements, deadlines, and enrollment.",
     },
     {
-      title: "AI Appointment Scheduling for Institutes",
+      title: "AI Callback Requests for Institutes",
       description:
-        "Let students schedule appointments with admissions counselors, academic advisors, faculty, and student services based on real-time availability.",
+        "On outgoing campaigns the agent can schedule a callback. It does not book into a calendar during a call.",
     },
     {
       title: "AI E-Learning Support Automation",
       description:
-        "Help online learners with course navigation, platform questions, account assistance, and common learning support requests.",
+        "Help online learners with course navigation, platform questions, and common learning support requests.",
     },
     {
       title: "AI Student Engagement Platform",
       description:
-        "Keep students connected with timely reminders, announcements, follow-ups, personalized communication, and helpful conversations throughout their journey.",
+        "Answer student questions by phone from approved information, and send a follow-up email when Gmail is connected.",
     },
     {
       title: "AI Admission Follow-Up Calls",
       description:
-        "Automatically reconnect with prospective students after inquiries, provide additional information, and encourage them to take the next step toward enrollment.",
+        "Run an outgoing campaign to call prospective students after an enquiry, share approved information and ask for the next step.",
     },
     {
-      title: "AI Student Call Routing",
+      title: "AI Student Call Handling",
       description:
-        "Understand why a student is calling and direct them to admissions, finance, academics, student services, or the appropriate team.",
+        "Understand why a student is calling and record it for the right team. A transfer to a person works only when it is set up.",
     },
   ];
 
@@ -108,7 +109,7 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Reduce Admin Work",
-      description: "Automate routine calls, questions, scheduling, reminders, and follow-ups for your team.",
+      description: "Answer routine calls and questions from approved information, and collect requests for your team.",
     },
     {
       title: "Respond Faster",
@@ -116,15 +117,15 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Boost Engagement",
-      description: "Keep students informed and connected with timely, personalized communication.",
+      description: "Answer student questions by phone using approved information, within your configured hours.",
     },
     {
       title: "Handle Peak Demand",
-      description: "Manage busy admission periods and high inquiry volumes without adding extra staff.",
+      description: "Answer routine enquiries from approved information, within your account call limits.",
     },
     {
-      title: "Support 24/7",
-      description: "Provide reliable student support around the clock, including nights, weekends, and holidays.",
+      title: "After-Hours Handling",
+      description: "Set the hours your calling workflow runs and how calls outside those hours are handled.",
     },
   ];
 
@@ -136,12 +137,12 @@ export default function EducationIndustryPage() {
     {
       title: "Configured Calling Hours",
       description:
-        "Provide reliable support 24/7, regardless of office hours, weekends, holidays, or peak admission periods.",
+        "Set the hours your calling workflow runs and how calls outside those hours are handled.",
     },
     {
-      title: "Easy to Scale",
+      title: "Clear Limits",
       description:
-        "Handle growing student inquiries and call volumes without increasing administrative workload at the same pace.",
+        "Handle student enquiries within your account call limits and your plan or Pay as you go minutes.",
     },
     {
       title: "Works With Your Team",
@@ -165,14 +166,14 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Stay Connected",
-      description: "Automated reminders, confirmations, and updates keep students informed throughout their journey.",
+      description: "Send a follow-up email when Gmail is connected and the campaign has an email action.",
     },
   ];
 
   const capabilities = [
     {
-      title: "24/7 AI Call Answering",
-      description: "Answer student and parent calls around the clock with fast, natural conversations.",
+      title: "Configured Call Answering",
+      description: "Answer student and parent calls within your configured hours, in natural conversation.",
     },
     {
       title: "Admission Support",
@@ -180,17 +181,17 @@ export default function EducationIndustryPage() {
         "Use approved information about programs, fees, eligibility, deadlines and enrollment requirements.",
     },
     {
-      title: "Appointment Management",
-      description: "Schedule and manage appointments with admissions teams, counselors, advisors, and faculty.",
+      title: "Callback Requests",
+      description: "Schedule a callback on outgoing campaigns. The agent does not book into a calendar during a call.",
     },
     {
-      title: "Multilingual Support",
-      description: "Communicate naturally with students and parents in multiple languages.",
+      title: "English Only",
+      description: "Speech recognition is English only in this release.",
     },
     {
       title: "Virtual Receptionist",
       description:
-        "Give your institution an always-available front desk that answers questions, routes calls, and assists students.",
+        "Give your institution a front desk that answers questions. A transfer to a person works only when it is set up.",
     },
   ];
 
@@ -201,15 +202,15 @@ export default function EducationIndustryPage() {
     },
     {
       title: "Colleges & Universities",
-      description: "Manage admissions, appointments, student support, and follow-ups across departments.",
+      description: "Handle admissions enquiries, student support questions and follow-ups across departments.",
     },
     {
       title: "Training Institutes",
-      description: "Automate course inquiries, enrollment communication, scheduling, and student assistance.",
+      description: "Answer course enquiries and enrollment questions, and collect details for your team.",
     },
     {
       title: "E-Learning Platforms",
-      description: "Support learners with course information, platform assistance, reminders, and ongoing engagement.",
+      description: "Support learners with course information and platform questions from approved knowledge.",
     },
   ];
 
@@ -217,36 +218,36 @@ export default function EducationIndustryPage() {
     {
       question: "What is AI for education?",
       answer:
-        "AI for education helps institutions automate student communication, admissions, calls, scheduling, follow-ups, and routine support.",
+        "AI for education answers student calls from approved information and collects requests for staff review.",
     },
     {
       question: "Can AI handle admission inquiries?",
       answer:
-        "Yes. AI can answer questions about programs, fees, eligibility, deadlines, application requirements, and enrollment.",
+        "Yes, from the information you approve: programs, fees, eligibility, deadlines, application requirements, and enrollment.",
     },
     {
-      question: "Can students schedule appointments with AI?",
+      question: "Can the agent book a student into a calendar?",
       answer:
-        "Yes. Students can book appointments with admissions counselors, advisors, faculty, and other departments through AI-powered conversations.",
+        "No. It does not book into a calendar during a call. It can collect the preferred time for staff to follow up.",
     },
     {
-      question: "Can AI route student calls?",
+      question: "Can a student call reach a person?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect the reason for a call for staff review; this does not arrange a callback.",
     },
     {
       question: "Can AI support students after office hours?",
-      answer: "Yes. AI provides 24/7 support, including evenings, weekends, and holidays.",
+      answer: "It depends on your configured hours. You set when the agent is active and how calls outside them are handled.",
     },
     {
       question: "Can AI work alongside our staff?",
       answer:
-        "Absolutely. We handle repetitive interactions while your team focuses on complex requests and meaningful student relationships.",
+        "Absolutely. The agent handles repetitive interactions while your team focuses on complex requests and meaningful student relationships.",
     },
     {
       question: "How quickly can we get started?",
       answer:
-        "Most institutions can launch within days. Our team handles the setup so you can start automating student communication quickly.",
+        "Setup depends on your phone line, approved knowledge and campaign. Review these before you start calling.",
     },
   ];
 
@@ -263,7 +264,7 @@ export default function EducationIndustryPage() {
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Talk-Lee AI helps schools, colleges, universities, and institutes automate student communication,
-            admissions, scheduling, and support with intelligent AI available 24/7.
+            admissions enquiries and support calls from approved information, within hours you configure.
           </p>
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -273,12 +274,12 @@ export default function EducationIndustryPage() {
             </Button>
             <Button asChild size="lg" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                See How It Works
+                Book a Demo
               </Link>
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            See pricing for plans and minutes. Go live with AI support in days.
+            See pricing for plans and minutes. Calls need a paid plan or Pay as you go minutes.
           </p>
         </header>
 
@@ -334,7 +335,7 @@ export default function EducationIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>The Business Impact</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Faster Support. Happier Students. More Enrollment.</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Clear Answers. Captured Requests. Your Team in Control.</h2>
           <p className={bodyClassName}>
             Automate repetitive communication while giving your team more time to focus on students who need personal
             attention.
@@ -381,19 +382,18 @@ export default function EducationIndustryPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>AI Education Workflow Automation</h2>
           <p className={bodyClassName}>
-            Connect admissions, calls, scheduling, follow-ups, student support, and notifications into streamlined
-            workflows.
+            Set up admissions, calls, follow-ups and student support questions as one workflow you review.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI handles repetitive tasks automatically, helping your institution save time, improve response
-            speed, and deliver a more consistent student experience.
+            Talk-Lee AI handles repetitive routine calls from approved information, so your team can focus on
+            requests that need a person.
           </p>
         </section>
 
         <section className="mt-14">
           <h2 className={headingClassName}>How It Works</h2>
           <p className={bodyClassName}>
-            From the first call to ongoing support, AI handles every student interaction quickly and smoothly.
+            From the first call to ongoing support, AI handles routine student calls from approved information.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {howItWorks.map((item) => (
@@ -415,7 +415,7 @@ export default function EducationIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>AI Education Capabilities</p>
-          <h2 className={`mt-3 ${headingClassName}`}>One Intelligent Platform for Every Student Interaction</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>One Voice Agent for Routine Student Calls</h2>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {capabilities.map((item) => (
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
@@ -457,8 +457,7 @@ export default function EducationIndustryPage() {
         <section className="mt-14 rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center">
           <h3 className={subHeadingClassName}>Stop Losing Students to Missed Calls</h3>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Turn every inquiry into an enrollment opportunity with AI-powered student support, scheduling, and 24/7
-            assistance.
+            Turn missed calls into captured enquiries, with approved answers and requests for staff review.
           </p>
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>

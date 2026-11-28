@@ -17,6 +17,8 @@ const pages = [
     "app/industries/recruitment/page.tsx",
     "app/industries/financial-services/page.tsx",
     "app/industries/travel-industry/page.tsx",
+    "app/industries/professional-services/page.tsx",
+    "app/industries/retail-ecommerce/page.tsx",
 ];
 
 for (const file of pages) {
@@ -41,3 +43,16 @@ test("no page promises a connection to systems that have no connector", () => {
     const finance = read("app/industries/financial-services/page.tsx");
     assert.equal(/leading CRM platforms, scheduling tools, and business applications/.test(finance), false);
 });
+
+// W4-T10: no applicant tracking, core banking or help desk connector exists either. A page may
+// name one only to say it is not available.
+const NO_CONNECTOR = /\bATS\b|applicant tracking|core banking|help ?desk/i;
+const NOT_AVAILABLE = /\b(?:no connector|not available|not connected|are not|is not|does not|cannot)\b/i;
+for (const file of ["recruitment", "financial-services", "professional-services", "retail-ecommerce", "marketing-automation"].map((name) => `app/industries/${name}/page.tsx`)) {
+    test(`${file} names no ATS, core banking or help desk system as a connection`, () => {
+        const text = read(file).replace(/&(?:rsquo|apos);|’/g, "'").replace(/\s+/g, " ");
+        const promises = text.split(/(?<=[.!?])\s+|[`"]/).filter((sentence) => NO_CONNECTOR.test(sentence) && !NOT_AVAILABLE.test(sentence));
+        assert.deepEqual(promises, []);
+        assert.equal(/\bintegrat(?:es|ion|ions)\b[^.]{0,60}\b(?:ATS|applicant tracking|core banking|help ?desk)/i.test(text), false);
+    });
+}

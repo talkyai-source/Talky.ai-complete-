@@ -3,11 +3,12 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI Hiring Automation | AI Recruitment Solutions Platform",
+  title: pageTitle("AI Voice Agents for Recruitment"),
   description:
-    "Automate candidate screening, interview scheduling, and recruitment workflows with AI hiring automation built for modern recruiting teams and enterprise hiring.",
+    "How AI voice agents can call candidates, ask your screening questions, answer routine enquiries and pass the answers to your recruiters.",
 };
 
 export default function RecruitmentIndustryPage() {
@@ -36,73 +37,73 @@ export default function RecruitmentIndustryPage() {
 
   const heroStats = [
     { value: "Candidate", label: "Enquiries" },
-    { value: "Call", label: "Records" },
+    { value: "Call", label: "History" },
     { value: "Configured", label: "Hours" },
     { value: "Team", label: "Review" },
   ];
 
   const recruitmentRealityPoints = [
-    "Faster candidate screening",
-    "Automated interview scheduling",
-    "Centralized recruitment workflows",
+    "Screening calls to candidates",
+    "Callback requests for recruiters",
+    "Campaign settings in one dashboard",
     "Consistent candidate communication",
     "Reduced administrative workload",
   ];
 
-  const recruitmentRealityBadges = ["Reduce Time-to-Hire", "Improve Recruitment Efficiency", "24/7 Automation"];
+  const recruitmentRealityBadges = ["Less Manual Calling", "Improve Recruitment Efficiency", "Your Calling Hours"];
 
   const automationFeatures = [
     {
       title: "AI Candidate Screening",
       description:
-        "Identify qualified candidates through natural AI conversations that assess skills, experience, and job requirements, helping recruiters focus on applicants who best match each role.",
+        "Ask candidates your screening questions in a natural AI phone conversation and record their answers, so recruiters focus on applicants who best match each role.",
     },
     {
-      title: "AI Resume Screening",
+      title: "AI Call Review",
       description:
-        "Analyze and prioritize resumes based on your hiring criteria, reducing manual review time and helping recruitment teams quickly identify the most relevant candidates.",
+        "Review what each candidate said in your call history, so recruitment teams can quickly decide which candidates to speak to next.",
     },
     {
-      title: "AI Interview Scheduling",
+      title: "AI Outgoing Callbacks",
       description:
-        "Schedule interviews automatically by matching availability, sending confirmations, and managing reminders, making coordination effortless for both candidates and hiring managers.",
+        "On outgoing campaigns, schedule a callback when a candidate asks, and send a follow-up email when Gmail is connected and the campaign allows it.",
     },
     {
       title: "AI Recruitment Call Handling",
       description:
-        "Handle candidate inquiries, share application updates, and answer common recruitment questions with natural AI conversations that keep applicants informed throughout the hiring process.",
+        "Answer common recruitment questions from the information you approve, with natural AI conversations, and pass candidate requests to your recruiters.",
     },
   ];
 
   const audiences = [
     {
       title: "Corporate HR Teams",
-      description: "Streamline hiring with automated screening, scheduling, and candidate communication.",
+      description: "Run screening calls and candidate follow-up calls for your open roles.",
     },
     {
       title: "Talent Acquisition Teams",
       description:
-        "Manage high application volumes while keeping every candidate engaged throughout the hiring process.",
+        "Call more candidates in a campaign, then review every result in the dashboard.",
     },
     {
       title: "Recruitment Agencies",
-      description: "Screen, qualify, and schedule candidates for multiple clients from one centralized platform.",
+      description: "Run screening calls for several roles or clients from one dashboard.",
     },
     {
       title: "Staffing Firms",
-      description: "Accelerate placements with AI-powered recruitment workflows that reduce administrative tasks.",
+      description: "Reach candidates by phone with AI-powered calls that reduce repetitive dialling.",
     },
     {
       title: "Executive Search Firms",
-      description: "Spend less time coordinating interviews and more time building relationships with top talent.",
+      description: "Spend less time on first-contact calls and more time building relationships with top talent.",
     },
     {
       title: "Enterprise Hiring Teams",
-      description: "Scale recruitment across departments and locations without increasing operational complexity.",
+      description: "Set up a separate campaign for each department or location in the dashboard.",
     },
     {
       title: "High-Volume Recruiters",
-      description: "Keep hiring pipelines moving with automated candidate engagement and interview scheduling.",
+      description: "Keep candidate calls moving with campaigns that follow your calling hours.",
     },
   ];
 
@@ -110,22 +111,22 @@ export default function RecruitmentIndustryPage() {
     {
       title: "Screen Candidates Faster",
       description:
-        "Automatically evaluate applications and identify qualified candidates before recruiters spend time reviewing every resume.",
+        "Call candidates with your screening questions before recruiters spend time on every first conversation.",
     },
     {
-      title: "Reduce Time-to-Hire",
+      title: "Reach Candidates Sooner",
       description:
-        "Move candidates through every stage of recruitment faster with automated screening, scheduling, and follow-up communication.",
+        "Reach candidates with screening calls, callback requests, and follow-up emails when Gmail is connected for the campaign.",
     },
     {
       title: "Improve Candidate Experience",
       description:
-        "Respond quickly, provide timely updates, and keep candidates informed throughout the hiring journey with consistent AI-powered communication.",
+        "Answer routine questions on the call, and every call opens by saying the caller is an AI assistant.",
     },
     {
-      title: "Automate Interview Scheduling",
+      title: "Capture Callback Requests",
       description:
-        "Coordinate interviews without endless emails by automatically matching candidate and interviewer availability.",
+        "Record when a candidate wants a call back, so your recruiter can return the call at a time that suits them.",
     },
     {
       title: "Increase Recruitment Efficiency",
@@ -135,63 +136,63 @@ export default function RecruitmentIndustryPage() {
     {
       title: "Scale Hiring Without Growing Your Team",
       description:
-        "Handle more job openings, more candidates, and more interviews without increasing recruiter workload or operational costs.",
+        "Handle more job openings and candidate calls than a small team can dial by hand.",
     },
   ];
 
-  const growthBadges = ["Call Records", "Campaign Settings", "ATS Integrations", "Configured Calling Hours"];
+  const growthBadges = ["Call History", "Campaign Settings", "CRM Connectors", "Configured Calling Hours"];
 
   const whyTalkLee = [
     {
-      title: "One Platform for Every Hiring Workflow",
+      title: "One Dashboard for Candidate Calls",
       description:
-        "Manage job openings, candidates, interviews, and recruitment workflows from one centralized dashboard instead of switching between multiple hiring tools.",
+        "Manage candidate calling campaigns, call history, and results from one centralized dashboard instead of switching between several calling tools.",
     },
     {
       title: "AI Virtual Recruiter",
       description:
-        "Engage candidates with natural AI conversations, answer common questions, and provide timely updates throughout the hiring journey.",
+        "Talk to candidates in natural AI conversations and answer common questions from the information you approve.",
     },
     {
-      title: "Hire Faster",
+      title: "Less Manual Dialling",
       description:
-        "Automate candidate screening and interview scheduling to reduce manual work and move qualified candidates through your hiring pipeline more efficiently.",
+        "Automate first screening calls to cut manual dialling, and give recruiters the candidate answers to review in the dashboard.",
     },
     {
-      title: "Enterprise Ready",
+      title: "Built for Growing Teams",
       description:
-        "Scale recruitment with flexible workflows, enterprise-grade reliability, and automation built to support growing hiring teams.",
+        "Run campaigns with your own scripts, approved information, and calling hours as your hiring team grows over time.",
     },
   ];
 
-  const integrationCategories = [
+  const connectorCategories = [
     {
-      title: "Applicant Tracking Systems",
-      description: "Sync candidate records, application progress, and hiring activity automatically.",
+      title: "CRM Logging",
+      description: "Calls are logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
-      title: "Interview Scheduling",
-      description: "Coordinate interviews with Google Calendar.",
+      title: "Google Calendar",
+      description: "Used by the assistant in the dashboard, not by the calls themselves.",
     },
     {
-      title: "HR Software",
-      description: "Keep recruitment data organized by integrating with your existing HR and hiring platforms.",
+      title: "Hiring Software",
+      description: "No connector for HR or hiring software is available in this release.",
     },
     {
-      title: "Recruitment Workflows",
-      description: "Automate interview reminders, candidate updates, and internal notifications from one platform.",
+      title: "Follow-up Email",
+      description: "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
   ];
 
-  const integrations = ["Google Calendar"];
+  const connectors = ["HubSpot, Salesforce, Gmail"];
 
   const howItWorks = [
     {
-      title: "Capture Every Application",
+      title: "Call Every Candidate",
       description: (
         <>
-          Collect applications from multiple sources and automatically organize every candidate into one centralized hiring
-          workflow.
+          Add your candidate list to a campaign and the agent calls each person on it within your configured calling
+          hours.
         </>
       ),
     },
@@ -199,17 +200,17 @@ export default function RecruitmentIndustryPage() {
       title: "Screen Every Candidate",
       description: (
         <>
-          Use <strong className="font-semibold text-primary dark:text-foreground">AI candidate screening</strong> to evaluate
-          applicants against your hiring criteria before they reach your recruitment team.
+          Use <strong className="font-semibold text-primary dark:text-foreground">AI candidate screening</strong> to ask
+          applicants your questions before they reach your recruitment team.
         </>
       ),
     },
     {
-      title: "Schedule Every Interview",
+      title: "Request Every Callback",
       description: (
         <>
-          Automatically coordinate interviews by matching candidate and interviewer availability, reducing scheduling delays
-          and manual follow-ups.
+          Record a callback request whenever a candidate wants one, so your team can follow up at the right time with
+          fewer delays.
         </>
       ),
     },
@@ -217,8 +218,8 @@ export default function RecruitmentIndustryPage() {
       title: "Keep Candidates Engaged",
       description: (
         <>
-          Send interview reminders, application updates, and follow-up messages automatically, ensuring every candidate stays
-          informed throughout the recruitment process.
+          Send a follow-up email when Gmail is connected and the campaign allows it, so candidates stay informed after the
+          call.
         </>
       ),
     },
@@ -226,24 +227,24 @@ export default function RecruitmentIndustryPage() {
 
   const faqs = [
     {
-      question: "Is this platform built for recruitment teams and HR departments?",
+      question: "Is this platform for recruitment teams?",
       answer:
-        "Yes. The platform is designed for recruiters, talent acquisition teams, staffing firms, and enterprise organizations looking to automate hiring workflows and improve recruitment efficiency.",
+        "It is a general voice agent platform. Recruiters, talent acquisition teams and staffing firms can use it to call candidates and review the results.",
     },
     {
       question: "Can AI screen candidates before recruiters review them?",
       answer:
-        "Absolutely. AI candidate screening evaluates applicants using your hiring criteria, helping recruiters focus on qualified candidates instead of reviewing every application manually.",
+        "Yes. The agent asks applicants your screening questions on a call, so recruiters review their answers instead of making every first call.",
     },
     {
-      question: "Can interviews be scheduled automatically?",
+      question: "Can the agent book interviews on the call?",
       answer:
-        "Yes. AI interview scheduling coordinates availability between candidates and interviewers, sends confirmations, and automatically issues reminders.",
+        "No. On outgoing campaigns it can schedule a callback and, when Gmail is connected, send a follow-up email; your team then arranges the interview.",
     },
     {
-      question: "Does it integrate with our existing ATS?",
+      question: "Can it connect to our hiring software?",
       answer:
-        "Yes. The platform integrates with popular Applicant Tracking Systems and HR platforms, keeping candidate records, interview schedules, and hiring activity synchronized.",
+        "No. A direct connection to ATS or HR software is not available in this release. Calls can be logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
       question: "Can it manage candidate phone calls and inquiries?",
@@ -253,7 +254,7 @@ export default function RecruitmentIndustryPage() {
     {
       question: "How quickly can our team get started?",
       answer:
-        "Most organizations can launch within a few days. Setup is simple, allowing your hiring team to begin automating candidate communication, screening, and interview scheduling without a lengthy implementation process.",
+        "Setup depends on your phone line, approved knowledge and campaign. Review these before you start calling.",
     },
   ];
 
@@ -270,8 +271,8 @@ export default function RecruitmentIndustryPage() {
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Finding great candidates is only half the challenge. Talk-Lee AI simplifies hiring with AI hiring automation that
-            screens candidates, schedules interviews, manages recruitment calls, and streamlines every stage of your hiring
-            process &mdash; all from one intelligent platform.
+            makes candidate calls, asks your screening questions, answers routine enquiries, and passes the results to your
+            team &mdash; all from one dashboard.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -280,13 +281,13 @@ export default function RecruitmentIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                See How It Works
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            Transform your hiring process with AI in just a few days.
+            Setup depends on your phone line, approved knowledge and campaign.
           </p>
         </header>
 
@@ -313,8 +314,8 @@ export default function RecruitmentIndustryPage() {
           </p>
           <p className={bodyClassName}>
             Talk-Lee AI simplifies recruitment with AI recruitment solutions designed to automate repetitive hiring tasks. From
-            candidate screening to interview scheduling, every workflow is managed from one centralized platform, helping your
-            team hire faster while delivering a better candidate experience.
+            candidate screening calls to follow-up, every call is managed from one dashboard, helping your team spend
+            more time on the candidates who matter.
           </p>
           <ul className={listClassName}>
             {recruitmentRealityPoints.map((point) => (
@@ -334,8 +335,8 @@ export default function RecruitmentIndustryPage() {
           <p className={eyebrowClassName}>Recruitment Automation</p>
           <h2 className={`mt-3 ${headingClassName}`}>Everything You Need to Hire Smarter</h2>
           <p className={bodyClassName}>
-            Talk-Lee AI brings candidate screening, interview scheduling, and hiring workflows together in one intelligent
-            platform.
+            Talk-Lee AI brings candidate screening calls, callback requests, and call history together in one
+            dashboard.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {automationFeatures.map((feature) => (
@@ -410,14 +411,14 @@ export default function RecruitmentIndustryPage() {
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Integrations</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Works Seamlessly With Your Recruitment Stack</h2>
+          <p className={eyebrowClassName}>Connectors</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Connectors for Your Recruitment Tools</h2>
           <p className={bodyClassName}>
-            No need to replace the tools you already use. Connect Google Calendar, HubSpot or Salesforce to keep interviews
-            and candidate records in step. A direct connection to ATS or HR software is not available in this release.
+            No need to replace the tools you already use. Connect HubSpot or Salesforce (Business plan) to log calls, or Gmail to send
+            follow-up emails. A direct connection to ATS or HR software is not available in this release.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {integrationCategories.map((category) => (
+            {connectorCategories.map((category) => (
               <div key={category.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{category.title}</h3>
                 <p className={cardBodyClassName}>{category.description}</p>
@@ -425,9 +426,9 @@ export default function RecruitmentIndustryPage() {
             ))}
           </div>
           <div className="mt-8 flex flex-wrap items-center gap-2 sm:gap-3">
-            {integrations.map((integration) => (
-              <span key={integration} className={pillClassName}>
-                {integration}
+            {connectors.map((connector) => (
+              <span key={connector} className={pillClassName}>
+                {connector}
               </span>
             ))}
           </div>
@@ -437,7 +438,7 @@ export default function RecruitmentIndustryPage() {
           <p className={eyebrowClassName}>How It Works</p>
           <h2 className={`mt-3 ${headingClassName}`}>From First Application to Final Hire</h2>
           <p className={bodyClassName}>
-            Automate every stage of recruitment to hire faster and deliver a better candidate experience.
+            Automate the first calls of recruitment so recruiters have more time with the right candidates.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {howItWorks.map((step) => (
@@ -465,8 +466,8 @@ export default function RecruitmentIndustryPage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={subHeadingClassName}>Stop Losing Top Candidates to Slow Hiring</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Don&rsquo;t lose qualified candidates to slow recruitment. Streamline screening, scheduling, and candidate
-              communication with AI built for modern hiring teams.
+              Don&rsquo;t lose qualified candidates to slow recruitment. Streamline screening and candidate calls with
+              AI built for modern hiring teams.
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
@@ -476,7 +477,7 @@ export default function RecruitmentIndustryPage() {
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/pricing">
-                  See Recruitment Plans
+                  View Pricing
                 </Link>
               </Button>
             </div>

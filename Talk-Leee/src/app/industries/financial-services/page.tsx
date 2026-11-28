@@ -3,9 +3,10 @@ import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "AI for Financial Services",
+  title: pageTitle("AI Voice Agents for Financial Services"),
   description:
     "Explore configured call intake, approved answers to routine enquiries and request capture for your team to review.",
 };
@@ -35,9 +36,9 @@ export default function FinancialServicesIndustryPage() {
 
   const heroStats = [
     "Enquiry Intake",
-    "Configured Calling Hours",
-    "Call Records",
-    "Workflow Settings",
+    "Configured Business Hours",
+    "Call History",
+    "Campaign Settings",
   ];
 
   const expectationBenefits = [
@@ -45,16 +46,16 @@ export default function FinancialServicesIndustryPage() {
     "Faster customer assistance",
     "Reduced support workload",
     "Consistent customer experiences",
-    "24/7 financial support",
+    "Calls within configured hours",
   ];
 
-  const expectationPills = ["Always Available", "Faster Response Times", "Enterprise Reliability"];
+  const expectationPills = ["Configured Hours", "Approved Answers", "Team Review"];
 
   const capabilities = [
     {
       title: "AI Banking Customer Support",
       description:
-        "Use approved information to answer routine service questions and collect requests for review. Access to account information depends on an authorized integration.",
+        "Use approved information to answer routine service questions and collect requests for review. Access to account information is not available in this release.",
     },
     {
       title: "AI Call Automation for Finance",
@@ -69,7 +70,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Financial Customer Service",
       description:
-        "Handle balance inquiries, payment assistance, branch information, loan questions, and general customer support through intelligent AI-powered conversations.",
+        "Answer branch information, loan product questions, and general customer support from the information you approve.",
     },
   ];
 
@@ -77,7 +78,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Retail Banks",
       description:
-        "Deliver faster customer service for everyday banking inquiries, account support, and transaction assistance.",
+        "Answer everyday banking enquiries from approved information and collect requests for your team to review.",
     },
     {
       title: "Credit Unions",
@@ -87,17 +88,17 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Fintech Companies",
       description:
-        "Scale customer support without growing your operations team by automating high-volume financial conversations.",
+        "Handle more customer calls without growing your operations team, within your plan’s call limits.",
     },
     {
       title: "Mortgage & Lending Companies",
       description:
-        "Answer loan inquiries, application questions, payment requests, and customer updates without long hold times.",
+        "Answer general loan questions from approved information, without long hold times.",
     },
     {
       title: "Insurance Providers",
       description:
-        "Support policyholders with claims information, billing inquiries, and customer assistance through AI-powered conversations.",
+        "Answer general policy and claims questions from approved information through AI-powered conversations.",
     },
     {
       title: "Investment & Wealth Management Firms",
@@ -108,7 +109,7 @@ export default function FinancialServicesIndustryPage() {
 
   const businessOutcomes = [
     {
-      title: "Answer Every Customer Call",
+      title: "Answer Customer Calls",
       description:
         "Handle configured calls within your account and provider limits, and review the recorded outcomes.",
     },
@@ -120,12 +121,12 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Lower Support Costs",
       description:
-        "Automate repetitive conversations and reduce the workload on your customer service team without sacrificing service quality.",
+        "Automate repetitive conversations and reduce the workload on your customer service team.",
     },
     {
-      title: "Improve Customer Satisfaction",
+      title: "Consistent Customer Calls",
       description:
-        "Deliver fast, accurate, and consistent support across every interaction, creating a better customer experience from the first call.",
+        "Give callers consistent answers from the information you approve, creating a steady customer experience from the first call.",
     },
     {
       title: "Increase Team Productivity",
@@ -135,71 +136,71 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Scale Customer Support",
       description:
-        "Handle growing call volumes confidently without increasing headcount or expanding your call center operations.",
+        "Handle growing call volumes within your plan’s call limits, without increasing headcount or expanding your call center operations.",
     },
   ];
 
   const conversationTypes = [
     {
-      title: "Account & Balance Inquiries",
+      title: "General Banking Enquiries",
       description:
-        "Help customers access account information, recent transactions, and general banking assistance without waiting for a live representative.",
+        "Answer general banking questions from approved information. Account details and transactions are not available in this release.",
     },
     {
       title: "Loan & Financing Questions",
       description:
-        "Answer common questions about loans, applications, payment schedules, and financing options while routing complex cases to specialists.",
+        "Answer common questions about loans, applications, payment schedules, and financing options while capturing complex cases for your specialists to review.",
     },
     {
-      title: "Credit Card Support",
+      title: "Card Information",
       description:
-        "Assist customers with card activation, payment information, spending limits, and lost or stolen card reporting.",
+        "Share general card and payment information from approved answers. Account actions on cards stay with your own channels.",
     },
     {
       title: "Payment & Billing Assistance",
       description:
-        "Guide customers through payment confirmations, billing inquiries, due dates, and account-related payment support.",
+        "Answer general billing and payment-date questions from approved information; account-specific details are not available.",
     },
     {
       title: "Branch & Service Information",
       description:
-        "Provide branch locations, business hours, appointment scheduling, and information about available financial services.",
+        "Provide branch locations, business hours, and information about available financial services.",
     },
     {
-      title: "Fraud & Security Reporting",
+      title: "Fraud & Security Concerns",
       description:
-        "Live transfer is not a channel for reporting fraud or security concerns. Keep your institution’s existing reporting channels available for those concerns.",
+        "Fraud and security concerns cannot be reported by transfer. Keep your institution’s existing reporting channels available for those concerns.",
     },
   ];
 
   const trustPills = [
-    "Configured Calling Hours",
-    "Enterprise Ready",
-    "Reliable Infrastructure",
-    "24/7 Customer Support",
-    "High-Volume Ready",
+    "Configured Business Hours",
+    "Approved Answers",
+    "Call History",
+    "Fixed Public Pricing",
+    "Team Review",
   ];
 
   const whyTalkLee = [
     {
       title: "AI Virtual Assistant for Finance",
       description:
-        "Configure approved answers for routine enquiries and review the resulting call records.",
+        "Configure approved answers for routine enquiries and review the resulting call history.",
     },
     {
       title: "AI Inbound Finance Calls",
       description:
-        "Automatically answer incoming customer calls, identify the reason for each inquiry, and deliver the right support from the first conversation.",
+        "Answer incoming calls on configured lines, identify the reason for each enquiry, and collect it for your team.",
     },
     {
       title: "AI Finance Workflow Automation",
       description:
-        "Automate customer service workflows, call routing, follow-ups, and routine financial requests to improve operational efficiency.",
+        "Automate routine enquiries and, when enabled for the campaign, follow-up emails, and callbacks on outgoing campaigns.",
     },
     {
       title: "AI Finance Call Center Automation",
       description:
-        "Support high call volumes with intelligent AI that handles repetitive customer interactions while allowing agents to focus on complex financial cases.",
+        "Handle repetitive customer interactions with AI while your agents focus on complex financial cases.",
     },
     {
       title: "AI Fintech Customer Support",
@@ -208,33 +209,33 @@ export default function FinancialServicesIndustryPage() {
     },
   ];
 
-  const integrations = [
+  const connectors = [
     {
-      title: "CRM Integration",
+      title: "CRM Connectors",
       description:
-        "Automatically sync customer interactions, support requests, and call outcomes with your preferred CRM.",
+        "Calls are logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
-      title: "Core Banking Systems",
+      title: "Account Systems",
       description:
-        "Connect with your existing banking and financial platforms to streamline customer support workflows.",
+        "No connector for core banking or account systems is available in this release.",
     },
     {
-      title: "Calendar & Appointment Scheduling",
+      title: "Google Calendar",
       description:
-        "Book consultations, branch appointments, and financial advisor meetings directly into your scheduling platform.",
+        "Connect it in the dashboard; the assistant there uses it, calls do not.",
     },
     {
-      title: "Workflow Automation",
+      title: "Follow-up Email",
       description:
-        "Automatically trigger customer notifications, follow-ups, support tickets, and internal workflows without manual intervention.",
+        "Send a follow-up email after a call when Gmail is connected and the campaign allows it.",
     },
   ];
 
-  const integrationPills = [
+  const connectorPills = [
     "Salesforce",
     "HubSpot",
-    "Google Calendar",
+    "Gmail",
   ];
 
   const howItWorks = [
@@ -246,7 +247,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Understand Every Request",
       description:
-        "Using natural language understanding, AI identifies why the customer is calling, whether it’s an account inquiry, payment question, loan request, or card-related issue.",
+        "Using natural language understanding, AI identifies why the customer is calling, whether it’s a general enquiry, payment question, or loan question.",
     },
     {
       title: "Resolve The Issue",
@@ -256,40 +257,40 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Keep Customers Informed",
       description:
-        "Follow-up messages, appointment reminders, and service updates are delivered automatically, keeping customers informed without additional manual effort.",
+        "A follow-up email can be sent when Gmail is connected and the campaign allows it, so customers hear back after the call.",
     },
   ];
 
   const faqs = [
     {
-      question: "Is this platform built specifically for financial services?",
+      question: "Is this platform for financial services?",
       answer:
-        "Yes. It’s designed for banks, fintech companies, lenders, insurance providers, and financial institutions that want to automate customer support and improve operational efficiency.",
+        "It is a general voice agent platform. Banks, fintech companies, lenders and insurance providers can use it to automate routine customer calls.",
     },
     {
       question: "Can AI handle banking customer inquiries?",
       answer:
-        "Absolutely. AI can answer common banking questions, assist with account inquiries, payment information, branch details, and many other routine customer requests.",
+        "Yes, general ones. AI answers common banking questions, payment information and branch details from approved information; it has no access to account systems.",
     },
     {
-      question: "Can AI route customers to the correct department?",
+      question: "Can AI send callers to the right department?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
-      question: "Does it integrate with our existing systems?",
+      question: "Does it connect to our existing systems?",
       answer:
-        "Yes. It connects to HubSpot, Salesforce and Google Calendar, and to your phone system through a SIP trunk, so call outcomes and bookings reach the tools your team already uses.",
+        "It connects to HubSpot, Salesforce, Gmail, Google Calendar and Google Drive, and to your phone system through a SIP trunk. Calls are logged to HubSpot or Salesforce (Business plan) and follow-up emails go through Gmail; core banking systems are not connected.",
     },
     {
       question: "Can it support high call volumes?",
       answer:
-        "Yes. AI is built to manage thousands of customer conversations simultaneously, helping financial organizations reduce wait times while maintaining consistent service quality.",
+        "Yes, within your account and provider limits. Several calls can run at the same time, which helps reduce wait times.",
     },
     {
       question: "How quickly can we get started?",
       answer:
-        "Most organizations can launch within a few days. Our team handles the setup so you can begin automating customer conversations without a lengthy implementation process.",
+        "Setup depends on your phone line, approved knowledge and campaign. Review these before you start calling.",
     },
   ];
 
@@ -315,13 +316,13 @@ export default function FinancialServicesIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                See How It Works
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
           <p className="mt-8 text-sm sm:text-base md:text-lg font-semibold text-primary dark:text-foreground">
-            Go live with AI voice agents built for financial services in days.
+            Calls need a paid plan or Pay as you go minutes. See pricing for plans.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {heroStats.map((stat) => (
@@ -341,9 +342,9 @@ export default function FinancialServicesIndustryPage() {
             losing customers to faster competitors.
           </p>
           <p className={bodyClassName}>
-            With AI for financial services, every customer receives immediate assistance. From account inquiries and
-            payment questions to loan information and branch support, AI delivers fast, consistent service while allowing
-            your staff to focus on complex financial conversations.
+            With AI for financial services, within your configured hours and call limits, customer calls can be answered right away. From payment questions to
+            loan information and branch support, AI gives consistent answers from approved information while your
+            staff focus on complex financial conversations.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -382,7 +383,7 @@ export default function FinancialServicesIndustryPage() {
           <p className={eyebrowClassName}>Who We Help</p>
           <h2 className={`mt-3 ${headingClassName}`}>Built for Every Financial Organization</h2>
           <p className={bodyClassName}>
-            Whether you&rsquo;re serving thousands of banking customers or building the next fintech platform, AI adapts to
+            Whether you&rsquo;re serving a bank&rsquo;s customers or building the next fintech platform, AI adapts to
             your customer support workflows while improving operational efficiency.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -432,12 +433,12 @@ export default function FinancialServicesIndustryPage() {
           <p className={eyebrowClassName}>Built for Trust</p>
           <h2 className={`mt-3 ${headingClassName}`}>Reliable AI for Financial Services</h2>
           <p className={bodyClassName}>
-            Financial institutions require technology they can depend on. Every conversation is handled with reliability,
-            consistency, and enterprise-grade infrastructure designed to support high-volume customer service environments.
+            Financial institutions require technology they can depend on. Every conversation is handled with consistency,
+            using the answers and rules you approve before the campaign starts.
           </p>
           <p className={bodyClassName}>
-            Whether you&rsquo;re serving hundreds of customers or millions, AI keeps your customer support running around
-            the clock without compromising performance.
+            Calls run within the business hours you configure and within your account and provider
+            limits, so you stay in control of when the agent speaks.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {trustPills.map((pill) => (
@@ -465,28 +466,28 @@ export default function FinancialServicesIndustryPage() {
           <h2 className={headingClassName}>Why This Matters</h2>
           <p className={bodyClassName}>
             Instead of overwhelming customer service teams with repetitive questions, AI provides immediate assistance
-            while ensuring every customer receives a fast, consistent, and professional experience. Your staff spends less
+            while giving customers a fast, consistent, and professional experience. Your staff spends less
             time answering routine inquiries and more time delivering meaningful financial guidance.
           </p>
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Integrations</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Works With the Financial Tools You Already Use</h2>
+          <p className={eyebrowClassName}>Connectors</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Connectors for the Financial Tools You Use</h2>
           <p className={bodyClassName}>
-            No need to change your workflow. Connect your existing tools to automate customer service and keep customer
-            data synchronized.
+            No need to change your workflow. Connect HubSpot, Salesforce, Gmail, Google Calendar or Google Drive. No other tools
+            are connected in this release.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
-            {integrations.map((integration) => (
-              <div key={integration.title} className={accentCardClassName} style={accentCardStyle}>
-                <h3 className={cardTitleClassName}>{integration.title}</h3>
-                <p className={cardBodyClassName}>{integration.description}</p>
+            {connectors.map((connector) => (
+              <div key={connector.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{connector.title}</h3>
+                <p className={cardBodyClassName}>{connector.description}</p>
               </div>
             ))}
           </div>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-            {integrationPills.map((pill) => (
+            {connectorPills.map((pill) => (
               <span key={pill} className={pillClassName}>
                 {pill}
               </span>
@@ -498,7 +499,7 @@ export default function FinancialServicesIndustryPage() {
           <h2 className={headingClassName}>How It Works</h2>
           <h3 className={`mt-3 ${subHeadingClassName}`}>From Customer Call to Resolution</h3>
           <p className={bodyClassName}>
-            AI streamlines every customer interaction, ensuring faster responses, accurate routing, and consistent service
+            AI streamlines every customer interaction, ensuring faster responses and consistent service
             across every conversation.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -537,7 +538,7 @@ export default function FinancialServicesIndustryPage() {
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/pricing">
-                  See Plans
+                  View Pricing
                 </Link>
               </Button>
             </div>
