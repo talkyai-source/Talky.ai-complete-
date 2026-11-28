@@ -253,7 +253,7 @@ export default function RealEstateIndustryPage() {
     "Viewing Requests",
     "Transfer When Set Up",
     "Follow-up Email",
-    "English by Default",
+    "English Only",
   ];
 
   const faqs = [
@@ -275,7 +275,7 @@ export default function RealEstateIndustryPage() {
     {
       question: "Can AI answer property questions?",
       answer:
-        "Yes. When connected to the appropriate listing or business information, AI can provide answers to common questions about properties, availability, features, pricing, and services.",
+        "Yes. From the listing information you upload as campaign knowledge, AI can answer common questions about properties, features and pricing.",
     },
     {
       question: "Can AI handle both buyers and sellers?",
@@ -283,7 +283,7 @@ export default function RealEstateIndustryPage() {
         "Yes. Separate conversation workflows can be designed for buyer inquiries, seller leads, rental requests, investors, and existing clients.",
     },
     {
-      question: "Can an agent take over the call?",
+      question: "Can a person join the call?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
@@ -295,7 +295,7 @@ export default function RealEstateIndustryPage() {
     {
       question: "Can it work with our existing systems?",
       answer:
-        "Talk-Lee AI logs calls to HubSpot or Salesforce once you connect one (Business plan). It does not connect to other systems.",
+        "Talk-Lee AI logs calls to HubSpot or Salesforce once you connect one (Business plan), and sends follow-up emails through Gmail. No listing systems are connected.",
     },
   ];
 

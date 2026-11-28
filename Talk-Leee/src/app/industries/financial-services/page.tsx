@@ -36,9 +36,9 @@ export default function FinancialServicesIndustryPage() {
 
   const heroStats = [
     "Enquiry Intake",
-    "Configured Calling Hours",
+    "Configured Business Hours",
     "Call History",
-    "Workflow Settings",
+    "Campaign Settings",
   ];
 
   const expectationBenefits = [
@@ -88,7 +88,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Fintech Companies",
       description:
-        "Scale customer support without growing your operations team by automating high-volume financial conversations.",
+        "Handle more customer calls without growing your operations team, within your plan’s call limits.",
     },
     {
       title: "Mortgage & Lending Companies",
@@ -136,7 +136,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "Scale Customer Support",
       description:
-        "Handle growing call volumes confidently without increasing headcount or expanding your call center operations.",
+        "Handle growing call volumes within your plan’s call limits, without increasing headcount or expanding your call center operations.",
     },
   ];
 
@@ -167,14 +167,14 @@ export default function FinancialServicesIndustryPage() {
         "Provide branch locations, business hours, and information about available financial services.",
     },
     {
-      title: "Fraud & Security Reporting",
+      title: "Fraud & Security Concerns",
       description:
-        "Live transfer is not a channel for reporting fraud or security concerns. Keep your institution’s existing reporting channels available for those concerns.",
+        "Fraud and security concerns cannot be reported by transfer. Keep your institution’s existing reporting channels available for those concerns.",
     },
   ];
 
   const trustPills = [
-    "Configured Calling Hours",
+    "Configured Business Hours",
     "Approved Answers",
     "Call History",
     "Fixed Public Pricing",
@@ -195,7 +195,7 @@ export default function FinancialServicesIndustryPage() {
     {
       title: "AI Finance Workflow Automation",
       description:
-        "Automate routine enquiries and, when enabled for the campaign, follow-up emails and callback requests.",
+        "Automate routine enquiries and, when enabled for the campaign, follow-up emails, and callbacks on outgoing campaigns.",
     },
     {
       title: "AI Finance Call Center Automation",
@@ -235,7 +235,7 @@ export default function FinancialServicesIndustryPage() {
   const connectorPills = [
     "Salesforce",
     "HubSpot",
-    "Google Calendar",
+    "Gmail",
   ];
 
   const howItWorks = [
@@ -263,9 +263,9 @@ export default function FinancialServicesIndustryPage() {
 
   const faqs = [
     {
-      question: "Is this platform built specifically for financial services?",
+      question: "Is this platform for financial services?",
       answer:
-        "Yes. It’s designed for banks, fintech companies, lenders, insurance providers, and financial institutions that want to automate customer support and improve operational efficiency.",
+        "It is a general voice agent platform. Banks, fintech companies, lenders and insurance providers can use it to automate routine customer calls.",
     },
     {
       question: "Can AI handle banking customer inquiries?",
@@ -273,14 +273,14 @@ export default function FinancialServicesIndustryPage() {
         "Yes, general ones. AI answers common banking questions, payment information and branch details from approved information; it has no access to account systems.",
     },
     {
-      question: "Can AI route customers to the correct department?",
+      question: "Can AI send callers to the right department?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Does it connect to our existing systems?",
       answer:
-        "It connects to HubSpot, Salesforce, Gmail and Google Calendar, and to your phone system through a SIP trunk. Calls are logged to HubSpot or Salesforce once connected; core banking systems are not.",
+        "It connects to HubSpot, Salesforce, Gmail, Google Calendar and Google Drive, and to your phone system through a SIP trunk. Calls are logged to HubSpot or Salesforce (Business plan) and follow-up emails go through Gmail; core banking systems are not connected.",
     },
     {
       question: "Can it support high call volumes?",
@@ -342,7 +342,7 @@ export default function FinancialServicesIndustryPage() {
             losing customers to faster competitors.
           </p>
           <p className={bodyClassName}>
-            With AI for financial services, every customer call can be answered right away. From payment questions to
+            With AI for financial services, within your configured hours and call limits, customer calls can be answered right away. From payment questions to
             loan information and branch support, AI gives consistent answers from approved information while your
             staff focus on complex financial conversations.
           </p>
@@ -383,7 +383,7 @@ export default function FinancialServicesIndustryPage() {
           <p className={eyebrowClassName}>Who We Help</p>
           <h2 className={`mt-3 ${headingClassName}`}>Built for Every Financial Organization</h2>
           <p className={bodyClassName}>
-            Whether you&rsquo;re serving thousands of banking customers or building the next fintech platform, AI adapts to
+            Whether you&rsquo;re serving a bank&rsquo;s customers or building the next fintech platform, AI adapts to
             your customer support workflows while improving operational efficiency.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -437,7 +437,7 @@ export default function FinancialServicesIndustryPage() {
             using the answers and rules you approve before the campaign starts.
           </p>
           <p className={bodyClassName}>
-            Calls run within the calling hours you configure and within your account and provider
+            Calls run within the business hours you configure and within your account and provider
             limits, so you stay in control of when the agent speaks.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
@@ -466,7 +466,7 @@ export default function FinancialServicesIndustryPage() {
           <h2 className={headingClassName}>Why This Matters</h2>
           <p className={bodyClassName}>
             Instead of overwhelming customer service teams with repetitive questions, AI provides immediate assistance
-            while ensuring every customer receives a fast, consistent, and professional experience. Your staff spends less
+            while giving customers a fast, consistent, and professional experience. Your staff spends less
             time answering routine inquiries and more time delivering meaningful financial guidance.
           </p>
         </section>
@@ -475,8 +475,8 @@ export default function FinancialServicesIndustryPage() {
           <p className={eyebrowClassName}>Connectors</p>
           <h2 className={`mt-3 ${headingClassName}`}>Connectors for the Financial Tools You Use</h2>
           <p className={bodyClassName}>
-            No need to change your workflow. Connect HubSpot, Salesforce, Gmail or Google Calendar. No other tools are
-            connected in this release.
+            No need to change your workflow. Connect HubSpot, Salesforce, Gmail, Google Calendar or Google Drive. No other tools
+            are connected in this release.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {connectors.map((connector) => (

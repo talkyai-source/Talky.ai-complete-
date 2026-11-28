@@ -63,7 +63,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "Approved Travel Answers",
       description:
-        "Handle AI travel inquiry handling with natural conversations that answer questions about destinations, room types, pricing, amenities, parking, and local attractions.",
+        "Handle travel enquiries with natural conversations that answer questions about destinations, room types, pricing, amenities, parking, and local attractions.",
     },
     {
       title: "Reservation Requests",
@@ -71,7 +71,7 @@ export default function TravelIndustryIndustryPage() {
         "Collect booking change and cancellation requests for your team. A captured request does not confirm a change.",
     },
     {
-      title: "Pre-Arrival Welcome",
+      title: "Arrival Details Email",
       description:
         "Send a follow-up email with arrival details once Gmail is connected and the campaign has an email action.",
     },
@@ -79,7 +79,7 @@ export default function TravelIndustryIndustryPage() {
 
   const duringStay = [
     {
-      title: "Always Within Reach",
+      title: "Within Your Hours",
       description:
         "Use approved information about amenities, dining, hotel facilities and services to answer routine guest questions.",
     },
@@ -94,12 +94,12 @@ export default function TravelIndustryIndustryPage() {
         "Take routine requests such as housekeeping or extra amenities and pass them to your staff to act on, so they can focus on guests in person.",
     },
     {
-      title: "English by Default",
+      title: "English Only",
       description:
-        "Speech recognition is set to English by default, and there is no language setting.",
+        "Speech recognition is English only in this release.",
     },
     {
-      title: "Always Ready to Help",
+      title: "Ready to Help",
       description:
         "Guest calls are answered within your configured hours and account call limits, which takes routine calls off your front desk team.",
     },
@@ -157,7 +157,7 @@ export default function TravelIndustryIndustryPage() {
     {
       title: "Call History",
       description:
-        "Review call history and captured requests in the dashboard, and log calls to HubSpot or Salesforce once connected.",
+        "Review call history and captured requests in the dashboard, and log calls to HubSpot or Salesforce once connected (Business plan).",
     },
   ];
 
@@ -198,7 +198,7 @@ export default function TravelIndustryIndustryPage() {
     },
   ];
 
-  const reliabilityPills = ["Call History", "Campaign Settings", "Voice Options", "Configured Hours", "Call Limits"];
+  const reliabilityPills = ["Call History", "Campaign Settings", "AI Options", "Configured Hours", "Call Limits"];
 
   const whyTeamsChoose = [
     {
@@ -268,7 +268,7 @@ export default function TravelIndustryIndustryPage() {
 
   const faqs = [
     {
-      question: "Is this platform built specifically for the travel and hospitality industry?",
+      question: "Is this platform for the travel and hospitality industry?",
       answer:
         "It can be set up for hotels, resorts, travel agencies, tour operators, vacation rentals and tourism businesses, using the information you approve.",
     },
@@ -280,7 +280,7 @@ export default function TravelIndustryIndustryPage() {
     {
       question: "Can guests get support in other languages?",
       answer:
-        "No. Speech recognition is set to English by default, and there is no language setting.",
+        "No. Speech recognition is English only in this release.",
     },
     {
       question: "Can AI act as a virtual receptionist for hotels?",
@@ -431,7 +431,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>Built for Every Hospitality Business</p>
           <h2 className={`mt-3 ${headingClassName}`}>Supporting Every Business That Welcomes Guests</h2>
           <p className={bodyClassName}>
-            Whether you manage one property or hundreds, AI adapts to your operations and helps deliver exceptional guest
+            Whether you manage one property or a group, AI adapts to your operations and helps deliver exceptional guest
             experiences at every location.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -452,7 +452,7 @@ export default function TravelIndustryIndustryPage() {
             and how calls outside them are handled.
           </p>
           <p className={bodyClassName}>
-            Every call follows the campaign settings, voice options and call limits you configure.
+            Every call follows the campaign settings and AI options you configure, within your plan&rsquo;s call limits.
           </p>
           <div className={pillRowClassName}>
             {reliabilityPills.map((pill) => (
@@ -488,7 +488,7 @@ export default function TravelIndustryIndustryPage() {
           <p className={eyebrowClassName}>Connectors</p>
           <h2 className={`mt-3 ${headingClassName}`}>Connect the Tools Talk-Lee AI Supports</h2>
           <p className={bodyClassName}>
-            Connect HubSpot or Salesforce to log calls, and Gmail to send follow-up emails.
+            Connect HubSpot or Salesforce (Business plan) to log calls, and Gmail to send follow-up emails.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             {connectors.map((item) => (

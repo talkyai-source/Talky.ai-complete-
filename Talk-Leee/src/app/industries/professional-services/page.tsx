@@ -57,7 +57,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "AI Call Automation",
       description:
-        "Handle incoming calls, answer common questions, qualify prospects, collect client details, and schedule callbacks without disrupting your team.",
+        "Handle incoming calls, answer common questions, qualify prospects, collect client details and note callback requests for your team.",
     },
     {
       title: "AI Voice Agents",
@@ -65,7 +65,7 @@ export default function ProfessionalServicesIndustryPage() {
         "Use approved information to answer routine client questions and collect requests for team review.",
     },
     {
-      title: "AI Callback Scheduling",
+      title: "AI Callback Requests",
       description:
         "Make follow-up effortless with AI that records callback requests so your team can return the call at a suitable time.",
     },
@@ -90,7 +90,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Configured Lead Capture",
       description:
-        "Configure calling hours and capture enquiry details within your account and provider limits.",
+        "Configure business hours and capture enquiry details within your account and provider limits.",
     },
   ];
 
@@ -110,7 +110,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Consistent Communication",
       description:
-        "Configure the voice, approved information, calling hours and limits for your workflow.",
+        "Configure the voice, approved information, business hours and limits for your workflow.",
     },
     {
       title: "Easier Growth",
@@ -154,7 +154,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Before the Meeting",
       description:
-        "Answer questions, capture prospect details, qualify leads, and schedule callbacks.",
+        "Answer questions, capture prospect details, qualify leads, and schedule callbacks on outgoing calls.",
     },
     {
       title: "During the Engagement",
@@ -163,7 +163,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "After the Meeting",
       description:
-        "Follow up with clients by call or, when Gmail is connected, by email, and schedule callbacks.",
+        "Follow up with clients by call or, when Gmail is connected, by email, and schedule callbacks on outgoing calls.",
     },
   ];
 
@@ -195,7 +195,7 @@ export default function ProfessionalServicesIndustryPage() {
         "Deliver natural, helpful conversations that reflect your firm’s professionalism from the very first interaction.",
     },
     {
-      title: "Your Calling Hours",
+      title: "Your Business Hours",
       description: "Respond to prospects and clients within the hours you configure, including evenings and weekends.",
     },
     {
@@ -205,7 +205,7 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "Human When It Matters",
       description:
-        "Let AI handle routine interactions while your team steps in when expertise, judgment, or a personal conversation is needed.",
+        "Let AI handle routine interactions and, when a transfer is set up, a live call can go to your team; otherwise requests wait for review.",
     },
   ];
 
@@ -240,17 +240,17 @@ export default function ProfessionalServicesIndustryPage() {
     {
       title: "AI Takes Action",
       description:
-        "It can answer questions, qualify prospects, schedule callbacks, capture details, or handle routine requests.",
+        "It can answer questions, qualify prospects, capture details, note a callback request or handle routine requests.",
     },
     {
-      title: "Your Team Steps In",
+      title: "Your Team Follows Up",
       description:
         "Your team can review captured requests and decide what follow-up is appropriate.",
     },
     {
       title: "The Workflow Continues",
       description:
-        "Lead details and follow-ups appear in your call history, and reach HubSpot or Salesforce once connected.",
+        "Lead details and follow-ups appear in your call history, and reach HubSpot or Salesforce once connected (Business plan).",
     },
   ];
 
@@ -264,8 +264,8 @@ export default function ProfessionalServicesIndustryPage() {
       description: "Understand prospect needs and collect essential information before a sales conversation.",
     },
     {
-      title: "Callback Scheduling",
-      description: "Schedule callbacks when clients ask for one, so your team can reply at a suitable time.",
+      title: "Outgoing Callbacks",
+      description: "On outgoing campaigns, schedule a callback when a client asks; the agent calls back at the agreed time.",
     },
     {
       title: "Client Support",
@@ -281,7 +281,7 @@ export default function ProfessionalServicesIndustryPage() {
     },
     {
       title: "English Conversations",
-      description: "Conversations are in English by default; there is no language setting in this release.",
+      description: "Speech recognition is English only in this release.",
     },
   ];
 
@@ -294,12 +294,12 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "Can AI handle calls for consultants?",
       answer:
-        "Yes. AI can answer consultant calls, understand prospect needs, collect project information, answer routine questions, and schedule a callback.",
+        "Yes. AI can answer consultant calls, understand prospect needs, collect project information, answer routine questions and note a callback request.",
     },
     {
       question: "Can AI book meetings on the call?",
       answer:
-        "No. The agent does not book into a calendar during a call. It can schedule a callback, and your team then arranges the meeting.",
+        "No. The agent does not book into a calendar during a call. It records the request, and your team then arranges the meeting.",
     },
     {
       question: "Can AI qualify potential clients?",
@@ -314,12 +314,12 @@ export default function ProfessionalServicesIndustryPage() {
     {
       question: "Can it work outside business hours?",
       answer:
-        "Yes, within the calling hours you configure, so your firm can capture enquiries even when your office is closed.",
+        "Yes, within the business hours you configure, so your firm can capture enquiries even when your office is closed.",
     },
     {
       question: "Does it connect to business tools?",
       answer:
-        "It connects to HubSpot, Salesforce, Gmail, Google Drive and Google Calendar. Calls are logged to HubSpot or Salesforce once connected.",
+        "It connects to HubSpot, Salesforce, Gmail, Google Calendar and Google Drive. Calls are logged to HubSpot or Salesforce (Business plan) and follow-up emails go through Gmail; the assistant in the dashboard uses Google Calendar and Google Drive.",
     },
   ];
 
@@ -359,7 +359,7 @@ export default function ProfessionalServicesIndustryPage() {
           <p className={eyebrowClassName}>Expertise Matters</p>
           <h2 className={`mt-3 ${headingClassName}`}>Let AI Handle the Repetitive Work.</h2>
           <p className={bodyClassName}>
-            Clients don&rsquo;t always reach out during convenient hours. They may need to schedule a consultation, ask
+            Clients don&rsquo;t always reach out during convenient hours. They may need a consultation, ask
             about your services, check availability, or speak with someone about an existing engagement. Your team
             shouldn&rsquo;t have to stop important work every time the phone rings.
           </p>
@@ -500,7 +500,7 @@ export default function ProfessionalServicesIndustryPage() {
           <h2 className={`mt-3 ${headingClassName}`}>Turn Every Conversation Into Action</h2>
           <p className={bodyClassName}>
             Talk-Lee AI helps turn conversations into practical business outcomes by logging calls to your CRM
-            once you connect HubSpot or Salesforce.
+            once you connect HubSpot or Salesforce (Business plan).
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {workflowActions.map((item) => (

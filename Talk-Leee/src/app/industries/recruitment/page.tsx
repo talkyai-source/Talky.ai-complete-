@@ -64,9 +64,9 @@ export default function RecruitmentIndustryPage() {
         "Review what each candidate said in your call history, so recruitment teams can quickly decide which candidates to speak to next.",
     },
     {
-      title: "AI Callback Scheduling",
+      title: "AI Outgoing Callbacks",
       description:
-        "Schedule a callback when a candidate asks for one, and send a follow-up email when Gmail is connected and the campaign allows it.",
+        "On outgoing campaigns, schedule a callback when a candidate asks, and send a follow-up email when Gmail is connected and the campaign allows it.",
     },
     {
       title: "AI Recruitment Call Handling",
@@ -175,7 +175,7 @@ export default function RecruitmentIndustryPage() {
       description: "Used by the assistant in the dashboard, not by the calls themselves.",
     },
     {
-      title: "HR Software",
+      title: "Hiring Software",
       description: "No connector for HR or hiring software is available in this release.",
     },
     {
@@ -184,7 +184,7 @@ export default function RecruitmentIndustryPage() {
     },
   ];
 
-  const connectors = ["Google Calendar"];
+  const connectors = ["HubSpot, Salesforce, Gmail"];
 
   const howItWorks = [
     {
@@ -227,9 +227,9 @@ export default function RecruitmentIndustryPage() {
 
   const faqs = [
     {
-      question: "Is this platform built for recruitment teams and HR departments?",
+      question: "Is this platform for recruitment teams?",
       answer:
-        "Yes. The platform is designed for recruiters, talent acquisition teams, staffing firms, and enterprise organizations looking to automate hiring workflows and improve recruitment efficiency.",
+        "It is a general voice agent platform. Recruiters, talent acquisition teams and staffing firms can use it to call candidates and review the results.",
     },
     {
       question: "Can AI screen candidates before recruiters review them?",
@@ -239,12 +239,12 @@ export default function RecruitmentIndustryPage() {
     {
       question: "Can the agent book interviews on the call?",
       answer:
-        "No. It can schedule a callback and, when Gmail is connected, send a follow-up email; your team then arranges the interview.",
+        "No. On outgoing campaigns it can schedule a callback and, when Gmail is connected, send a follow-up email; your team then arranges the interview.",
     },
     {
       question: "Can it connect to our hiring software?",
       answer:
-        "No. A direct connection to ATS or HR software is not available in this release. Calls can be logged to HubSpot or Salesforce once you connect one.",
+        "No. A direct connection to ATS or HR software is not available in this release. Calls can be logged to HubSpot or Salesforce once you connect one (Business plan).",
     },
     {
       question: "Can it manage candidate phone calls and inquiries?",
@@ -287,7 +287,7 @@ export default function RecruitmentIndustryPage() {
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            Transform your hiring process with AI in just a few days.
+            Setup depends on your phone line, approved knowledge and campaign.
           </p>
         </header>
 
@@ -414,7 +414,7 @@ export default function RecruitmentIndustryPage() {
           <p className={eyebrowClassName}>Connectors</p>
           <h2 className={`mt-3 ${headingClassName}`}>Connectors for Your Recruitment Tools</h2>
           <p className={bodyClassName}>
-            No need to replace the tools you already use. Connect HubSpot or Salesforce to log calls, or Gmail to send
+            No need to replace the tools you already use. Connect HubSpot or Salesforce (Business plan) to log calls, or Gmail to send
             follow-up emails. A direct connection to ATS or HR software is not available in this release.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

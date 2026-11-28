@@ -83,7 +83,7 @@ export default function EducationIndustryPage() {
     {
       title: "AI E-Learning Support Automation",
       description:
-        "Help online learners with course navigation, platform questions, account assistance, and common learning support requests.",
+        "Help online learners with course navigation, platform questions, and common learning support requests.",
     },
     {
       title: "AI Student Engagement Platform",
@@ -185,8 +185,8 @@ export default function EducationIndustryPage() {
       description: "Schedule a callback on outgoing campaigns. The agent does not book into a calendar during a call.",
     },
     {
-      title: "English by Default",
-      description: "Speech recognition is set to English by default, and there is no language setting.",
+      title: "English Only",
+      description: "Speech recognition is English only in this release.",
     },
     {
       title: "Virtual Receptionist",
@@ -231,7 +231,7 @@ export default function EducationIndustryPage() {
         "No. It does not book into a calendar during a call. It can collect the preferred time for staff to follow up.",
     },
     {
-      question: "Can AI transfer student calls?",
+      question: "Can a student call reach a person?",
       answer:
         "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect the reason for a call for staff review; this does not arrange a callback.",
     },
@@ -242,7 +242,7 @@ export default function EducationIndustryPage() {
     {
       question: "Can AI work alongside our staff?",
       answer:
-        "Absolutely. We handle repetitive interactions while your team focuses on complex requests and meaningful student relationships.",
+        "Absolutely. The agent handles repetitive interactions while your team focuses on complex requests and meaningful student relationships.",
     },
     {
       question: "How quickly can we get started?",

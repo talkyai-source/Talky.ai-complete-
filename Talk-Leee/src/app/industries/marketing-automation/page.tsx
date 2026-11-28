@@ -70,9 +70,9 @@ export default function MarketingAutomationIndustryPage() {
         "Automatically identify qualified prospects using the rules you define, so your clients receive leads that are ready to convert.",
     },
     {
-      title: "AI Callback Scheduling",
+      title: "AI Outgoing Callbacks",
       description:
-        "Schedule a callback when a prospect asks for one, so your team can follow up without missed opportunities.",
+        "On outgoing campaigns, schedule a callback when a prospect asks; the agent calls them back at the agreed time.",
     },
   ];
 
@@ -115,7 +115,7 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Grow Your Agency With Confidence",
       description:
-        "Take on more client accounts knowing your operations can scale without adding unnecessary complexity.",
+        "Take on more clients, each with its own campaign, without adding unnecessary complexity.",
     },
   ];
 
@@ -166,7 +166,7 @@ export default function MarketingAutomationIndustryPage() {
     },
   ];
 
-  const connectorLogos = ["HubSpot", "Salesforce", "Google Calendar"];
+  const connectorLogos = ["HubSpot", "Salesforce", "Gmail"];
 
   const howItWorks = [
     {
@@ -187,15 +187,15 @@ export default function MarketingAutomationIndustryPage() {
     {
       title: "Follow Up by Email",
       description:
-        "Send a follow-up email when Gmail is connected and the campaign allows it, so every lead hears from you after the call.",
+        "Send a follow-up email when Gmail is connected and the campaign allows it, to leads who agree and confirm their address.",
     },
   ];
 
   const faqs = [
     {
-      question: "Is this platform built specifically for marketing agencies?",
+      question: "Is this platform for marketing agencies?",
       answer:
-        "Yes. It’s designed specifically for agencies managing multiple client accounts, with campaign scripts, call history, and centralized management built into the platform.",
+        "It is a general voice agent platform. An agency can give each client its own campaign, script and brand name in one account.",
     },
     {
       question: "Can I manage multiple client campaigns at the same time?",
@@ -208,14 +208,14 @@ export default function MarketingAutomationIndustryPage() {
         "Not in this release. The dashboard and the platform carry the Talk-Lee AI name, and every call says it is an AI.",
     },
     {
-      question: "Does it connect to the CRMs my clients already use?",
+      question: "Does it connect to my CRM?",
       answer:
-        "It connects to HubSpot and Salesforce and logs call data to them once connected. Other CRM systems are not connected in this release.",
+        "It connects one HubSpot and one Salesforce account and logs calls there (Business plan). Other CRM systems are not connected in this release.",
     },
     {
       question: "How does AI marketing lead qualification work?",
       answer:
-        "You define the qualification criteria for each client, such as budget, timeline, buying intent, or custom questions. The AI asks those questions naturally during the conversation before qualifying or routing the lead.",
+        "You define the qualification criteria for each client, such as budget, timeline, buying intent, or custom questions. The AI asks those questions naturally during the conversation and the call summary records the answers for your team to review.",
     },
     {
       question: "How quickly can my agency get started?",
@@ -278,7 +278,7 @@ export default function MarketingAutomationIndustryPage() {
           </p>
           <p className={bodyClassName}>
             Talk-Lee AI simplifies agency operations with AI marketing automation built for agencies. From one
-            dashboard, you can automate conversations, streamline workflows, and scale every client account
+            dashboard, you can automate conversations, streamline workflows, and scale every client campaign
             without adding operational complexity.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
@@ -351,8 +351,8 @@ export default function MarketingAutomationIndustryPage() {
           <p className={eyebrowClassName}>Built to Scale</p>
           <h2 className={`mt-3 ${headingClassName}`}>Growing agencies need a platform they can rely on.</h2>
           <p className={bodyClassName}>
-            From your first client to your hundredth, every conversation and campaign runs on a platform
-            built for speed, reliability, and agency growth. Scale confidently without changing the way your team works.
+            Give each client its own campaign, up to your plan&rsquo;s campaign limit, on one platform.
+            Add clients without changing the way your team works.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {scaleStats.map((stat) => (
@@ -380,8 +380,8 @@ export default function MarketingAutomationIndustryPage() {
           <p className={eyebrowClassName}>Connectors</p>
           <h2 className={`mt-3 ${headingClassName}`}>Works With the Tools You Already Use</h2>
           <p className={bodyClassName}>
-            No need to change your workflow. Connect HubSpot, Salesforce, Gmail or Google Calendar. Other tools are
-            not connected in this release.
+            No need to change your workflow. Connect HubSpot, Salesforce, Gmail, Google Calendar or Google Drive. Other tools
+            are not connected in this release.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
             <ul className="space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
@@ -434,7 +434,7 @@ export default function MarketingAutomationIndustryPage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>Stop Losing Leads to Slow Follow-Ups</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Start automating lead engagement and qualification with AI built specifically for
+              Start automating lead engagement and qualification with AI voice agents for
               marketing agencies.
             </p>
             <div className={ctaPairClassName}>

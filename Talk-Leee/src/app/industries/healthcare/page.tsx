@@ -118,7 +118,7 @@ export default function HealthcareIndustryPage() {
         "Use approved information to answer routine administrative questions and collect requests for your staff.",
     },
     {
-      title: "Configured Calling Hours",
+      title: "Configured Business Hours",
       description: "Set when your intake workflow is available and how calls outside those hours are handled.",
     },
     {
@@ -168,7 +168,7 @@ export default function HealthcareIndustryPage() {
     {
       title: "Configured Call Intake",
       description:
-        "Calls follow your configured routing, hours and service limits.",
+        "Calls follow your configured business hours and service limits.",
     },
     {
       title: "Intelligent Request Recognition",
@@ -194,7 +194,7 @@ export default function HealthcareIndustryPage() {
   const capabilities = [
     {
       title: "Configured Call Answering",
-      description: "Set calling hours and review the service limits for your intake workflow.",
+      description: "Set business hours and review the service limits for your intake workflow.",
     },
     {
       title: "Patient Intent Recognition",
@@ -205,8 +205,8 @@ export default function HealthcareIndustryPage() {
       description: "Record the day and time a caller prefers. The agent does not book into a calendar.",
     },
     {
-      title: "English by Default",
-      description: "Speech recognition is set to English by default, and there is no language setting.",
+      title: "English Only",
+      description: "Speech recognition is English only in this release.",
     },
   ];
 
@@ -229,10 +229,10 @@ export default function HealthcareIndustryPage() {
     {
       question: "Do I need a tech team to set this up?",
       answer:
-        "No. You set it up in the dashboard: phone line, approved knowledge and campaign. No code is needed.",
+        "No code is needed. In the dashboard you request a phone line (staff review it), add knowledge and build the campaign.",
     },
     {
-      question: "What about my existing patient records or scheduling system?",
+      question: "Does it connect to my patient records or scheduling system?",
       answer:
         "No. A direct connection to EHR systems is not available in this release. Calls do not book into a calendar.",
     },
@@ -266,7 +266,7 @@ export default function HealthcareIndustryPage() {
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Explore Setup
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -325,7 +325,7 @@ export default function HealthcareIndustryPage() {
             chaos, a patient hangs up and calls someone else.
           </p>
           <p className={bodyClassName}>
-            Talk-Lee AI can collect routine administrative enquiries within your configured calling hours and limits.
+            Talk-Lee AI can collect routine administrative enquiries within your configured business hours and limits.
             Your team can review the captured details and decide the appropriate next step.
           </p>
           <ul className={listClassName}>
@@ -426,7 +426,7 @@ export default function HealthcareIndustryPage() {
 
         <section className="mt-14">
           <p className={eyebrowClassName}>Built On Trust</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Healthcare data is sensitive, and we treat it that way.</h2>
+          <h2 className={`mt-3 ${headingClassName}`}>Healthcare data is sensitive. Review how your workflow handles it before use.</h2>
           <p className={bodyClassName}>
             Review the intended workflow, data handling and required agreements before sharing patient information.
             Access, consent and recording settings do not by themselves establish suitability for healthcare use.
@@ -444,7 +444,7 @@ export default function HealthcareIndustryPage() {
           <p className={eyebrowClassName}>Healthcare AI Capabilities</p>
           <h2 className={`mt-3 ${headingClassName}`}>Review Your Call Intake Workflow</h2>
           <p className={bodyClassName}>
-            Configure routine enquiry handling, request capture and supported scheduling actions for your practice.
+            Configure routine enquiry handling and request capture, including the caller&rsquo;s preferred time.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {capabilities.map((item) => (

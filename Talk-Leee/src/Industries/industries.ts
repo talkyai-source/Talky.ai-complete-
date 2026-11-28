@@ -40,7 +40,7 @@ export const industryNavItems = [
   {
     label: "Real Estate",
     href: "/industries/real-estate",
-    description: "Answer Property Enquiries by Phone and Schedule Callbacks for Your Agents",
+    description: "Answer Property Enquiries by Phone and Collect Viewing Requests for Your Agents",
     icon: Building2,
   },
   {

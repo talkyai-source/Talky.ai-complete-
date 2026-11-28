@@ -36,7 +36,7 @@ test("the integrations intro no longer names reservations or guest information; 
     assert.equal(intro?.tagName, "P");
     assert.equal(
         (intro?.textContent ?? "").replace(/\s+/g, " ").trim(),
-        "Connect HubSpot or Salesforce to log calls, and Gmail to send follow-up emails.",
+        "Connect HubSpot or Salesforce (Business plan) to log calls, and Gmail to send follow-up emails.",
     );
     // The section keeps its eyebrow, heading and the two cards FX6b left.
     const section = heading.closest("section")!;

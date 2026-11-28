@@ -36,7 +36,7 @@ export default function SoftwareTechSupportIndustryPage() {
     "Fewer routine calls for your team",
     "Setup and feature questions answered",
     "Requests captured for review",
-    "Configured calling hours",
+    "Configured business hours",
     "Consistent answers on every call",
   ];
 
@@ -147,7 +147,7 @@ export default function SoftwareTechSupportIndustryPage() {
     "Intelligent request recognition",
     "Approved answers and enabled actions",
     "Requests for team review",
-    "Configured calling hours",
+    "Configured business hours",
     "Call history to review",
   ];
 
@@ -211,7 +211,7 @@ export default function SoftwareTechSupportIndustryPage() {
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            Start delivering smarter customer support today.
+            Setup depends on your phone line, approved knowledge and campaign.
           </p>
         </header>
 
