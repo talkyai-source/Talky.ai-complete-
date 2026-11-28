@@ -6,9 +6,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "AI Customer Support Services & Solutions | Talk-Lee AI",
+  title: "Customer Services & Support | Talk-Lee AI",
   description:
-    "Need faster customer support? Talk-Lee AI handles conversations, answers questions, resolves issues, and provides 24/7 support. See It in Action.",
+    "Answer incoming support calls with your campaign knowledge and capture requests for your team to review.",
 };
 
 export default function CustomerServicesSupportUseCasePage() {
@@ -35,42 +35,42 @@ export default function CustomerServicesSupportUseCasePage() {
   const centeredCtaClassName = "mt-10 flex justify-center";
 
   const heroStats = [
-    "24/7 coverage, every channel",
-    "<10 sec average first response",
-    "68% issues resolved without a human",
+    "Incoming calls",
+    "Answers from your documents",
+    "Caller requests",
   ];
 
   const supportServices = [
     {
       label: "01",
-      title: "24/7 Customer Support",
-      description: "Every request gets a response, day or night, weekday or weekend.",
+      title: "Answer incoming calls",
+      description: "An active, ready inbound campaign answers calls to its assigned number when inbound calling is enabled for the account.",
     },
     {
       label: "02",
-      title: "Instant Customer Responses",
-      description: "No queue, no hold music — the agent responds the moment a request comes in.",
+      title: "Answer product questions",
+      description: "The agent can use your campaign documents to explain a product or policy.",
     },
     {
       label: "03",
-      title: "AI-Powered Issue Resolution",
-      description: "Common issues are resolved end-to-end, not just answered with a link.",
+      title: "Ask for details",
+      description: "Choose which details the agent should ask a caller to provide.",
     },
     {
       label: "04",
       title: "Requests for Human Review",
-      description: "Record requests for your team to review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
+      description: "Record a caller’s request so a team member can review it in Call History.",
     },
   ];
 
   const automationCapabilities = [
     {
       title: "Answer questions automatically",
-      description: "The agent handles the repetitive requests that make up most of your ticket volume.",
+      description: "Add answers to common questions in the campaign’s knowledge documents.",
     },
     {
-      title: "Resolve customer issues",
-      description: "Refunds, plan changes, and status checks are completed, not deferred to a form.",
+      title: "Explain your policies",
+      description: "For example, the agent can explain a returns policy you have added to the campaign.",
     },
     {
       title: "Record complex requests",
@@ -83,78 +83,75 @@ export default function CustomerServicesSupportUseCasePage() {
   ];
 
   const automationImpact = [
-    { label: "", before: "Manual ticket triage", after: "AI resolution" },
-    { label: "Avg. first response", before: "6 hrs", after: "9 sec" },
-    { label: "Tickets resolved without a human", before: "0%", after: "68%" },
-    { label: "Coverage", before: "Business hours", after: "24/7" },
-    { label: "Escalation context", before: "Re-explained", after: "Full transcript attached" },
+    { label: "Phone number", before: "Incoming call", after: "Assigned campaign" },
+    { label: "Product question", before: "Campaign documents", after: "Spoken answer" },
+    { label: "Customer request", before: "Caller details", after: "Team review" },
+    { label: "Call outcome", before: "Finished call", after: "Call History" },
   ];
 
   const howItWorks = [
     {
       label: "Step 1",
-      title: "Connect your knowledge",
-      description: "Train the agent on your products, policies, pricing, and FAQs.",
+      title: "Add your knowledge",
+      description: "Upload a Markdown or text document with the information callers need.",
     },
     {
       label: "Step 2",
-      title: "Deploy your AI agent",
-      description: "Live across the channels your customers already use to reach you.",
+      title: "Set up incoming calls",
+      description: "Choose Customer Support and assign the phone number your customers will dial.",
     },
     {
       label: "Step 3",
-      title: "Resolve customer requests",
-      description: "The agent understands the request and takes the appropriate action in real time.",
+      title: "Collect the request",
+      description: "The agent can ask what the caller needs and capture the answer.",
     },
     {
       label: "Step 4",
       title: "Record requests for review",
-      description: "The agent can record a request for your team to review; this does not arrange a callback.",
+      description: "Open the call record to see the request and decide how to respond.",
     },
   ];
 
-  const channels = ["Voice Support", "Live Chat", "SMS", "Email Support", "Web Support"];
+  const channels = ["Incoming phone calls"];
 
   const withoutAutomation = [
-    "Slow response times",
-    "Repetitive manual work",
-    "Missed customer requests",
-    "Inconsistent answers",
-    "Support queues keep growing",
+    "Choose the number for support calls",
+    "Select the Customer Support agent type",
+    "Add product information",
+    "Define the details to collect",
   ];
 
   const withTalkLee = [
-    "Instant responses",
-    "24/7 coverage",
-    "Automated issue resolution",
-    "Consistent answers, every time",
-    "Human escalation when needed",
+    "Filter Call History by incoming calls",
+    "Check the outcome of a call",
+    "Read the available conversation history",
+    "Review details the caller provided",
   ];
 
   const solutions = [
     {
-      title: "AI Support Agent",
-      description: "Handles customer conversations automatically, end to end.",
+      title: "Customer Support",
+      description: "Choose this agent type for incoming support calls.",
     },
     {
-      title: "Knowledge Base Integration",
-      description: "Answers using your approved business information, nothing invented.",
+      title: "Campaign knowledge",
+      description: "The agent reads relevant sections of the documents you supply.",
     },
     {
-      title: "Intelligent Routing",
-      description: "Sends complex issues to the right team, already triaged.",
+      title: "Captured details",
+      description: "Choose which contact details the agent may capture, such as name, email and company.",
     },
     {
-      title: "CRM Integration",
-      description: "Connect customer conversations with the systems you already run.",
+      title: "Call logging",
+      description: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
-      title: "Conversation Analytics",
-      description: "Track conversations, resolutions, issues, and performance in one view.",
+      title: "Call History",
+      description: "Review call direction, duration and available outcomes.",
     },
     {
       title: "Human Review",
-      description: "Review saved caller requests. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
+      description: "A team member can review requests that need a personal response.",
     },
   ];
 
@@ -162,52 +159,47 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       label: "SaaS",
       title: "Product support",
-      description: "Handle plan changes, billing questions, and troubleshooting instantly.",
+      description: "Explain product features from the support guide you provide.",
     },
     {
       label: "E-commerce",
       title: "Order support",
-      description: "Resolve order status, returns, and shipping questions without a queue.",
+      description: "Explain shipping policies and capture questions about individual orders.",
     },
     {
       label: "Healthcare",
       title: "Patient support",
-      description: "Answer scheduling and administrative questions, escalate clinical ones.",
+      description: "Answer office-hours questions using the information you upload.",
     },
     {
       label: "Financial Services",
       title: "Account support",
-      description: "Handle routine account queries, escalate anything regulated.",
+      description: "Collect the caller’s question for an account team member to review.",
     },
     {
       label: "Home Services",
-      title: "Scheduling support",
-      description: "Book, reschedule, and confirm appointments without a dispatcher.",
+      title: "Service requests",
+      description: "Ask which service the caller needs and save the request for a dispatcher.",
     },
     {
       label: "B2B",
       title: "Management support",
-      description: "Route escalations to the right account owner with full context.",
+      description: "Ask what the customer needs and record details for your account team.",
     },
   ];
 
   const benefits = [
-    { value: "9s", label: "Faster response times" },
-    { value: "24/7", label: "Customer service" },
-    { value: "↓ Cost", label: "Lower support costs" },
-    { value: "↑ Focus", label: "Higher agent productivity" },
-    { value: "100%", label: "Consistent experience" },
-    { value: "↑ Scalable", label: "Scalable support" },
+    { value: "Direction", label: "Identify incoming calls" },
+    { value: "Duration", label: "See how long the call lasted" },
+    { value: "Outcome", label: "Check the recorded result" },
+    { value: "Summary", label: "Read a summary where available" },
+    { value: "Transcript", label: "Read the available conversation" },
+    { value: "Recording", label: "Play the recording where available" },
   ];
 
-  const integrations = [
-    "CRM",
-    "Help desk",
-    "Knowledge Base",
-    "Calendar",
-    "Phone Systems",
-    "Messaging Platforms",
-    "Automation Tools",
+  const connectors = [
+    "HubSpot",
+    "Salesforce",
   ];
 
   const faqs = [
@@ -219,45 +211,45 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "How does AI customer support work?",
       answer:
-        "AI understands customer requests, uses your knowledge base, provides answers, and takes action based on your support workflows.",
+        "The agent listens to the caller’s question and can answer from the campaign knowledge you supplied.",
     },
     {
       question: "What can an AI customer support agent do?",
       answer:
-        "It can answer FAQs, troubleshoot issues, collect information, route requests, and handle routine support tasks.",
+        "It can answer questions from your documents and collect a request for your team.",
     },
     {
       question: "Can AI handle customer support calls?",
       answer:
-        "AI agents can answer incoming calls, use approved information, and collect requests for review. The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign.",
+        "Yes. An active, ready campaign can answer its assigned number when inbound calling is enabled for the account.",
     },
     {
-      question: "Can AI customer support integrate with our CRM?",
+      question: "Can we see call activity in HubSpot or Salesforce?",
       answer:
-        "Yes. It can connect with your CRM to access customer data, update records, and log conversations automatically.",
+        "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       question: "Can customers speak to a human agent?",
-      answer: "The agent can transfer an incoming call to a person on your list when a transfer is set up for the campaign. Otherwise it can record a request for your team to review; this does not arrange a callback.",
+      answer: "When transfer is enabled for the incoming campaign, an approved destination is listed, its phone line supports calls in both directions and transfer is switched on for the account, the agent can request a transfer within the transfer hours you set, if any. An approved transfer request does not guarantee that someone answers.",
     },
     {
-      question: "Is AI customer support available 24/7?",
-      answer: "Yes. AI agents provide continuous customer support, including nights, weekends, and holidays.",
+      question: "Where do we find a caller’s request?",
+      answer: "Open Call History, filter by incoming calls and select the call to review its available details.",
     },
     {
       question: "How much does AI customer support cost?",
       answer:
-        "Pricing depends on conversation volume, features, integrations, and customization. Book a demo for a tailored quote.",
+        <>Compare subscriptions and Pay as you go on the <Link href="/pricing" className="underline">pricing page</Link>.</>,
     },
     {
       question: "Is AI customer support suitable for B2B companies?",
       answer:
-        "Yes. AI can handle B2B support requests, product questions, troubleshooting, routing, and routine customer interactions.",
+        "For example, the agent can answer product questions from your company’s documentation and take a request for your account team.",
     },
     {
-      question: "What’s the difference between AI customer support and a chatbot?",
+      question: "How does the agent introduce itself?",
       answer:
-        "AI agents understand natural conversations, take actions, resolve issues, and escalate requests—not just answer predefined questions.",
+        "The agent introduces itself as an AI assistant on the call.",
     },
   ];
 
@@ -270,8 +262,7 @@ export default function CustomerServicesSupportUseCasePage() {
             AI Customer Support
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI understands customer requests and resolves them using your knowledge base &mdash; handing off to a human
-            the moment it matters, across voice, chat, SMS, and email.
+            A caller can ask about your product or describe a problem. The voice agent uses your campaign documents to answer questions and captures requests for your team.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -280,8 +271,8 @@ export default function CustomerServicesSupportUseCasePage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                See It in Action
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
@@ -297,8 +288,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>AI-Powered Customer Support Services</h2>
           <p className={bodyClassName}>
-            Every conversation is handled the same way: understood, resolved against your approved knowledge, and escalated only
-            when a human genuinely needs to step in.
+            Choose Customer Support in the dashboard to configure an agent for incoming calls.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {supportServices.map((service) => (
@@ -314,8 +304,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Automate Customer Support With AI</h2>
           <p className={bodyClassName}>
-            High ticket volume, repetitive questions, and long response times don&rsquo;t have to mean a bigger headcount.
-            Customer support automation solves the backlog without the hire.
+            A caller might ask how to return an item. Give the agent your returns policy and choose which details to collect when the caller needs personal help.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
             {automationCapabilities.map((item) => (
@@ -347,10 +336,10 @@ export default function CustomerServicesSupportUseCasePage() {
             <div className="group w-full max-w-4xl rounded-3xl border border-border/70 shadow-sm transition-[transform,box-shadow,filter] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:brightness-[1.02]">
               <div className="overflow-hidden rounded-[calc(1.5rem-1px)]">
               <Image
-                src="/images/use-cases/customer-services-support/1.png"
-                alt="Talk-Lee AI customer support automation resolving repetitive requests, with manual ticket triage replaced by AI resolution"
-                width={1190}
-                height={530}
+                src="/docs/inbound-01-list.webp"
+                alt="Inbound campaign list showing a reception line marked active and ready"
+                width={1536}
+                height={588}
                 quality={100}
                 className="h-auto w-full transition-transform duration-300 ease-out group-hover:scale-[1.02]"
                 sizes="(min-width: 1024px) 896px, (min-width: 768px) 672px, 100vw"
@@ -370,7 +359,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>How Our AI Customer Support Agent Works</h2>
           <p className={bodyClassName}>
-            The same agent, understanding, using your knowledge base, and acting &mdash; not just generating replies.
+            Start with the questions callers ask, then choose the source material and details the agent should use.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {howItWorks.map((step) => (
@@ -384,10 +373,9 @@ export default function CustomerServicesSupportUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Omnichannel Customer Support</h2>
+          <h2 className={headingClassName}>Phone support</h2>
           <p className={bodyClassName}>
-            One AI customer support agent across every channel your customers actually use &mdash; not a separate tool bolted onto
-            each one.
+            Customers reach the agent by calling the number assigned to your inbound campaign.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {channels.map((channel) => (
@@ -401,12 +389,11 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Automated Customer Service That Works With Your Team</h2>
           <p className={bodyClassName}>
-            Automation doesn&rsquo;t replace your support team &mdash; it clears the queue so they can focus on the conversations
-            that need them.
+            Your team chooses what the agent can answer and reviews callers&rsquo; requests after a call.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className={accentCardClassName} style={accentCardStyle}>
-              <h3 className={`${cardTitleClassName} text-center`}>Without Automation</h3>
+              <h3 className={`${cardTitleClassName} text-center`}>Before the call</h3>
               <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 {withoutAutomation.map((item) => (
                   <li key={item} className="py-3 text-center">
@@ -416,7 +403,7 @@ export default function CustomerServicesSupportUseCasePage() {
               </ul>
             </div>
             <div className={accentCardClassName} style={accentCardStyle}>
-              <h3 className={`${cardTitleClassName} text-center`}>With Talk-Lee AI Support</h3>
+              <h3 className={`${cardTitleClassName} text-center`}>After the call</h3>
               <ul className="mt-4 divide-y divide-border/70 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
                 {withTalkLee.map((item) => (
                   <li key={item} className="py-3 text-center font-medium text-primary dark:text-foreground">
@@ -431,7 +418,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <p className={eyebrowClassName}>What we provide</p>
           <h2 className={`mt-3 ${headingClassName}`}>Talk-Lee AI Customer Support Solutions</h2>
-          <p className={bodyClassName}>A complete customer support software layer &mdash; not just a chatbot widget.</p>
+          <p className={bodyClassName}>Use the campaign settings to prepare the agent and Call History to review what happened.</p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {solutions.map((solution) => (
               <div key={solution.title} className={accentCardClassName} style={accentCardStyle}>
@@ -443,7 +430,7 @@ export default function CustomerServicesSupportUseCasePage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/book-a-demo">
-                See It in Action
+                Book a Demo
               </Link>
             </Button>
           </div>
@@ -452,8 +439,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>AI Customer Support for Every Business</h2>
           <p className={bodyClassName}>
-            Support volume, tone, and urgency look different by industry. The agent adapts to yours instead of running a generic
-            script.
+            These examples show how different teams can use their own campaign documents and caller questions.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {industries.map((industry) => (
@@ -467,8 +453,8 @@ export default function CustomerServicesSupportUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Benefits of AI-Powered Customer Support</h2>
-          <p className={bodyClassName}>What changes when resolution stops waiting on headcount.</p>
+          <h2 className={headingClassName}>What your team can review</h2>
+          <p className={bodyClassName}>Open a saved call to see the information available for that conversation.</p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {benefits.map((benefit) => (
               <div key={benefit.label} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
@@ -482,15 +468,14 @@ export default function CustomerServicesSupportUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Integrate AI Customer Support With Your Existing Stack</h2>
+          <h2 className={headingClassName}>Connectors for call records</h2>
           <p className={bodyClassName}>
-            The agent plugs into the tools you already run &mdash; CRM, helpdesk, knowledge base, calendar, phone systems,
-            messaging platforms, and automation tools.
+            On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there for your team to review.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
-            {integrations.map((integration) => (
-              <span key={integration} className={pillClassName}>
-                {integration}
+            {connectors.map((connector) => (
+              <span key={connector} className={pillClassName}>
+                {connector}
               </span>
             ))}
           </div>
@@ -512,7 +497,7 @@ export default function CustomerServicesSupportUseCasePage() {
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <h2 className={headingClassName}>See your AI customer support agent in action.</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Give your customers instant, intelligent support across every channel &mdash; without expanding your support team.
+              Discuss how your team could use an incoming phone campaign for support.
             </p>
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" className={primaryButtonClassName}>

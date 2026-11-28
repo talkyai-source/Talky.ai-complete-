@@ -5,9 +5,9 @@ import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = {
-  title: "AI Assist | Smart AI Assistant for Business Automation",
+  title: "AI Assist | Talk-Lee AI",
   description:
-    "Want to automate routine business tasks? AI Assist handles leads, support, sales, and workflows. Ready to simplify work? Get started!",
+    "Ask the assistant in your Talk-Lee dashboard about campaign activity, recent calls and AI minute usage.",
 };
 
 export default function AIAssistPage() {
@@ -33,148 +33,127 @@ export default function AIAssistPage() {
   const outlineButtonClassName = `${buttonSizeClassName} bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900`;
   const centeredCtaClassName = "mt-10 flex justify-center";
 
-  const capabilityPills = [
-    "24/7 Assistance",
-    "Sales & Support",
-    "Workflow Automation",
-    "Built for Your Business",
+  const capabilityPills = ["Campaigns", "Call history", "Dashboard totals", "AI minutes"];
+
+  const exampleQuestions = [
+    "Which of my campaigns are running?",
+    "How many calls did my campaign complete yesterday?",
+    "What was the outcome of its most recent call?",
+    "How many AI minutes have I used?",
   ];
 
-  const traditionalAssistants = [
-    "Available during business hours only",
-    "Handles one conversation at a time",
-    "Manual data entry and follow-up",
-    "Limited by headcount and hours",
-  ];
-
-  const assistantRoles = [
+  const assistantTopics = [
     {
-      title: "AI Sales Assistant",
-      description:
-        "Engages and qualifies leads, follows up automatically, and helps move prospects toward a booked appointment.",
-      items: ["Lead engagement", "Lead qualification", "Follow-ups", "Appointment scheduling"],
+      title: "Campaigns",
+      description: "Look up a campaign by name or find campaigns with the same status.",
+      items: ["Campaign name", "Status", "Direction", "Goal"],
     },
     {
-      title: "AI Customer Support Assistant",
-      description: "Answers common questions and resolves routine requests instantly, any time of day.",
-      items: [
-        "Answer customer questions",
-        "Handle common requests",
-        "Provide instant responses",
-        "Support customers 24/7",
-      ],
+      title: "Recent calls",
+      description: "Ask about recent calls from one campaign and narrow the list by outcome.",
+      items: ["Call status", "Recorded outcome", "Duration", "Time of call"],
     },
     {
-      title: "AI Business Assistant",
-      description: "Takes repetitive tasks off your team’s plate and keeps internal workflows moving.",
-      items: ["Automate repetitive tasks", "Manage workflows", "Assist employees", "Improve efficiency"],
+      title: "Dashboard totals",
+      description: "Choose a day or date range to see how your calls went.",
+      items: ["Total calls", "Completed calls", "Failed calls", "Goals achieved"],
     },
     {
-      title: "AI Virtual Assistant",
-      description: "Handles the routine, everyday requests that would otherwise sit in someone’s inbox.",
-      items: [
-        "Handle routine requests",
-        "Manage conversations",
-        "Assist with daily tasks",
-        "Reduce manual workload",
-      ],
+      title: "Account usage",
+      description: "Ask what your current plan is and how many AI minutes remain.",
+      items: ["Plan name", "AI minutes allocated", "AI minutes used", "AI minutes remaining"],
     },
   ];
 
   const howItWorks = [
-    { title: "Connect", description: "Connect AI Assist with your existing business systems." },
-    { title: "Configure", description: "Set your workflows, rules, knowledge, and business goals." },
-    { title: "Automate", description: "Let AI handle repetitive conversations and tasks." },
-    { title: "Optimize", description: "Monitor performance and improve workflows over time." },
+    { title: "Open the dashboard", description: "Sign in and open the assistant with the button at the bottom right of the dashboard." },
+    { title: "Ask a question", description: "Type a question about your account and send it." },
+    { title: "Add detail", description: "Include a campaign name and dates to narrow a call report." },
+    { title: "Return to a conversation", description: "Open the conversation history to revisit a previous answer." },
   ];
 
-  const automationCoverage = [
-    "Lead Qualification",
-    "Customer Inquiries",
-    "Follow-Ups",
-    "Appointment Booking",
-    "Data Collection",
-    "FAQ Responses",
-    "Customer Onboarding",
-    "Sales Support",
-    "Workflow Automation",
-    "Internal Assistance",
-    "CRM Updates",
-    "Lead Routing",
+  const sampleQuestions = [
+    "Which campaigns are paused?",
+    "What is the goal of this campaign?",
+    "Does this campaign handle inbound calls?",
+    "How many leads are in this campaign?",
+    "When was the last call?",
+    "How long did that call last?",
+    "Which recent calls reached their goal?",
+    "What outcomes did we record yesterday?",
+    "How many calls failed last week?",
+    "Which calls completed today?",
+    "What is my current plan?",
+    "How many AI minutes do I have left?",
   ];
 
   const features = [
     {
-      label: "Availability",
-      title: "24/7 AI Assistance",
-      description: "Provide support and engagement beyond business hours.",
+      label: "Date range",
+      title: "Choose the reporting period",
+      description: "Give a start and end date for a report on recent calls.",
     },
     {
-      label: "Conversation",
-      title: "Intelligent Conversations",
-      description: "Understand customer questions and respond naturally.",
+      label: "Campaign name",
+      title: "Find a campaign",
+      description: "Use part of a campaign name if you cannot recall the full name.",
     },
     {
-      label: "Sales",
-      title: "Lead Qualification",
-      description: "Identify and prioritize promising prospects.",
+      label: "Campaign status",
+      title: "Find running campaigns",
+      description: "Ask which campaigns are running on your account.",
     },
     {
-      label: "Consistency",
-      title: "Automated Follow-Ups",
-      description: "Keep leads and customers engaged without manual chasing.",
+      label: "Call outcome",
+      title: "Narrow the call list",
+      description: "Ask for recent calls with a particular recorded outcome.",
     },
     {
-      label: "Operations",
-      title: "Workflow Automation",
-      description: "Automate repetitive processes and reduce admin work.",
+      label: "Call duration",
+      title: "Review an individual call",
+      description: "Ask how long a recent call lasted.",
     },
     {
-      label: "Connected",
-      title: "CRM & Business Integrations",
-      description: "Connect AI Assist with the tools your team already uses.",
+      label: "Completion",
+      title: "Check the completion rate",
+      description: "See the share of calls marked completed for a given period.",
     },
     {
-      label: "Visibility",
-      title: "Analytics & Insights",
-      description: "Track conversations, activities, and outcomes.",
+      label: "Conversation history",
+      title: "Reopen a discussion",
+      description: "Use the history button to find an earlier conversation.",
     },
     {
-      label: "Flexibility",
-      title: "Custom AI Workflows",
-      description: "Configure AI Assist around your business processes.",
+      label: "New conversation",
+      title: "Start a separate discussion",
+      description: "Select New conversation when you want to ask about another topic.",
     },
   ];
 
   const faqs = [
     {
-      question: "What is AI Assist?",
-      answer:
-        "AI Assist is AI assistant software that automates conversations and tasks across sales, support, and business operations.",
+      question: "Where do I find AI Assist?",
+      answer: "Sign in to your dashboard and open the assistant with the button at the bottom right of the dashboard.",
     },
     {
-      question: "How does an AI virtual assistant work?",
-      answer:
-        "It connects to your business systems, follows the workflows and knowledge you configure, and handles conversations or tasks automatically based on that setup.",
+      question: "Can I ask about just one campaign?",
+      answer: "Yes. Include its name in your question to request the call totals for that campaign.",
     },
     {
-      question: "What can an AI assistant do for a business?",
-      answer:
-        "It can qualify leads, answer customer questions, schedule appointments, follow up automatically, and handle repetitive internal tasks.",
+      question: "Can I choose a reporting period?",
+      answer: "Yes. Ask about a particular day, or give a start and end date for a call report.",
     },
     {
-      question: "Can AI Assist automate customer support?",
-      answer: "Yes. It can answer common questions and handle routine support requests around the clock.",
+      question: "What details can I ask about a recent call?",
+      answer: "You can ask which campaign it belonged to, when it took place, its duration and its recorded outcome.",
     },
     {
-      question: "Can AI Assist help with sales and lead qualification?",
-      answer:
-        "Yes — it engages prospects, asks qualifying questions, and passes ready leads to your sales team.",
+      question: "Can I check how many AI minutes I have used?",
+      answer: "Yes. Ask for your account usage to see the latest figures available from the billing meter.",
     },
     {
-      question: "Is AI Assist software customizable?",
-      answer:
-        "Yes — workflows, knowledge, and conversation flow are all configured around your specific business.",
+      question: "How do I return to a previous answer?",
+      answer: "Open the assistant and select Conversation history to find the discussion.",
     },
   ];
 
@@ -184,11 +163,10 @@ export default function AIAssistPage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            AI Assist for smarter business automation
+            AI Assist for your dashboard
           </h1>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Automate routine tasks, engage customers, support your sales team, and streamline business workflows with an
-            AI-powered assistant built for your business.
+            Ask about campaign activity, recent calls and AI minutes in your signed-in Talk-Lee dashboard.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -217,36 +195,32 @@ export default function AIAssistPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>What is AI Assist?</h2>
           <p className={bodyClassName}>
-            AI Assist is AI software that engages customers, qualifies leads, and automates the repetitive work your team
-            handles every day across sales, support, and operations, in one place.
+            AI Assist answers questions about the calling activity recorded in your account.
           </p>
           <div className={`mt-8 ${accentCardClassName}`} style={accentCardStyle}>
-            <h3 className={subHeadingClassName}>Traditional Assistants</h3>
+            <h3 className={subHeadingClassName}>Questions to try</h3>
             <ul className={listClassName}>
-              {traditionalAssistants.map((item) => (
+              {exampleQuestions.map((item) => (
                 <li key={item}>&bull; {item}</li>
               ))}
             </ul>
           </div>
           <p className={bodyClassName}>
-            AI Assist works differently. It&rsquo;s designed to hold real conversations, understand what a customer or lead
-            needs, and act on it &mdash; updating records, scheduling, following up, or answering questions, without waiting
-            on a person to be free.
+            To review a campaign, start with its name and a period such as last week.
           </p>
           <p className={bodyClassName}>
-            It&rsquo;s built for businesses that want one AI assistant covering multiple functions, rather than a separate
-            tool for every task. Sales, support, and internal operations can all run through the same AI Assist software.
+            Then ask for a list of recent calls from that campaign to see the recorded outcomes.
           </p>
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>One Assistant, Every Function</h2>
-          <h3 className={`mt-3 ${subHeadingClassName}`}>Your AI assistant for sales, support &amp; operations</h3>
+          <h2 className={headingClassName}>What you can ask about</h2>
+          <h3 className={`mt-3 ${subHeadingClassName}`}>Your account activity</h3>
           <p className={bodyClassName}>
-            AI Assist isn&rsquo;t limited to a single job. It adapts to whichever part of your business needs it most.
+            Use the assistant to look up a recent call or ask for totals across campaigns.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {assistantRoles.map((role) => (
+            {assistantTopics.map((role) => (
               <div key={role.title} className={accentCardClassName} style={accentCardStyle}>
                 <h3 className={cardTitleClassName}>{role.title}</h3>
                 <p className={cardBodyClassName}>{role.description}</p>
@@ -263,7 +237,7 @@ export default function AIAssistPage() {
         <section className="mt-14">
           <h2 className={headingClassName}>How It Works</h2>
           <p className={bodyClassName}>
-            Four steps to a fully configured assistant, built around how your business actually operates.
+            Start with a question in the dashboard. You can return to the discussion later.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             {howItWorks.map((step) => (
@@ -276,21 +250,20 @@ export default function AIAssistPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                See How Setup Works &rarr;
+                Get Started
               </Link>
             </Button>
           </div>
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>Automation Coverage</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Automate more with AI Assist</h2>
+          <p className={eyebrowClassName}>Example questions</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Ask about a specific result</h2>
           <p className={bodyClassName}>
-            An AI automation assistant that covers the tasks eating up your team&rsquo;s time &mdash; not just one narrow use
-            case.
+            For a more focused answer, include the campaign name or the dates you want to review.
           </p>
           <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {automationCoverage.map((item) => (
+            {sampleQuestions.map((item) => (
               <div key={item} className={`${accentCardClassName} text-center`} style={accentCardStyle}>
                 <p className="text-base sm:text-lg font-semibold text-primary dark:text-foreground">{item}</p>
               </div>
@@ -299,8 +272,8 @@ export default function AIAssistPage() {
         </section>
 
         <section className="mt-14">
-          <p className={eyebrowClassName}>What It Does</p>
-          <h2 className={`mt-3 ${headingClassName}`}>Powerful AI assistant software built for business</h2>
+          <p className={eyebrowClassName}>Working with answers</p>
+          <h2 className={`mt-3 ${headingClassName}`}>How to explore a campaign</h2>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {features.map((feature) => (
               <div key={feature.title} className={accentCardClassName} style={accentCardStyle}>
@@ -315,25 +288,24 @@ export default function AIAssistPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/docs">
-                Explore Every Feature &rarr;
+                Read the Documentation
               </Link>
             </Button>
           </div>
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>AI Assist pricing</h2>
+          <h2 className={headingClassName}>Plans and AI minutes</h2>
           <p className={bodyClassName}>
-            Every business automates differently &mdash; pricing reflects your usage, workflows and integrations rather than
-            a flat, one-size-fits-all plan.
+            Visit the <Link href="/pricing" className="underline">pricing page</Link> to compare plans and included AI minutes.
           </p>
           <p className={bodyClassName}>
-            Get a customized AI Assist plan based on your business needs and workflow requirements.
+            Once signed in, ask the assistant how many AI minutes you have left.
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Get Your Custom Quote
+                Get Started
               </Link>
             </Button>
           </div>
@@ -354,15 +326,14 @@ export default function AIAssistPage() {
         <section className="mt-14">
           <div className="rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center shadow-sm transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-0.5 hover:after:absolute hover:after:inset-x-0 hover:after:top-full hover:after:box-content hover:after:h-0.5 hover:after:border-transparent hover:after:[border-bottom-width:inherit] hover:after:content-[''] hover:shadow-md hover:border-border">
             <p className={eyebrowClassName}>Get Started</p>
-            <h2 className={`mt-3 ${headingClassName}`}>Ready to put AI to work?</h2>
+            <h2 className={`mt-3 ${headingClassName}`}>See the dashboard in a demo</h2>
             <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-              Give your team an AI assistant that can handle repetitive work, engage customers, support sales, and automate
-              everyday workflows.
+              Request a walkthrough of the dashboard and bring a question about your calling workflow.
             </p>
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
                 <Link href="/book-a-demo">
-                  Book an AI Assist Demo
+                  Book a Demo
                 </Link>
               </Button>
             </div>
