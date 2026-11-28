@@ -31,35 +31,35 @@ const PROVIDERS: ProviderCard[] = [
     {
         type: "calendar",
         name: "Google Calendar",
-        description: "Sync events for scheduling, reminders, and meeting context.",
+        description: "Lets the assistant read your upcoming events and book, change or cancel meetings.",
         accent: "border-sky-500/20 bg-gradient-to-br from-sky-500/10 to-indigo-500/5",
         icon: CalendarDays,
     },
     {
         type: "email",
         name: "Gmail",
-        description: "Connect inboxes for activity capture and follow-ups.",
+        description: "Lets the assistant read your inbox and send emails from your account.",
         accent: "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-cyan-500/5",
         icon: Mail,
     },
     {
         type: "crm",
         name: "HubSpot",
-        description: "Sync contacts and engagement history into your CRM.",
+        description: "Logs calls on the matching HubSpot contact, and creates the contact when an email is known.",
         accent: "border-fuchsia-500/20 bg-gradient-to-br from-fuchsia-500/10 to-purple-500/5",
         icon: UsersRound,
     },
     {
         type: "drive",
         name: "Google Drive",
-        description: "Connect file storage for documents and recordings.",
+        description: "Lets the assistant list your files and read text files.",
         accent: "border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5",
         icon: HardDrive,
     },
     {
         type: "salesforce",
         name: "Salesforce",
-        description: "Log every call as a Salesforce Task, create Leads for new callees, and let Salesforce request agent callbacks.",
+        description: "Logs calls as Salesforce Tasks, creates Leads for new callees, and lets Salesforce request agent callbacks.",
         accent: "border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-cyan-500/5",
         icon: Cloud,
     },
@@ -215,7 +215,7 @@ export default function ConnectorsPage() {
     }, [q.data?.items, required]);
 
     return (
-        <DashboardLayout title="Connectors" description="Configure integrations and manage connector accounts.">
+        <DashboardLayout title="Connectors" description="Configure connectors and manage connector accounts.">
             <div className="mx-auto w-full max-w-5xl space-y-6">
                 {required.length > 0 ? (
                     <div className={cn("rounded-2xl border p-4", requirementsMet ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10")}>
@@ -241,7 +241,7 @@ export default function ConnectorsPage() {
                 <Card>
                     <CardHeader>
                         <CardTitle>Providers</CardTitle>
-                        <CardDescription>Connect your accounts to sync data and automate workflows.</CardDescription>
+                        <CardDescription>Connect an account to use it with the assistant and your call records.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {q.isError ? (
