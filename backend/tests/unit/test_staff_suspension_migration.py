@@ -24,7 +24,7 @@ def _sql(monkeypatch, operation):
 
 
 def test_0107_sits_on_0106_and_0108_sits_on_it():
-    assert SCRIPTS.get_heads() == ["0108_telephony_number_requests"]
+    assert SCRIPTS.get_heads() == ["0109_plan_retention_line"]
     assert SCRIPTS.get_revision("0108_telephony_number_requests").down_revision == REVISION
     assert SCRIPTS.get_revision(REVISION).down_revision == "0106_outbound_notice_placement"
     assert len(REVISION) <= 32 and _module().revision == REVISION
