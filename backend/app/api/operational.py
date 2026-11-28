@@ -20,7 +20,7 @@ router = APIRouter()
 
 @router.get("/")
 async def root():
-    return {"message": "Talky.ai API - AI Voice Dialer", "status": "running"}
+    return {"message": "Talk-Lee API - AI Voice Dialer", "status": "running"}
 
 
 @router.get("/health")

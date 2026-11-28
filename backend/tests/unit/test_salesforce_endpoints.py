@@ -185,6 +185,7 @@ async def test_new_lead_is_ingested_into_the_callback_list_and_dialed_now(campai
     out = await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN}, payload=payload)
 
     assert out.accepted and out.queued and out.jobs_enqueued == 1 and out.duplicate is False
+    assert out.message == "Callback queued for the Talk-Lee agent."
     assert out.lead_id == "lead-9" and out.campaign_id == CAMPAIGN and out.list_id == "list-1"
     # Campaign guard saw the configured campaign under the tenant from the URL.
     assert campaign_ok["campaign_id"] == CAMPAIGN and campaign_ok["tenant_id"] == TENANT
@@ -229,6 +230,7 @@ async def test_do_not_call_lead_is_refused_and_never_dialed(campaign_ok, dispatc
         await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN},
                                    payload=sf.CallbackRequest(phone="+14155550100"))
     assert exc.value.status_code == 409 and exc.value.detail["error"] == "do_not_call"
+    assert exc.value.detail["message"] == "This contact is flagged do-not-call in Talk-Lee; the callback was not queued."
     assert dispatch["start"] is None
 
 

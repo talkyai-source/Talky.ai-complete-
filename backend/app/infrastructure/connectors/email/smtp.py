@@ -78,7 +78,7 @@ class SMTPConnector(EmailProvider):
         self.user = os.getenv("SMTP_USER")
         self.password = os.getenv("SMTP_PASSWORD")
         self.from_email = os.getenv("SMTP_FROM_EMAIL")
-        self.from_name = os.getenv("SMTP_FROM_NAME", "Talky.ai")
+        self.from_name = os.getenv("SMTP_FROM_NAME", "Talk-Lee")
         self.use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
         
         if not all([self.host, self.user, self.password, self.from_email]):

@@ -71,7 +71,7 @@ WEBAUTHN_CHALLENGE_TTL_MINUTES: int = 5
 
 # Relying Party (RP) configuration
 # These should be overridden from environment in production
-RP_NAME: str = "Talky.ai"
+RP_NAME: str = "Talk-Lee"
 # WebAuthn requires the rpId to be a registrable suffix of the browser
 # page's effective domain. So the right value depends on which domain
 # the frontend lives at:

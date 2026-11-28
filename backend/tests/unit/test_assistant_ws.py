@@ -178,6 +178,7 @@ async def test_assistant_chat_creates_conversation_from_single_insert_response(m
 
     assert fake_websocket.accepted is True
     assert fake_websocket.sent_messages[0]["type"] == "connected"
+    assert fake_websocket.sent_messages[0]["message"] == "Connected to Talk-Lee Assistant"
     assert any(
         event["type"] == "assistant_message_end"
         and event["content"] == "You have no campaigns."
