@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
@@ -11,6 +11,7 @@ import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
+import { destinationAfterSignup, nextFromAddress, signInHref } from "./register-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -25,9 +26,17 @@ const BUSINESS_NAME_REQUIRED = "Enter your business name.";
 const PASSWORDS_DO_NOT_MATCH = "Passwords do not match.";
 const LEGAL_REQUIRED = "Accept the Terms of Service and Privacy Policy to continue.";
 
-export default function RegisterClientPage() {
+// The hard navigation is injected (as billing-plan-selector.tsx does) so a test can observe it; jsdom cannot mock location.assign.
+const navigate = (url: string) => window.location.assign(url);
+
+export default function RegisterClientPage({ onNavigate = navigate }: { onNavigate?: (url: string) => void } = {}) {
     const router = useRouter();
-    const { applyLoginResult } = useAuth();
+    const { applyLoginResult, status, user } = useAuth();
+    // Where the visitor was going (the pricing page's plan buttons carry the
+    // dashboard's plan page). Read from the address at each use; the sign-up
+    // steps are one page, so the address is the same at every step. It is only
+    // followed after postAuthDashboard has checked it (safeInternalPath).
+    const next = nextFromAddress(useSearchParams());
     const [step, setStep] = useState<Step>("form");
     const [formData, setFormData] = useState({
         email: "",
@@ -38,6 +47,8 @@ export default function RegisterClientPage() {
     const [password, setPassword] = useState("");
     const [confirmPassword, setConfirmPassword] = useState("");
     const [loading, setLoading] = useState(false);
+    // True once this page created the account; the signed-in redirect below is for visitors who arrived signed in.
+    const [createdHere, setCreatedHere] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
     // Both the first send and "Resend" start a signup, and Cloudflare accepts
@@ -61,6 +72,14 @@ export default function RegisterClientPage() {
         }, 0);
         return () => window.clearTimeout(t);
     }, [step]);
+
+    // A visitor who is already signed in is sent on, to a safe `next` or else
+    // their dashboard, and is not shown the form. The sign-in page does not
+    // send a signed-in visitor here, so the two pages cannot loop.
+    useEffect(() => {
+        if (status !== "authenticated" || !user || createdHere) return;
+        router.replace(postAuthDashboard(user.role, next));
+    }, [status, user, createdHere, next, router]);
 
     function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
         setFormData((prev) => ({
@@ -170,6 +189,7 @@ export default function RegisterClientPage() {
             // layout mounts with user=null and sends a brand-new account back
             // to login while its first /auth/me request is still in flight.
             flushSync(() => {
+                setCreatedHere(true);
                 applyLoginResult({
                     user_id: response.user_id,
                     tenant_id: response.tenant_id,
@@ -189,14 +209,11 @@ export default function RegisterClientPage() {
             // survive a successful signup.
             const fromAskAi = hasAskAiSignInFlag();
             clearAskAiSignInFlag();
-            const destination =
-                fromAskAi && response.role !== "white_label_admin"
-                    ? "/"
-                    : postAuthDashboard(response.role);
+            const destination = destinationAfterSignup(response.role, next, fromAskAi);
             if (typeof window !== "undefined") {
                 // A hard navigation guarantees the auth cookies are committed
                 // before the dashboard's first protected request.
-                window.location.assign(destination);
+                onNavigate(destination);
             } else {
                 router.push(destination);
             }
@@ -266,6 +283,9 @@ export default function RegisterClientPage() {
             description: "Choose a strong password to secure your account",
         },
     };
+
+    // Already signed in: the effect above is sending the visitor on.
+    if (status === "authenticated" && !createdHere) return null;
 
     return (
         <div className="relative min-h-screen bg-transparent flex items-center justify-center p-4 overflow-hidden">
@@ -388,7 +408,7 @@ export default function RegisterClientPage() {
 
                                 <p className="text-sm text-muted-foreground text-center">
                                     Already have an account?{" "}
-                                    <Link href="/auth/login" className="text-foreground font-medium hover:underline">
+                                    <Link href={signInHref(next)} className="text-foreground font-medium hover:underline">
                                         Sign in
                                     </Link>
                                 </p>

@@ -3,8 +3,9 @@
  *
  * Keeping this independent from `next/navigation` makes login, MFA, passkeys,
  * OAuth-style completions, and registration agree on where an authenticated
- * user belongs by default. Login may supply an original same-site path;
- * other completion callers keep their existing dashboard destination.
+ * user belongs by default. Login and sign-up may supply an original same-site
+ * path (sign-up reads it in app/auth/register/register-next.ts); other
+ * completion callers keep their existing dashboard destination.
  * The homepage Ask AI session flag is handled by the caller and keeps
  * precedence. White-label admins retain their own dashboard routing.
  */
@@ -35,6 +36,9 @@ export function safeInternalPath(next: string | null | undefined): string {
             }
             const parsed = new URL(candidate, origin);
             if (parsed.origin !== origin || /^\/auth(?:\/|$)/i.test(parsed.pathname)) return "";
+            // Dot segments can collapse to "//host" (/billing/..//evil.example); API and
+            // build-asset paths are never a page to land on after sign-in.
+            if (parsed.pathname.startsWith("//") || /^\/(?:api|_next)(?:\/|$)/i.test(parsed.pathname)) return "";
             if (!candidate.includes("%")) return next;
             candidate = decodeURIComponent(candidate);
         }

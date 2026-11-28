@@ -30,7 +30,14 @@ for (const file of ["login/login-client.tsx", "register/register-client.tsx"]) {
         assert.ok(read < clear, "the flag is read before it is cleared");
         // The Ask AI homepage shortcut stays flag-derived and excludes white-label admins.
         // Only login's fallback may consume a return URL, through the validated helper.
-        assert.match(source, /fromAskAi\s*&&\s*\w+\.role\s*!==\s*"white_label_admin"\s*\?\s*"\/"\s*:\s*postAuthDashboard\(/);
+        const precedence = /fromAskAi\s*&&\s*\w+\.role\s*!==\s*"white_label_admin"\s*\?\s*"\/"\s*:\s*postAuthDashboard\(/;
+        if (file === "login/login-client.tsx") assert.match(source, precedence);
+        else {
+            // Sign-up: the same precedence lives in one pure function, which the page calls with the flag it read.
+            assert.match(source, /destinationAfterSignup\(\s*response\.role\s*,\s*next\s*,\s*fromAskAi\s*\)/);
+            assert.match(readFileSync(path.join(authDir, "register", "register-next.ts"), "utf8"),
+                /fromAskAi\s*&&\s*role\s*!==\s*"white_label_admin"\s*\?\s*"\/"\s*:\s*postAuthDashboard\(role,\s*next\)/);
+        }
         if (file === "login/login-client.tsx") {
             assert.match(source, /import\s*\{\s*postAuthDashboard\s*\}\s*from\s*["']@\/lib\/post-auth-navigation["']/);
             const nextReads = source.match(/\.get\(\s*["']next["']\s*\)/g) ?? [];
@@ -38,7 +45,14 @@ for (const file of ["login/login-client.tsx", "register/register-client.tsx"]) {
             assert.match(source, /postAuthDashboard\(\s*\w+\.role\s*,\s*searchParams\?\.get\(\s*["']next["']\s*\)\s*\)/);
             assert.doesNotMatch(source, /(?:router\.(?:push|replace)|window\.location\.(?:assign|replace))\(\s*searchParams\??\.get\(\s*["']next["']\s*\)/);
         } else {
+            // Sign-up: register-next.ts is the only file that reads `next` from the address; the page gets it
+            // from nextFromAddress and passes it only to postAuthDashboard / destinationAfterSignup / signInHref
+            // (the full rule is in lib/post-auth-navigation.test.ts), never to router.* or location.*.
             assert.doesNotMatch(source, /\.get\(\s*["']next["']\s*\)/);
+            assert.match(source, /nextFromAddress\(\s*useSearchParams\(\)\s*\)/);
+            const nextReads = readFileSync(path.join(authDir, "register", "register-next.ts"), "utf8").match(/\.get\(\s*["']next["']\s*\)/g) ?? [];
+            assert.equal(nextReads.length, 1, "register-next.ts reads `next` exactly once");
+            assert.doesNotMatch(source, /(?:router\.(?:push|replace)|window\.location\.(?:assign|replace)|onNavigate)\(\s*next\b/);
         }
     });
 }
