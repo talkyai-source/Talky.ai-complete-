@@ -25,19 +25,19 @@ Notes:
 
 ### Pricing
 
-The public **Pricing** page lists subscription plans and pay-as-you-go AI-minute options. Review the current prices and included features before choosing an option.
+The public **Pricing** page lists subscription plans and Pay as you go AI minutes. Review the current prices and included features before choosing an option.
 
 ![The pricing page with the Annual option selected and the two plan cards below it](/docs/getting-started-03-pricing-annual.webp)
 
 1. Select **Pricing** from the navigation menu, or open the pricing page directly.
 2. Use the **Annual / Monthly** switch above the plan cards to change which price is shown. Annual is shown by default.
 3. Review the two plans side by side.
-4. Scroll down for the full feature comparison, the AI minute top-up bundles, voice provider notes, telephone usage notes, and billing notes.
-5. Select **Get Started** on a plan to create an account, or **Talk to Sales** to contact the team about larger deployments.
+4. Scroll down for the full feature comparison, the top-up bundles of AI minutes, voice provider notes, telephone usage notes, and billing notes.
+5. Select **Select Basic** or **Select Business** on a plan card, or **Buy minutes** under Pay as you go; without an account you create one first. **Talk to Sales** contacts the team.
 
 The pricing page shows plan limits, included AI minutes, concurrent call limits, campaign limits, recording storage and retention, support hours, connector availability, and which voice providers are included.
 
-AI-minute purchases cover Talk-Lee platform usage. Confirm any telephone carrier service and charges with your account owner or provider before calling; this guide does not promise a separate carrier-billing workflow.
+Telephone (PSTN / SIP) usage is not included in AI minutes. Its cost depends on the phone line you connect, so confirm it with your carrier or provider before calling.
 
 ### Other public pages
 
@@ -68,14 +68,14 @@ Corporate networks that block real-time audio may prevent in-browser calling. If
    ![The password step, showing the strength requirements](/docs/getting-started-06-register-password.webp)
 5. Complete the registration.
 
-After registration, Talk-Lee signs you in and opens your dashboard. If you arrived from the Ask AI button, you are returned to the home page instead.
+After registration, Talk-Lee signs you in and opens the page you were going to when it is a safe application link, otherwise your dashboard. If you arrived from the Ask AI button, you are returned to the home page instead.
 
 ### Sign in to Talk-Lee
 
 1. Open the Talk-Lee web application.
 2. Enter your registered email address and password.
 3. Complete MFA if it is enabled for your account.
-4. After a successful sign-in, Talk-Lee returns to the original page you requested when it is a safe application link. Otherwise it opens the **Dashboard**. The Ask AI homepage return and partner-role dashboard routing keep their existing priority.
+4. After a successful sign-in, Talk-Lee returns to the original page you requested when it is a safe application link. Otherwise it opens the **Dashboard**. If you arrived from the Ask AI button, you are returned to the home page instead.
 
 ![The sign-in page, with fields for email and password](/docs/getting-started-07-login.webp)
 
@@ -99,7 +99,7 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 
 - **Dashboard** — account and calling overview
 - **Campaigns** — create and manage outbound campaigns
-- **Inbound Campaigns** — manage inbound AI call flows where enabled
+- **Inbound Campaigns** — answer incoming calls with an AI agent, where inbound calling is enabled for your account; an account administrator switches it on with **Enable inbound** on that page
 - **Call History** — review completed calls, transcripts, summaries, and recordings
 - **Contacts** — import and manage campaign contacts
 - **Analytics** — review calling performance
@@ -112,7 +112,7 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 - **Settings** — profile, device, telephony, and recording settings
 - **Logout** — sign out of Talk-Lee
 
-Depending on your plan and role you may also see **Security Center** or **Agent Quality**. Use the controls available to your account; a listed or unavailable screen is not a promise that an administrative workflow is enabled.
+**Security Center** and **Agent Quality** are not shown in a customer account, whatever its plan or role in the account.
 
 Selecting the **Talk-Lee** name at the top of the sidebar returns you to the public home page.
 
@@ -124,7 +124,7 @@ A control beside the Talk-Lee name collapses the sidebar to icons only, giving m
 
 ### Your account panel
 
-The bottom of the sidebar shows your name and your role in the account, such as Tenant Admin. Use it to confirm which account and role you are working in, which matters when you have access to more than one.
+The bottom of the sidebar shows your name and your role in the account, such as Tenant Admin. The panel shows your name and your role in the account.
 
 ### Team
 

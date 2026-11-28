@@ -43,3 +43,26 @@ test("no published content carries the guide's internal appendix", () => {
         assert.ok(!/Internal Notes/.test(text), `${page.file} mentions Internal Notes`);
     }
 });
+
+// The backend's support index parses these slugs (backend/app/domain/services/support/articles.py).
+// A title or a description may change; a slug or a file name may not.
+test("the documentation slugs and file names are the ones the backend reads", () => {
+    assert.deepEqual(
+        docsPages.map((page) => [page.slug, page.file]),
+        [
+            ["getting-started", "getting-started.md"],
+            ["outbound-campaigns", "outbound-campaigns.md"],
+            ["contacts", "contacts.md"],
+            ["inbound", "inbound.md"],
+            ["calls-and-recordings", "calls-and-recordings.md"],
+            ["follow-ups", "follow-ups.md"],
+            ["connectors", "connectors.md"],
+            ["ai-options", "ai-options.md"],
+            ["billing", "billing.md"],
+            ["settings-and-security", "settings-and-security.md"],
+            ["workflows", "workflows.md"],
+            ["troubleshooting", "troubleshooting.md"],
+            ["glossary", "glossary.md"],
+        ],
+    );
+});

@@ -73,7 +73,7 @@ Use the controls above the table to choose how many rows to show at once and to 
 
 ![The top of the campaign form, showing the name, brand, persona options and representative name](/docs/outbound-campaigns-05-identity.webp)
 
-Your plan limits how many campaigns you can run. The pricing page lists the limit for each plan.
+The pricing page lists the number of campaigns for each plan.
 
 ### Campaign Name
 
@@ -96,9 +96,11 @@ Enter the business the agent represents. The field sits beside the campaign name
 
 Choose the **Persona** that matches the campaign. There are three:
 
-- **Lead Generation** — outbound calls: qualify leads and book consultations
-- **Customer Support** — inbound: resolve issues, handle escalations, book callbacks
-- **AI Receptionist** — inbound: answer, route, book appointments, take messages
+- **Lead Generation** — for outgoing calls: qualify leads and capture their details
+- **Customer Support** — for incoming calls: resolve issues and note requests for your team
+- **AI Receptionist** — for incoming calls: answer and take messages
+
+The form's persona descriptions mention booking, routing and escalation, but a caller is put through to a person only when a transfer is set up for the campaign (outgoing or incoming). The agent does not book appointments or meetings into a calendar. **What you book** is the next step the agent proposes; your team arranges it. On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request.
 
 Then enter the **Representative names**: one to three names, comma-separated. The agent uses one of them on each call. Each name has a **Male / Female** selector so that the name matches the gender of the voice you choose.
 
@@ -132,28 +134,28 @@ Talk-Lee allows campaign creators to define which actions the AI agent may attem
 
 Available actions can include:
 
-- **Schedule callback** — offer an agreed follow-up time
-- **Send follow-up email** — send information only after the caller confirms the address/content
-- **Submit configured form** — use an available form integration
-- **Transfer to a human** — transfer only when the transfer runtime and destination are available
+- **Schedule callback** — the AI agent calls the person back at the agreed time; scheduled callbacks exist on outgoing campaigns only
+- **Send follow-up email** — needs Gmail connected under **Connectors** and the **Subject** and **Message** filled in; the email is sent only after the caller confirms the address and the content
+- **Submit configured form** — emails the form you configured to the destination address; needs Gmail connected under **Connectors**
+- **Transfer to a human** — on an outgoing campaign, a transfer works only when the campaign lists transfer among its approved actions and names the destination numbers; the system knows that a transfer was requested, and it does not guarantee that someone answers
 - **End call politely** — close when the objective is complete or the caller declines
 
 ![The approved next actions, with transfer destination and objection-attempt settings beneath](/docs/outbound-campaigns-07-approved-actions.webp)
 
 #### Important
 
-Selecting an action gives the agent permission to attempt that action. The corresponding tool/integration must still be configured and return a successful result.
+Selecting an action gives the agent permission to attempt that action. The action must still be set up (for example Gmail connected for the email) and return a successful result.
 
 ### Transfer Destination
 
-If human transfer is enabled:
+On an outgoing campaign, a transfer works only when the campaign lists transfer among its approved actions and names the destination numbers:
 
 1. Enable **Transfer to a human**.
 2. Enter or select the approved destination.
 3. Save the campaign.
-4. Test the transfer before using the campaign with real customers.
+4. On an outgoing campaign, a transfer set up for the campaign cannot be tested in the browser test, because nothing is dialled; check its destination number carefully before using the campaign with real customers.
 
-If transfer is not configured, use callback scheduling instead.
+Without that set-up, an outgoing campaign cannot transfer a call; use a scheduled callback instead (outgoing campaigns only).
 
 ### Maximum Objection Attempts
 
@@ -197,7 +199,7 @@ Good guidance includes:
 - When to stop selling
 - When to ask for an email
 - Tone and conversation style
-- Special compliance or handoff rules
+- Special compliance rules
 
 Avoid duplicating large amounts of company information here. Business facts belong in the Knowledge Base.
 
@@ -276,11 +278,10 @@ Examples:
 - Policies
 - Supported locations
 - Approved claims
-- Escalation instructions
 
 ### What should not be placed only in the Knowledge Base
 
-Campaign permissions such as transfer, callback, email, and required fields should remain in the structured campaign configuration.
+The approved next actions and the required fields should remain in the structured campaign configuration.
 
 ### Recommended structure
 
@@ -292,7 +293,6 @@ For larger campaigns, separate information logically:
 - FAQs
 - Objections
 - Qualification
-- Escalation
 - Compliance
 
 ### Knowledge Base best practices
@@ -319,8 +319,8 @@ Never launch a new campaign without testing it first.
 6. Give a clear rejection.
 7. Ask a knowledge-base question.
 8. Give an email address and check that it is captured correctly.
-9. Test callback scheduling if enabled.
-10. Test human transfer if enabled.
+9. Test a scheduled callback, if the campaign has that action (outgoing campaigns only).
+10. On an outgoing campaign, a transfer set up for the campaign cannot be tested in the browser test, because nothing is dialled; check its destination number carefully. A test does not guarantee that someone will answer a live transfer.
 11. Check the resulting call summary/transcript.
 
 ### Choose who speaks first

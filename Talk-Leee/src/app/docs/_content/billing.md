@@ -1,4 +1,4 @@
-The Billing area allows you to review your subscription or pay-as-you-go AI-minute balance and usage. Available purchase options depend on the current catalog and your account.
+The Billing area allows you to review your subscription or Pay as you go AI minutes balance and usage. Available purchase options depend on the current catalog and your account.
 
 ## Available information can include
 
@@ -8,22 +8,22 @@ The Billing area allows you to review your subscription or pay-as-you-go AI-minu
 - Overage alerts
 - Plan-change options
 - Invoices
-- AI minute top-ups
+- Top-ups of AI minutes
 
 ## Review usage
 
-1. Select **Billing & Logs** and open **Billing**.
+1. **Billing & Logs** is shown to account administrators and billing users; selecting it opens **Billing**. Where a list opens under it, choose **Billing** from the list.
 2. Review the current plan.
 3. Check **Minutes Usage**.
 4. Review daily usage.
 5. Review any overage alerts.
 6. Open plan or invoice options when needed.
 
-AI-minute purchases cover Talk-Lee platform usage. Confirm any telephone carrier service and charges with your account owner or provider before calling; this guide does not promise a separate carrier-billing workflow.
+Two kinds of usage are separate. AI minutes are the minutes of AI conversation, counted against your plan allowance or your top-ups. Telephone (PSTN / SIP) usage is not included in AI minutes. Its cost depends on the phone line you connect, so confirm it with your carrier or provider before calling.
 
 ## Buy AI minute top-ups
 
-You can purchase pay-as-you-go minutes or add minutes to an eligible subscription. Review the current bundles and prices shown in Billing rather than relying on a price quoted in a help article.
+With an active paid plan you can buy a top-up at any time. Without a plan, the same panel is titled **Pay as you go** and sells bundles with no monthly fee; the minutes carry over until used. Review the current bundles and prices shown in Billing rather than relying on a price quoted in a help article.
 
 1. Open **Billing**.
 2. Find the top-up panel.
@@ -31,7 +31,7 @@ You can purchase pay-as-you-go minutes or add minutes to an eligible subscriptio
 4. Complete the payment.
 5. Confirm the new balance.
 
-Before confirming payment, check the bundle's AI minutes, price and currency in the checkout. A pay-as-you-go purchase does not create a recurring subscription. Confirm any premium-voice or separate telephone-service arrangement with your account owner before using it.
+Before confirming payment, check the bundle's AI minutes, price and currency in the checkout. A pay-as-you-go purchase does not create a recurring subscription. Confirm any premium-voice arrangement with your account owner before using it.
 
 ## Change plan
 
@@ -45,7 +45,7 @@ Returning from the payment provider does not by itself activate a subscription. 
 
 ## Invoices
 
-1. Open **Billing & Logs** and select **Recent invoices**.
+1. On the **Billing** page, select **Recent invoices**.
 2. Review the list of invoices.
 3. Select an invoice to open its detail page.
 4. Download or print the invoice where the action is available.
