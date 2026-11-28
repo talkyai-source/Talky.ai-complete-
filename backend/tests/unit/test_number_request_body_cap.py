@@ -39,16 +39,23 @@ def test_limit_is_two_files_plus_overhead():
 async def test_other_paths_keep_the_default_cap():
     assert (await send(OTHER, 1024)).status_code == 200
     r = await send(OTHER, 1025)
-    assert r.status_code == 413 and r.json() == {"detail": "Request body too large (max 1024 bytes)"}
+    assert r.status_code == 413
+    body = r.json()
+    assert body["error"]["code"] == "payload_too_large"
+    assert body["error"]["message"] == "The request is too large." == body["detail"]
 
 
-async def test_submit_path_accepts_just_under_and_refuses_just_over():
+async def test_submit_path_accepts_just_under_and_refuses_just_over(monkeypatch):
+    monkeypatch.setenv("NUMBER_REQUEST_MAX_FILE_BYTES", str(2 * 1024 * 1024))
     limit = config.submit_body_limit_bytes()
     assert (await send(SUBMIT, 1025)).status_code == 200  # above the default cap
     assert (await send(SUBMIT, limit)).status_code == 200
     r = await send(SUBMIT, limit + 1)
     assert r.status_code == 413
-    assert r.json() == {"detail": f"Request body too large (max {limit} bytes)"}
+    body = r.json()
+    assert body["error"]["code"] == "payload_too_large"
+    assert body["error"]["message"] == body["detail"]
+    assert body["detail"] == "Your files are too large to send together. Each document must be 2 MB or smaller."
 
 
 def test_trailing_slash_counts_as_the_submit_path():

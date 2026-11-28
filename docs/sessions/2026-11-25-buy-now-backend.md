@@ -32,7 +32,7 @@ Every statement of this feature carries an explicit account predicate. The revie
 | Virus scan if the infrastructure supports it | Documents are marked `not_scanned`; the download says so (`X-Document-Scan`) | No scanner exists on the server |
 | "The same key returns the same answer" | A replay is rebuilt from the database | After a decision it shows the current status |
 | The body is never held in memory | The security middleware reads up to about 20 MB for this one path, then the route parses it in pieces | The existing middleware buffers every request; the larger limit applies to this path only |
-| The request-wide "too large" answer | The middleware's existing `{"detail": …}` shape | The per-file limit, checked first by the website, uses the standard error shape |
+| The request-wide "too large" answer | The standard error shape with a customer sentence (the old `detail` key is kept beside `error`, same sentence) | The per-file limit, checked first by the website, uses the standard error shape |
 
 Known and accepted: while the disk is below its floor a retry of an unconfirmed save is refused like a new upload.
 
