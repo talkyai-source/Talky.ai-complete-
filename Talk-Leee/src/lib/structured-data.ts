@@ -20,7 +20,7 @@ export const homeStructuredData = {
             applicationCategory: "BusinessApplication",
             operatingSystem: "Web",
             description:
-                "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, campaign knowledge and call records.",
+                "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, the knowledge base and Call History.",
             publisher: { "@id": `${SITE_URL}/#organization` },
         },
     ],

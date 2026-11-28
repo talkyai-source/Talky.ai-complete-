@@ -3,18 +3,18 @@ import { BarChart3, Bot, Megaphone, Mic, PhoneCall, Settings, Target, Users } fr
 const services = [
   {
     icon: PhoneCall,
-    title: "Simultaneous Calls",
-    description: "Manage calls within your configured campaign, account and provider limits.",
+    title: "Calls at Once",
+    description: "Your plan sets how many calls can run at once, within your campaign and provider limits.",
   },
   {
     icon: Users,
-    title: "Knowledgebase Integration",
-    description: "Upload PDFs, images, or crawl websites so agents speak with your latest, accurate information.",
+    title: "Knowledge Base",
+    description: "Upload .md or .txt files so agents speak with your latest, accurate information.",
   },
   {
     icon: Bot,
     title: "AI Builder",
-    description: "Step-by-step wizard to design agent behavior and call flows without writing code.",
+    description: "Three-step campaign wizard to set agent behavior and knowledge without writing code.",
   },
   {
     icon: Mic,
@@ -24,12 +24,12 @@ const services = [
   {
     icon: Settings,
     title: "Requests for Your Team",
-    description: "Collect caller requests for review, or transfer a live call to a person on your list. Live transfer to a person is available when it is set up for the campaign.",
+    description: "Collect caller requests for review. Transfer needs set-up: approved numbers on outgoing calls; on incoming calls, transfer switched on, a destination on the approved list and a two-way line. An answer is not guaranteed.",
   },
   {
     icon: BarChart3,
     title: "Detailed Reports",
-    description: "Access recordings, transcriptions, and custom charts for performance and QA.",
+    description: "Review recordings where enabled, transcripts and Analytics charts per campaign.",
   },
   {
     icon: Target,
@@ -39,7 +39,7 @@ const services = [
   {
     icon: Megaphone,
     title: "Outbound Campaigns",
-    description: "Import leads or connect with HubSpot/forms for automated outreach.",
+    description: "Import leads for automated outreach; on the Business plan, log calls to HubSpot or Salesforce.",
   },
 ];
 

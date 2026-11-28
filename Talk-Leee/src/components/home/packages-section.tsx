@@ -62,7 +62,7 @@ export function PackagesSection() {
               transition={{ delay: 0.1 }}
               className="text-base sm:text-lg font-light text-gray-700 dark:text-muted-foreground"
             >
-              <span className="font-semibold">Language availability depends on your selected voice and model.</span>
+              <span className="font-semibold">Speech recognition is English only in this release, and there is no language setting.</span>
             </motion.p>
           </div>
 
@@ -70,13 +70,13 @@ export function PackagesSection() {
             {[
               {
                 icon: Globe,
-                title: "Global communication at scale",
-                description: "Review supported language options for the voice and model selected for your campaign.",
+                title: "Voices for your campaign",
+                description: "Callers hear the voice you choose for the campaign. Speech recognition is English only in this release.",
               },
               {
                 icon: Sparkles,
                 title: "Authentic brand identity",
-                description: "Clone your own voice for authentic brand identity.",
+                description: "Clone a voice with ElevenLabs (a paid add-on) where it is enabled.",
               },
               {
                 icon: Headphones,
@@ -131,8 +131,8 @@ export function PackagesSection() {
               transition={{ delay: 0.1 }}
               className="text-base sm:text-lg font-light text-gray-700 dark:text-muted-foreground"
             >
-              <span className="font-semibold">Start Small or Scale Big.</span> Launch with a single AI Agent or power your entire
-              contact center. Seamlessly integrates with all major CRM and CCaaS platforms.
+              <span className="font-semibold">Start Small or Scale Big.</span> Launch one campaign and add more within your plan’s
+              limits. Logs your calls to HubSpot or Salesforce once connected (Business plan).
             </motion.p>
           </div>
 
@@ -154,19 +154,19 @@ export function PackagesSection() {
                 icon: SlidersHorizontal,
                 title: "Make AI Agents Your Own",
                 points: [
-                  "Personalize every conversation with real‑time customer data.",
-                  "Connect instantly with your existing call center software.",
-                  "Automate interactions with drag‑and‑drop orchestration.",
-                  "Refine performance using built‑in A/B testing.",
+                  "Personalize every conversation with your own knowledge base.",
+                  "Use your own SIP trunk or request a phone number.",
+                  "Design agent behavior with the three-step campaign wizard.",
+                  "Refine your script and settings after reviewing calls.",
                 ],
               },
               {
                 icon: Smile,
-                title: "Feels Human",
+                title: "Natural Conversations",
                 points: [
                   "AI voice agents that let customers speak naturally, interrupt, and change topics.",
                   "Streaming speech for configured calling workflows.",
-                  "Language options depend on the selected voice and model.",
+                  "Speech recognition is English only in this release.",
                   "Calling availability follows your configuration and service limits.",
                 ],
               },
@@ -174,10 +174,10 @@ export function PackagesSection() {
                 icon: Eye,
                 title: "Always Know What’s Happening",
                 points: [
-                  "Stay in control with live monitoring and Conversation Intelligence.",
+                  "Stay in control with Call History and captured details.",
                   "Set goals and track performance.",
-                  "Automated QA on every call.",
-                  "Real‑time transcripts and insights for smarter decisions.",
+                  "Review transcripts and, where enabled, recordings.",
+                  "Live call status, with transcripts shortly after each call.",
                 ],
               },
               {
@@ -186,8 +186,8 @@ export function PackagesSection() {
                 points: [
                   "Manage call volume within your configured limits.",
                   "Customize agents for any use case.",
-                  "Train once, deploy everywhere.",
-                  "End‑to‑end AI call automation for enterprises and call centers.",
+                  "Duplicate a campaign to reuse its settings.",
+                  "End‑to‑end AI call automation for the campaigns you set up.",
                 ],
               },
             ].map((item) => (
@@ -274,7 +274,7 @@ export function PackagesSection() {
           <div className="mt-10 max-w-5xl mx-auto text-center">
             <div className="text-xl font-semibold text-primary dark:text-foreground">Personalize Every Conversation</div>
             <div className="mt-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">
-              Use Talk-Lee’s AI voice agents to deliver human‑like customer engagement.
+              Use Talk-Lee’s AI voice agents to deliver natural conversations, each introduced as an AI.
             </div>
           </div>
 
@@ -282,12 +282,12 @@ export function PackagesSection() {
             {[
               {
                 icon: CalendarDays,
-                title: "Automate Appointment Booking & Reminders",
+                title: "Capture Scheduling Requests",
                 description:
-                  "AI voice agents connect with live calendars to manage scheduling for dental clinics, beauty salons, dealerships, and more.",
+                  "AI voice agents note the time a caller prefers on incoming calls, and schedule callbacks on outgoing campaigns.",
                 points: [
-                  "Live calendar integration",
-                  "Works with Google Calendar",
+                  "Callbacks on outgoing campaigns",
+                  "Incoming requests noted for your team",
                 ],
               },
               {
@@ -296,16 +296,16 @@ export function PackagesSection() {
                 description: "Configure inbound call handling using approved information and your account and provider limits.",
                 points: [
                   "Configured hours and call limits",
-                  "Real‑time integration with your systems",
-                  "Inject support procedure documents",
+                  "Log calls to HubSpot or Salesforce once connected (Business plan)",
+                  "Add .md or .txt support documents to the knowledge base",
                 ],
               },
               {
                 icon: PhoneCall,
                 title: "Cold Calling for Sales Teams",
                 description:
-                  "Put sales on autopilot with AI voice agents that qualify leads, follow up, and book appointments.",
-                points: ["Automated follow‑ups", "Lead qualification on autopilot", "Close deals faster without scaling your team"],
+                  "Put sales on autopilot with AI voice agents that qualify leads, follow up, and schedule callbacks on outgoing calls.",
+                points: ["Automated follow‑ups", "Lead qualification on autopilot", "Calls within your plan’s limits"],
               },
             ].map((item) => (
               <div

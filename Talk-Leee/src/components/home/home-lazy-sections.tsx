@@ -14,6 +14,14 @@ const StatsSection = dynamic(() => import("@/components/home/stats-section").the
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[260px]" />,
 });
 
+const ConnectorStatusSection = dynamic(
+  () => import("@/components/home/connector-status-section").then((m) => m.ConnectorStatusSection),
+  {
+    ssr: true,
+    loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
+  },
+);
+
 const FeaturesSection = dynamic(() => import("@/components/home/features-section").then((m) => m.FeaturesSection), {
   ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
@@ -42,28 +50,28 @@ function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string
   );
 }
 
-function FAQSection() {
+export function FAQSection() {
   const items = [
     {
       question: "What is Talk-Lee AI?",
       answer:
-        "Talk-Lee AI provides voice agents for configured inbound and outbound calling workflows, with campaign settings and call records.",
+        "Talk-Lee AI provides voice agents for configured inbound and outbound calling workflows, with campaign settings and Call History.",
     },
     {
       question: "Do I need technical expertise to use Talk-Lee AI?",
-      answer: "No. Our guided AI builder makes it simple to design call flows and prompts without coding.",
+      answer: "No. Our guided AI builder makes it simple to design campaigns and prompts without coding.",
     },
     {
-      question: "Can Talk-Lee AI integrate with my existing phone system or CRM?",
-      answer: "Yes. Talk-Lee AI connects to your phone system through a SIP trunk, to HubSpot and Salesforce, and to Google Calendar.",
+      question: "Can Talk-Lee AI connect to my existing phone system or CRM?",
+      answer: "Talk-Lee AI connects to your phone system through a SIP trunk and, on the Business plan, logs calls to HubSpot or Salesforce once you connect one in the dashboard. See the Connectors section on this page for the status of each.",
     },
     {
       question: "How does Talk-Lee AI learn my company information?",
-      answer: "You can upload PDFs, images, or crawl entire websites to instantly train your agent with the right knowledge.",
+      answer: "Upload .md or .txt files to a campaign's knowledge base so your agent answers from your own information. Nothing is imported from websites.",
     },
     {
       question: "Can calls be transferred to human agents?",
-      answer: "Yes. When a transfer is set up for the campaign, the agent can transfer a live call to a person on your list. Otherwise it can collect a request for your team to review; this does not arrange a callback.",
+      answer: "Only when it is set up, and a person answering is not guaranteed. On outgoing calls the campaign must list transfer among its approved actions and name the destination numbers. On incoming calls the campaign's transfer option must be on, the destination must be on your approved list, and the phone line must carry calls both ways. Otherwise the agent can note a request for your team to review. Callbacks are scheduled on outgoing campaigns only.",
     },
     {
       question: "Is Talk-Lee AI secure and compliant?",
@@ -75,7 +83,7 @@ function FAQSection() {
     },
     {
       question: "Do you provide phone numbers for campaigns?",
-      answer: "Not yet. Calls go out through Talk-Lee AI's shared line, or through your own SIP trunk and numbers if you connect one. Numbers issued by Talk-Lee AI are not available in this release.",
+      answer: "On request. Under Settings, Telephony, Buy Now, upload the documents asked for; staff review each request and contact you about the next steps, so it is not instant. You can also connect your own SIP trunk and numbers. Telephone (PSTN / SIP) usage is not included in AI minutes.",
     },
   ];
 
@@ -325,7 +333,7 @@ export function HomeLazySections() {
             description={[
               "Configure AI voice agents for inbound enquiries and outbound campaigns using your approved business information.",
               "Choose a supported model and voice, set calling rules, and review the effective configuration before starting a campaign.",
-              "Review call records and captured details to decide what needs a follow-up or a correction from your team.",
+              "Review Call History and captured details to decide what needs a follow-up or a correction from your team.",
             ]}
             adjustForNavbar
             stats={[
@@ -340,6 +348,7 @@ export function HomeLazySections() {
         <SecondaryHero />
         <StatsSection />
         <PackagesSection />
+        <ConnectorStatusSection />
         <FeaturesSection />
         <CTASection />
         <FAQSection />

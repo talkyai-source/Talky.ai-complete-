@@ -135,6 +135,7 @@ export function Navbar() {
       { label: "Use Cases", items: [...useCaseNavItems] },
       { label: "Industries", items: [...industryNavItems] },
       { label: "Pricing", href: "/pricing" },
+      { label: "Documentation", href: "/docs" },
       { label: "Contact Us", href: "/contact" },
     ];
   }, []);
@@ -313,11 +314,11 @@ export function Navbar() {
         }}
       >
         <div className="w-full">
-          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] min-[1060px]:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
+          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] min-[1200px]:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
             <div className="flex items-center gap-3 justify-self-start">
               <details
                 ref={mobileMenuRef}
-                className="navbarMobileMenu relative min-[1060px]:hidden group"
+                className="navbarMobileMenu relative min-[1200px]:hidden group"
                 onToggle={(event) => {
                   setMobileMenuOpen(event.currentTarget.open);
                 }}
@@ -496,7 +497,7 @@ export function Navbar() {
 
           <ul
             ref={desktopNavRef}
-            className="navbarDesktopNav hidden min-[1060px]:flex items-center justify-center gap-1.5 min-[1060px]:gap-2.5"
+            className="navbarDesktopNav hidden min-[1200px]:flex items-center justify-center gap-1.5 min-[1200px]:gap-2.5"
             role="list"
           >
             {menuItems.map((item) => {
@@ -672,12 +673,12 @@ export function Navbar() {
             })}
           </ul>
 
-          <div className="navbarThemeWrap flex items-center gap-1.5 min-[1060px]:gap-2.5 justify-self-end">
+          <div className="navbarThemeWrap flex items-center gap-1.5 min-[1200px]:gap-2.5 justify-self-end">
             {authAction ? (
               <Link
                 href={authAction.href}
                 className={[
-                  "navbarDesktopAction hidden min-[1060px]:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  "navbarDesktopAction hidden min-[1200px]:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                   isCompact ? "py-1" : "py-1.5",
                 ].join(" ")}
               >
@@ -697,7 +698,7 @@ export function Navbar() {
                 aria-hidden="true"
                 data-auth-slot
                 className={[
-                  "navbarDesktopAction hidden min-[1060px]:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
+                  "navbarDesktopAction hidden min-[1200px]:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
                   isCompact ? "py-1" : "py-1.5",
                 ].join(" ")}
               >
@@ -707,7 +708,7 @@ export function Navbar() {
             <Link
               href="/book-a-demo"
               className={[
-                "navbarDemoButton navbarDesktopAction hidden min-[1060px]:inline-flex items-center justify-center px-3 text-[13px] font-medium rounded-lg bg-white text-[#004d5e] transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.18),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                "navbarDemoButton navbarDesktopAction hidden min-[1200px]:inline-flex items-center justify-center px-3 text-[13px] font-medium rounded-lg bg-white text-[#004d5e] transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.18),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 isCompact ? "py-1" : "py-1.5",
               ].join(" ")}
             >

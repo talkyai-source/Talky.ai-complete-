@@ -25,7 +25,7 @@ export const metadata: Metadata = {
   // Brand plus the hero's own product wording; nothing the page does not say.
   title: "Talk-Lee AI | AI Voice Agent Platform for Call Automation",
   description:
-    "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, campaign knowledge and call records.",
+    "Configure inbound and outbound calling with Talk-Lee AI. Manage voice agents, the knowledge base and Call History.",
 };
 
 export default function Home() {

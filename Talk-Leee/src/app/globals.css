@@ -315,10 +315,10 @@
   pointer-events: none;
 }
 
-/* The horizontal navbar exists only from 1060px up (navbar.tsx: min-[1060px]:
+/* The horizontal navbar exists only from 1200px up (navbar.tsx: min-[1200px]:
    prefixes on .navbarMobileMenu / .navbarDesktopNav / .navbarDesktopAction).
    Below that the drawer renders and the pill stays full width like a phone. */
-@media (min-width: 1060px) {
+@media (min-width: 1200px) {
   .home-navbar-fixed {
     width: max-content;
     max-width: calc(100% - 1.5rem);

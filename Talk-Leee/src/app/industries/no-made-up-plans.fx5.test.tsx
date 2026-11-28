@@ -109,8 +109,12 @@ test("integrations that stay are still named", (context) => {
 // The section's scroll animation cannot mount in jsdom ("controls.start() should only be
 // called after a component has mounted"), so this one is a guard over the copy; the
 // rendered line is measured on the production build.
-test("home packages: the calendar line names only a calendar the server connects to", () => {
+// The old rule was "the calendar line names only a calendar the server connects to". Calls do not
+// book into any calendar (Google Calendar is used by the assistant in the dashboard), so the card
+// now names none.
+test("home packages: the scheduling card names no calendar, since calls do not book into one", () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src", "components", "home", "packages-section.tsx"), "utf8");
-    assert.equal(source.includes('"Works with Google Calendar"'), true);
+    assert.equal(/google calendar|live calendar/i.test(source), false);
+    assert.equal(source.includes('"Callbacks on outgoing campaigns"'), true);
     assert.equal(REMOVED_INTEGRATIONS.test(source), false);
 });
