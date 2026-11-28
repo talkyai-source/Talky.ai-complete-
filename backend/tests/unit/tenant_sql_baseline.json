@@ -4779,7 +4779,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f461e2327d6c59a5f0bd9dd279cb41686ed29e436f1074b82ebd52c9ca302552",
+      "id": "788d0480e7190faf863ecb9ed4f94dd98ff22f0f5dbce87cf782c0ac2b50ac38",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
       "line": 949,
@@ -4987,7 +4987,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "22e3cc669f6895183cab45ffc8ac313a6221e4d8ba0d9117585c505583d87efd",
+      "id": "95c9e6595b288040fd28b4347ae73a071146d89f9c7e389916f7c2fa619a6445",
       "file": "app/core/security/passkeys.py",
       "function": "get_credential_by_id",
       "line": 840,
@@ -5987,7 +5987,7 @@
       "id": "c45e62d7b93515166758733da7a98e261d354f844331e411f5c12f53ad1160a2",
       "file": "app/api/v1/endpoints/mfa/setup.py",
       "function": "setup_mfa",
-      "line": 111,
+      "line": 112,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -6310,7 +6310,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d09b7b584604d96e3882c57b3db79496f3c7bf2f1c61dd4d4aae63b715971748",
+      "id": "1ba370edab9a146bc3578d786b3bd2c96937eaabb01d9057fa47071fe5804978",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
       "line": 950,
@@ -6777,7 +6777,7 @@
       "id": "dc4d603556ccce86514a0af2a5e3e72fa2d7e6a99c50988f292b59d7438c548d",
       "file": "app/api/v1/endpoints/mfa/setup.py",
       "function": "confirm_mfa",
-      "line": 214,
+      "line": 215,
       "method": "execute",
       "tables": [
         "user_profiles"
@@ -7954,10 +7954,10 @@
       "category": "platform_catalog"
     },
     {
-      "id": "0a6dce74d350ce3af920e5fe5c038f4f8db0f0ead1944eec6ebf5587ba4f1230",
+      "id": "23f76c353d1f63adcfb7581b8db83538240de5891988b2529b2bdd42f2dedb90",
       "file": "app/infrastructure/connectors/crm/hubspot.py",
       "function": "HubSpotConnector.create_note",
-      "line": 365,
+      "line": 371,
       "method": "ValueError",
       "tables": [],
       "sql": "Create note failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
