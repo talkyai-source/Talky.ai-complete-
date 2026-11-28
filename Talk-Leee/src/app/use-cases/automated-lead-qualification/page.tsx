@@ -64,7 +64,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
     {
       title: "Capture the answers",
       description:
-        "For example, ask when the contact wants to start and capture the timing in a campaign field.",
+        "For example, ask when the contact wants to start and the timing the contact gives is saved from the conversation for your team to check.",
     },
     {
       title: "Review the result",
@@ -89,7 +89,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
   ];
 
   const withTalkLee = [
-    "Filter Call History by campaign",
+    "Review each call in Call History",
     "Check the call outcome",
     "Review captured details",
     "Read the transcript where available",
@@ -104,13 +104,13 @@ export default function AutomatedLeadQualificationUseCasePage() {
     },
     {
       number: "02",
-      title: "Campaign fields",
-      description: "Save the answers you need to compare leads after the call.",
+      title: "Captured details",
+      description: "Contact details and the answers saved from the call, for your team to check.",
     },
     {
       number: "03",
       title: "Call logging",
-      description: "When you connect HubSpot or Salesforce and enable call logging, the connector can log completed calls.",
+      description: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       number: "04",
@@ -157,16 +157,16 @@ export default function AutomatedLeadQualificationUseCasePage() {
     {
       question: "Can I choose what the agent asks?",
       answer:
-        "Yes. Set up your qualification questions and the fields where you want the answers captured.",
+        "Yes. Set up your qualification questions and choose which contact details the agent may capture.",
     },
     {
       question: "Can this work alongside our existing sales team?",
       answer:
-        "Yes. Your representatives can review a contact’s answers after the call. When transfer is an approved action for the outgoing campaign, the agent can request a transfer to a listed destination during the configured hours.",
+        "Yes. Your representatives can review a contact’s answers after the call. When transfer is switched on for your account and is an approved action for the outgoing campaign, the agent can request a transfer to a listed destination within the transfer hours you set, if any. An approved transfer request does not guarantee that someone answers.",
     },
     {
       question: "Can we log calls in HubSpot or Salesforce?",
-      answer: "When you connect HubSpot or Salesforce and enable call logging, a completed call can be logged there.",
+      answer: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       question: "Is this suited for B2B lead qualification specifically?",
@@ -181,9 +181,9 @@ export default function AutomatedLeadQualificationUseCasePage() {
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Lead Qualification Services
+            Lead Qualification
           </h1>
-          <h2 className={`mt-4 ${subHeadingClassName}`}>AI-Powered Lead Qualification Services</h2>
+          <h2 className={`mt-4 ${subHeadingClassName}`}>AI-Powered Lead Qualification</h2>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
             Use an outbound campaign to ask contacts about their needs and collect the answers your team wants to review.
           </p>
@@ -197,8 +197,8 @@ export default function AutomatedLeadQualificationUseCasePage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                Book a Demo
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
@@ -207,7 +207,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Automate Lead Qualification With AI</h2>
           <p className={bodyClassName}>
-            A qualification call can start with a simple question about what the contact needs. Set that question in the campaign and choose a field for the answer.
+            A qualification call can start with a simple question about what the contact needs. Add that question to the campaign’s qualification questions.
           </p>
           <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
             {automationPillars.map((pillar) => (
@@ -236,7 +236,7 @@ export default function AutomatedLeadQualificationUseCasePage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>B2B Lead Qualification Services</h2>
+          <h2 className={headingClassName}>B2B Lead Qualification</h2>
           <p className={bodyClassName}>
             These example questions can help your team decide what to ask a business contact.
           </p>

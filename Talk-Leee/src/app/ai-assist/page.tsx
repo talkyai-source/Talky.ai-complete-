@@ -66,7 +66,7 @@ export default function AIAssistPage() {
   ];
 
   const howItWorks = [
-    { title: "Open the dashboard", description: "Sign in and select the AI assistant button." },
+    { title: "Open the dashboard", description: "Sign in and open the assistant with the button at the bottom right of the dashboard." },
     { title: "Ask a question", description: "Type a question about your account and send it." },
     { title: "Add detail", description: "Include a campaign name and dates to narrow a call report." },
     { title: "Return to a conversation", description: "Open the conversation history to revisit a previous answer." },
@@ -133,7 +133,7 @@ export default function AIAssistPage() {
   const faqs = [
     {
       question: "Where do I find AI Assist?",
-      answer: "Sign in to your dashboard and select the AI assistant button.",
+      answer: "Sign in to your dashboard and open the assistant with the button at the bottom right of the dashboard.",
     },
     {
       question: "Can I ask about just one campaign?",

@@ -109,8 +109,8 @@ export default function AIVoiceDialerPage() {
     },
     {
       label: "Prospecting",
-      title: "AI Cold Calling",
-      description: "Automates outreach, qualifies leads, and handles initial sales conversations.",
+      title: "Outbound Prospecting",
+      description: "Introduces your offer and asks qualifying questions on calls to contacts who have given permission to be called.",
     },
     {
       label: "Timing",
@@ -126,7 +126,7 @@ export default function AIVoiceDialerPage() {
 
   const comparisonRows = [
     { traditional: "Manual dialing", ai: "Automated dialing" },
-    { traditional: "One call at a time", ai: "Campaign calling limits" },
+    { traditional: "One call at a time", ai: "Several calls at once, up to your plan’s limit" },
     { traditional: "Requires sales reps", ai: "AI handles conversations" },
     { traditional: "Manual follow-ups", ai: "Callback scheduling when enabled" },
     { traditional: "Limited calling capacity", ai: "Configured calling hours" },
@@ -166,7 +166,7 @@ export default function AIVoiceDialerPage() {
     {
       question: "What do I need before starting a campaign?",
       answer:
-        "Add the contacts you have permission to call, connect a phone line and review the campaign’s readiness checks.",
+        <>A paid plan or <Link href="/pricing" className="underline">Pay as you go</Link> minutes, the contacts you have permission to call, a connected phone line and a review of the campaign’s readiness checks.</>,
     },
     {
       question: "Can an AI Voice Dialer make outbound calls automatically?",
@@ -243,7 +243,7 @@ export default function AIVoiceDialerPage() {
             </ul>
           </div>
           <p className={bodyClassName}>
-            An AI phone dialer removes the manual dialing entirely. It moves through your list on its own, and when someone picks
+            An AI phone dialer places the calls for you. It moves through your list on its own, and when someone picks
             up, the AI itself carries the conversation &mdash; asking questions, answering objections, and following the call flow
             you&rsquo;ve defined.
           </p>
@@ -466,7 +466,7 @@ export default function AIVoiceDialerPage() {
               </Button>
             </div>
             <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-              <Link href="/pricing">View Pricing</Link>
+              <Link href="/pricing" className="underline">View Pricing</Link>
             </p>
           </div>
         </section>

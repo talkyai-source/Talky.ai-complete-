@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "AI Voice Agents | Talk-Lee AI",
   description:
-    "See how a voice agent answers inbound calls, asks qualifying questions and records what callers need your team to review.",
+    "See how a voice agent answers inbound calls when inbound calling is enabled for the account, asks qualifying questions and records what callers need your team to review.",
 };
 
 export default function AIVoiceAgentPage() {
@@ -102,7 +102,7 @@ export default function AIVoiceAgentPage() {
   ];
 
   const understandingTraits = [
-    { title: "Natural", description: "Customers can speak normally." },
+    { title: "Natural", description: "Customers can speak normally in English." },
     { title: "Contextual", description: "Consider what’s already been discussed." },
     { title: "Responsive", description: "Adapts as needs change." },
     { title: "Relevant", description: "Based on your business and workflow." },
@@ -146,7 +146,7 @@ export default function AIVoiceAgentPage() {
     },
     {
       title: "Retail & E-commerce",
-      description: "Product information, order-related inquiries, and routine customer communication.",
+      description: "Answer product questions from your documents and record order questions for your team.",
     },
     {
       title: "Real Estate",
@@ -183,10 +183,10 @@ export default function AIVoiceAgentPage() {
       label: "Outbound",
       title: "Take outbound calling off your team’s to-do list",
       description:
-        "Manually calling hundreds or thousands of contacts takes significant time. Let AI handle repetitive outreach while your team focuses on conversations.",
+        "Calling a contact list by hand takes significant time. Let AI work through your campaign list within your plan’s limit of calls at once while your team focuses on conversations.",
       steps: [
         { name: "Follow Up", detail: "Reconnects with leads after an inquiry or interaction." },
-        { name: "Reach Out", detail: "Handles sales and prospecting conversations at scale." },
+        { name: "Reach Out", detail: "Works through your campaign list within your plan’s limit of calls at once." },
         { name: "Ask", detail: "Collect the lead details you selected for the campaign." },
         { name: "Reactivate", detail: "Re-engages previous customers and inactive leads." },
       ],
@@ -249,7 +249,7 @@ export default function AIVoiceAgentPage() {
     "Inbound & Outbound",
     "Automated Actions",
     "Calling Hours",
-    "Scalable Call Handling",
+    "Several Calls at Once",
     "Requests for Human Review",
     "Flexible Use Cases",
   ];
@@ -272,7 +272,7 @@ export default function AIVoiceAgentPage() {
     {
       title: "Choose actions",
       description:
-        "Select the actions your agent can use, such as scheduling a callback.",
+        "Select the actions your agent can use, such as scheduling a callback on an outbound campaign.",
     },
     {
       title: "Launch",
@@ -321,7 +321,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can an AI voice agent answer incoming calls?",
       answer:
-        "It can answer incoming calls using the campaign knowledge base and record what the caller needs your team to review.",
+        "When inbound calling is enabled for the account, it can answer incoming calls using the campaign knowledge base and record what the caller needs your team to review.",
     },
     {
       question: "Can AI voice agents handle sales conversations?",
@@ -331,12 +331,12 @@ export default function AIVoiceAgentPage() {
     {
       question: "Can the agent arrange a callback?",
       answer:
-        "When callbacks are enabled for a campaign, the agent can ask for a time, read it back and request the callback.",
+        "On an outbound campaign with callbacks enabled, the agent can ask for a time, read it back and schedule the callback. On an incoming call it records the request for your team.",
     },
     {
       question: "When can a caller speak with someone on my team?",
       answer:
-        "An incoming call can request a transfer when live transfer is available, you have enabled it for the campaign and you have listed an approved destination on a two-way phone line. An outbound call can request a transfer when transfer is an approved campaign action and the campaign lists the destination number. A request does not guarantee an answer.",
+        "An incoming call can request a transfer when transfer is switched on for your account, live transfer is available, you have enabled it for the campaign and you have listed an approved destination on a two-way phone line. An outbound call can request a transfer when transfer is switched on for your account, it is an approved campaign action and the campaign lists the destination number. An approved transfer request does not guarantee that someone answers.",
     },
     {
       question: "Can I customize the AI’s voice and behavior?",
@@ -345,7 +345,7 @@ export default function AIVoiceAgentPage() {
     {
       question: "How much do AI voice agent services cost?",
       answer:
-        <Link href="/pricing">View Pricing</Link>,
+        <Link href="/pricing" className="underline">View Pricing</Link>,
     },
   ];
 
@@ -364,7 +364,7 @@ export default function AIVoiceAgentPage() {
             Intelligent AI voice agents for conversations that move your business forward.
           </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Talk-Lee AI can answer inbound calls and ask qualifying questions on outbound campaigns. Set the information it can use and the details it should collect.
+            Talk-Lee AI can answer inbound calls when inbound calling is enabled for the account, and ask qualifying questions on outbound campaigns. Set the information it can use and the details it should collect.
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
@@ -401,7 +401,7 @@ export default function AIVoiceAgentPage() {
             </ul>
           </div>
           <p className={bodyClassName}>
-            Configure how your inbound campaign should handle calls during business hours and after closing.
+            Configure how your inbound campaign should handle calls during business hours and after closing, once inbound calling is enabled for the account.
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
@@ -607,7 +607,7 @@ export default function AIVoiceAgentPage() {
           <div className="mt-10 flex justify-center">
             <div className={imageFrameClassName}>
               <div className={imageClipClassName}>
-              <div className="relative aspect-[1536/1024] w-full">
+              <div className="relative aspect-[1436/1034] w-full">
                 <Image
                   src="/docs/outbound-campaigns-07-approved-actions.webp"
                   alt="Campaign settings showing the actions an agent can use, including scheduling a callback and ending the call."
@@ -639,9 +639,9 @@ export default function AIVoiceAgentPage() {
         </section>
 
         <section className="mt-14">
-          <h2 className={headingClassName}>Our Process</h2>
+          <h2 className={headingClassName}>How You Set It Up</h2>
           <h3 className={`mt-3 ${subHeadingClassName}`}>
-            From your first conversation to a fully operational AI voice agent.
+            From choosing your goal to launching your campaign.
           </h3>
           <p className={bodyClassName}>
             Set the goal for the call, give the agent the information it needs, then test the campaign before launch.
@@ -717,8 +717,8 @@ export default function AIVoiceAgentPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/book-a-demo">
-                  Book a Demo
+                <Link href="/auth/register">
+                  Get Started
                 </Link>
               </Button>
             </div>

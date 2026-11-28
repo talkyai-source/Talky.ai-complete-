@@ -139,11 +139,11 @@ export default function CustomerServicesSupportUseCasePage() {
     },
     {
       title: "Captured details",
-      description: "Use campaign fields to collect the details your team needs.",
+      description: "Choose which contact details the agent may capture, such as name, email and company.",
     },
     {
       title: "Call logging",
-      description: "When you connect HubSpot or Salesforce and enable call logging, completed calls can appear in that system.",
+      description: "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       title: "Call History",
@@ -169,7 +169,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       label: "Healthcare",
       title: "Patient support",
-      description: "Answer office-hours questions using your practice’s published information.",
+      description: "Answer office-hours questions using the information you upload.",
     },
     {
       label: "Financial Services",
@@ -226,11 +226,11 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "Can we see call activity in HubSpot or Salesforce?",
       answer:
-        "When you connect HubSpot or Salesforce and enable call logging, the connector can log completed calls.",
+        "On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there.",
     },
     {
       question: "Can customers speak to a human agent?",
-      answer: "When transfer is enabled for the incoming campaign and its phone line supports calls in both directions, the agent can request a transfer to an approved destination during the configured hours.",
+      answer: "When transfer is enabled for the incoming campaign, an approved destination is listed, its phone line supports calls in both directions and transfer is switched on for the account, the agent can request a transfer within the transfer hours you set, if any. An approved transfer request does not guarantee that someone answers.",
     },
     {
       question: "Where do we find a caller’s request?",
@@ -239,7 +239,7 @@ export default function CustomerServicesSupportUseCasePage() {
     {
       question: "How much does AI customer support cost?",
       answer:
-        <>Compare subscriptions and Pay as you go on the <Link href="/pricing">pricing page</Link>.</>,
+        <>Compare subscriptions and Pay as you go on the <Link href="/pricing" className="underline">pricing page</Link>.</>,
     },
     {
       question: "Is AI customer support suitable for B2B companies?",
@@ -271,8 +271,8 @@ export default function CustomerServicesSupportUseCasePage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/book-a-demo">
-                Book a Demo
+              <Link href="/auth/register">
+                Get Started
               </Link>
             </Button>
           </div>
@@ -339,7 +339,7 @@ export default function CustomerServicesSupportUseCasePage() {
                 src="/docs/inbound-01-list.webp"
                 alt="Inbound campaign list showing a reception line marked active and ready"
                 width={1536}
-                height={589}
+                height={588}
                 quality={100}
                 className="h-auto w-full transition-transform duration-300 ease-out group-hover:scale-[1.02]"
                 sizes="(min-width: 1024px) 896px, (min-width: 768px) 672px, 100vw"
@@ -470,7 +470,7 @@ export default function CustomerServicesSupportUseCasePage() {
         <section className="mt-14">
           <h2 className={headingClassName}>Connectors for call records</h2>
           <p className={bodyClassName}>
-            When you connect HubSpot or Salesforce and enable call logging, your team can review a completed call in its connected system.
+            On the Business plan, connect HubSpot or Salesforce and finished calls can be logged there for your team to review.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             {connectors.map((connector) => (

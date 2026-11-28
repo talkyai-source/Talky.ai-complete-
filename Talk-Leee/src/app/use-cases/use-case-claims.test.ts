@@ -192,3 +192,62 @@ test("rendered product and use-case links deliver what their labels offer", () =
         }
     }
 });
+
+test("no two neighbouring links in a button group share a label and a target", () => {
+    for (const { route, Page } of pages) {
+        for (const link of renderPage(route, Page).querySelectorAll("a")) {
+            const next = link.nextElementSibling;
+            if (next?.tagName !== "A") continue;
+            const same = plain(link) === plain(next) && link.getAttribute("href") === next.getAttribute("href");
+            assert.ok(!same, `${route}: repeated ${plain(link)} -> ${link.getAttribute("href")}`);
+        }
+    }
+});
+
+test("qualification answers are not described as a field the customer chooses", () =>
+    sourceCheck(/choose a field|campaign fields?/i));
+
+test("pages avoid unmeasured availability, scoring and scale claims", () =>
+    sourceCheck(/24\/7|around the clock|never miss|within seconds|human-like|can't tell|appointment (?:scheduling|booking)|interview scheduling|lead scoring|multilingual|crawl|at scale/i));
+
+test("sentences naming HubSpot or Salesforce state the Business plan", () => {
+    for (const { route, sentence } of pageStatements()) {
+        if (sentence.endsWith("?") || !/HubSpot|Salesforce/.test(sentence) || !/\s/.test(sentence)) continue;
+        assert.match(sentence, /Business plan/, `${route}: ${sentence}`);
+    }
+});
+
+test("callbacks on the voice agent page are limited to outgoing calls or recorded for the team", () => {
+    for (const { route, sentence } of pageStatements()) {
+        if (route !== "/ai-voice-agent" || sentence.endsWith("?") || !/callbacks?/i.test(sentence) || !/schedul|arrange|read it back|time/i.test(sentence)) continue;
+        assert.match(sentence, /outbound|outgoing|records? the request for your team/i, sentence);
+    }
+});
+
+test("transfer sentences carry their set-up condition and never guarantee an answer", () => {
+    for (const { route, sentence } of pageStatements()) {
+        assert.doesNotMatch(sentence.replace(/does not guarantee/gi, ""), /guarantee/i, `${route}: ${sentence}`);
+        assert.doesNotMatch(sentence, /during the configured hours/i, `${route}: ${sentence}`);
+    }
+    for (const route of ["/ai-voice-agent", "/use-cases/customer-services-support", "/use-cases/automated-lead-qualification"]) {
+        const sentences = pageStatements().filter((item) => item.route === route).map((item) => item.sentence);
+        assert.ok(sentences.some((sentence) => /does not guarantee/i.test(sentence) && /transfer/i.test(sentence)), route);
+        for (const sentence of sentences) {
+            if (sentence.endsWith("?") || !/\btransfers?\b/i.test(sentence) || /does not guarantee/i.test(sentence)) continue;
+            assert.match(sentence, /set up|configured|approved|enabled|switched on/i, `${route}: ${sentence}`);
+        }
+    }
+});
+
+test("incoming call copy on the voice agent page names the account setting", () => {
+    for (const { route, sentence } of pageStatements()) {
+        if (route !== "/ai-voice-agent" || sentence.endsWith("?") || !/answers? (?:inbound|incoming) calls/i.test(sentence) || sentence.split(" ").length < 6) continue;
+        assert.match(sentence, /inbound calling is enabled for the account/i, sentence);
+    }
+});
+
+test("the removed illustrations stay deleted from disk", () => {
+    for (const image of ["public/images/ai-voice-agent/see-it-in-action.png", "public/images/use-cases/customer-services-support/1.png"]) {
+        assert.equal(existsSync(image), false, image);
+    }
+});
