@@ -47,6 +47,13 @@ def _incoming_missing(evidence):
     return last[2:] if last.startswith("in") and last[2:].isdecimal() else "0"
 
 
+def _has_word(evidence, word):
+    """True when the evidence carries `word` among the parts after the four counts: the
+    health watch adds "all" when four in five answered calls have no confirmed recording
+    notice, and "now" when none of the answered calls of the last 4 hours has one."""
+    return word in (evidence or "").split("+")[4:]
+
+
 # Fixed sentences per check, filled only from the fingerprint's numbers.
 _SENTENCES = {
     "trunks": lambda status, ev: (
@@ -67,7 +74,10 @@ _SENTENCES = {
         + f"{_n(ev, 1)} {_plural(_n(ev, 1), 'recording is', 'recordings are')} waiting too long to be saved. "
         f"{_n(ev, 2)} {_plural(_n(ev, 2), 'transferred call is', 'transferred calls are')} missing "
         f"the part after the transfer. "
-        f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording of an answered call was', 'recordings of answered calls were')} saved without a confirmed notice."
+        f"{_n(ev, 3)} {_plural(_n(ev, 3), 'recording of a call of 30 seconds or more was', 'recordings of calls of 30 seconds or more were')} saved without a confirmed notice."
+        + (" Four in five answered calls have no confirmed recording notice." if _has_word(ev, "all") else "")
+        + (" None of the answered calls of the last 4 hours got a confirmed recording notice."
+           if _has_word(ev, "now") else "")
         if status == "alert" and ev else "The call recordings could not be checked."),
     "email": lambda status, ev: (
         "No email has been confirmed sent for more than 3 days." if status == "stale"
