@@ -31,18 +31,18 @@ export const docsPages: DocsPage[] = [
   {
     slug: "contacts",
     title: "Contacts",
-    description: "Upload contacts by CSV, format phone numbers, edit or delete contacts, and handle opt-outs.",
+    description: "Upload contacts by CSV or from Salesforce, add one contact, format phone numbers, and manage the Do-Not-Call list.",
     file: "contacts.md",
   },
   {
     slug: "inbound",
-    title: "Inbound",
+    title: "Inbound Campaigns",
     description: "Set up an AI agent to answer incoming calls, manage inbound campaigns, and test them.",
     file: "inbound.md",
   },
   {
     slug: "calls-and-recordings",
-    title: "Calls and Recordings",
+    title: "Call History and Recordings",
     description: "Review call history, transcripts and summaries, access recordings, and read analytics.",
     file: "calls-and-recordings.md",
   },
@@ -67,14 +67,14 @@ export const docsPages: DocsPage[] = [
   {
     slug: "billing",
     title: "Billing and Usage",
-    description: "Review your plan and usage, buy AI minute top-ups, change plan, and find invoices.",
+    description: "Review your plan and usage, buy top-ups of AI minutes, change plan, and find invoices.",
     file: "billing.md",
   },
   {
     slug: "settings-and-security",
     title: "Settings and Security",
     description:
-      "Your account security, profile and telephony settings, with availability guidance for administrative controls.",
+      "Your account security, and the profile, devices, telephony and recording settings.",
     file: "settings-and-security.md",
   },
   {

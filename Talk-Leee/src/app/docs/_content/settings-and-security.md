@@ -1,6 +1,6 @@
 ## Security
 
-The Security area covers your account protection, active sessions, and — for admins — tenant-wide keys and audit activity.
+The Security area covers your account protection, passkeys and active sessions.
 
 ![Account security, with password change and passkey options](/docs/security-01-password-passkeys.webp)
 
@@ -24,11 +24,11 @@ A second step at sign-in, from an authenticator app. Enable it from this page.
 
 ### Tenant-wide security
 
-Administrators also see **Tenant-wide security**: **Audit activity** (who changed what, and when) and **Audit and access** (security events and access review).
+A **Tenant-wide security** section with **Audit activity** (who changed what, and when) and **Audit and access** (security events and access review) is for platform and partner administrators. If a customer account administrator selects those cards, the page answers with an access-denied page.
 
 ### Data retention and recordings
 
-Confirm your account's recording and transcript retention policy with your administrator. Open **Recordings** to review stored audio.
+Your recording policy is under **Settings → Recording**. Open **Recordings** to review stored audio.
 
 ### IP allow-list
 
@@ -36,7 +36,7 @@ Not available. No IP allow-list is enforced anywhere in the platform today; it i
 
 ## Settings
 
-Settings contains account and telephony configuration.
+Settings has five tabs: Profile, Security, Devices, Telephony and Recording.
 
 ### Profile
 
@@ -80,6 +80,10 @@ On the **Security** page, under **Password and account**, select **Add a passkey
 
 Removing MFA weakens your account. Only do it when you are replacing the method, and re-enable it immediately afterwards. On the **Security** page, under **Two-factor authentication**, select **Turn off**, confirm your password, then select **Turn off two-factor authentication**.
 
+### Devices
+
+The **Devices** tab shows **Active Devices**: the devices your account is signed in on. It is the same list as **Active sessions** on the Security page. **Sign out from all other devices** ends every session except the one you are using.
+
 ### Telephony
 
 The Telephony tab is used to configure supported calling providers and related settings.
@@ -100,7 +104,7 @@ A campaign cannot place calls while its telephone route is not ready. If a campa
 
 #### Buy Now
 
-Use **Buy Now** to buy a phone number in Telephony. Each destination has its own regulations, so the window lists the documents needed for business use or personal use and lets you upload them.
+Use **Buy Now** to request a phone number. A request is not instant: you upload the documents asked for, staff review each request, and staff contact you about the next steps. You can also connect your own SIP trunk under **Connect PBX**. Each destination has its own regulations, so the window lists the documents needed for business use or personal use and lets you upload them.
 
 The last card on the Telephony tab is shown to every signed-in user. Account admins see it after the rest of the Telephony settings. Other users see it after the note that phone lines are managed by their account admin.
 
@@ -108,6 +112,8 @@ The card reads:
 
 - Minute charges vary by destination. Local conditions apply.
 - Info: Each destination has its own regulations, which may vary from region to region.
+
+Telephone (PSTN / SIP) usage is not included in AI minutes. Its cost depends on the phone line you connect.
 
 1. Select **Buy Now**. A window titled **Documentation is required:** opens.
 2. The window has two cards, each listing its documents:
@@ -119,7 +125,7 @@ The card reads:
      - B) Photo ID matching the utility bill
 3. Under each document is an upload box that reads **Click to upload or drag and drop**. Select the box to choose a file, or drag a file onto it. Each box takes one file. The file name is then shown, with **Choose another** to replace the file and **Remove** to empty the box.
 4. Select **Submit** on the card you filled in. Each card has its own **Submit**, which works only when both of that card's boxes have a file.
-5. The window closes and the message **Thank you. Your documents have been submitted.** is shown.
+5. The window closes and the message **Thank you. Your documents have been submitted.** is shown. Staff review the request and contact you about the next steps.
 
 To close the window without submitting, select **Cancel**, press Escape or select outside the window. Files you chose are not kept when the window closes.
 
@@ -127,8 +133,18 @@ To close the window without submitting, select **Cancel**, press Escape or selec
 
 Your plan sets how many calls can run at once. Campaigns queue beyond that limit rather than failing. The pricing page lists the concurrency allowance for each plan.
 
+### Recording
+
+The **Recording** tab holds the **Call recording policy**. Recording is off until a policy is saved. Only an account administrator can change the policy; other users see it without the **Save policy** button.
+
+- **Consent mode** — **Do not record calls**, **Record without a spoken notice (one-party consent)** or **Record with a spoken notice (two-party consent)**. One-party recording is lawful only where you and the people you call are in one-party jurisdictions, or you call your own numbers. With a spoken notice, the agent speaks a recording notice as the first thing on the call.
+- **Spoken notice (two-party)** and **Countries needing the notice** — the notice text, and the countries where it is spoken. An empty list means everywhere.
+- **Keep for (days)** — how long recordings are kept. The default is 90 days. In this release recordings are not deleted automatically.
+
+Select **Save policy** to apply a change. You are responsible for making sure your use of call recording follows the law where your callers are.
+
 ## Administrative controls
 
-Administrative screens depend on your role and the deployed release. Some listed screens remain unavailable; they are not customer self-service instructions. Ask your account owner which operational controls are enabled before planning a webhook, API-key or account-wide security workflow.
+Some screens depend on your role. **Security Center** and **Agent Quality** are shown to platform and partner administrators only.
 
-Use the account Security and Settings controls described above for your own account. Changes affecting other users, tenant-wide access or production calling belong with an authorized administrator following the deployment's reviewed procedures.
+Use the account Security and Settings controls described above for your own account. Changes that affect other users or the whole account belong with an authorised administrator.

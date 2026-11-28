@@ -15,7 +15,7 @@ Depending on your plan and permissions, settings can include:
 
 ## Pipeline Mode
 
-**Pipeline Mode** — "Choose how this tenant's calls are processed" — offers two options: **Standard Pipeline** and **Realtime (speech-to-speech)**.
+**Pipeline Mode** — "Choose how this tenant's calls are processed" — offers two options: **Standard Pipeline** and **Realtime (speech-to-speech)**. Use **Standard Pipeline**: the realtime speech-to-speech engine is not in general use in this release.
 
 ## Change AI settings
 
@@ -35,7 +35,7 @@ The **LLM Model** panel shows the provider family, a model dropdown, and a descr
 
 ### Speech-to-Text
 
-**Speech-to-Text** is the engine that hears the caller. Choose an engine from the dropdown; the panel describes its turn-detection behaviour.
+**Speech-to-Text** is the engine that hears the caller. Choose an engine from the dropdown; the panel describes its turn-detection behaviour. Speech recognition is English only in this release, and there is no language setting.
 
 ### TTS Voice
 

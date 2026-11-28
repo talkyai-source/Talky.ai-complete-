@@ -13,7 +13,7 @@ Check:
 
 ### The agent asks for information twice
 
-Verify that the campaign captures the field and that the latest call-state/captured-facts logic is active. Review the transcript to determine whether the caller's information was understood correctly.
+Check that the campaign is set to capture the field. Review the transcript to see whether the caller's information was understood correctly.
 
 ### A campaign will not start, or Resume is unavailable
 
@@ -35,7 +35,7 @@ Preview another voice or provider, save the change, and run a test call.
 
 ### Calls fail or audio quality is poor
 
-Pause the campaign if customers are affected and ask your Talk-Lee administrator/technical team to review telephony and voice-service health before continuing.
+Pause the campaign if customers are affected. Check the line's status under **Settings → Telephony**, run a test call, and contact support (see Getting Help) before you continue.
 
 ### Minutes have run out
 
@@ -55,7 +55,7 @@ Download the template and compare your file against it. Talk-Lee lists the rows 
 
 ### A recording is missing
 
-Check the retention period for your plan. Recordings older than that are removed. Check also that recording was enabled for the campaign at the time of the call.
+Open **Settings → Recording** and check the recording policy: recording is off until a policy is saved. Check also that recording was enabled for the campaign at the time of the call. Recordings are not deleted automatically in this release.
 
 ### You were signed out unexpectedly
 
@@ -67,7 +67,7 @@ Confirm your role still has access, and that the page has not moved. Use the sid
 
 ## Getting Help
 
-Use the contact details supplied by your account owner, or the contact form on the website. The in-app support assistant and ticket desk are optional deployment features and are not promised by this guide. If your account shows a working Help control, follow its on-screen instructions; otherwise use the contact fallback. Do not assume a ticket was created until you receive confirmation.
+Use the contact details supplied by your account owner, the contact form on the website, or support@talkleeai.com. The in-app support assistant and ticket desk are optional deployment features and are not promised by this guide. If your account shows a working Help control, follow its on-screen instructions; otherwise use the contact fallback. Do not assume a ticket was created until you receive confirmation.
 
 Before contacting support, have the following ready:
 

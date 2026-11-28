@@ -4,7 +4,7 @@ Actions taken through the AI assistant are saved, with their outcomes, on the **
 
 ## Agent Reviews
 
-Where the Agent Reviews area is enabled, it is used to review conversations for quality.
+Agent Reviews is part of **Agent Quality**, which is shown to platform and partner administrators only. A customer account does not see it. Where it is shown, it is used to review conversations for quality.
 
 1. Select **Agent Reviews**.
 2. Open a conversation.
