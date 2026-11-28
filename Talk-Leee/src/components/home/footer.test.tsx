@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import Module from "node:module";
-import { afterEach, test } from "node:test";
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { afterEach, mock, test } from "node:test";
 import React from "react";
 import { cleanup, render } from "@testing-library/react";
 
@@ -69,5 +71,57 @@ for (const status of ["anonymous", "authenticated"] as const) {
         const links = navList.querySelectorAll("li").length;
         assert.ok(rowSpan(navList) >= links, `nav list row-span must be at least its ${links} links`);
         assert.equal(rowSpan(nav), rowSpan(navList), "the nav and its list span the same rows");
+    });
+}
+
+// The copyright year comes from the clock, never from a typed number.
+test("the copyright line shows the year from the clock", () => {
+    mock.timers.enable({ apis: ["Date"], now: new Date("2031-06-15T12:00:00Z") });
+    try {
+        render(<Footer />);
+        const line = Array.from(document.querySelectorAll("footer p")).find((p) => /All rights reserved/.test(p.textContent ?? ""));
+        assert.ok(line, "the copyright line");
+        assert.match(line.textContent ?? "", /© 2031 Talk-Lee\./);
+    } finally {
+        mock.timers.reset();
+    }
+});
+
+test("footer.tsx types no year literal", () => {
+    const source = readFileSync(path.join(process.cwd(), "src/components/home/footer.tsx"), "utf8");
+    assert.equal(/20\d\d/.test(source), false);
+});
+
+// Routes that exist, read from the page files under src/app at run time (route
+// groups dropped, [param] folders match any one segment).
+function pageRoutes(dir: string, segments: string[] = []): string[][] {
+    const out: string[][] = [];
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+            const grouped = /^\(.*\)$/.test(entry.name);
+            out.push(...pageRoutes(path.join(dir, entry.name), grouped ? segments : [...segments, entry.name]));
+        } else if (/^page\.(tsx|ts|jsx|js|mdx)$/.test(entry.name)) {
+            out.push(segments);
+        }
+    }
+    return out;
+}
+
+function routeExists(href: string, routes: string[][]): boolean {
+    const parts = href.split(/[?#]/)[0].split("/").filter(Boolean);
+    return routes.some(
+        (route) => route.length === parts.length && route.every((seg, i) => (/^\[.+\]$/.test(seg) ? true : seg === parts[i])),
+    );
+}
+
+for (const status of ["anonymous", "authenticated"] as const) {
+    test(`${status}: every internal footer link is an existing route`, () => {
+        authStatus = status;
+        render(<Footer />);
+        const routes = pageRoutes(path.join(process.cwd(), "src/app"));
+        const hrefs = Array.from(document.querySelectorAll("footer a[href]")).map((a) => a.getAttribute("href") ?? "");
+        const internal = hrefs.filter((h) => h.startsWith("/"));
+        assert.ok(internal.length >= 10, `expected the footer's links, got ${internal.length}`);
+        for (const href of internal) assert.ok(routeExists(href, routes), `${href} has no page under src/app`);
     });
 }
