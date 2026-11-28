@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 
 // QA F1-01 (QA-UI-110): every industry page and the footer promised a free or
 // 14-day trial ("Start Free", "Try It Free", "No credit card needed") that
-// does not exist: Talklee is paid-only (monthly plans or pay-as-you-go
+// does not exist: Talk-Lee is paid-only (monthly plans or pay-as-you-go
 // minutes). A guard over the literal copy, since the defect is the copy.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const sources = [
