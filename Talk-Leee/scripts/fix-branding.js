@@ -4,9 +4,8 @@ const path = require('path');
 const {
   FORBIDDEN_TERMS,
   REPLACEMENT_TERM,
-  SEARCH_DIR,
   FILE_PATTERN,
-  toGlobalRegExp,
+  fixDisplaySpellings,
 } = require('./branding-terms');
 
 function fixFiles(dir) {
@@ -27,20 +26,10 @@ function fixFiles(dir) {
     } else {
       if (file.match(FILE_PATTERN)) {
         const original = fs.readFileSync(filePath, 'utf8');
-        let content = original;
-        const applied = [];
-
-        // Sequential, most-specific-first (see branding-terms.js) so that
-        // "Talky.ai" is rewritten whole rather than left as "Talk-Lee.ai".
-        for (const term of FORBIDDEN_TERMS) {
-          if (!content.includes(term)) continue;
-          const occurrences = content.split(term).length - 1;
-          content = content.replace(toGlobalRegExp(term), REPLACEMENT_TERM);
-          applied.push(`${term}×${occurrences}`);
-        }
+        const content = fixDisplaySpellings(original);
 
         if (content !== original) {
-          console.log(`🔧 Fixing branding in: ${filePath} (${applied.join(', ')})`);
+          console.log(`🔧 Fixing branding in: ${filePath}`);
           fs.writeFileSync(filePath, content, 'utf8');
           count++;
         }
@@ -51,7 +40,7 @@ function fixFiles(dir) {
 }
 
 console.log(`🔍 Replacing ${FORBIDDEN_TERMS.map((t) => `"${t}"`).join(', ')} with "${REPLACEMENT_TERM}"...`);
-const fixedCount = fixFiles(SEARCH_DIR);
+const fixedCount = fixFiles('src');
 if (fixedCount > 0) {
   console.log(`✅ Fixed branding in ${fixedCount} files.`);
 } else {

@@ -3,11 +3,9 @@ const path = require('path');
 
 const {
   FORBIDDEN_TERMS,
-  CHECK_ONLY_TERMS,
   REPLACEMENT_TERM,
-  SEARCH_DIR,
   FILE_PATTERN,
-  isAllowlistedLine,
+  violations,
 } = require('./branding-terms');
 
 function searchFiles(dir) {
@@ -29,24 +27,18 @@ function searchFiles(dir) {
       if (file.match(FILE_PATTERN)) {
         const content = fs.readFileSync(filePath, 'utf8');
         const lines = content.split('\n');
-        const violations = [];
+        const diagnostics = [];
 
         lines.forEach((line, index) => {
-          const hits = FORBIDDEN_TERMS.filter((term) => line.includes(term));
-          // Lowercase forms live in domains/emails — flag, never auto-rewrite,
-          // and ignore the auth-cookie identifiers that legitimately match.
-          const softHits = CHECK_ONLY_TERMS.filter(
-            (term) => line.includes(term) && !isAllowlistedLine(line, term),
-          );
-          const all = [...hits, ...softHits];
-          if (all.length > 0) {
-            violations.push(`   Line ${index + 1} [${all.join(', ')}]: ${line.trim()}`);
+          const hits = violations(line);
+          if (hits.length > 0) {
+            diagnostics.push(`   Line ${index + 1} [${hits.join(', ')}]`);
           }
         });
 
-        if (violations.length > 0) {
+        if (diagnostics.length > 0) {
           console.error(`❌ Branding violation found in: ${filePath}`);
-          violations.forEach((v) => console.error(v));
+          diagnostics.forEach((entry) => console.error(entry));
           found = true;
         }
       }
@@ -56,9 +48,11 @@ function searchFiles(dir) {
 }
 
 console.log(`🔍 Checking for forbidden branding terms (${FORBIDDEN_TERMS.map((t) => `"${t}"`).join(', ')})...`);
-if (searchFiles(SEARCH_DIR)) {
+const srcFailed = searchFiles('src');
+const publicFailed = searchFiles('public');
+if (srcFailed || publicFailed) {
   console.error(`\nFAILED: Forbidden branding terms found.`);
-  console.error(`The product is spelled "${REPLACEMENT_TERM}". Run \`npm run fix-branding\` to correct them.`);
+  console.error(`Review each spelling against the product name "${REPLACEMENT_TERM}".`);
   process.exit(1);
 } else {
   console.log('✅ Branding check passed.');

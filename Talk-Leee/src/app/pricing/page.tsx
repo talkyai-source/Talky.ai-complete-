@@ -108,7 +108,7 @@ export default function PricingPage() {
   ];
 
   const bundleNotes = [
-    "Top-up bundles apply only to Talklee AI platform minutes.",
+    "Top-up bundles apply only to Talk-Lee AI platform minutes.",
     "Top-up minutes are used after the plan's monthly minutes and carry over until used.",
     "Telephone/PSTN/SIP carrier usage remains billed separately.",
     "ElevenLabs premium voice usage remains separate from the standard AI-minute bundles.",
@@ -132,7 +132,7 @@ export default function PricingPage() {
   ];
 
   const telephoneUsage = [
-    "Telephone minutes are not deducted from the included Talklee AI-minute allowance.",
+    "Telephone minutes are not deducted from the included Talk-Lee AI-minute allowance.",
     "PSTN/SIP carrier charges are billed separately.",
     "Telephone rates depend on carrier, destination and call type.",
   ];

@@ -205,7 +205,7 @@ export function SalesforceSettingsView({
             <CardHeader>
                 <CardTitle>Salesforce</CardTitle>
                 <CardDescription>
-                    Every finished call is logged as a Salesforce Task on the matching Lead or Contact; unknown callees become Leads. Salesforce can also ask the Talky.ai agent to call someone back.
+                    Every finished call is logged as a Salesforce Task on the matching Lead or Contact; unknown callees become Leads. Salesforce can also ask the Talk-Lee agent to call someone back.
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">

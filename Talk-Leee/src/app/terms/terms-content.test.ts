@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { termsBlocks } from "./terms-content";
 
 // QA F1-01 / F13-13 (owner decision, 11 Nov 2026): the Terms must match what
-// the product does. Talklee is paid-only, so there is no trial to describe;
+// the product does. Talk-Lee is paid-only, so there is no trial to describe;
 // there is no monitored SLA, so no uptime percentage is promised; and minutes
 // are counted the way the pricing page says. A guard over the literal copy,
 // since the defect is the copy.
