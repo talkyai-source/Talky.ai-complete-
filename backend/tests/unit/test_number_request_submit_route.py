@@ -346,7 +346,7 @@ def assert_refusal(response, status, code, message, field):
 async def test_idempotency_key_codes(env, key, code):
     response = await post(make_app(), key=key)
     assert_refusal(response, 400, code,
-                   "Your request could not be sent. Please close this window, open Buy Now again and press Submit.",
+                   "Your request could not be sent. Please try again.",
                    "Idempotency-Key")
     assert env.db.calls == 0
     assert not [f for f in files_on_disk(env.root) if f.endswith(".part")]
@@ -359,7 +359,7 @@ async def test_same_key_different_documents_is_400_and_creates_nothing(env):
     other = [BIZ[0], ("business_registration", "reg.pdf", PDF + b"x"), BIZ[2]]
     r = await post(app, other)
     assert_refusal(r, 400, "idempotency_key_reused",
-                   "These documents were already sent with different files. Please press Submit again.",
+                   "Your files have changed since your last try. Please press Submit again.",
                    "Idempotency-Key")
     assert len(env.db.requests) == 1 and len(env.db.documents) == 2
     assert len([f for f in files_on_disk(env.root) if f.endswith(".tnr")]) == 2

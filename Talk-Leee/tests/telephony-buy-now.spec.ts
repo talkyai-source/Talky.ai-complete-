@@ -1144,7 +1144,7 @@ for (const role of ["tenant_admin", "user"] as const) {
                     expect(await buy.evaluate((el) => document.activeElement === el), `${state}: focus back on Buy Now`).toBe(true);
                 };
                 const beforeResend = posts.length;
-                answer = (use, nth) => (nth === beforeResend + 1 ? { status: 400, body: serverError("idempotency_key_reused", "These documents were already sent with different files. Please press Submit again.", { field: "Idempotency-Key" }) } : createdFor(use));
+                answer = (use, nth) => (nth === beforeResend + 1 ? { status: 400, body: serverError("idempotency_key_reused", "Your files have changed since your last try. Please press Submit again.", { field: "Idempotency-Key" }) } : createdFor(use));
                 await submit(0).click();
                 await measureMessage("resend_with_new_key_then_success", "400 idempotency_key_reused, then 201 for the automatic resend");
                 expect(posts.length - beforeResend, "exactly one automatic resend").toBe(2);

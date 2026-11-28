@@ -9,8 +9,8 @@ from typing import Any
 
 from app.domain.services.number_requests.config import KIND_LABELS, max_file_bytes
 
-REUSED_KEY_MESSAGE = "These documents were already sent with different files. Please press Submit again."
-INVALID_KEY_MESSAGE = "Your request could not be sent. Please close this window, open Buy Now again and press Submit."
+REUSED_KEY_MESSAGE = "Your files have changed since your last try. Please press Submit again."
+INVALID_KEY_MESSAGE = "Your request could not be sent. Please try again."
 UNREADABLE_FORM_MESSAGE = "Your documents could not be read. Please choose the files again and press Submit."
 TOO_MANY_PARTS_MESSAGE = "Please send only the two documents for this request."
 NOT_A_FILE_MESSAGE = "Please choose a file for {label}."
