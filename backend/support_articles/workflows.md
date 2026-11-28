@@ -24,7 +24,7 @@ For a new inbound agent:
 2. Prepare the knowledge base.
 3. Configure the greeting and approved actions.
 4. Select the voice.
-5. Connect the phone/SIP route.
+5. Connect the phone or SIP line.
 6. Test common and difficult scenarios.
-7. Route production calls only after the test flow passes.
+7. Let real callers use the number only after the test flow passes.
 8. Monitor call history, recordings, and analytics.

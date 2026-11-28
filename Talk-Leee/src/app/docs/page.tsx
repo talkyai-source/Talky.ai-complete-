@@ -15,8 +15,7 @@ export default function DocsIndexPage() {
         Step-by-step guidance for using the Talk-Lee web application.
       </p>
       <blockquote className="my-4 border-l-2 border-border pl-4 italic text-gray-700 dark:text-muted-foreground leading-relaxed">
-        This guide is written for the current Talk-Lee frontend and is intended for publication in the Talk-Lee website
-        documentation. Some screens are role-based, so a user may not see every menu item shown in this guide.
+        Some screens are role-based, so you may not see every menu item shown in this guide.
       </blockquote>
       <ul className="mt-8 border-t border-border/60">
         {docsPages.map((page) => (
