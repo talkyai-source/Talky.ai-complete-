@@ -251,7 +251,8 @@ def _retry_after_seconds(request: Request, exc: RateLimitExceeded) -> int:
         item, identifiers = window
         try:
             stats = request.app.state.limiter.limiter.get_window_stats(item, *identifiers)
-            return max(1, math.ceil(stats.reset_time - time.time()))
+            # Reset time by position, as slowapi does: `.reset_time` needs limits >= 3.
+            return max(1, math.ceil(stats[0] - time.time()))
         except Exception as error:
             # The limit was reached even if its store can no longer report the reset.
             logger.warning("Rate limit window unavailable: %s", type(error).__name__)
