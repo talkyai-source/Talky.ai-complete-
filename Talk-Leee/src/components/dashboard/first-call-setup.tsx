@@ -5,7 +5,7 @@ const steps = [
     {
         title: "Choose your plan",
         href: "/billing",
-        description: "Calls need a monthly or yearly plan, or Pay as you go minutes. Choose in Billing, then check your minutes.",
+        description: "Calls need a paid plan or Pay as you go minutes. Choose in Billing, then check your minutes.",
     },
     {
         title: "Connect your calling route",
