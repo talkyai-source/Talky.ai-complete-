@@ -85,7 +85,7 @@ test("credential request forwards its AbortSignal without changing server option
 
 test("registration decodes excluded existing keys and preserves server requirements", async () => {
     const seen = installCredentials();
-    const input = { challenge: "AQI", rp: { id: "example.com", name: "Talky" },
+    const input = { challenge: "AQI", rp: { id: "example.com", name: "Talk-Lee" },
         user: { id: "AwQ", name: "a@example.com", displayName: "A" },
         pubKeyCredParams: [{ type: "public-key", alg: -7 }],
         excludeCredentials: [{ type: "public-key", id: "-_8", transports: ["usb"] }],

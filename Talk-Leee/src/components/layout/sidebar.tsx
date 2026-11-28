@@ -218,7 +218,7 @@ export function Sidebar({ className }: { className?: string }) {
 
     const profileUser = user ?? {
         id: "guest",
-        email: "guest@talk-lee.ai",
+        email: "guest@talkleeai.com",
         name: "Guest",
         business_name: brandName,
         role: "user",
