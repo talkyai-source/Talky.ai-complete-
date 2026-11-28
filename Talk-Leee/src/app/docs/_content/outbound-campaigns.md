@@ -100,7 +100,7 @@ Choose the **Persona** that matches the campaign. There are three:
 - **Customer Support** — for incoming calls: resolve issues and note requests for your team
 - **AI Receptionist** — for incoming calls: answer and take messages
 
-The form's persona descriptions mention booking, routing and escalation, but a caller is put through to a person only when a transfer is set up for the campaign (outgoing or incoming). The agent does not book appointments or meetings into a calendar. **What you book** is the next step the agent proposes; your team arranges it. On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request.
+A caller is put through to a person only when a transfer is set up for the campaign (outgoing or incoming). The agent does not book appointments or meetings into a calendar. **Next step you offer** is the next step the agent proposes; your team arranges it. On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request.
 
 Then enter the **Representative names**: one to three names, comma-separated. The agent uses one of them on each call. Each name has a **Male / Female** selector so that the name matches the gender of the voice you choose.
 
