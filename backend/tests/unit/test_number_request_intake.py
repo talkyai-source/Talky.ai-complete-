@@ -334,7 +334,17 @@ def test_document_field_without_a_file_name_is_not_a_file(store):
     parts = [BIZ[0], ("business_registration", None, b"hello"), BIZ[2]]
     exc = refused(store, build(parts))
     assert (exc.status, exc.code, exc.field) == (422, "invalid_form", "business_registration")
-    assert exc.message == "Send Business registration as a file."
+    assert exc.message == "Please choose a file for Business registration."
     parts = [PER[0], PER[1], ("personal_photo_id", None, b"hello")]
-    assert refused(store, build(parts)).message == "Send Photo ID matching the utility bill as a file."
+    assert refused(store, build(parts)).message == "Please choose a file for Photo ID matching the utility bill."
     assert temps(store) == []
+
+
+def test_document_refusal_messages_used_by_buy_now():
+    from app.domain.services.number_requests import errors
+
+    kind = "business_registration"
+    assert errors.empty_file(kind).message == "Business registration is empty."
+    assert errors.file_too_large(kind, 10 * 1048576).message == "Business registration is larger than 10 MB."
+    assert errors.unsupported_file_type(kind, []).message == "Business registration must be a PDF, JPG or PNG file."
+    assert errors.missing_document(kind).message == "Add Business registration."

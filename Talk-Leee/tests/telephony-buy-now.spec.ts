@@ -913,7 +913,7 @@ const SERVER_ANSWERS: Array<{ id: string; answer: (use: string) => StateAnswer; 
     { id: "413_file_too_large", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} is larger than 10 MB.`, answer: (use) => ({ status: 413, body: serverError("file_too_large", `${SECOND_LABEL[use][1]} is larger than 10 MB.`, { field: SECOND_LABEL[use][0], max_file_bytes: 10485760 }) }) },
     { id: "415_unsupported_file_type", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} must be a PDF, JPG or PNG file.`, answer: (use) => ({ status: 415, body: serverError("unsupported_file_type", `${SECOND_LABEL[use][1]} must be a PDF, JPG or PNG file.`, { field: SECOND_LABEL[use][0], accepted_types: ["application/pdf", "image/jpeg", "image/png"] }) }) },
     { id: "422_empty_file", as: "error", shows: (use) => `${SECOND_LABEL[use][1]} is empty.`, answer: (use) => ({ status: 422, body: serverError("empty_file", `${SECOND_LABEL[use][1]} is empty.`, { field: SECOND_LABEL[use][0] }) }) },
-    { id: "429_rate_limited", as: "error", shows: () => "Too many requests. Wait a moment and try again.", answer: () => ({ status: 429, headers: { "Retry-After": "360" }, body: serverError("rate_limited", "Too many requests. Wait a moment and try again.", { limit: "10 per 1 hour", retry_after_seconds: 360 }) }) },
+    { id: "429_rate_limited", as: "error", shows: () => "You have sent too many requests. Please try again in about 1 hour.", answer: () => ({ status: 429, headers: { "Retry-After": "3600" }, body: serverError("rate_limited", "You have sent too many requests. Please try again in about 1 hour.", { limit: "10 per 1 hour", retry_after_seconds: 3600 }) }) },
     { id: "503_storage_unavailable", as: "error", shows: () => "Your documents could not be saved. Nothing was kept. Please try again.", answer: () => ({ status: 503, headers: { "Retry-After": "30" }, body: serverError("storage_unavailable", "Your documents could not be saved. Nothing was kept. Please try again.", null) }) },
     { id: "503_save_unconfirmed", as: "error", shows: () => "We could not confirm that your documents were saved. Please send the same files again.", answer: () => ({ status: 503, headers: { "Retry-After": "30" }, body: serverError("save_unconfirmed", "We could not confirm that your documents were saved. Please send the same files again.", null) }) },
     // F1: the session ended and could not be renewed. With the server's sentence, then with no body at all.
@@ -1144,7 +1144,7 @@ for (const role of ["tenant_admin", "user"] as const) {
                     expect(await buy.evaluate((el) => document.activeElement === el), `${state}: focus back on Buy Now`).toBe(true);
                 };
                 const beforeResend = posts.length;
-                answer = (use, nth) => (nth === beforeResend + 1 ? { status: 400, body: serverError("idempotency_key_reused", "This Idempotency-Key was already used with different documents. Send a new key.", { field: "Idempotency-Key" }) } : createdFor(use));
+                answer = (use, nth) => (nth === beforeResend + 1 ? { status: 400, body: serverError("idempotency_key_reused", "Your files have changed since your last try. Please press Submit again.", { field: "Idempotency-Key" }) } : createdFor(use));
                 await submit(0).click();
                 await measureMessage("resend_with_new_key_then_success", "400 idempotency_key_reused, then 201 for the automatic resend");
                 expect(posts.length - beforeResend, "exactly one automatic resend").toBe(2);

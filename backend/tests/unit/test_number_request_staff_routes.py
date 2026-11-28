@@ -373,6 +373,7 @@ async def test_document_of_another_request_is_404(monkeypatch, world):
 async def test_deleted_document_is_410(monkeypatch, world):
     r, *_ = await _open(monkeypatch, world, files_deleted_at=NOW, file_name=None, wrapped_key=None)
     assert r.status_code == 410 and r.json()["error"]["code"] == "document_deleted"
+    assert r.json()["error"]["message"] == "That document has been deleted."
     assert world.audit_calls == []
 
 
@@ -380,6 +381,7 @@ async def test_clean_scan_setting_refuses_an_unscanned_document_with_409(monkeyp
     monkeypatch.setenv("NUMBER_REQUEST_REQUIRE_CLEAN_SCAN", "true")
     r, *_ = await _open(monkeypatch, world)
     assert r.status_code == 409 and r.json()["error"]["code"] == "document_not_cleared"
+    assert r.json()["error"]["message"] == "That document has not been cleared by a virus scan."
     assert r.json()["error"]["details"]["scan_status"] == "not_scanned"
     assert b"zq9marker" not in r.content and world.audit_calls == []
 

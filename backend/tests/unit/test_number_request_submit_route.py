@@ -12,6 +12,7 @@ import copy
 import logging
 import os
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -24,6 +25,7 @@ from app.api.v1.dependencies import get_current_user, get_db_pool
 from app.api.v1.endpoints import telephony_number_requests as route
 from app.api.v1.endpoints.auth import limiter
 from app.core.error_handlers import register_error_handlers
+from app.core.request_id_middleware import RequestIdMiddleware
 from app.domain.services.number_requests import config, service
 from app.domain.services.number_requests import store as store_module
 from app.domain.services.number_requests.store import DocumentStore
@@ -196,6 +198,7 @@ def env(tmp_path, monkeypatch):
 
 def make_app(role="tenant_admin", tenant=TENANT, signed_in=True):
     app = FastAPI()
+    app.add_middleware(RequestIdMiddleware)
     app.state.limiter = limiter
     register_error_handlers(app)
     app.include_router(route.router, prefix="/api/v1")
@@ -290,6 +293,27 @@ async def test_401_when_not_signed_in(env):
     assert r.status_code == 401 and env.db.calls == 0
 
 
+async def test_ended_session_message(env, monkeypatch):
+    from app.api.v1 import dependencies
+
+    @contextlib.asynccontextmanager
+    async def acquire(pool, tenant):
+        yield object()
+
+    async def missing_session(conn, session_id, *, user_id):
+        return None
+
+    monkeypatch.setattr(dependencies, "decode_and_validate_token", lambda _: {"sub": USER_ID, "sid": "session"})
+    monkeypatch.setattr(dependencies, "get_db_client", lambda: SimpleNamespace(pool=object()))
+    monkeypatch.setattr(dependencies, "acquire_with_tenant", acquire)
+    monkeypatch.setattr(dependencies, "get_session_by_id", missing_session)
+    app = make_app()
+    del app.dependency_overrides[get_current_user]
+    response = await post(app, headers={"Authorization": "Bearer dummy"})
+    assert response.status_code == 401
+    assert response.json()["error"]["message"] == "Your login session has ended. Please sign in again."
+
+
 async def test_403_tenant_required(env):
     r = await post(make_app(tenant=None))
     assert r.status_code == 403
@@ -306,14 +330,24 @@ async def test_403_role_not_allowed_when_roles_are_set(env, monkeypatch):
     assert ok.status_code == 201
 
 
-async def test_idempotency_key_codes(env):
-    app = make_app()
-    missing = await post(app, key=None)
-    bad = await post(app, key="short")
-    assert missing.status_code == 400
-    assert missing.json()["error"]["code"] == "idempotency_key_required"
-    assert missing.json()["error"]["details"] == {"field": "Idempotency-Key"}
-    assert bad.status_code == 400 and bad.json()["error"]["code"] == "idempotency_key_invalid"
+def assert_refusal(response, status, code, message, field):
+    assert response.status_code == status
+    request_id = response.headers["X-Request-ID"]
+    assert str(uuid.UUID(request_id)) == request_id
+    assert response.json() == {"error": {
+        "code": code, "message": message, "details": {"field": field}, "request_id": request_id,
+    }}
+
+
+@pytest.mark.parametrize("key,code", [
+    (None, "idempotency_key_required"),
+    ("short", "idempotency_key_invalid"),
+])
+async def test_idempotency_key_codes(env, key, code):
+    response = await post(make_app(), key=key)
+    assert_refusal(response, 400, code,
+                   "Your request could not be sent. Please try again.",
+                   "Idempotency-Key")
     assert env.db.calls == 0
     assert not [f for f in files_on_disk(env.root) if f.endswith(".part")]
 
@@ -324,10 +358,9 @@ async def test_same_key_different_documents_is_400_and_creates_nothing(env):
     assert first.status_code == 201
     other = [BIZ[0], ("business_registration", "reg.pdf", PDF + b"x"), BIZ[2]]
     r = await post(app, other)
-    assert r.status_code == 400
-    err = r.json()["error"]
-    assert err["code"] == "idempotency_key_reused"
-    assert err["details"] == {"field": "Idempotency-Key"}
+    assert_refusal(r, 400, "idempotency_key_reused",
+                   "Your files have changed since your last try. Please press Submit again.",
+                   "Idempotency-Key")
     assert len(env.db.requests) == 1 and len(env.db.documents) == 2
     assert len([f for f in files_on_disk(env.root) if f.endswith(".tnr")]) == 2
     assert not [f for f in files_on_disk(env.root) if f.endswith(".part")]
@@ -387,24 +420,51 @@ async def test_422_codes(env, parts, code, field):
     assert not [f for f in files_on_disk(env.root) if f.endswith((".part", ".tnr"))]
 
 
-async def test_422_when_not_multipart(env):
-    r = await post(make_app(), body=b"{}", headers={"Content-Type": "application/json"})
-    assert r.status_code == 422
-    err = r.json()["error"]
-    assert err["code"] == "invalid_form" and err["message"] == "Send the documents as multipart/form-data."
-    assert err["details"] == {"field": "body"}
+@pytest.mark.parametrize("content_type", ["application/json", "multipart/form-data"])
+async def test_unreadable_form(env, content_type):
+    r = await post(make_app(), body=b"{}", headers={"Content-Type": content_type})
+    assert_refusal(r, 422, "invalid_form",
+                   "Your documents could not be read. Please choose the files again and press Submit.", "body")
 
 
-async def test_429_on_the_eleventh_request(env, monkeypatch):
+async def test_too_many_form_parts(env, monkeypatch):
+    # Exercise the parser's part cap before its independent per-field checks.
+    monkeypatch.setattr("app.domain.services.number_requests.intake.MAX_PARTS", 2)
+    r = await post(make_app())
+    assert_refusal(r, 422, "invalid_form", "Please send only the two documents for this request.", "body")
+
+
+@pytest.mark.parametrize("elapsed,expected_wait,wording", [
+    (0, 3600, "about 1 hour"),
+    (3000, 600, "about 10 minutes"),
+])
+async def test_429_on_the_eleventh_request(env, monkeypatch, elapsed, expected_wait, wording):
     # the hourly limit is under test here, not the cap on waiting requests
     monkeypatch.setattr(config, "MAX_OPEN_REQUESTS_PER_ACCOUNT", 100)
     app = make_app()
-    codes = []
-    for i in range(11):
-        r = await post(app, key=f"key-aaaaaaaa-{i:04d}")
-        codes.append(r.status_code)
-    assert codes[:10] == [201] * 10 and codes[10] == 429
-    assert "Retry-After" in r.headers
+    now = time.time()
+    monkeypatch.setattr(time, "time", lambda: now)
+    for i in range(10):
+        response = await post(app, key=f"key-aaaaaaaa-{i:04d}")
+        assert response.status_code == 201
+    now += elapsed
+    response = await post(app, key="eleventh")
+    assert response.status_code == 429
+    assert int(response.headers["Retry-After"]) == expected_wait
+    error = response.json()["error"]
+    assert error["details"]["retry_after_seconds"] == expected_wait
+    assert error["message"] == f"You have sent too many requests. Please try again in {wording}."
+
+
+@pytest.mark.parametrize("seconds,words", [
+    (0, "less than a minute"), (59, "less than a minute"),
+    (60, "about 1 minute"), (90, "about 2 minutes"),
+    (3599, "about 1 hour"), (3600, "about 1 hour"), (None, "a little while"),
+])
+def test_wait_words(seconds, words):
+    from app.core.retry_wait import wait_words
+
+    assert wait_words(seconds) == words
 
 
 # ---------------------------------------------------- saved together / 503 ----
@@ -701,11 +761,8 @@ async def test_boundary_over_256_characters_is_422_not_500(env):
     assert [f for f in files_on_disk(env.root) if f.endswith((".part", ".tnr"))] == []
 
 
-async def test_document_field_without_a_file_name_says_send_as_a_file(env):
+async def test_document_field_without_a_file_name(env):
     parts = [BIZ[0], ("business_registration", None, b"text"), BIZ[2]]
     r = await post(make_app(), parts)
-    assert r.status_code == 422
-    err = r.json()["error"]
-    assert err["code"] == "invalid_form"
-    assert err["message"] == "Send Business registration as a file."
-    assert err["details"] == {"field": "business_registration"}
+    assert_refusal(r, 422, "invalid_form", "Please choose a file for Business registration.",
+                   "business_registration")

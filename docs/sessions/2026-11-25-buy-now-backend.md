@@ -32,14 +32,16 @@ Every statement of this feature carries an explicit account predicate. The revie
 | Virus scan if the infrastructure supports it | Documents are marked `not_scanned`; the download says so (`X-Document-Scan`) | No scanner exists on the server |
 | "The same key returns the same answer" | A replay is rebuilt from the database | After a decision it shows the current status |
 | The body is never held in memory | The security middleware reads up to about 20 MB for this one path, then the route parses it in pieces | The existing middleware buffers every request; the larger limit applies to this path only |
-| The request-wide "too large" answer | The middleware's existing `{"detail": …}` shape | The per-file limit, checked first by the website, uses the standard error shape |
+| The request-wide "too large" answer | The standard error shape with a customer sentence (the old `detail` key is kept beside `error`, same sentence) | The per-file limit, checked first by the website, uses the standard error shape |
 
 Known and accepted: while the disk is below its floor a retry of an unconfirmed save is refused like a new upload.
+
+The product owner approved the four document refusal messages. They read “{Label} is empty.”, “{Label} is larger than 10 MB.”, “{Label} must be a PDF, JPG or PNG file.” and “Add {Label}.”
 
 ## Waiting for the product owner
 
 - The retention times, and the clean-up's dry-run switch (the nightly clean-up in production runs as a dry run).
-- The wording of the two decision emails and of the refusal messages, including three added in review: "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents."; "We could not confirm that your documents were saved. Please send the same files again."; "Send <document name> as a file."
+- The wording of the two decision emails and the other submission messages, including "Your earlier requests are still waiting for review. Please wait for a decision before sending more documents.", "We could not confirm that your documents were saved. Please send the same files again." and "Please choose a file for {Label}."
 - Whether three waiting requests per account is the right limit.
 - Whether any member of an account may submit (the recommended option) or only its admins.
 - A virus scanner; an off-site copy of the documents folder (the files are encrypted, so a copy would be safe); a sentence in the Privacy Policy on how these documents are stored and for how long.
