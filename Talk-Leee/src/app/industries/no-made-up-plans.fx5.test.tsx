@@ -21,8 +21,10 @@ import EducationPage from "./education/page";
 import FinancialServicesPage from "./financial-services/page";
 import HealthcarePage from "./healthcare/page";
 import MarketingAutomationPage from "./marketing-automation/page";
+import ProfessionalServicesPage from "./professional-services/page";
 import RealEstatePage from "./real-estate/page";
 import RecruitmentPage from "./recruitment/page";
+import RetailEcommercePage from "./retail-ecommerce/page";
 import SoftwareTechSupportPage from "./software-tech-support/page";
 import TravelIndustryPage from "./travel-industry/page";
 
@@ -56,7 +58,9 @@ const pages: Array<[string, React.ComponentType, string, boolean]> = [
     ["/industries/healthcare/", HealthcarePage, "Flexible Plans for Every Healthcare Practice", false],
     ["/industries/marketing-automation/", MarketingAutomationPage, "Flexible Plans for Every Marketing Agency", true],
     ["/industries/real-estate/", RealEstatePage, "Flexible Plans for Real Estate Teams", false],
+    ["/industries/professional-services/", ProfessionalServicesPage, "Flexible Plans for Professional Firms", true],
     ["/industries/recruitment/", RecruitmentPage, "Pricing for Every Hiring Team", true],
+    ["/industries/retail-ecommerce/", RetailEcommercePage, "Flexible Plans for Retail Teams", false],
     ["/industries/software-tech-support/", SoftwareTechSupportPage, "Flexible Solutions for Every Stage of Growth", false],
     ["/industries/travel-industry/", TravelIndustryPage, "Pricing for Every Travel & Hospitality Business", true],
 ];
@@ -77,6 +81,15 @@ for (const [route, Page, planHeading, hadPricingLink] of pages) {
         if (hadPricingLink) assert.equal(pricingLinks.length > 0, true, "the existing link to /pricing stays");
     });
 }
+
+test("professional-services: one View Pricing link to /pricing instead of three plan cards", (context) => {
+    context.mock.method(globalThis, "fetch", async () => { throw new Error("no network in this test"); });
+    renderPublic("/industries/professional-services/", <ProfessionalServicesPage />);
+    const section = Array.from(document.querySelectorAll("section")).find((node) => node.querySelector("h2")?.textContent === "Pricing");
+    assert.ok(section, "the Pricing section replaces the plan cards");
+    const links = Array.from(section.querySelectorAll("a"));
+    assert.deepEqual(links.map((a) => [a.textContent?.trim(), a.getAttribute("href")]), [["View Pricing", "/pricing"]]);
+});
 
 test("integrations that stay are still named", (context) => {
     context.mock.method(globalThis, "fetch", async () => { throw new Error("no network in this test"); });

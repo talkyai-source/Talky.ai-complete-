@@ -29,11 +29,9 @@ const rootDescription = /description: "([^"]+)"/.exec(
 )?.[1];
 const rootMetadata = { description: rootDescription, metadataBase: sharedMetadata.metadataBase };
 
-// The ten industry pages get their titles in another package, and the docs
-// pages (/docs*) keep their own title form. A new page under either folder is
-// NOT covered by the title and description checks below.
-const OTHER_FORM = (route: string) =>
-    route.startsWith("/industries/") || route === "/docs" || route.startsWith("/docs/");
+// The docs pages (/docs*) keep their own title form. A new page under that
+// folder is NOT covered by the title and description checks below.
+const OTHER_FORM = (route: string) => route === "/docs" || route.startsWith("/docs/");
 
 const checked = PUBLIC_ROUTES.filter((route) => !OTHER_FORM(route));
 
@@ -60,7 +58,7 @@ test("T1: every checked public page has a unique title ending in the brand suffi
         assert.ok(!titles.has(text), `${route} and ${titles.get(text)} share the title "${text}"`);
         titles.set(text, route);
     }
-    assert.ok(checked.length >= 14);
+    assert.ok(checked.length >= 24);
 });
 
 test("T2: every checked public page has its own description, never the root one", async () => {

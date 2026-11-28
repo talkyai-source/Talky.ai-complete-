@@ -35,7 +35,7 @@ function renderPage() {
 
 /** The integrations section: its card titles, in page order. */
 function integrationCards(): string[] {
-    const heading = screen.getByRole("heading", { name: "Connect With the Hospitality Tools You Already Use" });
+    const heading = screen.getByRole("heading", { name: "Connect the Tools Talk-Lee AI Supports" });
     const section = heading.closest("section");
     assert.equal(section !== null, true, "the integrations section is on the page");
     return Array.from(section!.querySelectorAll("h3")).map((node) => node.textContent ?? "");
@@ -55,8 +55,8 @@ test("the section keeps its heading and its other two cards, with no empty card 
     context.mock.method(globalThis, "fetch", async () => { throw new Error("no network in this test"); });
     renderPage();
     const cards = integrationCards();
-    assert.deepEqual(cards, ["Calendar & Scheduling", "Workflow Automation"]);
-    const section = screen.getByRole("heading", { name: "Connect With the Hospitality Tools You Already Use" }).closest("section")!;
+    assert.deepEqual(cards, ["Call Logging", "Follow-up Email"]);
+    const section = screen.getByRole("heading", { name: "Connect the Tools Talk-Lee AI Supports" }).closest("section")!;
     const grid = section.querySelector(".grid")!;
     assert.equal(grid.children.length, 2, "the grid holds exactly the two cards");
     assert.equal(Array.from(grid.children).every((card) => (card.textContent ?? "").trim().length > 0), true, "no empty card");
