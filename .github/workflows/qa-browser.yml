@@ -83,7 +83,7 @@ jobs:
         if: ${{ !inputs.update_linux_snapshots }}
         env:
           ADMIN_BASE_URL: http://127.0.0.1:4173
-        run: npx playwright test tests/demo.smoke.spec.ts tests/dashboard-first-row.visual.spec.ts tests/journey-sign-in.spec.ts tests/journey-campaign-create.spec.ts tests/journey-import.spec.ts tests/journey-billing.spec.ts tests/journey-admin.spec.ts --project=chromium --workers=1 --reporter=list,html
+        run: npx playwright test tests/demo.smoke.spec.ts tests/dashboard-first-row.visual.spec.ts tests/journey-sign-in.spec.ts tests/journey-campaign-create.spec.ts tests/journey-import.spec.ts tests/journey-billing.spec.ts tests/journey-admin.spec.ts tests/public-conversion-flow.spec.ts --project=chromium --workers=1 --reporter=list,html
       # Manual run with the input ticked only: nothing is compared, and the
       # images are uploaded, not committed.
       - name: Write the Linux reference images
