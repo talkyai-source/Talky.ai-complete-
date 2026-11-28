@@ -6,6 +6,15 @@ export const SITE_URL = "https://talkleeai.com";
 
 export const SITE_NAME = "Talk-Lee";
 
+// The one brand suffix of a page title. Pages build theirs with pageTitle();
+// there is no root title template, because pages that already carry the
+// suffix would get it twice.
+export const BRAND_TITLE_SUFFIX = "Talk-Lee AI";
+
+export function pageTitle(name: string): string {
+  return `${name} | ${BRAND_TITLE_SUFFIX}`;
+}
+
 // Spread into the root layout's `metadata` so every route inherits it.
 //
 // "./" resolves against the route being rendered, and because next.config.ts

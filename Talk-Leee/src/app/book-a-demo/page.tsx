@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { DemoBooking } from "./demo-booking";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Book a Demo",
+  title: pageTitle("Book a Demo"),
   description: "Tell us about your business and choose a time for your 30-minute Talk-Lee demo.",
 };
 

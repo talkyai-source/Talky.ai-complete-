@@ -54,6 +54,14 @@ const nextConfig: NextConfig = {
             { source: "/inbound/calls/", destination: "/calls?direction=inbound", permanent: false },
             { source: "/inbound/:id/edit", destination: "/inbound-campaigns", permanent: false },
             { source: "/inbound/:id/edit/", destination: "/inbound-campaigns", permanent: false },
+            // Old addresses that answered 404. /docs/support and /docs/partners
+            // stay withheld from the catalog and sitemap; visitors land on the index.
+            { source: "/docs/support", destination: "/docs", permanent: true },
+            { source: "/docs/support/", destination: "/docs", permanent: true },
+            { source: "/docs/partners", destination: "/docs", permanent: true },
+            { source: "/docs/partners/", destination: "/docs", permanent: true },
+            { source: "/ai-voices", destination: "/ai-voice-agent", permanent: true },
+            { source: "/ai-voices/", destination: "/ai-voice-agent", permanent: true },
             // Listed last: `/inbound` must not shadow the deeper paths above.
             ...target("/inbound-campaigns"),
         ];

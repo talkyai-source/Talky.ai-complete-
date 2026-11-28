@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { ContactSection } from "@/components/home/contact-section";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Contact Talk-Lee AI",
+  title: pageTitle("Contact"),
   description: "Get in touch with our team to learn how Talk-Lee can help.",
 };
 

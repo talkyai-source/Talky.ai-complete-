@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalDocument, type LegalBlock } from "@/components/legal/legal-document";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee | Accessibility Statement",
+  title: pageTitle("Accessibility Statement"),
   description:
     "What Talk-Lee does to be usable by everyone, the gaps we know about, and how to tell us when something is hard to use.",
 };

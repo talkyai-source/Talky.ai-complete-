@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { useCaseNavItems } from "@/lib/products-use-cases";
 import { CategoryOverviewPage } from "@/components/home/category-overview";
+import { pageTitle } from "@/lib/site-metadata";
 
-// Title only: the description is inherited from the root layout.
 export const metadata: Metadata = {
-  title: "Use Cases | Talk-Lee AI",
+  title: pageTitle("Use Cases"),
+  description:
+    "See how teams use Talk-Lee voice agents on the phone, from qualifying leads on outbound calls to answering support calls.",
 };
 
 // The same list the navbar's Use Cases dropdown renders.

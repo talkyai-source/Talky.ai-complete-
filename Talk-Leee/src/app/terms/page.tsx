@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/legal-document";
 import { termsBlocks } from "./terms-content";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee | Terms of Service",
+  title: pageTitle("Terms of Service"),
   description:
     "The legally binding terms governing your use of the Talk-Lee AI voice agent platform, including acceptable use, billing, and compliance obligations.",
 };

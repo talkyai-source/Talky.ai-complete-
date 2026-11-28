@@ -1,6 +1,14 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { pageTitle } from "@/lib/site-metadata";
+
+export const metadata: Metadata = {
+    title: pageTitle("Not allowed"),
+    description: "This page tells a signed-in visitor that their account does not have permission to open the address they asked for.",
+    robots: { index: false, follow: false },
+};
 
 export default function UnauthorizedPage() {
     return (
