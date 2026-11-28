@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { productNavItems } from "@/lib/products-use-cases";
 import { CategoryOverviewPage } from "@/components/home/category-overview";
+import { pageTitle } from "@/lib/site-metadata";
 
-// Title only: the description is inherited from the root layout.
 export const metadata: Metadata = {
-  title: "Products | Talk-Lee AI",
+  title: pageTitle("Products"),
+  description:
+    "See the three Talk-Lee AI products: the AI Voice Dialer, AI Assist and the AI Voice Agent, and what each one does.",
 };
 
 // The same list the navbar's Products dropdown renders.

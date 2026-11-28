@@ -95,8 +95,14 @@ test("the category page content fills at least one screen above the footer", () 
     }
 });
 
-test("the pages set no description of their own, so the root layout's is inherited", () => {
-    for (const m of [productsMetadata, useCasesMetadata, industriesMetadata]) {
-        assert.equal(Object.hasOwn(m, "description"), false);
+// The old rule was the opposite (no description, so the root layout's was
+// inherited): three public pages then shared one description. Each page now
+// sets its own.
+test("each category page sets a description of its own, so none inherits the root layout's", () => {
+    const descriptions = [productsMetadata, useCasesMetadata, industriesMetadata].map((m) => m.description);
+    for (const description of descriptions) {
+        assert.equal(typeof description, "string");
+        assert.ok((description as string).length > 20);
     }
+    assert.equal(new Set(descriptions).size, descriptions.length);
 });

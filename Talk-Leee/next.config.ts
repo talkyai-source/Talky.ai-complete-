@@ -54,6 +54,19 @@ const nextConfig: NextConfig = {
             { source: "/inbound/calls/", destination: "/calls?direction=inbound", permanent: false },
             { source: "/inbound/:id/edit", destination: "/inbound-campaigns", permanent: false },
             { source: "/inbound/:id/edit/", destination: "/inbound-campaigns", permanent: false },
+            // Old addresses that answered 404. Destinations carry the trailing
+            // slash so a visitor is redirected once, not twice.
+            // /docs/support and /docs/partners are withheld only until they are
+            // enabled again, so their redirects are temporary. A redirect runs
+            // before the page route: remove the entry when the page is published
+            // (seo-metadata.test.tsx fails until then).
+            { source: "/docs/support", destination: "/docs/", permanent: false },
+            { source: "/docs/support/", destination: "/docs/", permanent: false },
+            { source: "/docs/partners", destination: "/docs/", permanent: false },
+            { source: "/docs/partners/", destination: "/docs/", permanent: false },
+            // The /ai-voices page was removed for good.
+            { source: "/ai-voices", destination: "/ai-voice-agent/", permanent: true },
+            { source: "/ai-voices/", destination: "/ai-voice-agent/", permanent: true },
             // Listed last: `/inbound` must not shadow the deeper paths above.
             ...target("/inbound-campaigns"),
         ];

@@ -2,9 +2,10 @@ import type { Metadata } from "next";
 import { LegalDocument } from "@/components/legal/legal-document";
 import { PRIVACY_POLICY_DATES, formatPolicyDate } from "@/lib/privacy-policy-dates";
 import { privacyBlocks, privacyIntro } from "./privacy-content";
+import { pageTitle } from "@/lib/site-metadata";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee | Privacy Policy",
+  title: pageTitle("Privacy Policy"),
   description:
     "How Talk-Lee collects, uses, shares, and protects personal data across the AI voice agent platform, and the rights you have over your data.",
 };

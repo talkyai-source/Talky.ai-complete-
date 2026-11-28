@@ -81,7 +81,8 @@ function isPublicContactPath(pathname: string) {
         pathname === "/api/contact-enquiries" || pathname === "/api/contact-enquiries/";
 }
 
-function isPublicPath(pathname: string) {
+// Exported for proxy.public-paths.test.ts only.
+export function isPublicPath(pathname: string) {
     if (pathname === "/") return true;
     if (isPublicContactPath(pathname)) return true;
     if (pathname.startsWith("/auth/")) return true;
@@ -95,6 +96,9 @@ function isPublicPath(pathname: string) {
     if (pathname === "/pricing" || pathname.startsWith("/pricing/")) return true;
     if (pathname === "/book-a-demo" || pathname.startsWith("/book-a-demo/")) return true;
     if (pathname === "/docs" || pathname.startsWith("/docs/")) return true;
+    if (pathname === "/privacy" || pathname.startsWith("/privacy/")) return true;
+    if (pathname === "/terms" || pathname.startsWith("/terms/")) return true;
+    if (pathname === "/accessibility" || pathname.startsWith("/accessibility/")) return true;
     if (pathname.startsWith("/use-cases")) return true;
     if (pathname.startsWith("/industries")) return true;
     return false;
