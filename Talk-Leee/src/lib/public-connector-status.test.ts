@@ -39,3 +39,14 @@ test("W5-T2 the sentences promise no more than the dashboard cards", () => {
     const cal = PUBLIC_CONNECTORS.find((c) => c.name === "Google Calendar")!;
     assert.match(cal.customerMust, /not by calls/i, "the calendar is not used by calls");
 });
+
+test("W5-T2 audit: CRM entries say Business plan, calendar and Drive say not by calls, no entry names a Google account", () => {
+    const get = (name: string) => PUBLIC_CONNECTORS.find((c) => c.name === name)!;
+    for (const name of ["HubSpot", "Salesforce"]) {
+        const c = get(name);
+        assert.match(c.does + " " + c.customerMust, /Business plan/, `${name}: call logging is on the Business plan`);
+        assert.match(c.customerMust, /Business plan/, `${name}: the customer sentence says it`);
+    }
+    for (const name of ["Google Calendar", "Google Drive"]) assert.match(get(name).customerMust, /not by calls/i, `${name}: used by the assistant, not by calls`);
+    for (const c of PUBLIC_CONNECTORS) assert.doesNotMatch(c.customerMust, /Google account/i, `${c.name}: each card is its own connection`);
+});

@@ -61,3 +61,15 @@ test("W5-T8 every navigation target is an existing route", () => {
         assert.ok(routeExists(href), `${href} has no page`);
     }
 });
+
+// Audit of 28 Nov 2026: with "Documentation" the bar is about 124 px wider, so the
+// horizontal menu starts at 1200 px, not 1060 px; below that the drawer shows. The
+// browser cannot be measured here, so this reads the source: one breakpoint everywhere.
+test("W5-T12 the horizontal menu starts at 1200px in the component and in the stylesheet", () => {
+    const navbar = fs.readFileSync(path.join(process.cwd(), "src/components/home/navbar.tsx"), "utf8");
+    const css = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+    assert.doesNotMatch(navbar, /min-\[1060px\]/);
+    assert.equal(navbar.split(/\r?\n/).filter((line) => line.includes("min-[1200px]")).length, 7, "the seven lines that switch drawer and bar");
+    assert.doesNotMatch(css, /min-width:\s*1060px/);
+    assert.match(css, /@media \(min-width: 1200px\)\s*\{\s*\.home-navbar-fixed/);
+});

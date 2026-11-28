@@ -8,11 +8,11 @@ export type Availability = (typeof AVAILABILITY_VALUES)[number];
 // Same pill shape and colours as components/ui/status-pill.tsx (emerald,
 // amber, grey); sky is the status pill's neutral accent family.
 const PILL: Record<Availability, { pill: string; dot: string }> = {
-    Available: { pill: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700", dot: "bg-emerald-500" },
-    Beta: { pill: "border-sky-500/30 bg-sky-500/10 text-sky-700", dot: "bg-sky-500" },
-    Limited: { pill: "border-amber-500/30 bg-amber-500/10 text-amber-700", dot: "bg-amber-500" },
+    Available: { pill: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300", dot: "bg-emerald-500" },
+    Beta: { pill: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300", dot: "bg-sky-500" },
+    Limited: { pill: "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300", dot: "bg-amber-500" },
     "Admin-only": { pill: "border-gray-300 bg-gray-100 text-gray-700", dot: "bg-gray-400" },
-    "Selected plans": { pill: "border-sky-500/30 bg-sky-500/10 text-sky-700", dot: "bg-sky-500" },
+    "Selected plans": { pill: "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300", dot: "bg-sky-500" },
     "Coming soon": { pill: "border-gray-300 bg-gray-100 text-gray-700", dot: "bg-gray-400" },
 };
 

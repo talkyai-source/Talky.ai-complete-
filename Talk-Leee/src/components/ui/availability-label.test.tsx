@@ -26,3 +26,13 @@ test("W5-T4 any other value is a type error", () => {
     const el = <AvailabilityLabel value="Maybe" />;
     assert.ok(el);
 });
+
+// The grey pills keep an opaque light fill in dark mode, where their dark grey text reads well; only
+// the translucent emerald, amber and sky pills sit on the black section and need a light text colour.
+test("W5-T4 every translucent pill has a dark-mode text colour", () => {
+    for (const value of ["Available", "Beta", "Limited", "Selected plans"] as const) {
+        const { container } = render(<AvailabilityLabel value={value} />);
+        const cls = container.firstElementChild!.getAttribute("class") ?? "";
+        assert.match(cls, /dark:text-\S+/, `${value} has no dark:text colour`);
+    }
+});

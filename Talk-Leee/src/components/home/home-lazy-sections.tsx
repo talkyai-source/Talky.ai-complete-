@@ -59,11 +59,11 @@ export function FAQSection() {
     },
     {
       question: "Do I need technical expertise to use Talk-Lee AI?",
-      answer: "No. Our guided AI builder makes it simple to design call flows and prompts without coding.",
+      answer: "No. Our guided AI builder makes it simple to design campaigns and prompts without coding.",
     },
     {
       question: "Can Talk-Lee AI connect to my existing phone system or CRM?",
-      answer: "Talk-Lee AI connects to your phone system through a SIP trunk, and logs calls to HubSpot or Salesforce once you connect one in the dashboard. See the connectors on this page for the status of each.",
+      answer: "Talk-Lee AI connects to your phone system through a SIP trunk and, on the Business plan, logs calls to HubSpot or Salesforce once you connect one in the dashboard. See the Connectors section on this page for the status of each.",
     },
     {
       question: "How does Talk-Lee AI learn my company information?",
@@ -83,7 +83,7 @@ export function FAQSection() {
     },
     {
       question: "Do you provide phone numbers for campaigns?",
-      answer: "Yes, on request. A number can be requested in the dashboard under Settings, Telephony (Buy Now). Staff review each request, so it is not an instant purchase. Meanwhile calls go out through Talk-Lee AI's shared line, or through your own SIP trunk and numbers. Telephone (PSTN / SIP) usage is not included in AI minutes.",
+      answer: "On request. Under Settings, Telephony, Buy Now, upload the documents asked for; staff review each request and contact you about the next steps, so it is not instant. You can also connect your own SIP trunk and numbers. Telephone (PSTN / SIP) usage is not included in AI minutes.",
     },
   ];
 

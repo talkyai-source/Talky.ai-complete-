@@ -21,13 +21,13 @@ export const PUBLIC_CONNECTORS: readonly PublicConnector[] = [
         name: "Google Calendar",
         status: "Limited",
         does: "Lets the assistant read your upcoming events and book, change or cancel meetings.",
-        customerMust: "Connect your Google account under Connectors. Used by the assistant in the dashboard, not by calls.",
+        customerMust: "Connect Google Calendar under Connectors. Used by the assistant in the dashboard, not by calls.",
     },
     {
         name: "Gmail",
         status: "Limited",
         does: "Lets the assistant read your inbox and send emails from your account. A call can send a follow-up email.",
-        customerMust: "Connect your Google account under Connectors. A call sends email only when the campaign has an email action and the caller confirms the address.",
+        customerMust: "Connect Gmail under Connectors. A call sends email only when the campaign has an email action and the caller confirms the address.",
     },
     {
         name: "HubSpot",
@@ -39,12 +39,12 @@ export const PUBLIC_CONNECTORS: readonly PublicConnector[] = [
         name: "Google Drive",
         status: "Limited",
         does: "Lets the assistant list your files and read text files.",
-        customerMust: "Connect your Google account under Connectors. Used by the assistant in the dashboard, not by calls.",
+        customerMust: "Connect Google Drive under Connectors. Used by the assistant in the dashboard, not by calls.",
     },
     {
         name: "Salesforce",
         status: "Limited",
-        does: "Logs calls as Salesforce Tasks, creates Leads for new callees, and lets Salesforce request agent callbacks.",
-        customerMust: "Ask support to turn it on, then connect it under Connectors. Call logging is on the Business plan.",
+        does: "Logs calls as Salesforce Tasks, creates Leads for new callees, and lets Salesforce request a call on an outgoing campaign.",
+        customerMust: "Its card appears under Connectors once Salesforce is switched on for the service. Call logging is on the Business plan.",
     },
 ];
