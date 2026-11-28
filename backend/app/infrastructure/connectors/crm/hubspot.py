@@ -280,7 +280,7 @@ class HubSpotConnector(CRMProvider):
         }
         reference = call_reference(call_body)
         if reference:
-            call_props["hs_call_title"] = f"Talky.ai call {reference}"
+            call_props["hs_call_title"] = f"Talk-Lee call {reference}"
         body = {
             "properties": call_props,
             "associations": [
@@ -317,11 +317,17 @@ class HubSpotConnector(CRMProvider):
 
     async def find_call_by_reference(self, reference: str) -> Optional[str]:
         from uuid import UUID
-        title = f"Talky.ai call {UUID(reference)}"
+        call_id = UUID(reference)
+        # Separate groups are ORed. Keep the shared limit so duplicate records
+        # under different titles are still reported as ambiguous.
+        filter_groups = [
+            {"filters": [{"propertyName": "hs_call_title", "operator": "EQ", "value": title}]}
+            for title in (f"Talk-Lee call {call_id}", f"Talky.ai call {call_id}")
+        ]
         async with httpx.AsyncClient(timeout=20) as client:
             response = await client.post(
                 f"{self.API_BASE_URL}/crm/v3/objects/calls/search",
-                json={"filterGroups": [{"filters": [{"propertyName": "hs_call_title", "operator": "EQ", "value": title}]}],
+                json={"filterGroups": filter_groups,
                       "properties": ["hs_call_title"], "limit": 2}, headers=self._get_auth_headers(),
             )
             self._check_response(response, "find_call_by_reference")

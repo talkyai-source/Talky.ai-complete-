@@ -115,8 +115,10 @@ def boundaries(monkeypatch):
             if provider == "hubspot":
                 assert request.method == "POST" and request.url.path == "/crm/v3/objects/calls/search"
                 assert json.loads(request.content) == {
-                    "filterGroups": [{"filters": [{"propertyName": "hs_call_title", "operator": "EQ",
-                                                  "value": f"Talky.ai call {CALL}"}]}],
+                    "filterGroups": [
+                        {"filters": [{"propertyName": "hs_call_title", "operator": "EQ", "value": title}]}
+                        for title in (f"Talk-Lee call {CALL}", f"Talky.ai call {CALL}")
+                    ],
                     "properties": ["hs_call_title"], "limit": 2,
                 }
             else:

@@ -46,8 +46,39 @@ async def test_hubspot_create_and_reconcile_share_reference(monkeypatch):
     assert await connector.log_call('contact', f'Talky.ai call id: {REFERENCE}', 10) == 'hs-call'
     assert await connector.find_call_by_reference(REFERENCE) == 'hs-call'
     title = json.loads(requests[0].content)['properties']['hs_call_title']
-    search = json.loads(requests[1].content)['filterGroups'][0]['filters'][0]
-    assert search == {'propertyName': 'hs_call_title', 'operator': 'EQ', 'value': title}
+    assert title == f'Talk-Lee call {REFERENCE}'
+    assert json.loads(requests[0].content)['properties']['hs_call_body'] == f'Talky.ai call id: {REFERENCE}'
+    assert json.loads(requests[1].content)['filterGroups'] == [
+        {'filters': [{'propertyName': 'hs_call_title', 'operator': 'EQ', 'value': heading}]}
+        for heading in (title, f'Talky.ai call {REFERENCE}')
+    ]
+
+
+async def test_hubspot_reconciles_and_updates_a_call_with_the_previous_title(monkeypatch):
+    old_title = f'Talky.ai call {REFERENCE}'
+    activities = {'old-activity': {'hs_call_title': old_title, 'hs_call_body': 'Original'}}
+
+    def respond(request):
+        payload = json.loads(request.content)
+        if request.method == 'POST' and request.url.path.endswith('/calls/search'):
+            titles = {group['filters'][0]['value'] for group in payload['filterGroups']}
+            return httpx.Response(200, json={'results': [
+                {'id': key} for key, properties in activities.items() if properties['hs_call_title'] in titles
+            ]})
+        assert request.method == 'PATCH' and request.url.path.endswith('/calls/old-activity')
+        activities['old-activity'].update(payload['properties'])
+        return httpx.Response(200, json={'id': 'old-activity'})
+
+    client_class = httpx.AsyncClient
+    monkeypatch.setattr(module.httpx, 'AsyncClient', lambda **kwargs: client_class(
+        transport=httpx.MockTransport(respond), **kwargs))
+    connector = HubSpotConnector('tenant', 'connector')
+    await connector.set_access_token('dummy')
+    found = await connector.find_call_by_reference(REFERENCE)
+    assert found == 'old-activity'
+    assert await connector.update_call_log(found, call_body=f'Updated\nTalky.ai call id: {REFERENCE}')
+    assert list(activities) == ['old-activity']
+    assert activities[found]['hs_call_body'] == f'Updated\nTalky.ai call id: {REFERENCE}'
 
 
 async def test_hubspot_ambiguous_reconciliation_never_selects_first(monkeypatch):
