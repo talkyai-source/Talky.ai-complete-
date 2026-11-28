@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { LegalBlock } from "@/components/legal/legal-document";
@@ -175,4 +176,19 @@ test("the promises that were not wrong are kept", () => {
     assert.match(policyText, /we never store card numbers/);
     assert.match(policyText, /Standard Contractual Clauses/);
     assert.match(policyText, /We do not use Google Analytics/);
+});
+
+// The legal text is pinned so a change to it is deliberate. The hash covers the
+// content serialised without any "All rights reserved" block (the shared footer
+// shows the copyright). A deliberate change to the legal text must update this
+// hash on purpose.
+const PRIVACY_SHA256 = "49c93a2c4965deccbcdbcb3866ba1a3ed903a5751ecf02b7918bc868c2f5252d";
+
+test("the Privacy content has no typed copyright block (the footer shows it)", () => {
+    assert.equal(textOf(privacyBlocks).includes("All rights reserved"), false);
+});
+
+test("the Privacy legal text is unchanged apart from the copyright block", () => {
+    const serial = JSON.stringify({ intro: privacyIntro, blocks: privacyBlocks });
+    assert.equal(createHash("sha256").update(serial).digest("hex"), PRIVACY_SHA256);
 });

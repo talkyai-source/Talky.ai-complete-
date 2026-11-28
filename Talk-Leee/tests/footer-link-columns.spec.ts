@@ -3,7 +3,7 @@ import { test, expect } from "@playwright/test";
 // The footer's two link columns share one row rhythm: row N of the navigation
 // list and row N of the secondary links must sit on the same horizontal line,
 // at every width where the two columns are side by side (which is every width).
-// The unpaired fifth and sixth navigation rows sit below the last secondary row.
+// The unpaired seventh secondary row sits below the last navigation row.
 const WIDTHS = [1280, 768, 375];
 
 for (const width of WIDTHS) {
@@ -31,10 +31,10 @@ for (const width of WIDTHS) {
     });
 
     expect(rows.nav).toHaveLength(6);
-    expect(rows.secondary).toHaveLength(5);
-    for (let i = 0; i < rows.secondary.length; i++) {
+    expect(rows.secondary).toHaveLength(7);
+    for (let i = 0; i < rows.nav.length; i++) {
       expect(Math.abs(rows.nav[i] - rows.secondary[i]), `row ${i + 1} centre difference`).toBeLessThan(0.01);
     }
-    expect(rows.nav[5]).toBeGreaterThan(rows.secondary[4]);
+    expect(rows.secondary[6]).toBeGreaterThan(rows.nav[5]);
   });
 }

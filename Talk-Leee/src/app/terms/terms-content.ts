@@ -411,5 +411,4 @@ export const termsBlocks: LegalBlock[] = [
     ],
   },
 
-  { type: "p", text: `© 2026 Talk-Lee Limited. All rights reserved.` },
 ];
