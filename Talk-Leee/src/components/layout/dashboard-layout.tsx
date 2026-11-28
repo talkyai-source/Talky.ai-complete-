@@ -75,14 +75,18 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             }
             return;
         }
-        const next = pathname ?? "/dashboard";
+        // The whole address the visitor wanted, query included (a plan page on
+        // ?interval=year must reopen on that period). The search is read from the
+        // window here, where the redirect already happens, so no page that uses
+        // this layout needs a Suspense boundary for useSearchParams.
+        const next = `${pathname ?? "/dashboard"}${window.location.search}`;
         try {
-            router.replace(`/auth/login?next=${encodeURIComponent(next)}`);
+            router.replace(`/auth/login/?next=${encodeURIComponent(next)}`);
         } catch {
             // router.replace threw (e.g. router not ready yet) — fall back
             // to a hard navigation. Making the destination explicitly
             // absolute satisfies next/next/no-location-assign-relative-destination.
-            window.location.href = new URL(`/auth/login?next=${encodeURIComponent(next)}`, window.location.origin).toString();
+            window.location.href = new URL(`/auth/login/?next=${encodeURIComponent(next)}`, window.location.origin).toString();
         }
     }, [authLoading, pathname, requireAuth, router, user]);
 

@@ -24,7 +24,7 @@ A second step at sign-in, from an authenticator app. Enable it from this page.
 
 ### Tenant-wide security
 
-Account administrators may also see **Tenant-wide security** with **Audit activity** and **Audit and access**, but neither works for a customer account in this release: **Audit and access** opens a 403 page, and **Audit activity** says the audit log could not be loaded.
+**Tenant-wide security**, with its **Audit activity** and **Audit and access** cards, is not shown in a customer account.
 
 ### Data retention and recordings
 

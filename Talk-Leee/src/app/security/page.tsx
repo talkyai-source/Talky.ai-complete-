@@ -49,7 +49,7 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
-import { isPlatformAdminRole } from "@/lib/admin-access";
+import { getAdminUiCapabilities } from "@/lib/admin-access";
 import { getMfaStatus, disableMfa, regenerateRecoveryCodes, validateTotpCode } from "@/lib/mfa-utils";
 import { api } from "@/lib/api";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
@@ -235,7 +235,8 @@ function ChangePasswordForm() {
 export default function SecurityPage() {
     const { user } = useAuth();
     const token = useAccessToken() ?? "";
-    const isAdmin = isPlatformAdminRole(user?.role) || user?.role === "tenant_admin";
+    // Only the roles that can open /admin and /admin/audit-logs (RouteGuard on those pages).
+    const canOpenAdminPages = getAdminUiCapabilities(user).canViewAuditLogs;
 
     const [showMfaSetup, setShowMfaSetup] = useState(false);
     const [showPasskeySetup, setShowPasskeySetup] = useState(false);
@@ -510,7 +511,7 @@ export default function SecurityPage() {
                 </Section>
 
                 {/* ── 4 + 5. Tenant-wide, admin only ───────────────────────── */}
-                {isAdmin && (
+                {canOpenAdminPages && (
                     <Section
                         icon={Shield}
                         title="Tenant-wide security"

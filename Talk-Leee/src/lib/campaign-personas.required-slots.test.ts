@@ -33,3 +33,18 @@ test("lead_gen no longer requires pricing or differentiator", () => {
     assert.ok(!keys.includes("pricing_info"));
     assert.ok(!keys.includes("company_differentiator"));
 });
+
+// The calling agent does not book into a calendar, and a callback is scheduled
+// only on outgoing campaigns (backend action_execution.py), so no card or field
+// label may say the agent books anything.
+test("no persona summary or field label says the agent books something", () => {
+    for (const p of PERSONAS) {
+        assert.doesNotMatch(p.summary, /book/i, `${p.value} summary`);
+        for (const s of p.slots) assert.doesNotMatch(s.label, /book/i, `${p.value}.${s.key} label`);
+    }
+});
+
+test("the lead_gen next-step field keeps its backend key and shows the new label", () => {
+    const slot = PERSONAS.find((p) => p.value === "lead_gen")!.slots.find((s) => s.key === "calendar_booking_type");
+    assert.equal(slot?.label, "Next step you offer");
+});

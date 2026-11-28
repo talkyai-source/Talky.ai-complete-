@@ -34,11 +34,16 @@ export interface PersonaSpec {
     recommended_voice_keywords: string[];
 }
 
+// The backend's name for the lead-generation "next step" field. It predates
+// the label: the agent proposes this step, it does not book into a calendar.
+// The name must not change (the prompts read it).
+const NEXT_STEP_SLOT = "calendar_booking_type";
+
 export const PERSONAS: PersonaSpec[] = [
     {
         value: "lead_gen",
         title: "Lead Generation",
-        summary: "Outbound calls — qualify leads and book consultations.",
+        summary: "Outbound calls — qualify leads and capture their details.",
         recommended_voice_keywords: [
             "warm", "energetic", "conversational", "friendly", "natural", "confident",
         ],
@@ -52,7 +57,7 @@ export const PERSONAS: PersonaSpec[] = [
             { key: "call_reason", label: "Reason for calling", placeholder: "Why are we ringing this lead?", kind: "textarea", required: true },
             { key: "qualification_questions", label: "Qualification questions", help: "One per line", kind: "list", required: true },
             { key: "disqualifying_answers", label: "Disqualifying answers", help: "Comma-separated or one per line", kind: "list", required: true },
-            { key: "calendar_booking_type", label: "What you book", placeholder: "e.g. a free home assessment", kind: "text", required: true },
+            { key: NEXT_STEP_SLOT, label: "Next step you offer", placeholder: "e.g. a free home assessment", kind: "text", required: true },
             { key: "approved_offer", label: "Approved offer or incentive (optional)", placeholder: "Only offers the agent may state, including any conditions", kind: "textarea" },
             { key: "approved_data_source_explanation", label: "Contact-source explanation (optional)", placeholder: "What the agent may truthfully say if asked how you got the number", kind: "textarea" },
             { key: "approved_objection_responses", label: "Approved objection responses (optional)", help: "One per line: Objection | Approved response", kind: "kv-list" },
@@ -62,7 +67,7 @@ export const PERSONAS: PersonaSpec[] = [
     {
         value: "customer_support",
         title: "Customer Support",
-        summary: "Inbound — resolve issues, handle escalations, book callbacks.",
+        summary: "Inbound — answer questions and note requests for your team.",
         recommended_voice_keywords: [
             "calm", "clear", "professional", "neutral", "patient", "trustworthy",
         ],
@@ -83,7 +88,7 @@ export const PERSONAS: PersonaSpec[] = [
     {
         value: "receptionist",
         title: "AI Receptionist",
-        summary: "Inbound — answer, route, book appointments, take messages.",
+        summary: "Inbound — answer, take messages and note requests.",
         recommended_voice_keywords: [
             "warm", "professional", "friendly", "welcoming", "polite", "efficient",
         ],

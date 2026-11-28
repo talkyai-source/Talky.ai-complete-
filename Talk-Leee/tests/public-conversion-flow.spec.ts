@@ -691,17 +691,15 @@ for (const viewport of VIEWPORTS) {
 
                 await page.goto(`${target.path}${target.query}`, { waitUntil: "domcontentloaded" });
 
-                // Today: the proxy lets a signed-out visitor through (src/proxy.ts:355-376) and the page sends them on from the client
-                // (components/layout/dashboard-layout.tsx:78-80), carrying `next=<path>` only.
+                // The proxy lets a signed-out visitor through (src/proxy.ts:355-376) and the page sends them on from the client
+                // (components/layout/dashboard-layout.tsx), carrying `next=<path><query>`.
                 await page.waitForURL((url) => samePath(url.pathname, "/auth/login"));
                 const next = nextOf(page);
                 expect(next, "the sign-in page carries the return address").not.toBeNull();
                 expect(samePath(new URL(next ?? "/", baseOrigin()).pathname, target.path)).toBe(true);
-                // FINDING (reported, not asserted as a defect): dashboard-layout.tsx:78 keeps `pathname` and drops the query, so
-                // ?interval=year does not survive the sign-in round trip. The test follows whatever the app does: the period is
-                // asserted below as "kept" or "dropped" according to what `next` carries.
-                const keepsQuery = (next ?? "").includes("interval=year");
-                test.info().annotations.push({ type: "return-address", description: `next=${next} (query kept: ${keepsQuery})` });
+                // The return address keeps the query, so the plan page reopens on the period the visitor chose.
+                expect(new URL(next ?? "/", baseOrigin()).search, "the return address keeps the query of the page asked for").toBe(target.query);
+                test.info().annotations.push({ type: "return-address", description: `next=${next}` });
                 await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
                 expect(
                     navigations.filter((url) => samePath(new URL(url).pathname, "/auth/login")).length,
@@ -720,7 +718,7 @@ for (const viewport of VIEWPORTS) {
                 if (target.path === "/dashboard/") {
                     await expectDashboard(page);
                 } else {
-                    await expectPlansPage(page, keepsQuery ? "year" : "month");
+                    await expectPlansPage(page, "year");
                 }
                 expect(
                     navigations.filter((url) => samePath(new URL(url).pathname, "/auth/login")).length,
