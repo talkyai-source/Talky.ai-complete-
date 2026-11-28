@@ -1,6 +1,6 @@
 Connectors link Talk-Lee to external services.
 
-The connectors you can see depend on your account and the current product configuration. CRM connectors such as HubSpot and Salesforce are available on the Business plan.
+The connectors you can see depend on your account and the current product configuration. CRM connectors such as HubSpot and Salesforce are listed below; call logging is on the Business plan.
 
 ![The connectors page, showing connected and unconnected services](/docs/connectors-01-list.webp)
 

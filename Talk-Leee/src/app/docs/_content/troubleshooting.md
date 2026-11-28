@@ -51,11 +51,11 @@ Check that your browser has microphone permission, that no other application is 
 
 ### A contact import failed
 
-Download the template and compare your file against it. Talk-Lee lists the rows it could not import and why.
+Select **Download a sample file** and compare your file against it. Talk-Lee lists the rows it could not import and why.
 
 ### A recording is missing
 
-Open **Settings → Recording** and check the recording policy: recording is off until a policy is saved. Check also that recording was enabled for the campaign at the time of the call. Recordings are not deleted automatically in this release.
+Open **Settings → Recording**. A saved **Do not record calls** means no call is recorded; with no saved policy, calls are recorded with a spoken notice. For an incoming call, check that the inbound campaign's **Record inbound calls** switch was on. Recordings are not deleted automatically in this release.
 
 ### You were signed out unexpectedly
 

@@ -77,12 +77,40 @@ const MENU_RESTRICTED = new Set(
     [...navBlock.matchAll(/\bname:\s*"([^"]+)"[^\n]*\b(?:adminOnly|supportOnly):\s*true/g)].map((match) => match[1]),
 );
 const squash = (name: string) => name.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+// The Settings tab names are read from the screen. They are tab labels, never menu names.
+const settingsTabs = [...read("src", "app", "settings", "page.tsx").matchAll(/<TabsTrigger value="[^"]+"[^>]*>([^<]+)<\/TabsTrigger>/g)].map((match) => match[1]);
+
+// "Select **X**" / "Open **X**" WITHOUT "from the sidebar" names a menu entry only when X is a near
+// miss of one: the same letters with a plural or a shortened form ("Inbound" for "Inbound Campaigns",
+// "Contact" for "Contacts"), or the same first word plus a word that names a page ("Call Logs" for
+// "Call History"). A button, a tab or a column label ("Add contact", "Call anytime", "Security" tab,
+// "Remove") is none of these, so it is left alone. The test is case-insensitive.
+const PAGE_NOUNS = new Set(["logs", "log", "history", "list", "page", "area", "section", "campaigns", "campaign", "calls", "call", "reports"]);
+// Button labels of a connector card (src/components/connectors/connector-card.tsx): "Connect" is the start of
+// "Connectors" but it is the card's button, not a menu entry.
+const CONNECTOR_BUTTONS = ["Connect", "Reconnect", "Disconnect"];
+function isNearMiss(label: string): boolean {
+    if (MENU_ALL.includes(label) || settingsTabs.includes(label) || CONNECTOR_BUTTONS.includes(label)) return false;
+    const key = squash(label);
+    const keyNoS = key.replace(/s$/, "");
+    const words = label.toLowerCase().split(/\s+/);
+    return MENU_TOP.some((menu) => {
+        const menuKey = squash(menu);
+        if (menuKey === key) return true; // same letters, other case or spelling
+        if (key.length >= 4 && (menuKey.startsWith(key) || menuKey === keyNoS || menuKey.startsWith(keyNoS))) return true;
+        const menuWords = menu.toLowerCase().split(/\s+/);
+        return words.length > 1 && menuWords.length > 1 && words[0] === menuWords[0] && PAGE_NOUNS.has(words[words.length - 1]);
+    });
+}
 
 function menuNamesUsed(text: string): string[] {
     const names = new Set<string>();
     for (const match of text.matchAll(/(?:Select|Open|Use) \*\*([^*]+)\*\*(?: from the (?:left )?sidebar| and open \*\*([^*]+)\*\*)/g)) {
         names.add(match[1]);
         if (match[2]) names.add(match[2]);
+    }
+    for (const match of text.matchAll(/\b(?:select|open|choose|use|go to)\s+\*\*([^*]+)\*\*/gi)) {
+        if (isNearMiss(match[1])) names.add(match[1]);
     }
     const nav = /### Main Navigation\n([\s\S]*?)\n#{2,3} /.exec(text)?.[1] ?? "";
     for (const match of nav.matchAll(/^- \*\*([^*]+)\*\*/gm)) names.add(match[1]);
@@ -112,31 +140,52 @@ test("W6-T1 fixture: a near miss or an unknown menu name is flagged, the real na
     assert.deepEqual(notMenuNames("Select **Billing & Logs** and open **Billing**."), []);
     assert.deepEqual(notMenuNames("Select **Call History** from the sidebar."), []);
     assert.deepEqual(notMenuNames("Select **Edit** on the card."), []);
+    // Without "from the sidebar": a near miss is flagged, in any case; buttons, tabs and labels pass.
+    assert.deepEqual(notMenuNames("In the sidebar, select **Inbound** to create a campaign."), ["Inbound"]);
+    assert.deepEqual(notMenuNames("Open **Call Logs** to review past calls."), ["Call Logs"]);
+    assert.deepEqual(notMenuNames("open **call history** to review calls."), ["call history"]);
+    assert.deepEqual(notMenuNames("Select **Contact** to add people."), ["Contact"]);
+    assert.deepEqual(notMenuNames("Select **Call History** to review calls."), []);
+    assert.deepEqual(notMenuNames("Select **Add contact**, then select **Call anytime** and **Remove**."), []);
+    assert.deepEqual(notMenuNames("Open **Settings → Recording**."), []);
+    assert.deepEqual(notMenuNames("Select the **Security** tab, then **Save policy**."), []);
 });
 
 // ---------------------------------------------------------------------------------------------
 // W6-T2: Security Center and Agent Quality are admin-only (owner decision O5). Agent Reviews sits
 // under Agent Quality, so it is described the same way.
+// The sentence is read WITH its bold names (the screen names are the subject here, so `unbold` is not used).
 const ADMIN_AREAS = /\bSecurity Center\b|\bAgent Quality\b/;
-const SAYS_ADMIN_ONLY = /\badministrators?\b|\badmin-only\b/i;
+// What an honest sentence says: the areas are not in a customer account (the older wording, "platform and
+// partner administrators", is accepted too). The bare word "administrator" is NOT enough.
+const SAYS_ADMIN_ONLY =
+    /\bplatform and partner administrators\b|\bnot shown in a customer account\b|\badmin-only\b|\b(?:cannot|can't|do not|does not|never) (?:see|open)\b/i;
+// "Account administrators can open Security Center": a customer-side administrator who can open the area.
+const CUSTOMER_ADMIN_OPENS =
+    /\b(?:customer|account|tenant)(?: account)? (?:administrators?|admins?)\b[^.]{0,60}\b(?:can|may|could|are able to|is able to|see|sees|open|opens|access|accesses)\b/i;
+const NEGATED = /\b(?:not|never|cannot|can't|no)\b|n't\b/i;
 const DEPENDS_ON_PLAN = /\b(?:depend\w*|based) on your plan\b|\byour plan and role\b|\bplan and role\b/i;
-test("W6-T2 Security Center and Agent Quality are for administrators, never 'depending on your plan'", () => {
-    const missing = sentenceHits(ADMIN_AREAS, SAYS_ADMIN_ONLY, pages);
-    const plan = pages.flatMap((page) =>
-        sentencesOf(page.text).filter((s) => ADMIN_AREAS.test(s) && DEPENDS_ON_PLAN.test(s)).map((s) => `${page.name}: "${s}"`));
-    assert.deepEqual([...missing, ...plan], []);
-    assert.match(pageText("getting-started.md"), /platform and partner administrators/);
+const adminAreaProblem = (s: string) =>
+    ADMIN_AREAS.test(s) && (!SAYS_ADMIN_ONLY.test(s) || (CUSTOMER_ADMIN_OPENS.test(s) && !NEGATED.test(s)) || DEPENDS_ON_PLAN.test(s));
+test("W6-T2 Security Center and Agent Quality are not in a customer account, never 'depending on your plan'", () => {
+    const problems = pages.flatMap((page) => sentencesOf(page.text).filter(adminAreaProblem).map((s) => `${page.name}: "${s}"`));
+    assert.deepEqual(problems, []);
+    assert.match(pageText("getting-started.md"), /not shown in a customer account|platform and partner administrators/);
 });
-test("W6-T2 Agent Reviews is described as admin-only where it is explained", () => {
+test("W6-T2 Agent Reviews is described as not in a customer account's menu where it is explained", () => {
     const about = sentencesOf(pageText("follow-ups.md")).filter((s) => /Agent Reviews/.test(s));
     assert.ok(about.length > 0, "follow-ups.md explains Agent Reviews");
-    assert.match(about.join(" "), /platform and partner administrators/);
+    assert.match(about.join(" "), /platform and partner administrators|not shown in a customer account|not in a customer account/);
 });
 test("W6-T2 fixture", () => {
-    const f = (s: string) => flagged(ADMIN_AREAS, SAYS_ADMIN_ONLY, s) || (ADMIN_AREAS.test(s) && DEPENDS_ON_PLAN.test(s));
-    assert.equal(f("Depending on your plan and role you may also see Security Center or Agent Quality."), true);
-    assert.equal(f("Agent Quality is available on the Business plan."), true);
-    assert.equal(f("Security Center and Agent Quality are shown to platform and partner administrators only."), false);
+    assert.equal(adminAreaProblem("Depending on your plan and role you may also see Security Center or Agent Quality."), true);
+    assert.equal(adminAreaProblem("Agent Quality is available on the Business plan."), true);
+    assert.equal(adminAreaProblem("Account administrators can open Security Center."), true);
+    assert.equal(adminAreaProblem("A customer account administrator sees **Agent Quality** in the sidebar."), true);
+    assert.equal(adminAreaProblem("Administrators can open **Security Center**."), true); // "administrator" alone is not an honest answer
+    assert.equal(adminAreaProblem("Security Center and Agent Quality are shown to platform and partner administrators only."), false);
+    assert.equal(adminAreaProblem("**Security Center** and **Agent Quality** are not shown in a customer account."), false);
+    assert.equal(adminAreaProblem("An account administrator cannot open Security Center."), false);
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -240,9 +289,13 @@ test("W6-T6 the contacts page documents the Do-Not-Call list, paste, single add,
 // ---------------------------------------------------------------------------------------------
 // W6-T7: the settings page documents every Settings tab (read from the screen) and sends no
 // customer administrator to a page that answers 403.
-const settingsTabs = [...read("src", "app", "settings", "page.tsx").matchAll(/<TabsTrigger value="[^"]+"[^>]*>([^<]+)<\/TabsTrigger>/g)].map((match) => match[1]);
-const ADMIN_SCREENS = /\bAudit and access\b|\bAudit activity\b|\bTenant-wide security\b/;
-const SAYS_PLATFORM_ONLY = /platform and partner administrators|access-denied|answers? with an access/i;
+// (settingsTabs is read at the top of this file, in the T1 section.)
+// The pages are read WITH their bold names: the sentence is about the screen the name labels.
+const ADMIN_SCREENS = /\bAudit (?:&|and) Access\b|\bAudit Logs\b|\bAudit activity\b|\bTenant-wide security\b/i;
+// An honest sentence says the screen does not work or is not shown for a customer account.
+const SAYS_PLATFORM_ONLY =
+    /platform and partner administrators|not shown in a customer account|access-denied|answers? with an access|\b403\b|could not be loaded|\bneither works\b|\bdoes not work\b/i;
+const adminScreenProblem = (s: string) => ADMIN_SCREENS.test(s) && !SAYS_PLATFORM_ONLY.test(s);
 test("W6-T7 the settings page documents every Settings tab", () => {
     assert.deepEqual(settingsTabs, ["Profile", "Security", "Devices", "Telephony", "Recording"]);
     const text = pageText("settings-and-security.md");
@@ -250,24 +303,32 @@ test("W6-T7 the settings page documents every Settings tab", () => {
     assert.match(text, /### Devices/);
     assert.match(text, /### Recording/);
 });
-test("W6-T7 the pages that open for platform and partner administrators only say so", () => {
-    assert.deepEqual(sentenceHits(ADMIN_SCREENS, SAYS_PLATFORM_ONLY, pages), []);
+test("W6-T7 the audit screens never promise a customer account a working page", () => {
+    const problems = pages.flatMap((page) => sentencesOf(page.text).filter(adminScreenProblem).map((s) => `${page.name}: "${s}"`));
+    assert.deepEqual(problems, []);
 });
 test("W6-T7 fixture", () => {
-    assert.equal(flagged(ADMIN_SCREENS, SAYS_PLATFORM_ONLY, "Administrators also see Tenant-wide security: Audit activity and Audit and access."), true);
-    assert.equal(flagged(ADMIN_SCREENS, SAYS_PLATFORM_ONLY, "Audit and access opens for platform and partner administrators; an account administrator sees an access-denied page."), false);
+    assert.equal(adminScreenProblem("Administrators also see Tenant-wide security: Audit activity and Audit and access."), true);
+    assert.equal(adminScreenProblem("An account administrator can open **Audit & Access** from the sidebar."), true);
+    assert.equal(adminScreenProblem("Open **Audit Logs** to see who changed what."), true);
+    assert.equal(adminScreenProblem("**Audit activity** lists every change."), true);
+    assert.equal(adminScreenProblem("Audit and access opens for platform and partner administrators; an account administrator sees an access-denied page."), false);
+    assert.equal(adminScreenProblem("**Audit and access** opens a 403 page, and **Audit activity** says the audit log could not be loaded."), false);
+    assert.equal(adminScreenProblem("**Audit & Access** is not shown in a customer account."), false);
 });
 
 // ---------------------------------------------------------------------------------------------
 // W6-T8: minutes terms (owner decisions O8, O9) and one click to Billing.
 // The heading "Buy AI minute top-ups" of billing.md keeps its wording on purpose: the anchor of that heading must not change.
 const OLD_MINUTES_TERMS = /\bAI-minute\b|\bAI minute (?:top-ups?|balance)\b|platform minutes|telephone carrier service|separate telephone-service|\bPSTN\/SIP\b|telephone minutes|carrier minutes|billed separately/i;
-test("W6-T8 the billing page uses the two minutes terms and says one click reaches Billing", () => {
+test("W6-T8 the billing page uses the two minutes terms and says who sees Billing & Logs and that it opens Billing", () => {
     const text = pageText("billing.md");
     assert.match(text, /\bAI minutes\b/);
     assert.match(text, /Telephone \(PSTN \/ SIP\) usage is not included in AI minutes/);
     assert.match(text, /its cost depends on the phone line you connect/i);
-    assert.match(text, /\bone click\b/i);
+    // Who sees Billing & Logs, and that it opens Billing (no particular count of clicks is required).
+    assert.match(text, /\*\*Billing & Logs\*\* is shown to [^.\n]*(?:administrators?|billing)[^.\n]*/);
+    assert.match(text, /\*\*Billing & Logs\*\*[^.\n]*\bopens? \*\*Billing\*\*|\bopens? \*\*Billing\*\*/);
     assert.doesNotMatch(text, /Select \*\*Billing & Logs\*\* and open/);
     const withoutHeadings = everything.map((source) => ({ name: source.name, text: source.text.replace(/^#{1,6}\s.*$/gm, "") }));
     assert.deepEqual(hits(OLD_MINUTES_TERMS, withoutHeadings), []);
@@ -282,11 +343,22 @@ test("W6-T8 fixture", () => {
 // W6-T11 (a): every sentence about transfer names its direction and its condition (R9), and never
 // promises that a person answers. "telephone route" is a phone line, not a call route, so it is not
 // a trigger. A question does NOT excuse a transfer sentence.
-const TRANSFER = /transfer|hand(?:s|ed|ing)?[- ]?off|escalat|(?<!(?:telephone|SIP|phone|trunk) )rout(?:e|es|ed|ing)\b|steps? in\b|takes? over/i;
-const TRANSFER_CONDITION =
-    /\blists? transfer among (?:its|the) approved actions\b|\btransfer option is on\b|\bapproved list\b|\bset up for (?:the|your) campaign\b|\bwhen it is set up\b|\bwhen set up\b|\bdoes not guarantee\b|\b(?:does not|do not|doesn't|cannot|can't|never)\b[^.]{0,30}\b(?:transfer|hand|route|escalat)/i;
+// Triggers: the transfer words, and the plain ways of saying a caller is passed to a person. "steps in",
+// "takes over" and a bare "route" are NOT triggers ("Complete the steps in the window."); a route is a
+// trigger only when it is a call or a caller that is routed.
+const TRANSFER =
+    /transfer|hand(?:s|ed|ing)?[- ]?off|escalat|\brout(?:e|es|ed|ing)\s+(?:the |a |an |each |every |incoming |outgoing )?(?:calls?|callers?)\b|\bconnects?\s+(?:the |a )?callers?\s+to\b|\bput through\b|\bputs?\s+(?:a |the )?callers?\s+through\b/i;
+const TRANSFER_SETUP =
+    /\blists? transfer among (?:its|the) approved actions\b|\btransfer option is on\b|\bapproved list\b|\bset up for (?:the|your) campaign\b|\bwhen it is set up\b|\bwhen set up\b|\bdoes not guarantee\b/i;
+// "plainly says that no transfer happens": the negation sits directly on the verb ("cannot transfer a call"),
+// not somewhere before it ("If the agent cannot answer, it transfers the caller" does not count).
+const TRANSFER_NONE =
+    /\b(?:does not|do not|doesn't|cannot|can't|never)\s+(?:\w+\s+){0,2}?(?:transfer|hand off|hand over|route|escalate|connect)\w*\b|\bno (?:transfer|hand-?off)s?\b/i;
+// A negation alone does not satisfy the rule: a set-up condition, or a plain "no transfer".
+const TRANSFER_CONDITION = new RegExp(`${TRANSFER_SETUP.source}|${TRANSFER_NONE.source}`, "i");
 const TRANSFER_DIRECTION = /\b(?:outgoing|outbound|incoming|inbound)\b|both ways/i;
-const TRANSFER_NEGATIVE = /\b(?:does not|do not|doesn't|cannot|can't|never)\b[^.]{0,30}\b(?:transfer|hand|route|escalat|guarantee)/i;
+// Direction is not needed for a sentence that says nothing is promised or that no transfer happens.
+const TRANSFER_NEGATIVE = new RegExp(`${TRANSFER_NONE.source}|\\bdoes not guarantee\\b`, "i");
 const TRANSFER_OVERPROMISE = /always (?:answers|picks up)|instantly|(?<!guarantee that )(?:a (?:person|human)|someone) will answer/i;
 const transferProblem = (s: string) =>
     TRANSFER.test(unbold(s)) && (TRANSFER_OVERPROMISE.test(s) || !TRANSFER_CONDITION.test(s) || (!TRANSFER_DIRECTION.test(s) && !TRANSFER_NEGATIVE.test(s)));
@@ -298,8 +370,17 @@ test("W6-T11 fixture: transfer", () => {
     assert.equal(transferProblem("Transfer to a human if enabled."), true);
     assert.equal(transferProblem("Test human transfer if enabled."), true);
     assert.equal(transferProblem("On an outgoing campaign a transfer always picks up."), true);
-    assert.equal(transferProblem("Your team steps in when expertise is needed."), true);
+    assert.equal(transferProblem("The agent connects the caller to your team when expertise is needed."), true);
+    assert.equal(transferProblem("Qualified callers are put through to sales."), true);
+    assert.equal(transferProblem("The agent puts a caller through to a manager."), true);
     assert.equal(transferProblem("A call can be handed off to your team."), true);
+    // A negation that does not sit on the transfer verb is not an honest condition.
+    assert.equal(transferProblem("If the agent cannot answer, it transfers the caller to your team."), true);
+    assert.equal(transferProblem("On an outgoing campaign the agent cannot answer, so it transfers the call."), true);
+    assert.equal(transferProblem("Without that set-up, an outgoing campaign cannot transfer a call."), false);
+    assert.equal(transferProblem("Complete the steps in the window."), false);
+    assert.equal(transferProblem("Your team takes over from there."), false);
+    assert.equal(transferProblem("Choose the route you prefer."), false);
     assert.equal(transferProblem("On an outgoing campaign, a transfer works only when the campaign lists transfer among its approved actions and names the destination numbers."), false);
     assert.equal(transferProblem("On an incoming campaign, a transfer works only when the transfer option is on and the destination is on the approved list."), false);
     assert.equal(transferProblem("On an outgoing campaign, when the campaign lists transfer among its approved actions, someone will answer."), true);
@@ -311,11 +392,25 @@ test("W6-T11 fixture: transfer", () => {
 
 // W6-T11 (b): a callback is scheduled only on an OUTGOING campaign, and the AI agent makes the call
 // back (R14). On an incoming call the agent only notes the request.
-const CALLBACK_CLAIM = /(?:schedul\w*|book\w*|arrang\w*)[^.]{0,30}call[ -]?backs?|call[ -]?backs?[^.]{0,30}(?:schedul|book)/i;
-const CALLBACK_OK = /\b(?:outgoing|outbound)\b|\b(?:does not|do not|cannot|can't|only notes?)\b/i;
-test("W6-T11 a scheduled callback is outgoing-only", () => assert.deepEqual(sentenceHits(CALLBACK_CLAIM, CALLBACK_OK), []));
+const CALLBACK_CLAIM =
+    /(?:schedul\w*|book\w*|arrang\w*)[^.]{0,30}call[ -]?backs?|call[ -]?backs?[^.]{0,30}(?:schedul|book)|\bcalls? (?:the |that )?(?:person|caller|customer|contact|them)s? back\b|\bagrees? (?:on )?a time\b/i;
+const CALLBACK_INCOMING = /\b(?:incoming|inbound)\b/i;
+const CALLBACK_OUTGOING = /\b(?:outgoing|outbound)\b/i;
+const CALLBACK_NEGATED = /\b(?:does not|do not|cannot|can't|only notes?)\b/i;
+// The direction word must APPLY to the callback: a sentence that names the incoming side without saying that
+// the agent only notes the request does not pass because "outbound" is also in it ("Unlike outbound
+// campaigns, inbound campaigns also schedule callbacks."), and a claim with no direction at all does not pass.
+const callbackProblem = (s: string) =>
+    CALLBACK_CLAIM.test(s) && !CALLBACK_NEGATED.test(s) && (CALLBACK_INCOMING.test(s) || !CALLBACK_OUTGOING.test(s));
+test("W6-T11 a scheduled callback is outgoing-only", () => {
+    const problems = everything.flatMap((source) => sentencesOf(source.text).filter(callbackProblem).map((s) => `${source.name}: "${s}"`));
+    assert.deepEqual(problems, []);
+});
 test("W6-T11 fixture: callbacks", () => {
-    const f = (s: string) => flagged(CALLBACK_CLAIM, CALLBACK_OK, s);
+    const f = callbackProblem;
+    assert.equal(f("Unlike outbound campaigns, inbound campaigns also schedule callbacks."), true);
+    assert.equal(f("On incoming calls the agent agrees a time and calls the person back."), true);
+    assert.equal(f("On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request."), false);
     assert.equal(f("Customer Support: inbound, resolve issues, handle escalations, book callbacks."), true);
     assert.equal(f("Configure approved actions such as a callback."), false); // no claim about scheduling
     assert.equal(f("Schedule callbacks when callers ask for one."), true);
@@ -327,7 +422,8 @@ test("W6-T11 fixture: callbacks", () => {
 // W6-T11 (c): the calling agent does not book appointments or meetings into a calendar (R8). Google
 // Calendar and Google Drive are used by the assistant in the dashboard, not by calls.
 const CALENDAR_CLAIM = /\b(?:book\w*|schedul\w*)\b[^.]{0,50}\b(?:appointments?|meetings?|interviews?|consultations?|showings?|tours?|calendar)\b|\b(?:appointment|interview|meeting) (?:booking|scheduling)\b|added to (?:google )?calendar/i;
-const CALENDAR_OK = /\b(?:does not|do not|doesn't|cannot|can't|is not|are not|no calendar)\b|\bnot by calls\b/i;
+// "is not" / "are not" elsewhere in the sentence does not excuse a booking claim ("Booking is not hard: the agent books meetings.").
+const CALENDAR_OK = /\b(?:does not|do not|doesn't|cannot|can't|no calendar)\b|\bnot by calls\b/i;
 test("W6-T11 the calling agent does not book into a calendar", () => assert.deepEqual(sentenceHits(CALENDAR_CLAIM, CALENDAR_OK), []));
 test("W6-T11 fixture: calendar", () => {
     const f = (s: string) => flagged(CALENDAR_CLAIM, CALENDAR_OK, s);
@@ -335,16 +431,21 @@ test("W6-T11 fixture: calendar", () => {
     assert.equal(f("Configure approved actions such as appointment booking."), true);
     assert.equal(f("Qualify leads and book consultations."), true);
     assert.equal(f("The agent does not book appointments or meetings into a calendar."), false);
+    assert.equal(f("Booking is not hard: the agent books appointments for you."), true);
+    assert.equal(f("Meetings are not a problem, the agent will schedule meetings in your calendar."), true);
     assert.equal(f("| Google Calendar | Limited | Lets the assistant read your upcoming events and book, change or cancel meetings. | Used by the assistant in the dashboard, not by calls. |"), false);
 });
 
 // W6-T11 (d): calls are logged to HubSpot or Salesforce on the Business plan (R16).
-const LOGS_TO_CRM = /(?:log\w*|sync\w*|record\w*)[^.]{0,60}\b(?:hubspot|salesforce)\b|\b(?:hubspot|salesforce)\b[^.]{0,60}(?:log\w*|sync\w*)/i;
+const LOGS_TO_CRM =
+    /(?:log\w*|sync\w*|record\w*)[^.]{0,60}\b(?:hubspot|salesforce)\b|\b(?:hubspot|salesforce)\b[^.]{0,60}(?:log\w*|sync\w*)|\b(?:appears?|shows? up|shown|listed|posted|pushed|copied|saved)\b[^.]{0,40}\b(?:hubspot|salesforce)\b/i;
 const CRM_OK = /Business plan|\b(?:does not|do not|cannot|can't)\b/i;
 test("W6-T11 every sentence saying calls go to HubSpot or Salesforce says Business plan", () => assert.deepEqual(sentenceHits(LOGS_TO_CRM, CRM_OK), []));
 test("W6-T11 fixture: CRM logging", () => {
     const f = (s: string) => flagged(LOGS_TO_CRM, CRM_OK, s);
     assert.equal(f("Calls are logged to HubSpot or Salesforce."), true);
+    assert.equal(f("Every call appears in HubSpot."), true);
+    assert.equal(f("On the Business plan, every call appears in HubSpot."), false);
     assert.equal(f("CRM connectors such as HubSpot and Salesforce are available."), false);
     assert.equal(f("On the Business plan, calls are logged to HubSpot or Salesforce once you connect one."), false);
 });
@@ -353,11 +454,14 @@ test("W6-T11 fixture: CRM logging", () => {
 // automatically after a number of days (the retention nightly job only counts, nothing is removed).
 const SHARED_LINE = /shared (?:line|number|phone)/i;
 const LANGUAGE_CLAIM = /multilingual|multi-language|any language|\b(?:multiple|many|several|other|different|supported|more than one) languages?\b|language options?|translat\w+/i;
-const RECORDING_DELETED = /\brecordings?\b[^.]{0,80}\b(?:are|is|get|will be|being) (?:removed|deleted|purged|erased)\b|\b(?:removed|deleted|purged|erased) (?:automatically|after \d+)|older than[^.]{0,40}\b(?:removed|deleted|purged)/i;
-const RECORDING_NOT_DELETED = /\bnot (?:removed|deleted|purged|erased) automatically\b|\bnot deleted automatically\b/i;
+const RECORDING_DELETED =
+    /\brecordings?\b[^.]{0,80}\b(?:are|is|get|will be|being) (?:removed|deleted|purged|erased)\b|\b(?:removed|deleted|purged|erased) (?:automatically|after \d+)|older than[^.]{0,40}\b(?:removed|deleted|purged)|\brecordings?\b[^.]{0,60}\bexpir\w*/i;
+const RECORDING_NOT_DELETED = /\bnot (?:removed|deleted|purged|erased) automatically\b|\bnot deleted automatically\b|\b(?:do not|don't|never) expire\b/i;
+// An honest negative about a language or a shared line is allowed ("Speech in other languages is not recognised.").
+const HONEST_NEGATIVE = /\b(?:not|no|never|cannot|can't|does not|do not|English only|only English|only in English)\b/i;
 test("W6-T11 no shared line, no other language than English, no automatic recording deletion", () => {
-    assert.deepEqual(hits(SHARED_LINE), []);
-    assert.deepEqual(hits(LANGUAGE_CLAIM), []);
+    assert.deepEqual(sentenceHits(SHARED_LINE, HONEST_NEGATIVE), []);
+    assert.deepEqual(sentenceHits(LANGUAGE_CLAIM, HONEST_NEGATIVE), []);
     assert.deepEqual(sentenceHits(RECORDING_DELETED, RECORDING_NOT_DELETED), []);
     assert.match(pageText("ai-options.md"), /Speech recognition is English only/);
 });
@@ -368,6 +472,13 @@ test("W6-T11 fixture: line, language, retention", () => {
     assert.equal(flagged(RECORDING_DELETED, RECORDING_NOT_DELETED, "Recordings older than the retention period are removed."), true);
     assert.equal(flagged(RECORDING_DELETED, RECORDING_NOT_DELETED, "Recordings are deleted after 90 days."), true);
     assert.equal(flagged(RECORDING_DELETED, RECORDING_NOT_DELETED, "Recordings are not deleted automatically in this release."), false);
+    assert.equal(flagged(RECORDING_DELETED, RECORDING_NOT_DELETED, "Recordings expire after 90 days."), true);
+    assert.equal(flagged(RECORDING_DELETED, RECORDING_NOT_DELETED, "Recordings do not expire in this release."), false);
+    // The language and shared-line rules let an honest negative through, and still flag the claim.
+    assert.equal(flagged(LANGUAGE_CLAIM, HONEST_NEGATIVE, "Speech in other languages is not recognised."), false);
+    assert.equal(flagged(LANGUAGE_CLAIM, HONEST_NEGATIVE, "Callers can speak other languages."), true);
+    assert.equal(flagged(SHARED_LINE, HONEST_NEGATIVE, "Talk-Lee does not offer a shared line."), false);
+    assert.equal(flagged(SHARED_LINE, HONEST_NEGATIVE, "Start on Talk-Lee's shared line."), true);
 });
 
 // A phone number is a request that staff review, not an instant purchase.
@@ -380,4 +491,84 @@ test("W6-T11 a phone number is a request that staff review", () => {
 test("W6-T11 fixture: phone number", () => {
     assert.equal(flagged(BUYS_NUMBER, /\brequest\b|\bcannot\b|\bdoes not\b/i, "Use Buy Now to buy a phone number in Telephony."), true);
     assert.equal(flagged(BUYS_NUMBER, /\brequest\b|\bcannot\b|\bdoes not\b/i, "Use Buy Now to request a phone number."), false);
+});
+// A number is never issued instantly, from Buy Now or anywhere else.
+const INSTANT_NUMBER =
+    /\b(?:phone )?numbers?\b[^.]{0,40}\b(?:issued|assigned|provisioned|activated|delivered|ready)\b[^.]{0,30}\b(?:instant\w*|immediate\w*|at once|straight away|right away|in seconds)\b|\binstant\w*\b[^.]{0,40}\b(?:phone )?numbers?\b/i;
+const NOT_INSTANT = /\bnot instant\b|\bnot (?:issued|assigned|provisioned) instantly\b|\bnever instant/i;
+test("W6-T11 a phone number is never issued instantly", () => assert.deepEqual(sentenceHits(INSTANT_NUMBER, NOT_INSTANT, pages), []));
+test("W6-T11 fixture: instant number", () => {
+    assert.equal(flagged(INSTANT_NUMBER, NOT_INSTANT, "Phone numbers are issued instantly from Buy Now."), true);
+    assert.equal(flagged(INSTANT_NUMBER, NOT_INSTANT, "Get an instant number with Buy Now."), true);
+    assert.equal(flagged(INSTANT_NUMBER, NOT_INSTANT, "A request is not instant: staff review each request."), false);
+});
+
+// ---------------------------------------------------------------------------------------------
+// W6-R1: the recording default. A tenant with no saved policy IS recorded and the agent speaks the notice
+// first (owner decision of 18 November 2026). No page may say recording is off, disabled or not active
+// "until a policy is saved" or by default.
+const RECORDING_OFF_BY_DEFAULT =
+    /\b(?:recording|recordings|calls?)\b[^.]{0,60}\b(?:off|disabled|not active|inactive|not recorded|not made|not kept|switched off|turned off)\b[^.]{0,60}\b(?:until[^.]{0,40}\bpolic\w*|by default|unless[^.]{0,30}\bpolic\w*)/i;
+const UNTIL_POLICY_SAVED = /\buntil (?:a |you save a |you set a |one is |your )?polic\w+(?: is| has been| are)? (?:saved|set)\b/i;
+const recordingDefaultProblem = (s: string) => RECORDING_OFF_BY_DEFAULT.test(s) || (UNTIL_POLICY_SAVED.test(s) && /\brecord/i.test(s));
+test("W6-R1 no page says recording is off until a policy is saved or by default", () => {
+    const problems = everything.flatMap((source) => sentencesOf(source.text).filter(recordingDefaultProblem).map((s) => `${source.name}: "${s}"`));
+    assert.deepEqual(problems, []);
+    assert.match(pageText("settings-and-security.md"), /If no policy has been saved, calls are recorded and the agent speaks a recording notice first\./);
+    assert.match(pageText("troubleshooting.md"), /with no saved policy, calls are recorded with a spoken notice/);
+});
+test("W6-R1 fixture: recording default", () => {
+    assert.equal(recordingDefaultProblem("Recording is off until a policy is saved."), true);
+    assert.equal(recordingDefaultProblem("Recording is disabled by default."), true);
+    assert.equal(recordingDefaultProblem("Calls are not recorded until you save a policy."), true);
+    assert.equal(recordingDefaultProblem("Recording stays inactive until a policy has been saved."), true);
+    assert.equal(recordingDefaultProblem("If no policy has been saved, calls are recorded and the agent speaks a recording notice first."), false);
+    assert.equal(recordingDefaultProblem("A saved **Do not record calls** means no call is recorded."), false);
+});
+
+// W6-R2: revoking a session signs that device out.
+const REVOKE_STAYS_SIGNED_IN =
+    /\brevok\w*\b[^.]{0,80}\b(?:does not|doesn't|do not|did not|will not|won't|not)\s+(?:sign|log)\w*\b[^.]{0,30}\bout\b|\brevok\w*\b[^.]{0,80}\b(?:stays?|remains?|still)\b[^.]{0,20}\b(?:signed|logged) in\b/i;
+test("W6-R2 no page says a revoked session stays signed in", () => {
+    const problems = pages.flatMap((page) => sentencesOf(page.text).filter((s) => REVOKE_STAYS_SIGNED_IN.test(s)).map((s) => `${page.name}: "${s}"`));
+    assert.deepEqual(problems, []);
+    assert.match(pageText("settings-and-security.md"), /Revoking an entry signs that device out/);
+});
+test("W6-R2 fixture: session revoke", () => {
+    assert.equal(REVOKE_STAYS_SIGNED_IN.test("Revoking an entry does not sign that device out; changing your password does."), true);
+    assert.equal(REVOKE_STAYS_SIGNED_IN.test("A revoked session stays signed in until it expires."), true);
+    assert.equal(REVOKE_STAYS_SIGNED_IN.test("Revoking an entry signs that device out: its next request or token refresh is refused."), false);
+});
+
+// W6-R3: on the Do-Not-Call page, Remove, Add a number and Import many are for account administrators.
+// The three controls are named in the DNC page source first, so the test also proves they exist.
+test("W6-R3 the Do-Not-Call controls are described as administrator-only", () => {
+    const source = read("src", "app", "contacts", "do-not-call", "page.tsx");
+    for (const label of ["Remove", "Add a number", "Import many"]) assert.ok(source.includes(label), `"${label}" is not on the Do-Not-Call page`);
+    const sentences = sentencesOf(pageText("contacts.md"));
+    const about = sentences.filter((s) => /\*\*Remove\*\*/.test(s) && /\*\*Add a number\*\*/.test(s) && /\*\*Import many\*\*/.test(s));
+    assert.equal(about.length > 0 && about.every((s) => ONLY_ADMIN_SEES.test(s)), true, "contacts.md has no sentence that gives all three controls to account administrators only");
+    const loose = sentences.filter((s) => /\*\*(?:Remove|Add a number|Import many)\*\*/.test(s) && EVERYONE_CAN.test(s));
+    assert.deepEqual(loose, []);
+});
+const ONLY_ADMIN_SEES = /\bonly (?:an )?account administrators?\b/i;
+const EVERYONE_CAN = /\b(?:every|any|all)\s+(?:user|role|member)s?\b|\beveryone\b|\banyone\b|\bonly a role that may\b/i;
+test("W6-R3 fixture: Do-Not-Call controls", () => {
+    assert.equal(EVERYONE_CAN.test("Any user can use **Add a number**."), true);
+    assert.equal(EVERYONE_CAN.test("Only a role that may change the list sees **Add a number** and **Import many**."), true);
+    assert.equal(ONLY_ADMIN_SEES.test("Only an account administrator sees **Add a number**, **Import many** and **Remove**; other roles can view the list."), true);
+    assert.equal(ONLY_ADMIN_SEES.test("Administrators see **Remove**."), false);
+});
+
+// W6-R4: top-ups. An account with no plan can still buy minutes, under the name Pay as you go.
+test("W6-R4 the billing page says an account with no plan buys minutes under Pay as you go", () => {
+    const sentences = sentencesOf(pageText("billing.md"));
+    assert.ok(sentences.some((s) => /\bwithout a plan\b|\bno plan\b/i.test(s) && /\*\*Pay as you go\*\*/.test(s) && /no monthly fee/i.test(s)), "billing.md does not explain Pay as you go for an account with no plan");
+});
+
+// W6-R5: the Opt-out key does nothing in this release.
+test("W6-R5 the settings page says the Opt-out key has no effect", () => {
+    const text = pageText("settings-and-security.md");
+    assert.match(text, /\*\*Opt-out key\*\* has no effect in this release\./);
+    assert.match(text, /Callers cannot opt out of recording by pressing a key/);
 });

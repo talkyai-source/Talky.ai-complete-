@@ -6,7 +6,7 @@ The Security area covers your account protection, passkeys and active sessions.
 
 ### Password and account
 
-Change your password here, or sign in without one using a passkey. Changing the password signs out all other sessions, each within 15 minutes.
+Change your password here, or sign in without one using a passkey. Changing your password signs out your other sessions when they next refresh or make a request.
 
 ### Passkeys
 
@@ -18,13 +18,13 @@ A second step at sign-in, from an authenticator app. Enable it from this page.
 
 ### Sessions and devices
 
-**Active sessions** lists every device the account is signed in on, with its last-active time, under **Active Devices**. Revoking an entry does not sign that device out; changing your password does.
+**Active sessions** lists every device the account is signed in on, with its last-active time, under **Active Devices**. Revoking an entry signs that device out: its next request or token refresh is refused, and it must sign in again.
 
 ![Active sessions, listing each signed-in device](/docs/security-03-sessions.webp)
 
 ### Tenant-wide security
 
-A **Tenant-wide security** section with **Audit activity** (who changed what, and when) and **Audit and access** (security events and access review) is for platform and partner administrators. If a customer account administrator selects those cards, the page answers with an access-denied page.
+Account administrators may also see **Tenant-wide security** with **Audit activity** and **Audit and access**, but neither works for a customer account in this release: **Audit and access** opens a 403 page, and **Audit activity** says the audit log could not be loaded.
 
 ### Data retention and recordings
 
@@ -135,16 +135,17 @@ Your plan sets how many calls can run at once. Campaigns queue beyond that limit
 
 ### Recording
 
-The **Recording** tab holds the **Call recording policy**. Recording is off until a policy is saved. Only an account administrator can change the policy; other users see it without the **Save policy** button.
+The **Recording** tab holds the **Call recording policy**. If no policy has been saved, calls are recorded and the agent speaks a recording notice first. The box at the top of the card shows which rule applies. Only an account administrator can change the policy; other users see it without the **Save policy** button.
 
-- **Consent mode** — **Do not record calls**, **Record without a spoken notice (one-party consent)** or **Record with a spoken notice (two-party consent)**. One-party recording is lawful only where you and the people you call are in one-party jurisdictions, or you call your own numbers. With a spoken notice, the agent speaks a recording notice as the first thing on the call.
+- **Consent mode** — **Do not record calls**, **Record without a spoken notice (one-party consent)** or **Record with a spoken notice (two-party consent)**. One-party recording is lawful only where you and the people you call are in one-party jurisdictions, or you call your own numbers. Even in one-party mode, the agent still speaks the notice to callers in two-party countries, or when the caller's country is unknown. With a spoken notice, the agent speaks a recording notice as the first thing on the call.
 - **Spoken notice (two-party)** and **Countries needing the notice** — the notice text, and the countries where it is spoken. An empty list means everywhere.
-- **Keep for (days)** — how long recordings are kept. The default is 90 days. In this release recordings are not deleted automatically.
+- **Opt-out key** has no effect in this release. Callers cannot opt out of recording by pressing a key, and an opt-out offer in your notice is left out when the notice is spoken.
+- **Keep for (days)** — the retention period (90 days by default). In this release recordings are not deleted automatically.
 
 Select **Save policy** to apply a change. You are responsible for making sure your use of call recording follows the law where your callers are.
 
 ## Administrative controls
 
-Some screens depend on your role. **Security Center** and **Agent Quality** are shown to platform and partner administrators only.
+Some screens depend on your role. **Security Center** and **Agent Quality** are not shown in a customer account.
 
 Use the account Security and Settings controls described above for your own account. Changes that affect other users or the whole account belong with an authorised administrator.

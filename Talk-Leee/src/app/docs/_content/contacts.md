@@ -34,7 +34,7 @@ Contact uploads are unlimited on all plans.
 2. Select **Add contact**.
 3. Enter the contact's details.
 4. Complete **Permission to call these contacts** (see below).
-5. Save the contact.
+5. Select **Add**.
 
 ## Permission to call these contacts
 
@@ -63,12 +63,12 @@ The **Do-Not-Call list** holds numbers no campaign will call. Callers who ask to
 
 - To add one number, use **Add a number**: enter the phone number, choose its country, add a reason if you wish, then select **Add to list**.
 - To paste many numbers, use **Import many**: paste the numbers into **Numbers, one per line**, choose the country, then select **Import numbers**. The result says how many were added, how many were already listed and how many were not valid.
-- To find a number on the list, search under **Numbers on the list**. Each entry has a **Remove** control.
+- To find a number on the list, search under **Numbers on the list**. Search looks among the newest numbers shown. Each entry has a **Remove** control.
 
-Only a role that may change the list sees **Add a number** and **Import many**. Other roles see the list without those two forms.
+Only an account administrator sees **Add a number**, **Import many** and **Remove**; other roles can view the list.
 
 ## Import from Salesforce
 
-Once Salesforce is connected under **Connectors**, its settings offer **Import Leads or Contacts into a campaign**. Choose Lead or Contact and the campaign, set the maximum number of records (up to 2,000), and add a filter or a list name if you wish. Complete **Permission to call these contacts**, then start the import.
+Once Salesforce is connected under **Connectors**, its settings offer **Import Leads or Contacts into a campaign**. Choose Lead or Contact and the campaign, set the maximum number of records (up to 2,000), and add a **SOQL filter (optional)** or a list name if you wish. Complete **Permission to call these contacts**, then select **Import now**.
 
 The import pulls records that have a phone number (unconverted Leads only), newest first, into a new contact list. Each imported contact remembers its Salesforce Id. Salesforce is Limited, so its card appears under **Connectors** only once it is switched on for the service; see the Connectors page.

@@ -10,7 +10,7 @@ Inbound allows Talk-Lee to answer incoming calls with an AI agent when inbound c
 4. Configure the greeting and objective.
 5. Select the voice.
 6. Add the relevant knowledge base.
-7. Configure the approved actions: the agent can take a message or note a callback request for your team.
+7. Configure the approved actions: on an incoming call the agent can take a message, note a callback request for your team or send a follow-up email, and it can transfer the call when it is set up.
 8. Connect the required telephone number or SIP line.
 9. Run test calls before real callers use the number.
 
@@ -24,7 +24,7 @@ The inbound list works like the outbound campaign list. You can open an inbound 
 
 On an incoming call the agent does not schedule a callback and does not book appointments or meetings into a calendar. It only notes a callback request for your team. Scheduled callbacks, where the AI agent calls the person back at the agreed time, exist on outgoing campaigns only.
 
-On an incoming campaign, a transfer works only when the campaign's transfer option is on, the destination is on the approved list, and the phone line carries calls both ways. The system knows that a transfer was requested; it does not guarantee that someone answers.
+On an incoming campaign, a transfer works only when the transfer option is on (**Transfer to a person**), the destination is on the approved list (**Approved transfer destinations**), the phone line carries calls both ways, and **Transfer to a human** is also ticked in the campaign's agent settings with the same number. When the account has no transfer available, an incoming campaign's option reads **Transfer to a person is unavailable**. The system knows that a transfer was requested; it does not guarantee that someone answers.
 
 ## Who speaks first
 
@@ -43,7 +43,7 @@ Each inbound campaign has its own **Record inbound calls** switch and a recordin
 
 - The agent says the notice first on every call. The recording starts after the notice.
 - If the service cannot confirm that the notice played in full, the recording is still kept and the call is marked "notice not confirmed".
-- Calls are not recorded if your account's recording setting is "disabled".
+- Calls are not recorded if your account's recording policy is **Do not record calls**.
 - The notice cannot offer callers a way to opt out, such as pressing a key. The service cannot do that during a call.
 - A new inbound campaign starts with recording switched on. You can switch it off before you activate the campaign.
 

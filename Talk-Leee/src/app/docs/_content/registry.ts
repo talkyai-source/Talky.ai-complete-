@@ -31,7 +31,7 @@ export const docsPages: DocsPage[] = [
   {
     slug: "contacts",
     title: "Contacts",
-    description: "Upload contacts by CSV or from Salesforce, add one contact, format phone numbers, and manage the Do-Not-Call list.",
+    description: "Upload contacts by CSV or from Salesforce, add one contact, format phone numbers, and see the Do-Not-Call list (account administrators change it).",
     file: "contacts.md",
   },
   {

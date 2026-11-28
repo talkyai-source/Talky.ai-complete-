@@ -4,14 +4,7 @@ Actions taken through the AI assistant are saved, with their outcomes, on the **
 
 ## Agent Reviews
 
-Agent Reviews is part of **Agent Quality**, which is shown to platform and partner administrators only. A customer account does not see it. Where it is shown, it is used to review conversations for quality.
-
-1. Select **Agent Reviews**.
-2. Open a conversation.
-3. Review the transcript and any recording.
-4. Record your assessment where the controls are available.
-
-Use Agent Reviews to build a consistent view of agent quality across a campaign rather than judging single calls in isolation.
+Agent Reviews is not in a customer account's menu. Where your role allows, rate a call from its own page or from **Recordings**.
 
 ## Notifications
 

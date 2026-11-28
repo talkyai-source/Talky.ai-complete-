@@ -65,7 +65,7 @@ The Recordings page provides access to stored voice recordings according to your
 
 ![The recordings page, listing stored call audio](/docs/calls-03-recordings.webp)
 
-Recordings are kept for the retention period in your recording policy: 90 days unless you change it in Settings. The pricing page lists the storage allowance for each plan. Recordings older than the retention period are removed, so download anything you need to keep for longer.
+Your recording policy is under **Settings → Recording**. **Keep for (days)** there is the retention period: 90 days unless you change it. In this release recordings are not deleted automatically, so download anything you need to keep. The pricing page lists the storage allowance for each plan.
 
 ### Recommended usage
 

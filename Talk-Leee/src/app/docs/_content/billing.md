@@ -12,7 +12,7 @@ The Billing area allows you to review your subscription or Pay as you go AI minu
 
 ## Review usage
 
-1. One click on **Billing & Logs** in the sidebar opens **Billing**. Administrators who see a list under **Billing & Logs** choose **Billing** from it.
+1. **Billing & Logs** is shown to account administrators and billing users; selecting it opens **Billing**. Where a list opens under it, choose **Billing** from the list.
 2. Review the current plan.
 3. Check **Minutes Usage**.
 4. Review daily usage.
@@ -23,7 +23,7 @@ Two kinds of usage are separate. AI minutes are the minutes of AI conversation, 
 
 ## Buy AI minute top-ups
 
-With an active paid plan you can buy a top-up at any time. Review the current bundles and prices shown in Billing rather than relying on a price quoted in a help article.
+With an active paid plan you can buy a top-up at any time. Without a plan, the same panel is titled **Pay as you go** and sells bundles with no monthly fee; the minutes carry over until used. Review the current bundles and prices shown in Billing rather than relying on a price quoted in a help article.
 
 1. Open **Billing**.
 2. Find the top-up panel.

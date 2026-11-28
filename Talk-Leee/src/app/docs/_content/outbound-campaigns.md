@@ -100,7 +100,7 @@ Choose the **Persona** that matches the campaign. There are three:
 - **Customer Support** — for incoming calls: resolve issues and note requests for your team
 - **AI Receptionist** — for incoming calls: answer and take messages
 
-The form's one-line description of a persona may mention booking. The agent does not book appointments or meetings into a calendar. On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request.
+The form's persona descriptions mention booking, routing and escalation, but a caller is put through to a person only when a transfer is set up for the campaign (outgoing or incoming). The agent does not book appointments or meetings into a calendar. **What you book** is the next step the agent proposes; your team arranges it. On an outgoing campaign it can schedule a callback; on an incoming call it only notes a callback request.
 
 Then enter the **Representative names**: one to three names, comma-separated. The agent uses one of them on each call. Each name has a **Male / Female** selector so that the name matches the gender of the voice you choose.
 
@@ -135,8 +135,8 @@ Talk-Lee allows campaign creators to define which actions the AI agent may attem
 Available actions can include:
 
 - **Schedule callback** — the AI agent calls the person back at the agreed time; scheduled callbacks exist on outgoing campaigns only
-- **Send follow-up email** — needs Gmail connected under **Connectors**; the email is sent only after the caller confirms the address and the content
-- **Submit configured form** — submit the form you configured for the campaign
+- **Send follow-up email** — needs Gmail connected under **Connectors** and the **Subject** and **Message** filled in; the email is sent only after the caller confirms the address and the content
+- **Submit configured form** — emails the form you configured to the destination address; needs Gmail connected under **Connectors**
 - **Transfer to a human** — on an outgoing campaign, a transfer works only when the campaign lists transfer among its approved actions and names the destination numbers; the system knows that a transfer was requested, and it does not guarantee that someone answers
 - **End call politely** — close when the objective is complete or the caller declines
 
@@ -153,7 +153,7 @@ On an outgoing campaign, a transfer works only when the campaign lists transfer 
 1. Enable **Transfer to a human**.
 2. Enter or select the approved destination.
 3. Save the campaign.
-4. Test the transfer you set up for the campaign (outgoing campaigns only) before using the campaign with real customers.
+4. On an outgoing campaign, a transfer set up for the campaign cannot be tested in the browser test, because nothing is dialled; check its destination number carefully before using the campaign with real customers.
 
 Without that set-up, an outgoing campaign cannot transfer a call; use a scheduled callback instead (outgoing campaigns only).
 
@@ -320,7 +320,7 @@ Never launch a new campaign without testing it first.
 7. Ask a knowledge-base question.
 8. Give an email address and check that it is captured correctly.
 9. Test a scheduled callback, if the campaign has that action (outgoing campaigns only).
-10. Test the transfer set up for the campaign (outgoing campaigns only), if the campaign has one. A test does not guarantee that someone will answer a live transfer.
+10. On an outgoing campaign, a transfer set up for the campaign cannot be tested in the browser test, because nothing is dialled; check its destination number carefully. A test does not guarantee that someone will answer a live transfer.
 11. Check the resulting call summary/transcript.
 
 ### Choose who speaks first
