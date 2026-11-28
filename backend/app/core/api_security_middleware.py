@@ -22,7 +22,8 @@ from fastapi import HTTPException, Request, status
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from app.core.error_handlers import http_exception_handler
+from app.core.error_handlers import _DEFAULT_CODES, _envelope, http_exception_handler
+from app.core.retry_wait import wait_words
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,21 @@ def resolve_client_ip(request: Request) -> str:
 # Configuration
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024  # 10MB
 NUMBER_REQUEST_SUBMIT_PATH = "/api/v1/telephony/number-requests"
+
+
+_NUMBER_REQUEST_PATH_RE = re.compile(r"^/api/v1(?:/admin)?/telephony/number-requests(?:/|$)")
+_UNREADABLE_REQUEST = "Your request could not be read. Please try again."
+
+
+def _is_number_request_path(path: str) -> bool:
+    return bool(_NUMBER_REQUEST_PATH_RE.match(path or ""))
+
+
+def _standard_response(status_code: int, code: str, message: str, details=None, headers=None) -> JSONResponse:
+    """Standard error shape plus the legacy top-level ``detail`` (same sentence)."""
+    content = _envelope(code=code, message=message, details=details)
+    content["detail"] = message
+    return JSONResponse(status_code=status_code, content=content, headers=headers)
 
 
 def _max_body_size(scope) -> int:
@@ -283,7 +299,7 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         # body bytes as well, so chunking or a false length cannot bypass it.
         max_body = _max_body_size(scope)
         if len(request.headers.getlist("content-length")) > 1:
-            response = JSONResponse(status_code=400, content={"detail": "Ambiguous Content-Length"})
+            response = _standard_response(400, _DEFAULT_CODES[400], _UNREADABLE_REQUEST, details={"reason": "ambiguous_content_length"})
             return await response(scope, receive, send)
         content_length = request.headers.get("content-length")
         if content_length is not None:
@@ -292,10 +308,10 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                 if size < 0:
                     raise ValueError
             except ValueError:
-                response = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+                response = _standard_response(400, _DEFAULT_CODES[400], _UNREADABLE_REQUEST, details={"reason": "invalid_content_length"})
                 return await response(scope, receive, send)
             if size > max_body:
-                return await self._body_too_large(max_body)(scope, receive, send)
+                return await self._body_too_large(scope)(scope, receive, send)
 
         body = bytearray()
         while True:
@@ -304,7 +320,7 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                 return
             chunk = message.get("body", b"")
             if len(body) + len(chunk) > max_body:
-                return await self._body_too_large(max_body)(scope, receive, send)
+                return await self._body_too_large(scope)(scope, receive, send)
             body.extend(chunk)
             if not message.get("more_body", False):
                 break
@@ -325,12 +341,19 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         await super().__call__(scope, bounded_receive, send)
 
     @staticmethod
-    def _body_too_large(max_body: int | None = None):
-        limit = MAX_REQUEST_BODY_SIZE if max_body is None else max_body
-        return JSONResponse(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            content={"detail": f"Request body too large (max {limit} bytes)"},
-        )
+    def _body_too_large(scope):
+        message = "The request is too large."
+        if scope.get("method") == "POST" and (scope.get("path") or "").rstrip("/") == NUMBER_REQUEST_SUBMIT_PATH:
+            from app.domain.services.number_requests import config as number_request_config
+
+            # Whole megabytes, rounded down like the per-file sentence in number_requests.errors.
+            megabytes = number_request_config.max_file_bytes() // 1048576
+            if megabytes >= 1:
+                message = (
+                    "Your files are too large to send together. "
+                    f"Each document must be {megabytes} MB or smaller."
+                )
+        return _standard_response(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, _DEFAULT_CODES[413], message)
 
     async def dispatch(self, request: Request, call_next):
         # Skip for public/static paths
@@ -345,7 +368,8 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                 if content_type and content_type not in ALLOWED_CONTENT_TYPES:
                     return await http_exception_handler(request, HTTPException(
                         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                        detail=f"Content-Type '{content_type}' not supported",
+                        detail=(_UNREADABLE_REQUEST if _is_number_request_path(request.url.path)
+                                else f"Content-Type '{content_type}' not supported"),
                     ))
 
             # Payload Sanitization (Day 6) — DISABLED.
@@ -371,10 +395,7 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         user_agent = request.headers.get("user-agent", "").lower()
         if self._is_suspicious_ua(user_agent):
             logger.warning(f"Suspicious User-Agent blocked: {user_agent[:100]}")
-            return JSONResponse(
-                status_code=status.HTTP_403_FORBIDDEN,
-                content={"detail": "Access denied"}
-            )
+            return _standard_response(status.HTTP_403_FORBIDDEN, "forbidden", "Access denied")
 
         # 4. Global Rate Limiting (Day 6)
         # Attempt to apply rate limiting here if not already handled by dependencies
@@ -443,10 +464,16 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
                 )
                 
                 if not allowed:
-                    return JSONResponse(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        content={"detail": error},
-                        headers=headers
+                    try:
+                        retry_after = int((headers or {}).get("Retry-After"))
+                    except (TypeError, ValueError):
+                        retry_after = None
+                    return _standard_response(
+                        status.HTTP_429_TOO_MANY_REQUESTS,
+                        "rate_limited",
+                        f"Too many requests from your network. Please try again in {wait_words(retry_after)}.",
+                        details={"retry_after_seconds": retry_after},
+                        headers=headers,
                     )
                 
                 # Store headers to be added to response later

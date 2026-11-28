@@ -115,7 +115,7 @@ def assert_response_wrappers(response, *, allowed_origin=True, request_id=REQUES
 @pytest.mark.parametrize("extra,method,status,detail", [
     ({"Authorization": "Bearer definitely-not-a-jwt"}, "GET", 401, "Invalid authentication token"),
     ({"User-Agent": "sqlmap"}, "GET", 403, "Access denied"),
-    ({"Content-Length": "10485761"}, "POST", 413, "Request body too large"),
+    ({"Content-Length": "10485761"}, "POST", 413, "The request is too large."),
     ({"Content-Type": "application/octet-stream"}, "POST", 415, "not supported"),
 ])
 async def test_early_security_denials_are_readable_without_reaching_endpoint(configured_app, extra, method, status, detail):
@@ -133,8 +133,14 @@ async def test_early_security_denials_are_readable_without_reaching_endpoint(con
         if status == 401:
             assert response.headers["www-authenticate"] == "Bearer"
     else:
-        # These two guards retain their existing explicit detail contract.
-        assert detail in body["detail"]
+        # The 403 and 413 guards use the standard shape and keep the legacy detail key.
+        assert set(body) == {"error", "detail"}
+        error = body["error"]
+        assert set(error) == {"code", "message", "details", "request_id"}
+        assert error["code"] == {403: "forbidden", 413: "payload_too_large"}[status]
+        assert error["request_id"] == REQUEST_ID
+        assert body["detail"] == error["message"]
+        assert error["message"] == detail
     assert configured_app.state.endpoint_calls == 0
     assert_response_wrappers(response)
 
